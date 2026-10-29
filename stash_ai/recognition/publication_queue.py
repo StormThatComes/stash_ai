@@ -36,11 +36,17 @@ def latest(db,scope,namespace,scene):
                       (scope,namespace,scene)).fetchone()
 
 
+def body_policy(config):
+    from .body_identity import enabled,policy
+    from .body_observations import contract
+    return dict(contract=contract(config),policy=policy(config)) if enabled(config) else None
+
+
 def enqueue(db,scope,namespace,scene,config,reason):
     previous=current(db,scope,namespace,scene)
     scan=latest(db,scope,namespace,scene)
     document=dict(format=1,scope=scope,namespace=namespace,scene=scene,
-        scan=scan['id'] if scan else None,policy=matching_policy(config),revision=uuid.uuid4().hex,
+        scan=scan['id'] if scan else None,policy=matching_policy(config),body=body_policy(config),revision=uuid.uuid4().hex,
         reasons=sorted(set((previous or {}).get('reasons',()))|{reason}))
     db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(key(scope,namespace,scene),encoded(document)))
 
@@ -52,14 +58,17 @@ def acknowledge(db,scope,namespace,scene,revision):
         db.execute('DELETE FROM metadata WHERE key=?',(key(scope,namespace,scene),))
 
 
-def snapshot(db,scope,namespace,scene):
+def snapshot(db,scope,namespace,scene,config=None):
     scan=latest(db,scope,namespace,scene)
     if scan is None or scan['status']!='complete':
         raise ValueError('Latest scene scan is incomplete or missing; run recognition first.')
     h=hashlib.sha256();_hash_row(h,scan);people=set()
+    queued=current(db,scope,namespace,scene)
+    expected=matching_policy(config) if config is not None else (queued or {}).get('policy')
+    body=body_policy(config) if config is not None else (queued or {}).get('body')
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.geometry,o.quality,o.rejected,o.dimensions,o.embedding,'
         'm.person,p.scope AS person_scope,p.namespace AS person_namespace,p.token,'
-        'c.person AS decision_person,c.status,c.payload FROM observations o '
+        'c.person AS decision_person,c.status,c.payload,c.policy AS decision_policy FROM observations o '
         'LEFT JOIN members m ON m.observation=o.id LEFT JOIN people p ON p.id=m.person '
         'LEFT JOIN candidates c ON c.rowid=(SELECT n.rowid FROM candidates n WHERE '+observation_sql('n')+
         '=o.id ORDER BY n.rowid DESC LIMIT 1) WHERE o.scan=? ORDER BY o.id',(scan['id'],))
@@ -68,6 +77,10 @@ def snapshot(db,scope,namespace,scene):
         if row['rejected'] is not None:
             if row['person'] is not None:raise ValueError('Rejected face still has a membership; run recognition first.')
             continue
+        if expected is not None and row['decision_policy']!=expected:
+            payload=json.loads(row['payload']) if row['payload'] else {}
+            if payload.get('publication_policy')!=expected:
+                raise ValueError('Face decision policy changed or is missing; run recognition first.')
         if row['person'] is not None:
             if row['person_scope']!=scope or row['person_namespace']!=namespace:
                 raise ValueError('Scene membership crosses recognition scope or namespace.')
@@ -77,9 +90,28 @@ def snapshot(db,scope,namespace,scene):
         elif row['payload'] is None or row['status']!='withheld':
             raise ValueError('Latest scene scan has no complete identity decisions; run recognition first.')
     from .body_identity import publication_rows,vector as body_vector
+    if body is not None:
+        cues=db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues WHERE scan=? AND contract=?',
+                        (scan['id'],body['contract'])).fetchone()
+        _hash_row(h,cues)
+        if cues[0]!=scan['total'] or (cues[0] and (cues[1]!=0 or cues[2]!=scan['total']-1)):
+            raise ValueError('Independent person collection is incomplete; run recognition first.')
+        for row in db.execute('SELECT b.id,b.rejected,b.embedding,m.person,m.status,m.policy '
+                'FROM body_observations b LEFT JOIN body_members m ON m.observation=b.id '
+                'WHERE b.scan=? AND b.contract=? ORDER BY b.id',(scan['id'],body['contract'])):
+            _hash_row(h,row)
+            if row['rejected'] is not None:continue
+            if (row['embedding'] is None or row['policy']!=body['policy'] or
+                    row['status'] not in ('accepted','withheld','provisional') or
+                    (row['status'] in ('accepted','provisional') and row['person'] is None)):
+                raise ValueError('Independent person identity decisions are incomplete or stale; run recognition first.')
     for row in publication_rows(db,scan['id']):
         _hash_row(h,row)
+        if body is not None and (row['contract']!=body['contract'] or row['policy']!=body['policy']):
+            raise ValueError('Independent person decision contract changed; run recognition first.')
         if row['status']=='accepted':
+            if body is None and (config is not None or queued is not None and 'body' in queued):
+                raise ValueError('Disabled person identities still have memberships; run recognition first.')
             if row['rejected'] is not None or row['person'] is None or row['scope']!=scope or row['namespace']!=namespace:
                 raise ValueError('Invalid independent person membership; run recognition first.')
             body_vector(row);people.add(row['person'])
@@ -99,7 +131,9 @@ def plan(db,scope,namespace,config,scenes=()):
             if row['key']!=key(scope,namespace,scene):raise ValueError('Publication queue key is inconsistent.')
             if queued['policy']!=matching_policy(config):
                 raise ValueError('Publication policy changed; run recognition for this scene first.')
-            item,people,signature=snapshot(db,scope,namespace,scene)
+            if queued.get('body')!=body_policy(config):
+                raise ValueError('Publication person collection contract changed; run recognition for this scene first.')
+            item,people,signature=snapshot(db,scope,namespace,scene,config)
             if item['scan']!=queued['scan']:raise ValueError('Scene scan changed; run recognition first.')
             entry.update(status='ready',scan=item['scan'],people=people,signature=signature)
         except (ValueError,TypeError,KeyError) as error:
@@ -110,7 +144,7 @@ def plan(db,scope,namespace,config,scenes=()):
         if scene in queued or chosen and scene not in chosen:continue
         entry=dict(scene=scene,revision=None,reasons=sorted(reasons),status='blocked',origin='journal_inventory')
         try:
-            item,people,signature=snapshot(db,scope,namespace,scene)
+            item,people,signature=snapshot(db,scope,namespace,scene,config)
             entry.update(status='ready',scan=item['scan'],people=people,signature=signature)
         except (ValueError,TypeError,KeyError) as error:entry['reason']=str(error)
         items.append(entry)
@@ -155,19 +189,21 @@ def adopt(db,scope,namespace,config,entry):
     from .publication import PendingRecognition
     if current(db,scope,namespace,entry['scene']) is not None:
         raise PendingRecognition('Recognition publication request changed; refresh synchronization plan.')
-    item,people,signature=snapshot(db,scope,namespace,entry['scene'])
+    item,people,signature=snapshot(db,scope,namespace,entry['scene'],config)
     if signature!=entry['signature'] or people!=entry['people'] or item['scan']!=entry['scan']:
         raise PendingRecognition('Recognition scene assignments changed; refresh synchronization plan.')
     enqueue(db,scope,namespace,entry['scene'],config,'retained_publication_inventory')
     entry['revision']=current(db,scope,namespace,entry['scene'])['revision'];entry['origin']='queue'
 
 
-def validate(db,scope,namespace,entry):
+def validate(db,scope,namespace,entry,config=None):
     from .publication import PendingRecognition
     queued=current(db,scope,namespace,entry['scene'])
     if queued is None or queued['revision']!=entry['revision']:
         raise PendingRecognition('Recognition publication request changed; refresh synchronization plan.')
-    item,people,signature=snapshot(db,scope,namespace,entry['scene'])
+    if config is not None and (queued['policy']!=matching_policy(config) or queued.get('body')!=body_policy(config)):
+        raise PendingRecognition('Recognition publication policy changed; rebuild this scene first.')
+    item,people,signature=snapshot(db,scope,namespace,entry['scene'],config)
     if signature!=entry['signature'] or people!=entry['people'] or item['scan']!=entry['scan']:
         raise PendingRecognition('Recognition scene assignments changed; refresh synchronization plan.')
 

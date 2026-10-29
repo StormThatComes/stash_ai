@@ -374,6 +374,12 @@ scope. Source anchors become attachments, while frozen original body and face
 witnesses retain veto power. Missing original evidence blocks further merges.
 Local aliases preserve old Stash profiles and manual metadata. Face-bearing
 identities take precedence as the target, then creation order and ID break ties.
+Publication validates the current collection contract, body decision policy and
+complete cue/decision coverage. Missing body decisions are an incomplete rebuild,
+not an empty scene. The same validation applies to journal-inventory recovery;
+old face decisions cannot be adopted under a different matching policy. A
+validated global reference repair records its current publication policy without
+promoting the repaired attachments into new recognition references.
 Body-owned aliases are revalidated when all involved scenes are selected; a
 partial selection cannot reactivate or blindly publish a retired source core.
 Turning global consolidation off and rerunning the full involved scope restores
