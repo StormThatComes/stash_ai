@@ -17,6 +17,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
         if result.command == 'report-merge':
+            if result.feasibility_trials < 0:
+                self.error('--feasibility-trials must be nonnegative.')
             outside = [getattr(result, name) for name in ('max_outside_coverage_loss',
                        'max_outside_split_pairs', 'max_outside_joined_pairs', 'max_new_outsider_observations')]
             if any(v is not None and v < 0 for v in outside):
@@ -188,6 +190,9 @@ def parser():
         help='Declare that a performer from a goal set must not appear in this scene; repeatable. '
              'Applies to the whole set after alias resolution, in both goal policies; never forces recognition assignments.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
+    merge_report.add_argument('--feasibility-trials', type=int, default=6,
+        help='Initial permissive production probes within --max-trials (default: 6; 0 disables early probes). '
+             'Reports observed reachability separately from goal acceptance.')
     for flag, meaning in (
             ('coverage-loss', 'lost assignments'), ('split-pairs', 'split observation pairs'),
             ('joined-pairs', 'newly joined observation pairs')):

@@ -44,7 +44,7 @@ def test_face_floor_alone_recovers_auxiliary_members_without_pair_proposals(tmp_
         baseline = evaluate(config, goals, db)['trials']['baseline']['goal_result']
         assert not baseline['fully_solved']
         assert sum(g['withheld'] for g in baseline['groups']) == 3*sets
-        result = dict(goals, **solve(config, goals, db, maximum=2))
+        result = dict(goals, **solve(config, goals, db, feasibility_trials=0, maximum=2))
     assert result['status'] == 'fully_solved'
     assert result['selected_trial'] == 'trial-1'
     assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .785}
@@ -70,7 +70,7 @@ def test_large_joint_list_cannot_delay_independent_gate_probes(tmp_path, monkeyp
         return options
     monkeypatch.setattr(merge_solver, 'measured_options', noisy_hints)
     with _open_readonly(config.database) as db:
-        result = solve(config, goals, db, maximum=4)
+        result = solve(config, goals, db, feasibility_trials=0, maximum=4)
     assert result['status'] == 'fully_solved'
     assert result['selected_trial'] == 'trial-1'
     assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .785}
@@ -118,7 +118,7 @@ def test_local_probes_do_not_invent_missing_body_evidence(tmp_path):
         state.connection.commit()
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        result = solve(config, goals, db, maximum=2)
+        result = solve(config, goals, db, feasibility_trials=0, maximum=2)
     assert not result['best_result']['fully_solved']
     assert result['selected_trial'] == 'baseline'
     assert result['search']['tested_hybrid_values']['face_floor'] == [.78, .8]
@@ -132,9 +132,9 @@ def test_tested_values_exclude_unfinished_probes(tmp_path, interrupted_trial):
         if name == interrupted_trial and stage == 'start':
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
-        result = solve(config, goals, db, maximum=4, progress=progress)
+        result = solve(config, goals, db, feasibility_trials=0, maximum=4, progress=progress)
     assert result['interrupted']
-    assert result['search']['executed_by_phase'] == dict(baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, minimization=0, robustness=0)
+    assert result['search']['executed_by_phase'] == dict(feasibility=0, baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, minimization=0, robustness=0)
     if interrupted_trial == 'baseline':
         assert result['search']['tested_hybrid_values'] == {}
     else:

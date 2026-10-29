@@ -23,15 +23,16 @@ def relaxed_seeds(config, feedback):
             for key, value in patch.items():
                 if key in keys and type(value) in (int, float):
                     options.setdefault(key, []).append(value)
-    quality = next(iter(feedback.get('proposals', {}).get('face', ())), {})
+    from .merge_solver_profiles import relaxed_quality
+    quality = relaxed_quality(config, feedback)
     seen = set()
-    for fraction in (0., .5, .25):
+    for fraction in (None, 0., .5, .25):
         selected = {}
         for key in keys:
             current = parameter(config.data, key)
             values = sorted({domains[key].project(v) for v in options.get(key, ())
                              if type(v) in (int, float) and domains[key].low <= v <= current})
-            selected[key] = values[int(fraction*(len(values)-1))] if values else domains[key].low
+            selected[key] = values[int(fraction*(len(values)-1))] if values and fraction is not None else domains[key].low
             if domains[key].kind is int:
                 selected[key] = int(selected[key])
         face = {k: v for k, v in selected.items() if not k.startswith(PERSON_PREFIX)}
@@ -46,6 +47,14 @@ def relaxed_seeds(config, feedback):
 
 def progress_rank(status):
     """Continuous within-set progress, including when complete stays at 1/N."""
+    construction = status.get('construction', {}).get('groups')
+    if construction:
+        shared = [g['shared_coverage'] for g in construction]
+        pairs = [g['pair_fraction'] for g in construction]
+        covered = [g['scene_coverage_fraction'] for g in construction]
+        return (min(pairs), sum(pairs)/len(pairs), min(shared), sum(shared)/len(shared),
+                min(covered), sum(covered)/len(covered),
+                -status.get('cross_set_evidence_pairs', status['cross_set_observation_pairs']))
     groups = status['groups']
     pairs = [g.get('raw_set_pair_fraction', g['pair_consolidation_fraction']) for g in groups if g['total_performers'] > 1]
     shared = [g.get('raw_set_shared_coverage', g['consolidation_fraction']) for g in groups]
@@ -190,12 +199,18 @@ class BidirectionalSearch:
         if not self.enabled:
             return
         self.executed += int(phase == 'bidirectional')
-        if status['disjoint'] and (self.safe is None or rank > self.safe['rank']):
+        conflict_free = (status['disjoint'] and status.get('scene_exclusions_satisfied', True)
+                         and status.get('outside_preserved', True))
+        if conflict_free and (self.safe is None or rank > self.safe['rank']):
             self.safe = dict(name=name, changes=changes, rank=rank)
         if name == 'baseline':
             return
+        if phase == 'feasibility':
+            self.seen.add(digest(proposal(self.config, changes)['yaml_patch']))
+            if status['construction']['merged'] and self.offered == 0:
+                self.offered = 1  # The initial phase already supplied a broad start; repair it next.
         candidate = dict(changes=changes, rank=progress_rank(status) + rank,
-                         outcome=outcome, disjoint=status['disjoint'])
+                         outcome=outcome, disjoint=conflict_free)
         pool = dict(self.frontier, **{name: candidate})
         chosen, signatures = {}, set()
         for key in sorted(pool, key=lambda n: pool[n]['rank'], reverse=True):

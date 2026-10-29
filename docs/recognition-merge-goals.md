@@ -560,19 +560,78 @@ values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
 
+### Initial construction feasibility
+
+After baseline replay, the solver first checks whether the requested sets can
+actually be constructed with the retained evidence and enabled identity routes.
+`--feasibility-trials 6` (default) permits up to six initial production replays;
+these consume the existing `--max-trials` budget, including failed resource-limited
+attempts. The probe allowance is capped at half the non-baseline slots (rounded
+down, with one probe permitted in a two-trial run), reserving time for ordinary
+tuning. `--feasibility-trials 0` disables these early probes but keeps construction
+diagnostics on ordinary trials. Baseline always consumes one trial. A small total
+budget may prevent all six profiles from being tried.
+
+The deterministic profiles try matching/support floors, admission floors, both
+together, and separate face, hybrid and independent-body routes. Duplicates and
+unchanged configurations are skipped. Profiles preserve detection/model/input
+contracts, disabled evidence routes, absent optional gates and already more
+permissive baseline settings. They cannot recover features that were never
+retained. Rejection hints from forbidden scenes cannot overwrite these liberal
+matching floors.
+
+The initial phase stops as soon as a completed replay constructs **all** sets,
+even if that replay mixes different sets or violates a forbidden scene. If
+baseline already provides this witness, no initial probe is needed. Completed
+probes feed the normal beam and alternate frontier without another rebuild;
+an overmerge is immediately available for repair. Winner selection and YAML
+export continue to use the full original goal policy and outside-impact limits.
+
+The JSON `feasibility` report and `Merge feasibility:` console summary distinguish:
+
+| Status | Meaning |
+| --- | --- |
+| `possible` | One completed production replay constructs all sets and satisfies the full goals. |
+| `possible_with_conflicts` | One replay constructs all sets but violates set separation, a scene exclusion or an outside-impact limit. |
+| `possible_goal_mismatch` | Construction succeeded, but the selected goal policy does not credit it; for example, accepted linked body evidence replaced frozen face samples. |
+| `blocked_inputs` | A required frozen scene witness or core quorum is unavailable in selected retained inputs and enabled routes. This is a narrow input certificate, not a claim about recollected data or other mechanisms. |
+| `not_demonstrated` | No joint witness has been observed. Finite unsuccessful probes, interruption and resource limits do not prove impossibility. |
+
+Each set reports its own witness, best observed scene/core support, available
+input counts and trial-specific blocker reasons. Separate successful witnesses
+for different sets do **not** establish one jointly feasible configuration.
+`joint_witness_trial` identifies such a joint witness when one exists. Observed
+matching blockers are diagnostic evidence, never global infeasibility certificates.
+
+Construction counts an accepted, compatible, same-scene body linked to the
+original face identity as an alternative address of the **same** frozen unit.
+It never doubles support; conflicting destinations cannot vote. This diagnostic
+can therefore detect face-to-body handoff even when strict all-sample goals or
+frozen positive face goals reject it. It does not change those goals. Strict
+reports retain separate `construction_evidence` using the identity-level pooled
+core and scene criteria; strict acceptance still requires every original sample.
+
+Known resource-limit errors during initial probes are reported in `failed_probes`
+with the stage and exception details, and search continues from completed states.
+They are checkpointed and not retried on resume. Baseline and ordinary-search
+errors, unexpected exceptions and invalid configuration still fail normally.
+`search.attempted` includes these failed probes; `search.executed` counts completed
+replays. Incomplete probes cannot become winners. Resume requires the same
+`--feasibility-trials` setting as the original checkpoint.
+
 With at least one fragmented or multi-scene set, including a single set, search
-also approaches the problem from a permissive configuration. Starting with
-`trial-2`, initially every other exploration slot is offered to this alternate
+also maintains an alternate permissive frontier after this initial phase.
+Initially every other exploration slot is offered to this alternate
 lane while the goal is unsolved. Recent improvements increase its frequency;
 four unsuccessful experiments reduce it. At most two consecutive alternate
-trials run while normal exploration remains available. The first normal trial and the existing baseline probes
+trials run while normal exploration remains available. The existing baseline probes
 remain available. The lane alternates broad joint relaxations with attempts to
 repair their results; it does not wait for stagnation or the late restart.
 
-The initial profiles use broad, median and quartile boundaries from the current
+The alternate seeds use legal domain floors plus broad, median and quartile boundaries from the current
 measurements and proposals, separately for SapiensID, face matching and both
-routes together. Without measured values they use legal domain extremes, not
-fixed similarity constants. They include measured admission-gate relaxations. Existing
+routes together. Floors are tried even when measurements exist; rejection hints
+cannot silently replace them. Seeds include measured admission-gate relaxations. Existing
 lower thresholds are preserved. Detection, feature extraction and model
 contracts are unchanged; missing features remain missing. These profiles are
 experiments, not recommended settings until production replay evaluates them.

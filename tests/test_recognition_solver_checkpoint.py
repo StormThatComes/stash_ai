@@ -25,7 +25,7 @@ def test_resume_restores_completed_trials_and_live_yaml(tmp_path,monkeypatch):
     with _open_readonly(config.database) as db:
         resumed=solve(config,goals,db,maximum=7,checkpoint=checkpoint,resume=True,winner_writer=winner_file(yaml,resume=True))
     assert resumed['search']['restored_trials']==3 and len(calls)==4
-    assert first['selected_trial'] in yaml.read_text()
+    assert resumed['selected_trial'] in yaml.read_text()
     # Replay the entire journal without running production again.
     calls.clear()
     with _open_readonly(config.database) as db:
