@@ -227,7 +227,7 @@ def validate(data):
                        'view_min_support': (2, 1000), 'view_attach_min_support': (1, 1000),
                        'max_view_prototypes_per_person': (1, 8), 'max_view_witnesses': (8,128),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
-                       'max_reference_bytes': (1048576, 1073741824)},
+                       'max_reference_bytes': (1048576, 68719476736)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
                       'max_video_bytes': (1048576, 1073741824)},
         'execution': {'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),

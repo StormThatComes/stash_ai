@@ -66,7 +66,7 @@ clustering:
   max_view_prototypes_per_person: 4  # Maximum primary confirmed face-view representatives per identity.
   max_samples_per_person: 32        # Maximum selected face references per identity; does not limit stored observations.
   max_people_per_lookup: 20000      # Maximum identities loaded into a face lookup; exceeding it stops the lookup.
-  max_reference_bytes: 134217728    # Byte cap for face reference vectors, including views; not a total RAM/VRAM limit.
+  max_reference_bytes: 134217728    # Face reference byte cap (1 MiB..64 GiB), including views; not a total RAM/VRAM limit.
 
 # Portrait selection and framing; quality targets rank candidates, not recognition admission.
 portraits:

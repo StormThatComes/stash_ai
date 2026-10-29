@@ -1202,8 +1202,8 @@ matching the selected scene. Compatible retained people from the same Stash
 instance and model namespace participate even when their scenes are not selected.
 Each person contributes at most `max_samples_per_person` vectors (default 32).
 The default limit is 134217728 bytes (128 MiB); the supported range is 1 MiB
-through 1 GiB. Exceeding it fails that scene's matching instead of silently
-dropping people or samples. The error includes required bytes, configured limit
+through 64 GiB (68719476736 bytes). Exceeding it fails that scene's matching
+instead of silently dropping people or samples. The error includes required bytes, configured limit
 and the numbers of people/groups and samples reached at the failure.
 
 SFace uses 128 float32 components (512 bytes per vector), while AuraFace uses
@@ -1220,6 +1220,16 @@ a larger reference set; it does not reserve memory, increase samples per person,
 improve the similarity scores or speed up matching. More actual references mean
 more comparisons. This budget excludes Python/SQLite overhead, image buffers,
 model memory and GPU VRAM, so leave room for them in system RAM.
+
+For a larger library on a high-RAM host, an 8 GiB reference budget can be set with:
+
+```yaml
+clustering:
+  max_reference_bytes: 8589934592 # 8 GiB; allocated only as references are loaded.
+```
+
+Existing YAML values remain unchanged after upgrading. Increasing this limit
+does not require rescanning and does not change recognition thresholds.
 
 During `recognition run`, the matching status shows reference MiB used/limit,
 percentage, run peak, people/groups, sample count and stage. Snapshots are

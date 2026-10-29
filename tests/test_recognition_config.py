@@ -45,6 +45,28 @@ def test_reject_bad_configuration_before_work(tmp_path, text):
     assert not (tmp_path / 'faces_state.sqlite3').exists()
 
 
+@pytest.mark.parametrize('limit', [1073741825, 8589934592, 68719476736])
+def test_large_reference_budget_loads_and_remains_enforced(tmp_path, limit):
+    from stash_ai.recognition.reference_usage import ReferenceUsage
+    path = tmp_path / 'large-references.yml'
+    path.write_text(f'version: 1\nclustering: {{max_reference_bytes: {limit}}}\n')
+    config = load(path)
+    usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'])
+    # Exercise accounting above the old ceiling without allocating large arrays.
+    usage.add_counts(limit, 1, people=1, kind='Test')
+    assert usage.bytes == limit
+    with pytest.raises(ValueError, match='clustering.max_reference_bytes'):
+        usage.add_counts(1, 1, kind='Test')
+
+
+@pytest.mark.parametrize('limit', [1048575, 68719476737])
+def test_reference_budget_outside_supported_range_is_rejected(tmp_path, limit):
+    path = tmp_path / 'invalid-references.yml'
+    path.write_text(f'version: 1\nclustering: {{max_reference_bytes: {limit}}}\n')
+    with pytest.raises(ValueError, match='clustering.max_reference_bytes'):
+        load(path)
+
+
 def test_missing_explicit_file_and_limits(tmp_path):
     assert load(root=tmp_path).source == b''
     assert load(root=tmp_path).snapshot()['policy_origin'] == 'bundled-default'
