@@ -54,7 +54,9 @@ def test_seed_values_follow_measurements_not_fixed_thresholds(tmp_path):
     key = 'sapiensid.matching.face_floor'
     first = list(relaxed_seeds(config, {'options': {key: [.123456, .678901]}}))
     second = list(relaxed_seeds(config, {'options': {key: [.234567, .678901]}}))
-    assert first[0][key] == .123456 and second[0][key] == .234567
+    assert first[0][key] == second[0][key] == 0.  # Always try the legal floor too.
+    assert any(p.get(key) == .123456 for p in first)
+    assert any(p.get(key) == .234567 for p in second)
     for patch in first+second:
         patched(config, patch)
 

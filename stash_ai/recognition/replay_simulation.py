@@ -65,7 +65,7 @@ def replay(config, variants, **kwargs):
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
-            prepared_selection=None):
+            prepared_selection=None, trial_error=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -130,48 +130,63 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                     if restored is not None:
                         item,restored_baseline = restored
                         if baseline is None:baseline=restored_baseline
+                        if item.get('failed'):
+                            result.setdefault('failed_trials', {})[name] = item
+                            if progress:progress(name, 'failed', item)
+                            continue
                         result['trials'][name]=item
                         if progress:progress(name,'complete',item)
                         continue
                     started = time.perf_counter()
-                    with closing(_ram(settings)) as target:
-                        if seed is None:
-                            target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
-                            copy_history(db, target, [], scope, ns)
-                        else:
-                            seed.backup(target)
-                            pages = settings.data['execution']['rebuild_memory_bytes']//target.execute('PRAGMA page_size').fetchone()[0]
-                            target.execute(f'PRAGMA max_page_count={pages}')
-                        state = SimpleNamespace(connection=target, installation=installation)
-                        from .progress import observe_stages
-                        last_stage = [0.]
-                        active_stage = 'Rebuild selected identities'
-                        def stage_update(label):
-                            nonlocal active_stage
-                            active_stage = label
-                            now = time.monotonic()
-                            if progress and now-last_stage[0] >= 1.:
-                                last_stage[0] = now
-                                progress(name, 'stage: '+label, None)
-                        try:
-                            with observe_stages(stage_update):
-                                rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
-                        except Exception as exc:
-                            # The last printed stage can lag behind. Preserve the
-                            # original exception and expose locations, never locals.
-                            from pathlib import Path
-                            from traceback import extract_tb
-                            frames = extract_tb(exc.__traceback__, limit=-5)
-                            location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
-                            exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
+                    active_stage = 'Prepare replay'
+                    try:
+                        with closing(_ram(settings)) as target:
+                            if seed is None:
+                                target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
+                                copy_history(db, target, [], scope, ns)
+                            else:
+                                seed.backup(target)
+                                pages = settings.data['execution']['rebuild_memory_bytes']//target.execute('PRAGMA page_size').fetchone()[0]
+                                target.execute(f'PRAGMA max_page_count={pages}')
+                            state = SimpleNamespace(connection=target, installation=installation)
+                            from .progress import observe_stages
+                            last_stage = [0.]
+                            active_stage = 'Rebuild selected identities'
+                            def stage_update(label):
+                                nonlocal active_stage
+                                active_stage = label
+                                now = time.monotonic()
+                                if progress and now-last_stage[0] >= 1.:
+                                    last_stage[0] = now
+                                    progress(name, 'stage: '+label, None)
+                            try:
+                                with observe_stages(stage_update):
+                                    rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
+                            except Exception as exc:
+                                # The last printed stage can lag behind. Preserve the
+                                # original exception and expose locations, never locals.
+                                from pathlib import Path
+                                from traceback import extract_tb
+                                frames = extract_tb(exc.__traceback__, limit=-5)
+                                location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
+                                exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
+                                raise
+                            predictions = dict.fromkeys(observations)
+                            predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
+                                               if r[0] in observations)
+                            predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
+                            bodies=body_report(target,settings,[s['id'] for s in scans])
+                            hybrid=coverage(target,settings,[s['id'] for s in scans])
+                            evidence = inspect_trial(target, settings) if inspect_trial else None
+                    except Exception as exc:
+                        failure = trial_error(name, settings, exc, active_stage) if trial_error else None
+                        if failure is None:
                             raise
-                        predictions = dict.fromkeys(observations)
-                        predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
-                                           if r[0] in observations)
-                        predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
-                        bodies=body_report(target,settings,[s['id'] for s in scans])
-                        hybrid=coverage(target,settings,[s['id'] for s in scans])
-                        evidence = inspect_trial(target, settings) if inspect_trial else None
+                        failure.update(failed=True, elapsed_seconds=time.perf_counter()-started)
+                        result.setdefault('failed_trials', {})[name] = failure
+                        if record_trial:record_trial(name, settings, failure, inputs)
+                        if progress:progress(name, 'failed', failure)
+                        continue
                     if baseline is None:
                         baseline = predictions
                     item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=time.perf_counter()-started,

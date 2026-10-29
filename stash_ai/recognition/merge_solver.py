@@ -114,11 +114,13 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6):
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside
     outside_limits = validate_outside(outside_limits)
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
+    if type(feasibility_trials) is not int or feasibility_trials < 0:
+        raise ValueError('feasibility_trials must be a nonnegative integer.')
     if yaml_mode not in ('full', 'diff'):
         raise ValueError('YAML mode must be full or diff.')
     from .scanning import scan_identity
@@ -132,7 +134,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits)),
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
@@ -150,11 +152,19 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     inputs = {}
     replay_scope, scans = _selection(db, config, None, goals['scope'], allow_partial=True, diagnostics=inputs)
     replay_selection = replay_scope, scans, inputs
+    from .merge_solver_feasibility import Feasibility, resource_limit
+    from .merge_solver_profiles import profiles
+    from collections import deque
+    feasibility = Feasibility(db, config, goals, scans)
+    # Keep room for ordinary tuning; a two-trial run can still try one probe.
+    probe_budget = min(feasibility_trials, maximum-1, max(1, (maximum-1)//2))
+    probes = deque(profiles(config)) if probe_budget else deque()
+    failures = {}
     selected_scans = {s['id'] for s in scans}
     measurement_goals = dict(goals, groups=[dict(g, members=[m for m in g['members']
         if any(r['scan'] in selected_scans for r in m['observations'])]) for g in goals['groups']])
     target_ids = goal_index().observation_ids
-    outcome_ids = goal_index().outcome_ids
+    outcome_ids = goal_index().outcome_ids | feasibility.addresses
     proofs = []
     hybrid = {}
     options = (measured_options(db, config, measurement_goals, proofs, hybrid=hybrid)
@@ -183,6 +193,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     robustness = {}
     restored_count = 0
     written_winner = None
+    probe_state = None
     def ranking(name):
         return ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
     def selected(name):
@@ -201,6 +212,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                          {k:v for k,v in predicted.items() if k not in target_ids})
         apply_outside(status, outside, summaries['baseline'], outside_limits)
+        status['construction'] = feasibility.assess(status, observations, predicted,
+                                                    latest_feedback['provenance']['blocker_trace'])
         patch = patches.get(name, {'changes': []})
         magnitude = mutation_magnitude(patch['changes'])
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
@@ -223,7 +236,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             **transitions[name])
     def inspect(target, settings):
         from .database import encoded
-        ids = target_ids
+        ids = target_ids | feasibility.addresses
         result = latest_decisions(target, ids)
         membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
             'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
@@ -283,7 +296,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return result
     def stream():
         nonlocal search, bidirectional, stop_reason
-        trials, attempts = 1, 0
+        trials, attempts, probes_attempted = 1, 0, 0
         previous_name, previous_changes = 'baseline', {}
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
                      'face': lambda changes: _face_neighbours(config, changes, options)}
@@ -332,7 +345,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         while trials < maximum and attempts < maximum * 100:
             reserve = allowance(maximum, changes_for(best),
                 feedback[best]['provenance']['active_parameters'])
-            if polishing is None and trials < maximum-reserve:
+            if (probes and probes_attempted < probe_budget
+                    and not any(s['construction']['merged'] for s in summaries.values())):
+                strategy, changes = probes.popleft()
+                family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
+                phase, parent = 'feasibility', 'baseline'
+            elif polishing is None and trials < maximum-reserve:
                 period = cadence(search.operators.get('tpe', {}), 5)
                 tpe_due = (learned and not normal_exhausted and trials >= BASELINE_WARMUP and
                     (trials % period == 0 if sampled_for is None else trials-sampled_for >= period))
@@ -407,6 +425,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             yield name, variant
             previous_name, previous_changes = name, normalized
             trials += 1
+            probes_attempted += int(phase == 'feasibility')
+            if name in failures:
+                search.rejected(family, strategy)
+                continue
             alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
             if polishing is not None:
                 polishing.completed(phase)
@@ -431,6 +453,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if record['configuration']!=digest(settings.data):
             raise ValueError('Checkpoint search reconstruction diverged; completed trials were not reused.')
         state=deepcopy(record['state'])
+        if state.get('failed'):
+            failures[name] = deepcopy(record['item'])
+            query_feedback.reset()
+            query_feedback.visits = state['visits']
+            restored_count += 1
+            return deepcopy(record['item']), baseline
         summaries[name]=state['status'];ranks[name]=tuple(state['rank']);outcomes[name]=state['outcome']
         latest_feedback.clear();latest_feedback.update(state['feedback']);feedback[name]=latest_feedback.copy()
         query_feedback.visits = dict(latest_feedback['query'].get('sampling_visits', {}))
@@ -443,6 +471,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return deepcopy(record['item']),baseline
     def record(name,settings,item,inputs):
         nonlocal written_winner
+        if item.get('failed'):
+            if journal is not None:
+                journal.record(name, settings, item, dict(failed=True, visits=dict(query_feedback.visits)), None)
+            return
         winner_text=(configuration_document(config,selected(best),inputs,mode=yaml_mode)
                      if winner_writer and written_winner!=best else None)
         if journal is not None:
@@ -453,15 +485,34 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         elif winner_text is not None:winner_writer.write(winner_text)
         if winner_text is not None:written_winner=best
     def trial_progress(name, stage, item):
+        nonlocal probe_state
         if stage == 'complete':durations[name]=item['elapsed_seconds']
         if stage == 'start':
+            probe_state = (deepcopy(dict(options=options, hybrid=hybrid, hybrid_changes=hybrid_changes,
+                feedback=latest_feedback, visits=query_feedback.visits, priorities=query_feedback.priorities))
+                if origins.get(name, {}).get('search_phase') == 'feasibility' else None)
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
+    def trial_error(name, settings, exc, stage):
+        if origins.get(name, {}).get('search_phase') != 'feasibility' or not resource_limit(exc):
+            return None
+        query_feedback.reset()
+        if probe_state is not None:
+            options.clear(); options.update(probe_state['options'])
+            hybrid.clear(); hybrid.update(probe_state['hybrid'])
+            hybrid_changes[:] = probe_state['hybrid_changes']
+            latest_feedback.clear(); latest_feedback.update(probe_state['feedback'])
+            query_feedback.visits = probe_state['visits']
+            query_feedback.priorities = probe_state['priorities']
+        item = dict(reason='resource_limit', error=str(exc), diagnostics=list(getattr(exc, '__notes__', ())),
+                    stage=stage, **origins[name], **patches[name])
+        failures[name] = item
+        return item
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
             inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
-            restore_trial=restore,record_trial=record,prepared_selection=replay_selection)
+            restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     robustness.clear()
     for name in result['trials']:
@@ -492,6 +543,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
             tested_hybrid[gate] = sorted(values)
     return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
+        feasibility=feasibility.report(result['trials'], result.get('failed_trials', {}), probe_budget),
         simulation=result, status=(result.get('stop_reason', 'no_completed_trials') if selection is None else
             'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
         selected_trial=best, best_result=selection,
@@ -501,6 +553,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             validated=bool(confidence(robustness.get(best,[]))),
             candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
         search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
+                    attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
                     scheduling='bidirectional_blocker_guided_beam',
                     bidirectional=dict(enabled=bidirectional.enabled if bidirectional else False,
                         budget=bidirectional.budget if bidirectional else 0,
@@ -517,8 +570,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                         for family in ('hybrid', 'face')},
                     baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
+                        for name in result['trials']) for phase in ('feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
                     tested_hybrid_values=tested_hybrid,
-                    budget_exhausted=len(result['trials']) >= maximum,
+                    budget_exhausted=len(result['trials'])+len(failures) >= maximum,
                     selection_scope='completed_trials_including_baseline',
                     proves_optimality=False, proves_infeasibility=False))

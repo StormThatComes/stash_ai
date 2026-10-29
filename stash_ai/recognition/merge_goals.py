@@ -65,12 +65,15 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             item['observations'] = [{k:r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state','evidence_kind')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
-                set_rows.extend(rows)
+            set_rows.extend(rows)
         group['members'] = kept
         if excluded:
             group['excluded_members'] = excluded
         if policy == 'identity':
             group['identity_evidence'] = freeze_set(set_rows)
+        else:
+            # Diagnostic physical continuity, independent of strict all-sample acceptance.
+            group['construction_evidence'] = freeze_set(set_rows)
     result = dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
                 selector='performer' if by_performer else 'identity', sample_diagnostics=diagnostics,
                 goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),
@@ -127,16 +130,25 @@ def execute(args, config):
                         if item.get('search_phase') == 'bidirectional':
                             print(f"  Search: phase=bidirectional strategy={item['search_strategy']}",
                                   file=sys.stderr, flush=True)
+                        if item.get('search_phase') == 'feasibility':
+                            print(f"  Search: phase=feasibility profile={item['search_strategy']}", file=sys.stderr, flush=True)
                     elif stage == 'complete':
                         for group in item['goal_result']['groups']:
                             print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
                         from .merge_scene_exclusions import summary_lines
                         for line in summary_lines(item['goal_result']):
                             print(line, file=sys.stderr, flush=True)
+                        construction = item['goal_result'].get('construction')
+                        if construction:
+                            merged = [g['index']+1 for g in construction['groups'] if g['merged']]
+                            print(f"  Construction: {construction['status']} merged_sets={merged} "
+                                  f"goals_satisfied={construction['goals_satisfied']}", file=sys.stderr, flush=True)
+                    elif stage == 'failed':
+                        print(f"  Feasibility probe incomplete: {item['reason']}; {item['error']}", file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
-                                yaml_mode=yaml_mode, outside_limits={
+                                yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6), outside_limits={
                                     key: getattr(args, attr, None) for key, attr in (
                                         ('coverage_lost', 'max_outside_coverage_loss'),
                                         ('split_pairs', 'max_outside_split_pairs'),

@@ -133,9 +133,9 @@ def test_winner_role_counters_survive_checkpoint_resume_and_interruption(tmp_pat
         if stage == 'complete' and name == 'trial-1':
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
-        first = dict(goals, **solve(config, goals, db, maximum=4, checkpoint=checkpoint,
+        first = dict(goals, **solve(config, goals, db, feasibility_trials=0, maximum=4, checkpoint=checkpoint,
                                    winner_writer=winner_file(output), progress=stop))
-        resumed = dict(goals, **solve(config, goals, db, maximum=4, checkpoint=checkpoint, resume=True,
+        resumed = dict(goals, **solve(config, goals, db, feasibility_trials=0, maximum=4, checkpoint=checkpoint, resume=True,
                                      winner_writer=winner_file(output, resume=True)))
     assert first['interrupted'] and first['selected_trial'] == 'trial-1'
     assert first['simulation']['trials']['trial-1']['goal_result'] == resumed['simulation']['trials']['trial-1']['goal_result']

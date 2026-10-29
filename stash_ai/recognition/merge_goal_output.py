@@ -20,6 +20,8 @@ def explain(result):
     if feedback:
         result['explanation']['solver_feedback'] = feedback
     result['explanation']['search_stop_reason'] = result.get('search', {}).get('stop_reason')
+    if 'feasibility' in result:
+        result['explanation']['feasibility_status'] = result['feasibility']['status']
     if simulation.get('input_selection', {}).get('excluded_scans'):
         result['explanation']['input_blockers'] = simulation['input_selection']['excluded_scans']
         result['explanation']['validation_scope'] = 'compatible_complete_latest_scenes_only'
@@ -183,7 +185,9 @@ def summary(result):
             scope_hint = 'simulation.selection' if result.get('yaml_export_mode') == 'diff' else 'run_argv'
             input_lines.append(f'Recommendations apply only to replayed scenes; use {scope_hint} from the JSON report.')
     if selected is None:
-        return '\n'.join(['Merge solver: no completed trial; no configuration selected.'] + input_lines)
+        from .merge_solver_feasibility import lines as feasibility_lines
+        return '\n'.join(['Merge solver: no completed trial; no configuration selected.'] + input_lines +
+                         (feasibility_lines(result['feasibility']) if 'feasibility' in result else []))
     name = selected['trial']
     goal = result['simulation']['trials'][name]['goal_result']
     lines = [f"Merge solver best completed trial: {name} ({selected['quality']}); "
@@ -194,6 +198,9 @@ def summary(result):
     lines.extend(line for group in goal['groups'] for line in group_summary_lines(group))
     from .merge_scene_exclusions import summary_lines
     lines.extend(summary_lines(goal))
+    if 'feasibility' in result:
+        from .merge_solver_feasibility import lines as feasibility_lines
+        lines.extend(feasibility_lines(result['feasibility']))
     for violation in selected['unmet_conditions']:
         detail = []
         for key, value in violation.items():

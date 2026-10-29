@@ -41,7 +41,7 @@ def test_joint_hybrid_trial_clears_four_gates_and_export_replays(tmp_path, monke
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people[:2]], by_performer=False)
-        result = dict(goals, **solve(config, goals, db, maximum=2))
+        result = dict(goals, **solve(config, goals, db, feasibility_trials=0, maximum=2))
     assert result['status'] == 'fully_solved'
     assert not result['simulation']['trials']['baseline']['goal_result']['fully_solved']
     changed = {c['parameter']: c['proposed'] for c in result['recommendation']['changes']}
@@ -68,7 +68,7 @@ def test_two_sets_share_hybrid_patch_without_cross_set_merge(tmp_path):
     config, people = prepared(tmp_path, faces, bodies)
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people[:2], people[2:]], by_performer=False)
-        result = solve(config, goals, db, maximum=3)
+        result = solve(config, goals, db, feasibility_trials=0, maximum=3)
     assert result['status'] == 'fully_solved'
     trial = result['simulation']['trials'][result['selected_trial']]
     assert trial['goal_result']['disjoint']
@@ -161,7 +161,7 @@ def test_real_mode_replay_does_not_lower_threshold_to_cross_look_minimum(tmp_pat
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people], by_performer=False)
-        result = solve(config, goals, db, maximum=2)
+        result = solve(config, goals, db, feasibility_trials=0, maximum=2)
     assert result['status'] == 'fully_solved'
     proof = result['measured_hybrid_evidence']['pairs'][0]
     assert proof['person']['minimum'] == 0

@@ -27,7 +27,7 @@ def scripted_search(monkeypatch):
 def arguments(config, goals, tmp_path, style='auto'):
     config.source_path.write_text(yaml.safe_dump(plain(config.data)))
     argv = ['report-merge','--face-config',str(config.source_path),'--faces-db',str(config.database),
-            '--solve','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
+            '--solve','--feasibility-trials','0','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
     for group in goals['groups']:
         argv.extend(['--performer-set',','.join(m['performer_id'] for m in group['members'])])
     return argv
@@ -93,7 +93,7 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
         summary_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver best completed trial:'))
         winner_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver trial-1: complete '))
         winner_stop = next(i for i in range(winner_position+1, len(lines)) if lines[i].startswith('Merge solver '))
-        winner_details = lines[winner_position+1:winner_stop]
+        winner_details = [line for line in lines[winner_position+1:winner_stop] if not line.startswith('  Construction:')]
         assert lines[summary_position+2:summary_position+2+len(winner_details)] == winner_details
     with _open_readonly(config.database) as db:
         repeated = evaluate(load(tmp_path/'winner.yml'), goals, db)['trials']['baseline']['goal_result']

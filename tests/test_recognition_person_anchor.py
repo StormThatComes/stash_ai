@@ -206,10 +206,12 @@ def test_solver_repairs_numeric_size_gate_using_retained_measurements(tmp_path,m
     assert c.database.read_bytes()==before
 
 
-def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabled(tmp_path,monkeypatch):
+@pytest.mark.parametrize('feasibility_trials',[0,6],ids=['measured_body_gate','initial_face_probe'])
+def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabled(tmp_path,monkeypatch,feasibility_trials):
     from tests.test_recognition_merge_solver_hybrid import prepared
     from stash_ai.recognition.fragmentation_report import _open_readonly
-    from stash_ai.recognition.merge_goals import resolve
+    from stash_ai.recognition.merge_goals import resolve,evaluate
+    from stash_ai.recognition.merge_report_policy import patched
     from stash_ai.recognition.merge_solver import solve
     from stash_ai.recognition.body_solver import analyse
     from stash_ai.recognition.merge_solver_domains import registry
@@ -230,9 +232,21 @@ def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabl
         hints=analyse(db,c,goals)
         assert hints['options'].keys()=={PIXEL_PARAMETER}
         assert {80,81,120,121}<=set(hints['options'][PIXEL_PARAMETER])
-        result=solve(c,goals,db,maximum=4)
+        result=solve(c,goals,db,maximum=4,feasibility_trials=feasibility_trials)
         assert not result['simulation']['trials']['baseline']['goal_result']['fully_solved']
         assert result['status']=='fully_solved'
         patch={r['parameter']:r['proposed'] for r in result['recommendation']['changes']}
-        assert patch=={PIXEL_PARAMETER:80}
+        if feasibility_trials==0:
+            # Isolate measured legacy body admission from the initial face fallback.
+            assert patch=={PIXEL_PARAMETER:80}
+        else:
+            trial=result['simulation']['trials']['trial-1']
+            assert trial['search_phase']=='feasibility'
+            assert trial['goal_result']['fully_solved']
+            assert result['feasibility']['joint_witness_trial']=='trial-1'
+            assert PIXEL_PARAMETER not in patch
+            assert patch['recognition.match_threshold']<c.data['recognition']['match_threshold']
+        winner=patched(c,patch)
+        assert not winner.data['sapiensid']['identities']['enabled']
+        assert evaluate(winner,goals,db)['trials']['baseline']['goal_result']['fully_solved']
     assert c.database.read_bytes()==before

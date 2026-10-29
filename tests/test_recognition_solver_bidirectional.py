@@ -57,7 +57,7 @@ def test_eighteen_performers_escape_plateau_via_overmerge_and_repair(tmp_path, m
     config, goals = plateau(tmp_path, monkeypatch, size=20)
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        result = dict(goals, **solve(config, goals, db, maximum=5))
+        result = dict(goals, **solve(config, goals, db, feasibility_trials=0, maximum=5))
     trials = result['simulation']['trials']
     assert list(trials) == ['baseline', 'trial-1', 'trial-2', 'trial-3', 'trial-4']
     assert trials['trial-1']['goal_result']['groups'][0]['largest_complete_performers'] == 1
@@ -79,7 +79,7 @@ def test_eighteen_performers_escape_plateau_via_overmerge_and_repair(tmp_path, m
     with monkeypatch.context() as local:
         local.setattr(BidirectionalSearch, 'next', lambda *args, **kwargs: None)
         with _open_readonly(config.database) as db:
-            normal_only = solve(config, goals, db, maximum=5)
+            normal_only = solve(config, goals, db, feasibility_trials=0, maximum=5)
         assert all(t['goal_result']['groups'][0]['largest_complete_performers'] == 1
                    for t in normal_only['simulation']['trials'].values())
     assert before == config.database.read_bytes()
@@ -97,7 +97,7 @@ def test_resume_repairs_completed_overmerge_and_ctrl_c_keeps_safe_yaml(tmp_path,
             raise KeyboardInterrupt
 
     with _open_readonly(config.database) as db:
-        first = solve(config, goals, db, maximum=6, checkpoint=checkpoint,
+        first = solve(config, goals, db, feasibility_trials=0, maximum=6, checkpoint=checkpoint,
             winner_writer=winner_file(destination), progress=interrupt, yaml_mode=mode)
     assert first['interrupted'] and first['selected_trial'] != 'trial-2'
     assert not first['simulation']['trials']['trial-2']['goal_result']['disjoint']
@@ -111,7 +111,7 @@ def test_resume_repairs_completed_overmerge_and_ctrl_c_keeps_safe_yaml(tmp_path,
 
     monkeypatch.setattr(replay, 'rebuild_selected', counting)
     with _open_readonly(config.database) as db:
-        resumed = solve(config, goals, db, maximum=6, checkpoint=checkpoint, resume=True,
+        resumed = solve(config, goals, db, feasibility_trials=0, maximum=6, checkpoint=checkpoint, resume=True,
             winner_writer=winner_file(destination, resume=True), yaml_mode=mode)
     assert resumed['search']['restored_trials'] == 3 and len(calls) == 3
     assert resumed['best_result']['fully_solved']
@@ -119,7 +119,7 @@ def test_resume_repairs_completed_overmerge_and_ctrl_c_keeps_safe_yaml(tmp_path,
     assert f"best completed trial {resumed['selected_trial']} " in destination.read_text()
     calls.clear()
     with _open_readonly(config.database) as db:
-        repeated = solve(config, goals, db, maximum=6, checkpoint=checkpoint, resume=True,
+        repeated = solve(config, goals, db, feasibility_trials=0, maximum=6, checkpoint=checkpoint, resume=True,
             winner_writer=winner_file(destination, resume=True), yaml_mode=mode)
     assert not calls and repeated['simulation']['trials'] == resumed['simulation']['trials']
 
