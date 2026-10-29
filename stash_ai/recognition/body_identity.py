@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v2-cues',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v3-physical-evidence',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -71,9 +71,19 @@ def copresent(first,second):
     return any(a['scan']==b['scan'] and a['cue']==b['cue'] and a['id']!=b['id'] for a in first for b in second)
 
 
+def distinct_pixels(rows):
+    """Repeated physical pixels contribute one score, independently of support."""
+    seen=set();result=[]
+    for row in rows:
+        key=(quality(row).get('pixel_digest') if 'quality' in row else None) or ('observation',row['id'])
+        if key not in seen:result.append(row);seen.add(key)
+    return result
+
+
 class Scores:
     def __init__(self,config):self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
     def compare(self,first,second):
+        first,second=distinct_pixels(first),distinct_pixels(second)
         self.count+=len(first)*len(second)
         if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
         values=[float(np.dot(a['_vector'],b['_vector'])) for a in first for b in second]

@@ -84,6 +84,8 @@ def plan(db,config,bank,*,focus=None):
                 decision=dict(people=people,outcome='blocked' if blockers else 'merge',blockers=blockers,
                     nearest_rival=nearest,cores={p:[r['id'] for core in bank[p]['cores'] for r in core] for p in people},
                     face_witnesses={p:bank[p]['face_ids'] for p in people})
+                if any(bank[p].get('provisional') for p in people):
+                    decision['confirmation_witnesses']={p:[r['id'] for r in bank[p]['witnesses']] for p in people}
                 reserve(size(decision));result['decisions'].append(decision)
             result['search']=dict(search.stats)
         reserve(size(result['nearest_competitors'])+size(result['search']))
@@ -134,7 +136,8 @@ def reconcile(database,selected,config):
         rows=list(db.execute('SELECT p.id,p.created,EXISTS(SELECT 1 FROM members WHERE person=p.id) AS has_face FROM people p '
             'WHERE p.id IN (SELECT value FROM json_each(?)) ORDER BY has_face DESC,p.created,p.id',(encoded(people),)))
         target=rows[0]['id']
-        proof=dict(decision,route='body_global',scenes=sorted(scenes,key=int),contract=contract(config),policy=policy(config))
+        provisional=bool(db.execute("SELECT 1 FROM body_members WHERE status='provisional' AND person IN (SELECT value FROM json_each(?)) LIMIT 1",(encoded(people),)).fetchone())
+        proof=dict(decision,provisional_confirmation=provisional,route='body_global',scenes=sorted(scenes,key=int),contract=contract(config),policy=policy(config))
         proof_bytes+=len(encoded(proof))*(len(rows)-1)
         if proof_bytes>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('Body alias proofs exceed sapiensid.execution.plan_bytes.')
@@ -147,6 +150,8 @@ def reconcile(database,selected,config):
             db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
             db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.prior_reason',json_extract(payload,'$.reason'),"
                 "'$.reason','body_global_identity','$.reference_role','attachment','$.reference_selected',json('false')) WHERE person=?",(target,source))
+        # Cross-scene proof can confirm individually provisional scene cores.
+        db.execute("UPDATE body_members SET status='accepted' WHERE person=? AND status='provisional'",(target,))
         for scene in scenes:enqueue(db,scope,namespace,scene,config,'body_global_merge')
     # A body-born identity may become entirely associated with an existing face
     # identity within the scene. Record that promotion as an explicit alias.

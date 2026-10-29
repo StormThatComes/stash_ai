@@ -191,7 +191,15 @@ def exact_pair(a,b,bank,config,evidence):
             m,n=evidence.compare(left,right);minimum=min(minimum,n)
             if m<settings['match_threshold'] or n<settings['cohesion_threshold']:
                 if 'body_cohesion' not in blockers:blockers.append('body_cohesion')
-    if min(first['support'],second['support'])<settings['min_support']:blockers.append('independent_support')
+    if first.get('provisional') or second.get('provisional'):
+        from .body_identity import independent
+        local=config.data['sapiensid']['identities']
+        witnesses=independent(first['witnesses']+second['witnesses'],local)
+        if (len({r['scan'] for r in witnesses})<2 or
+                len(witnesses)<max(local['min_support'],settings['min_support']) or
+                min(first['support'],second['support'])<local['attach_min_support']):
+            blockers.append('independent_support')
+    elif min(first['support'],second['support'])<settings['min_support']:blockers.append('independent_support')
     if first['cues']&second['cues']:blockers.append('person_copresence')
     if first['missing_original'] or second['missing_original']:blockers.append('missing_original_body_witness')
     if first.get('stale_policy') or second.get('stale_policy'):
