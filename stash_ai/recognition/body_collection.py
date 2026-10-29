@@ -7,12 +7,12 @@ from .body_observations import contract, identifier
 
 def quality(image,person,people,settings):
     bounds=person['bounds'];left,top,right,bottom=bounds
-    with image.crop(bounds) as crop, crop.convert('L') as gray:
+    with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
         lap=(4*values[1:-1,1:-1]-values[:-2,1:-1]-values[2:,1:-1]
              -values[1:-1,:-2]-values[1:-1,2:])
         sharpness=float(lap.var()) if lap.size else 0.
-        pixel_digest=hashlib.sha256(gray.tobytes()).hexdigest()
+        pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
             small=np.asarray(thumb)
             bits=(small[:,1:]>small[:,:-1]).flatten()

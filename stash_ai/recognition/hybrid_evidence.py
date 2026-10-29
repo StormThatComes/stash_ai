@@ -82,10 +82,14 @@ def scores(left,right):
     if isinstance(left,Matrix) or isinstance(right,Matrix):
         for start in range(0,len(left),16):
             a=np.asarray(left[start:start+16],dtype='float64')
+            wa=left.weights(slice(start,start+16)) if isinstance(left,Matrix) else np.ones(len(a))
             for other in range(0,len(right),64):
                 b=np.asarray(right[other:other+64],dtype='float64')
+                wb=right.weights(slice(other,other+64)) if isinstance(right,Matrix) else np.ones(len(b))
                 values=a @ b.T
-                low=min(low,float(values.min()));total+=float(values.sum(dtype='float64'));count+=values.size
+                low=min(low,float(values.min()))
+                total+=float((values*wa[:,None]*wb[None,:]).sum(dtype='float64'));count+=float(wa.sum()*wb.sum())
+        if not count:raise ValueError('Body mode has no independent scoring witnesses.')
         return dict(minimum=low,mean=total/count)
     from .run_cache import packed
     right64=packed(right)

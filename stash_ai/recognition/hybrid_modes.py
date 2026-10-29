@@ -46,7 +46,7 @@ def competitor_score(left,right,fallback):
 
 def query_score(query,bank,settings,modes=()):
     from .hybrid_evidence import scores
-    measurements=[scores(query,mode) for mode in (modes or (bank,)) if len(mode)]
+    measurements=[dict(scores(query,mode),mode_index=i) for i,mode in enumerate(modes or (bank,)) if len(mode)]
     admitted=[m for m in measurements if m['minimum']>=settings['person_threshold']]
     return max(admitted or measurements,key=lambda m:m['mean'],default=None)
 

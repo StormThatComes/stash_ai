@@ -48,7 +48,7 @@ def _recover(database, selected, config, *, births=()):
         face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
         if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
-        choices=[];face_choices=[]
+        choices=[];face_choices=[];query_modes={}
         face_batch=np.asarray([face],dtype='float64')
         body_batch=np.asarray([body],dtype='float64') if body is not None else None
         if observe is not None:
@@ -64,6 +64,7 @@ def _recover(database, selected, config, *, births=()):
             modes=identity.body_modes if bodies is identity.persons else ()
             measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
+            if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
             score=max((m['mean'] for m in measures),default=None)
             admissible=bool(measures and not identity.guard_missing and not identity.unsupported_body_modes and
                 len(identity.independent)>=settings['min_support'] and
@@ -85,7 +86,9 @@ def _recover(database, selected, config, *, births=()):
             continue
         proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
                    core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
-                   reference_role='attachment',reference_selected=False)
+                   reference_role='attachment',reference_selected=False,
+                   body_mode=query_modes.get((owner,id(group))) if signal=='face_and_body' else None,
+                   independent_query_support=None)
         vote={k:row[k] for k in ('scan','seconds','quality')}
         used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
         if used>config.data['sapiensid']['execution']['plan_bytes']:
@@ -111,18 +114,40 @@ def _recover(database, selected, config, *, births=()):
         if claim[4] in births:birth_claims[claim[4]].append(claim)
     admissible_births={source for source,items in birth_claims.items()
         if len(items)==source_counts.get(source,0) and len({c[2] for c in items})==1}
-    for candidate,observation,owner,proof,prior,row in claims:
-        if prior not in births or prior in admissible_births:votes[owner].add(row)
+    def family(claim):
+        _,_,owner,proof,_,_=claim
+        return ((owner,'face') if proof['signal']=='face' else
+                (owner,'face_and_body',tuple(proof['core_observations']),proof['body_mode']))
+    def minimum(claim):
+        return config.data['clustering']['auxiliary_min_support'] if claim[3]['signal']=='face' else settings['min_support']
+    active=[c for c in claims if c[4] not in births or c[4] in admissible_births]
+    # Birth reassignment remains all-or-nothing even when its face and body
+    # claims have different support requirements. Removing a birth's votes may
+    # invalidate other claims, so resolve the frozen support to a fixed point.
+    while True:
+        votes=defaultdict(Votes)
+        for claim in active:votes[family(claim)].add(claim[5])
+        supported=[c for c in active if len(votes[family(c)])>=minimum(c)]
+        birth_claims=defaultdict(list)
+        for claim in supported:
+            if claim[4] in births:birth_claims[claim[4]].append(claim)
+        complete={p for p,items in birth_claims.items() if len(items)==source_counts[p] and len({c[2] for c in items})==1}
+        reduced=[c for c in supported if c[4] not in births or c[4] in complete]
+        if len(reduced)==len(active):break
+        active=reduced
+    eligible={c[1] for c in active}
     with db:
         for candidate,observation,owner,proof,prior,row in claims:
-            if prior in births and prior not in admissible_births:
+            if prior in births and prior not in complete:
                 if observe is not None:query_decision(observation,'birth','incomplete_birth_claim',owner=owner)
                 continue
-            if len(votes[owner])<(config.data['clustering']['auxiliary_min_support'] if proof['signal']=='face' else settings['min_support']):
+            support=len(votes[family((candidate,observation,owner,proof,prior,row))])
+            if observation not in eligible:
                 if observe is not None:query_decision(observation,'support',
                     'auxiliary_insufficient_support' if proof['signal']=='face' else 'query_support',
-                    owner=owner,support=len(votes[owner]))
+                    owner=owner,support=support)
                 continue
+            proof['independent_query_support']=support
             db.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','hybrid_query',"
                 "'$.hybrid_query',json(?),'$.reference_role','attachment','$.reference_selected',json('false')) WHERE id=?",

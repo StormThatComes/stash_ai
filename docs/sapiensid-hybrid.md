@@ -176,6 +176,12 @@ components whose entire retained membership is inside the selected scans; select
 all involved scenes together to consolidate them. Partial selections can report
 an eligible pair while correctly leaving it unapplied. The oldest identity wins.
 Source samples become attachment-only and do not become new strict face anchors.
+Hybrid query support is counted separately for strict face proofs and for each
+frozen body appearance/core. Face-only hits cannot supply the body route's
+minimum support. A newly born face identity is reassigned only if all of its
+members retain independent support for the same target. Repeated physical crops
+have one scoring weight as well as one independent vote; all vectors still keep
+cohesion-veto power.
 Original cores and numeric proof remain in alias evidence; candidate records
 point to that proof without duplicating it per observation. On later passes,
 the proof retains every body witness used by the complete mode check, even when
@@ -321,6 +327,16 @@ High-quality body anchors form complete-link cores; weak observations may attach
 to a frozen accepted bank, but never become new anchors through assignment.
 Direct face/person associations keep the existing face identity. Missing face
 observations can query its independently supported, frozen body bank.
+Each face owner's body bank is partitioned into frozen complete-link appearances.
+An attachment needs independent support in the matching appearance; other
+appearances of that owner do not dilute its score, and every competing owner
+still participates in ambiguity checks. On a local split, the largest physical
+overlap keeps the historical identity and performer; the oldest label wins a merge.
+
+Exact body pixel fingerprints include RGB bytes and crop dimensions. This changes
+the collection contract: the next run recollects the selected VTT body evidence.
+Compatible old grayscale banks remain competitors, but cannot supply new merges
+until rebuilt under the current contract. Physical origins preserve identity labels.
 
 New cores require `min_support` independent cues, with at most one vote per
 `(scan, cue)`, regardless of the time between cues. Exact pixel digests and
