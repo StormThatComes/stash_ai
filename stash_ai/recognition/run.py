@@ -128,6 +128,7 @@ def _execute(args, config, *, services=None):
     from tqdm import tqdm
     report = RunReport(args.progress_style == 'verbose', tqdm.write)
     counts = Counter()
+    rejection_totals={kind:Counter() for kind in ('face','body','person_evidence_unavailable')}
     references = {}
     from .sprite_cache import scope as sprite_scope
     with sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
@@ -198,7 +199,6 @@ def _execute(args, config, *, services=None):
                     from .person_collection import PersonCollector
                     person_collector = PersonCollector(config, paths)
                     runtime_services = replace(services, backend=backend.borrow)
-                rejected_totals = Counter()
                 if not portraits_only:
                     selected = []
                     ordered = sorted(identifiers, key=int)
@@ -222,17 +222,21 @@ def _execute(args, config, *, services=None):
                                     person_collector.flush()
                                     person_collector.enrich(database.connection, scan, source)
                                 counts['scenes_reused' if reused else 'scenes_scanned'] += 1
-                                rejected = {row['rejected']: row['total'] for row in database.connection.execute(
-                                    'SELECT rejected,COUNT(*) AS total FROM observations WHERE scan=? AND rejected IS NOT NULL '
-                                    'GROUP BY rejected', (scan,))}
-                                counts['observations_rejected'] += sum(rejected.values())
-                                rejected_totals.update(rejected)
-                                database.progress(run, 'detection', {'scene': identifier, 'scan': scan,
-                                                                   'rejected': rejected, 'reused': reused})
-                                if rejected:
-                                    report.optional('recognition_quality', report.detail,
-                                        f'Recognition quality scene {identifier}: ' +
-                                        ' '.join(f'{reason}={total}' for reason, total in sorted(rejected.items())))
+                                from .rejection_summary import summary as rejection_summary
+                                rejected=rejection_summary(database.connection,scan,config)
+                                counts['observations_rejected']+=sum(rejected['face'].values())
+                                counts['face_observations_rejected']+=sum(rejected['face'].values())
+                                counts['body_observations_rejected']+=sum(rejected['body'].values())
+                                counts['person_evidence_unavailable']+=sum(rejected['person_evidence_unavailable'].values())
+                                for kind,reasons in rejected.items():rejection_totals[kind].update(reasons)
+                                database.progress(run,'detection',dict(scene=identifier,scan=scan,
+                                    rejected=rejected['face'],body_rejected=rejected['body'],
+                                    person_evidence_unavailable=rejected['person_evidence_unavailable'],reused=reused))
+                                for kind,reasons in rejected.items():
+                                    if reasons:
+                                        report.optional('recognition_quality',report.detail,
+                                            f'Recognition quality scene {identifier} ({kind}): '+
+                                            ' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items())))
                                 selected.append({'scene': identifier, 'scan': scan})
                             except KeyboardInterrupt:
                                 raise
@@ -345,7 +349,8 @@ def _execute(args, config, *, services=None):
                 report.console.finish_rendering()
                 report.optional('recognition_summary', report.write, f'Recognition {outcome}: ' +
                                 ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
-                                (' | rejected: ' + ' '.join(f'{reason}={total}' for reason, total in sorted(rejected_totals.items())) if rejected_totals else '') +
+                                ''.join(' | '+kind+': '+' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items()))
+                                        for kind,reasons in rejection_totals.items() if reasons) +
                                 (' | face references=' + usage_line(references) +
                                  f" people={references['people']} samples={references['samples']} stage={references['stage']}" if references else ''))
                 return 0 if outcome == 'success' else 1
@@ -362,7 +367,8 @@ def _execute(args, config, *, services=None):
                 def show_errors():
                     report.optional('recognition_error_summary', render_errors, report, summary['errors'])
                 def finish_history():
-                    summary.update(counts=dict(counts), mutations=dict(report.counts))
+                    summary.update(counts=dict(counts), mutations=dict(report.counts),
+                                   rejections={kind:dict(reasons) for kind,reasons in rejection_totals.items()})
                     from .profiling import pipeline_snapshot
                     timings = pipeline_snapshot()
                     if timings is not None:

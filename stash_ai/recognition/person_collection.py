@@ -34,6 +34,8 @@ class PersonCollector:
             complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,body_contract(self.config)))}
             missing.update(set(range(len(source.cues)))-complete)
         if not missing:
+            from .person_crop_backfill import backfill
+            backfill(db,scan,source,self.config)
             return
         self._load()
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
@@ -43,6 +45,8 @@ class PersonCollector:
                     with image:
                         if index in missing:self.collect_frame(db,scan,index,image,seconds=cue.start)
         self.flush()
+        from .person_crop_backfill import backfill
+        backfill(db,scan,source,self.config)
 
     def _load(self):
         if self.model is None:
@@ -53,9 +57,11 @@ class PersonCollector:
 
     def abort(self):
         self.deferred=None
-        if self.pipeline is not None:
-            pipeline,self.pipeline=self.pipeline,None
-            cleanup([("abort person preparation", pipeline.close)])
+        # Failed inference may leave CUDA/session state unusable. A later scene
+        # must acquire a fresh owner, even if closing this owner also fails.
+        resources=[('abort person preparation',self.pipeline),('close failed person model',self.model)]
+        self.pipeline=self.model=None
+        cleanup([(name,resource.close) for name,resource in resources if resource is not None])
 
     def flush(self):
         try:
