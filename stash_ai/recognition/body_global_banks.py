@@ -78,6 +78,11 @@ def banks(db,config,scope,namespace):
         face_ids.update(r[0] for r in db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
             'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+strict_sql()+' AND '+
             anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(person,)))
+        # Unassigned but measured faces linked to body cores retain veto power.
+        face_ids.update(r[0] for r in db.execute('SELECT b.face FROM body_observations b '
+            'JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
+            'JOIN observations o ON o.id=b.face WHERE m.person=? AND b.rejected IS NULL '
+            'AND o.rejected IS NULL AND '+current_scan(),(person,)))
         for identifier in sorted(face_ids):
             raw=db.execute('SELECT o.id,o.dimensions FROM observations o JOIN scans s ON s.id=o.scan '
                 'WHERE o.id=? AND o.rejected IS NULL AND '+current_scan(),(identifier,)).fetchone()
@@ -94,5 +99,8 @@ def banks(db,config,scope,namespace):
             for row in core:cue(row['scan'],row['cue'])
         for row in db.execute('SELECT b.scan,b.cue FROM body_observations b JOIN body_members m ON m.observation=b.id '
             'JOIN scans s ON s.id=b.scan WHERE m.person=? AND m.status=\'accepted\' AND '+current_scan(),(person,)):
+            cue(row['scan'],row['cue'])
+        for row in db.execute('SELECT o.scan,o.cue FROM observations o JOIN members m ON m.observation=o.id '
+            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+current_scan(),(person,)):
             cue(row['scan'],row['cue'])
     return output

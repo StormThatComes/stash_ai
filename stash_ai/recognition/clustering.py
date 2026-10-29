@@ -237,7 +237,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 def matching_policy(config):
     from .context import policy_digest
     from .person_signal import contract
-    return policy_digest(config, f'matching-v{MATCHING_FORMAT}', lambda: {
+    return policy_digest(config, f'matching-v{MATCHING_FORMAT}-assignment-guards-v1', lambda: {
+        **({'assignment_guards': 1} if config.data['sapiensid']['enabled'] else {}),
         **({'hybrid': {'contract': contract(config),
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
         **({'body_anchor_pixels':config.data['sapiensid']['identities']['anchor_min_person_pixels']}

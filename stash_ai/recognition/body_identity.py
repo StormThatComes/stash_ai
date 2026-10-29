@@ -90,6 +90,7 @@ def scene_plan(db,scan,config):
     from .pose_policy import anchor_sql
     rows=[];cost=0
     for raw in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
+            'o.dimensions AS face_dimensions,o.embedding AS face_embedding,o.rejected AS face_rejected,'
             'm.person AS face_person,CASE WHEN o.id IS NOT NULL THEN '+
             strict_sql()+' AND '+anchor_sql('o',config.data['clustering'])+' ELSE 0 END AS face_anchor FROM body_observations b '
             'LEFT JOIN observations o ON o.id=b.face LEFT JOIN members m ON m.observation=o.id '
@@ -98,7 +99,13 @@ def scene_plan(db,scan,config):
         row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
             raise ValueError('Person scene references exceed sapiensid.execution.reference_bytes.')
-        row['_vector']=vector(row);rows.append(row)
+        row['_vector']=vector(row)
+        from .clustering import vector as face_vector
+        row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
+            if row['face_embedding'] is not None and row['face_rejected'] is None else None)
+        rows.append(row)
+    from .body_guards import FaceGuard,resolve_claims
+    guard=FaceGuard(db,config)
     scores=Scores(config);seeds={};decisions={}
     for row in rows:
         if row['face_person'] is None:continue
@@ -120,7 +127,7 @@ def scene_plan(db,scan,config):
             mean,minimum,person,bank=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
             good=(mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
                   and mean-runner>=settings['ambiguity_margin'] and not copresent([row],bank)
-                  and len(independent(bank,settings))>=settings['attach_min_support'])
+                  and len(independent(bank,settings))>=settings['attach_min_support'] and guard.allows(row,bank,person))
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
                 score=mean,minimum=minimum,runner=runner)
@@ -131,7 +138,7 @@ def scene_plan(db,scan,config):
         ranked=[]
         for index,group in enumerate(groups):
             mean,minimum=scores.compare([row],group)
-            if not copresent([row],group):ranked.append((mean,minimum,index))
+            if not copresent([row],group) and guard.allows(row,group):ranked.append((mean,minimum,index))
         ranked.sort(key=lambda x:(-x[0],x[2]))
         if ranked and ranked[0][0]>=settings['match_threshold']:
             mean,minimum,index=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
@@ -156,9 +163,10 @@ def scene_plan(db,scan,config):
     for row in weak:
         ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks],key=lambda x:(-x[0][0],x[1]))
         best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
-        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2])
+        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2]) and guard.allows(row,best[2])
         decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
             reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+    resolve_claims(rows,decisions,config)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
     return record,rows,decisions
