@@ -95,8 +95,11 @@ def assess(image, detection):
                    & (points[:, 1] >= y) & (points[:, 1] <= y + height)).all())
     eye_distance = float(np.linalg.norm(points[0] - points[1]))
     eye_mid, mouth_mid = (points[0] + points[1]) / 2, (points[3] + points[4]) / 2
-    ordered = bool(eye_distance > 1 and mouth_mid[1] > eye_mid[1] and
-                   eye_mid[1] < points[2, 1] < mouth_mid[1])
+    eye=points[1]-points[0]
+    vertical=np.array([-eye[1],eye[0]]) / max(eye_distance,1.)
+    nose_height=float((points[2]-eye_mid) @ vertical)
+    mouth_height=float((mouth_mid-eye_mid) @ vertical)
+    ordered = bool(eye_distance > 1 and 0 < nose_height < mouth_height)
     pose = pose_measurements(points)
     return dict(complete=complete, landmarks_inside=inside and ordered, **alignment_measurements(detection, image),
                 pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,

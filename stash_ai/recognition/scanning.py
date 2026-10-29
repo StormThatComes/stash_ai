@@ -19,7 +19,7 @@ from .pose_policy import measurement_required
 def scan_identity(config, namespace):
     visibility_contract = CONTRACT_ID if measurement_required(config) else None
     return digest({'namespace': namespace, 'detection': config.data['detection'],
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 2,
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 3,
                    'visibility_contract': visibility_contract})
 
 

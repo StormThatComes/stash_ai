@@ -97,9 +97,12 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='auxiliary_identity'")
-    supporters = db.execute(
-        f'SELECT person,COUNT(*) FROM (SELECT c.person AS person,o.scan,o.seconds {source} '
-        'GROUP BY c.person,o.scan,o.seconds) GROUP BY person', (policy,)).fetchall()
+    from collections import defaultdict
+    from .independent_evidence import Votes
+    votes=defaultdict(Votes)
+    for row in db.execute(f'SELECT c.person,o.scan,o.seconds,o.quality {source}',(policy,)):
+        votes[row['person']].add(row)
+    supporters=[(person,len(support)) for person,support in votes.items()]
     eligible = {person for person, count in supporters if count >= grouping['auxiliary_min_support']}
     with db:
         for person, _ in supporters:
@@ -226,7 +229,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='view_identity_pending'")
-    rows=lambda:db.execute("SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,c.person,json_extract(c.payload,'$.view_prototype.medoid') AS medoid "+source+
+    rows=lambda:db.execute("SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding,c.person,json_extract(c.payload,'$.view_prototype.medoid') AS medoid "+source+
                     ' ORDER BY o.embedding,o.geometry,o.id',(policy,))
     supported=eligible(rows,config,key=lambda r:r['person'],prototype=lambda r:r['medoid'])
     with db:

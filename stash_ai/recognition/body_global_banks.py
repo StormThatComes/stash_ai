@@ -18,7 +18,7 @@ def banks(db,config,scope,namespace):
         if used+extra>limit:
             raise ValueError('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
     where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? AND b.rejected IS NULL "
-           "AND m.status='accepted' AND m.role='anchor' AND "+current_scan())
+           "AND m.status IN ('accepted','provisional') AND m.role='anchor' AND "+current_scan())
     args=(scope,namespace,expected)
     source=' FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
     owners={}
@@ -28,7 +28,7 @@ def banks(db,config,scope,namespace):
     # Fetch quality for one identity at a time, never its crop/embedding blobs.
     for person,aliases in owners.items():
         rows=[];working=0
-        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,length(b.embedding) AS bytes'+source+
+        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
             'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
             (*args,encoded(aliases))):
             if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
@@ -38,25 +38,28 @@ def banks(db,config,scope,namespace):
         if not selected and rows:selected=rows[:1]
         refs=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in selected]
         output[person]=dict(refs=refs,cores=[refs],missing_original=False,support=len(witnesses),
-                            faces=[],face_ids=[],cues=set(),stale_policy=any(r['policy']!=policy(config) for r in rows))
+                            faces=[],face_ids=[],cues=set(),witnesses=witnesses,provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
         used+=size(output[person])+size(person)+128;reserve(0)
 
     def body(identifier):
-        raw=db.execute('SELECT b.id,b.scan,b.cue,length(b.embedding) AS bytes FROM body_observations b '
+        raw=db.execute('SELECT b.id,b.scan,b.cue,b.quality,length(b.embedding) AS bytes FROM body_observations b '
             'JOIN scans s ON s.id=b.scan WHERE b.id=? AND b.contract=? AND b.rejected IS NULL AND '+current_scan(),
             (identifier,expected)).fetchone()
         if raw is None or raw['bytes'] is None:return None
         if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
-        return dict(id=raw['id'],scan=raw['scan'],cue=raw['cue'])
+        return dict(id=raw['id'],scan=raw['scan'],cue=raw['cue'],quality=raw['quality'])
 
     # Preserve proof multiplicity for future replays, while identical cores
     # share metadata storage and the exact-score cache.
     signatures={p:{tuple(r['id'] for r in b['refs']):b['refs']} for p,b in output.items()}
     original_faces={p:set() for p in output}
+    confirmation_witnesses={p:set() for p in output}
     for alias in db.execute('SELECT target,evidence FROM identity_merges'):
         proof=json.loads(alias['evidence']);target=canonical(db,alias['target'])
         if proof.get('route') not in ROUTES or target not in output:continue
         bank=output[target]
+        if proof.get('provisional_confirmation'):
+            confirmation_witnesses[target].update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
         for ids in proof.get('cores',{}).values():
             signature=tuple(ids)
             if signature in signatures[target]:
@@ -89,6 +92,14 @@ def banks(db,config,scope,namespace):
             if raw is None:bank['missing_original']=True;continue
             row=dict(raw);used+=size(row)+64;reserve(0)
             bank['faces'].append(row);bank['face_ids'].append(identifier)
+        # Original cores still supply independent support after consolidation.
+        extra=[]
+        for identifier in sorted(confirmation_witnesses[person]):
+            row=body(identifier)
+            if row is None:bank['missing_original']=True
+            else:extra.append(row);used+=size(row)+16;reserve(0)
+        bank['witnesses']=independent(bank['witnesses']+extra,settings)
+        bank['support']=len(bank['witnesses'])
         cues=bank['cues']
         def cue(scan,index):
             nonlocal used
