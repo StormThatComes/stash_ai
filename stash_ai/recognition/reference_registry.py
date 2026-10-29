@@ -195,7 +195,7 @@ def apply(database,history,config):
                     (identifier,row['scan'],policy,source,'accepted',encoded(payload)))
         db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
         demote=action['kind']=='verified_attachment'
-        db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.reference_registry',json(?),"
+        db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.reference_registry',json(?),'$.publication_policy',?,"
             "'$.strict_confirmation',CASE WHEN json_type(payload,'$.strict_confirmation')='object' THEN "
             "json_set(json_extract(payload,'$.strict_confirmation'),'$.identity',?) ELSE NULL END,"
             "'$.prior_reason',CASE WHEN json_extract(payload,'$.reason')='global_reference_attachment' THEN "
@@ -206,7 +206,7 @@ def apply(database,history,config):
             "ELSE coalesce(json_extract(payload,'$.reference_role'),'strict') END,'$.reference_selected',"
             "json(CASE WHEN ? THEN 'false' WHEN json_extract(payload,'$.reference_selected') THEN 'true' ELSE 'false' END)) "
             "WHERE person=? AND status='accepted' AND json_valid(payload)",
-            (target,encoded(action),target,demote,encoded(STRICT_REASONS),demote,demote,source))
+            (target,encoded(action),matching_policy(config),target,demote,encoded(STRICT_REASONS),demote,demote,source))
     from .publication_queue import enqueue
     for scope,namespace,scene in sorted(dirty):
         enqueue(db,scope,namespace,scene,config,'global_reference_repair')
