@@ -66,7 +66,7 @@ def test_report_maps_downscaled_face_and_offset_person_points_offline(tmp_path, 
         # Outside/missing points never get clamped into border markers.
         assert annotated.getpixel((119, 50)) == BOX_COLOR
         assert annotated.getpixel((30, 199)) == BOX_COLOR
-    assert len(list(target.glob('*.png'))) == 4
+    assert len(list(target.glob('*.png'))) == 6
     if os.name == 'posix':
         assert all(path.stat().st_mode & 0o777 == 0o600 for path in target.iterdir())
 
@@ -88,7 +88,7 @@ def test_unavailable_crop_geometry_keeps_clean_export(tmp_path, bounds, status):
     assert image['status'] == 'exported'
     assert image['annotations'] == {'status': status, 'file': None}
     assert report['summary']['complete']
-    assert len(list((tmp_path / 'report').glob('*.png'))) == 1
+    assert len(list((tmp_path / 'report').glob('*.png'))) == 2
 
 
 @pytest.mark.parametrize('keypoints,status', [

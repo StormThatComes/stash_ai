@@ -709,6 +709,36 @@ distinguished from historical policies; missing accepted evidence remains
 cohesion values, runner-up identity IDs and overwritten decisions are not invented.
 Original identity labels and recorded merge evidence are included for context.
 
+Each face/person crop also gets a `*-thresholds.png` companion with the retained
+overlay above a readable admission table, and a `*-thresholds.json` sidecar.
+`image.thresholds` links both files; `admission` in the manifest contains the same
+checks. The clean and landmark-only PNGs retain their original pixels. Missing
+crops still get the JSON explanation, without inventing an image.
+
+The table shows the **measured value, threshold, comparison and pass/fail/unknown/
+disabled status** for each gate. JSON additionally records the signed margin and
+`parameter_requirement`: for a 72 px face, the size gate needs
+`detection.min_face_pixels <= 72`; a detector score of 0.91 needs
+`detection.score_threshold < 0.91` (strict comparison). These are boundaries for
+individual gates, not a sufficient recipe for detecting or assigning that sample.
+
+Detection settings are verified against the retained scan/person contract hash.
+If the supplied configuration differs, the report searches saved run snapshots
+for matching settings. A match verifies the settings, not which run created the
+observation. If no matching snapshot exists, the table explicitly says
+`current_configuration_only_historical_unavailable`. Anchor/auxiliary quality
+checks always use the supplied configuration and do not rewrite the recorded role.
+Faces show confidence, source pixels, sharpness, completeness, head pose,
+visibility and geometry admission. Person evidence shows detector confidence and
+the body anchor size gate; independent body observations additionally show
+collection pixels/sharpness/keypoint count/overlap and body anchor quality.
+Face-associated person evidence inherits the face gates and does not require the
+independent body collection floors. Group results cover only the displayed quality
+gates; support, matching, reference selection and association ambiguity can impose
+additional requirements. NMS/result limits are frame context, not single-crop
+pass/fail checks. Raw per-keypoint confidences were not retained, so their threshold
+is displayed with `unknown`, never reconstructed from accepted coordinates.
+
 This command is offline and reads a single consistent SQLite snapshot without
 the recognition writer lock. It never fetches scenes, loads weights, reruns
 detection/matching, or changes SQLite/Stash. Every linked observation is included,

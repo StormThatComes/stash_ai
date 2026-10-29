@@ -16,6 +16,7 @@ from .fragmentation_report import _open_readonly
 from .models import namespace
 from .pose_policy import is_anchor
 from .scanning import scan_identity
+from . import admission_report, admission_panel
 
 
 from .decision_evidence import REASONS, DECISION_FIELDS, recorded, explanation
@@ -148,6 +149,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
     policy, model_namespace = matching_policy(config), namespace(config)
     with closing(_open_readonly(config.database)) as db:
         requested, person = _select(db, model_namespace, identity_id, performer_id, scope)
+        policies = admission_report.Policies(db, config, person['scope'], model_namespace)
         family, merges = _merges(db, person)
         invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
             'JOIN scans s ON s.id=o.scan WHERE m.person=? AND (s.scope<>? OR s.namespace<>?) LIMIT 1',
@@ -172,6 +174,9 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'All current members are included without detection filtering or a sample cap; this is not a rescan.',
                 'PNGs decode retained recognition crops (normally JPEG), not original thumbnails or aligned model inputs.',
                 'Annotated copies show retained source landmarks mapped to crop pixels; missing geometry is not inferred.',
+                'Threshold companions compare retained measurements with hash-verified scan settings when available; '
+                'otherwise they explicitly use current settings only. Anchor/auxiliary gates always use current settings.',
+                'Per-gate threshold boundaries do not reconstruct NMS, missing keypoint confidence or identity matching.',
                 'Missing or unreadable crops cannot be recovered offline and remain explicit entries.',
                 'Recorded decisions may be absent, from other policies, or overwritten by later rechecks/rebuilds.',
                 'Scores are cosine similarities, not probabilities. Historical reference members, individual cohesion '
@@ -221,11 +226,20 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             }
             from .person_collection import retained_report
             sample['person_evidence'] = retained_report(db,row['id'],config,directory,name,geometry=geometry)
+            sample['admission'] = admission_report.face(quality, geometry, config, policies, row['detection_policy'])
+            image['thresholds'] = admission_panel.export(image, sample['admission'], directory, name,
+                observation=row['id'], role=assignment['role'], rejection=row['rejected'])
+            evidence = sample['person_evidence']
+            if 'image' in evidence:
+                evidence['admission'] = admission_report.person(evidence['metadata'], config, policies, evidence['contract'])
+                evidence['image']['thresholds'] = admission_panel.export(evidence['image'], evidence['admission'], directory, 'person-'+name,
+                    observation=row['id'], role='face-associated '+assignment['role'],
+                    rejection=evidence['metadata'].get('identity_rejection'))
             report['samples'].append(sample)
             counts[image['status']] += 1
             counts[assignment['role']] += 1
         from .body_reports import export_members
-        for sample in export_members(db,config,person,directory):
+        for sample in export_members(db,config,person,directory,policies=policies):
             report['samples'].append(sample)
             counts[sample['image']['status']]+=1
             counts[sample['assignment']['role']]+=1
