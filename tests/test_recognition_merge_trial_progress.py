@@ -27,7 +27,7 @@ def scripted_search(monkeypatch):
 def arguments(config, goals, tmp_path, style='auto'):
     config.source_path.write_text(yaml.safe_dump(plain(config.data)))
     argv = ['report-merge','--face-config',str(config.source_path),'--faces-db',str(config.database),
-            '--solve','--feasibility-trials','0','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
+            '--solve','--targeted-trials','0','--feasibility-trials','0','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
     for group in goals['groups']:
         argv.extend(['--performer-set',','.join(m['performer_id'] for m in group['members'])])
     return argv

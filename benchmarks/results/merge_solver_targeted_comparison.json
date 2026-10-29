@@ -1,0 +1,388 @@
+{
+  "format": 1,
+  "scope": "deterministic_synthetic_retained_replay",
+  "python": "3.12.3",
+  "maximum": 12,
+  "repeats": 3,
+  "feasibility_trials": 6,
+  "baseline_included": true,
+  "interpretation": "Same fixtures and total budget. Modes alternate order across repeats. Wall time includes search and polishing; first_solution_replay_seconds excludes initial analysis. Synthetic timings do not predict library runtime.",
+  "results": {
+    "face": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7477113469976757,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10539534700001241
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7414079070003936,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1012939419997565
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.6759024019993376,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.09000373700109776
+          }
+        ],
+        "median": {
+          "seconds": 0.7414079070003936,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.1012939419997565
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8692173400013417,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12402827899859403
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7683599940028216,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10555043299973477
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8711433179996675,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.130146956002136
+          }
+        ],
+        "median": {
+          "seconds": 0.8692173400013417,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.12402827899859403
+        }
+      }
+    },
+    "query": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.971729664997838,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1483953280003334
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7917535659980786,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10949136599811027
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8834055060033279,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1323872630018741
+          }
+        ],
+        "median": {
+          "seconds": 0.8834055060033279,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.1323872630018741
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.0937773669975286,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1682180839998182
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8607934350002324,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.11500814899773104
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9303130600019358,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12767842700122856
+          }
+        ],
+        "median": {
+          "seconds": 0.9303130600019358,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.12767842700122856
+        }
+      }
+    },
+    "disjoint": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.2498744440017617,
+            "first_solution_replays": 6,
+            "first_solution_replay_seconds": 0.528724281994073
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.09108580800239,
+            "first_solution_replays": 6,
+            "first_solution_replay_seconds": 0.46548257199901855
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.4670167030017183,
+            "first_solution_replays": 6,
+            "first_solution_replay_seconds": 0.7678766169956361
+          }
+        ],
+        "median": {
+          "seconds": 1.2498744440017617,
+          "first_solution_replays": 6,
+          "first_solution_replay_seconds": 0.528724281994073
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.1761667449973174,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.17144288100098493
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.0447568379968288,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1527601859997958
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.3851089299969317,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.23220062100153882
+          }
+        ],
+        "median": {
+          "seconds": 1.1761667449973174,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.17144288100098493
+        }
+      }
+    },
+    "missing_body": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8297138870002527,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12106793899874901
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7848384860008082,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10151142399990931
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.833913966002001,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10743222299788613
+          }
+        ],
+        "median": {
+          "seconds": 0.8297138870002527,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.10743222299788613
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7982974359983928,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.10799836299702292
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9037840419987333,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12394252900048741
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9537276520022715,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12339564199646702
+          }
+        ],
+        "median": {
+          "seconds": 0.9037840419987333,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.12339564199646702
+        }
+      }
+    },
+    "quality": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7065152120012499,
+            "first_solution_replays": 3,
+            "first_solution_replay_seconds": 0.11918298300224706
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.6690187249987503,
+            "first_solution_replays": 3,
+            "first_solution_replay_seconds": 0.1151388219986984
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7436949119983183,
+            "first_solution_replays": 3,
+            "first_solution_replay_seconds": 0.11808190200099489
+          }
+        ],
+        "median": {
+          "seconds": 0.7065152120012499,
+          "first_solution_replays": 3,
+          "first_solution_replay_seconds": 0.11808190200099489
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.8179344119998859,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.11395126299976255
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.7038615720011876,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.08867892299895175
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9434278879998601,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.08625388000291423
+          }
+        ],
+        "median": {
+          "seconds": 0.8179344119998859,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.08867892299895175
+        }
+      }
+    },
+    "body_modes": {
+      "0": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.0524185449976358,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.15996956700109877
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9019772610008658,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.12628386299911654
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.0494466199997987,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.15202190099807922
+          }
+        ],
+        "median": {
+          "seconds": 1.0494466199997987,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.15202190099807922
+        }
+      },
+      "8": {
+        "runs": [
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.204594509999879,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1590043979958864
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 0.9795731589983916,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1409745569981169
+          },
+          {
+            "quality": "fully_solved",
+            "completed": 12,
+            "seconds": 1.0228976359976514,
+            "first_solution_replays": 2,
+            "first_solution_replay_seconds": 0.1521513000043342
+          }
+        ],
+        "median": {
+          "seconds": 1.0228976359976514,
+          "first_solution_replays": 2,
+          "first_solution_replay_seconds": 0.1521513000043342
+        }
+      }
+    }
+  },
+  "commands": [
+    "python -m benchmarks.benchmark_merge_solver --max-trials 12 --targeted-trials 0",
+    "python -m benchmarks.benchmark_merge_solver --max-trials 12 --targeted-trials 8"
+  ]
+}

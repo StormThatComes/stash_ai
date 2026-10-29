@@ -219,6 +219,8 @@ class QueryFeedback:
                     nearest_competitor=max((dict(identity=v['identity'], score=v['score'], relation=v['relation'])
                         for v in rivals if v['score'] is not None), key=lambda v:v['score'], default=None),
                     unknown_competitor_identity=next((v['identity'] for v in rivals if v['score'] is None), None))
+                face_rivals = [v['face']['mean'] for v in choices if v['identity'] != c['identity']]
+                entry['face_gap'] = c['face']['minimum']-max(face_rivals) if face_rivals else None
                 self.entries.append(entry)
                 self.face_votes.setdefault((pass_id, c['identity']), Votes()).add(row)
                 if c['person'] is not None and not c['missing_original_core']:
@@ -233,6 +235,7 @@ class QueryFeedback:
             if 'identity' not in entry:
                 continue
             entry['query_support'] = len(self.votes.get((entry['pass_id'], entry['identity']), ()))
+            entry['face_query_support'] = len(self.face_votes.get((entry['pass_id'], entry['identity']), ()))
             # Missing body evidence blocks the hybrid route, not face matching.
             # Only measured faces are proposed; production still checks pose,
             # independent support, original cores and competing identities.
@@ -315,7 +318,7 @@ def quality_feedback(db, config, goals, *, priorities=None):
     return dict(observations=entries, proposals=([joint] if joint else []) + [e['patch'] for e in entries if e['patch']])
 
 
-def face_fallbacks(db, config, goals, targets, limit=32):
+def face_fallbacks(db, config, goals, targets, limit=32, *, evidence=None):
     """Measure retained goal queries even when the body matcher cannot run.
 
     Query observers may never be invoked when every body bank is unavailable.
@@ -357,6 +360,8 @@ def face_fallbacks(db, config, goals, targets, limit=32):
             patch = {k: min(parameter(config.data, k), _floor(value)) for k in (
                 'recognition.match_threshold', 'clustering.cohesion_threshold',
                 'clustering.view_match_threshold', 'clustering.view_cohesion_threshold')}
+            if evidence is not None and len(evidence)<limit:
+                evidence.append(dict(observation=row['id'],identity=bank.identifier,patch=patch))
             proposals[digest(patch)] = patch
             if len(proposals) >= limit:
                 return list(proposals.values())

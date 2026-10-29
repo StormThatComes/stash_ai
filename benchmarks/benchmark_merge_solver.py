@@ -95,12 +95,14 @@ def main():
     parser.add_argument('--cases',nargs='+',choices=CASES,default=CASES)
     parser.add_argument('--sampler',choices=('heuristic','tpe','compare'),default='heuristic')
     parser.add_argument('--seed',type=int,default=0)
+    parser.add_argument('--targeted-trials',type=int,default=8)
     args = parser.parse_args()
     if args.max_trials<1:parser.error('max-trials must be positive')
+    if args.targeted_trials<0:parser.error('targeted-trials must be nonnegative')
     with tempfile.TemporaryDirectory() as tmp:
         modes=('heuristic','tpe') if args.sampler=='compare' else (args.sampler,)
         results={mode:{case:measure(*fixture(Path(tmp)/mode/case,case),args.max_trials,
-                    sampler=mode,seed=args.seed) for case in args.cases} for mode in modes}
+                    sampler=mode,seed=args.seed,targeted_trials=args.targeted_trials) for case in args.cases} for mode in modes}
     print(json.dumps(dict(format=1,scope='deterministic_synthetic_retained_replay',results=results),indent=2))
 
 
