@@ -88,6 +88,12 @@ def test_disk_mode_comparison_budget_is_shared_across_owners(tmp_path):
         db.commit();ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
         with pytest.raises(ValueError,match='max_witness_comparisons'):
             catalogue_rows(db,config,'scope',ns,people)
+        from stash_ai.recognition.rebuild import rebuild_selected
+        selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
+        before=list(db.iterdump())
+        with pytest.raises(ValueError,match='max_witness_comparisons'):
+            rebuild_selected(state,selected,config)
+        assert list(db.iterdump())==before
 
 
 @pytest.mark.parametrize('foreign', ['scope','namespace'])
