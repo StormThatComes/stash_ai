@@ -53,11 +53,13 @@ def report(db,config,scans):
     return dict(result,assignments=dict(counts),reasons=dict(reasons),identities=identities)
 
 
-def export_members(db,config,person,directory):
+def export_members(db,config,person,directory,*,policies=None):
     from .identity_report import _image
     from .person_audit import _draw
     from .alignment_audit import _png
     if not available(db):return []
+    from . import admission_report, admission_panel
+    policies = policies or admission_report.Policies(db,config,person['scope'],person['namespace'])
     invalid=db.execute('SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation '
         'JOIN scans s ON s.id=b.scan WHERE m.person=? AND (s.scope<>? OR s.namespace<>?) LIMIT 1',
         (person['id'],person['scope'],person['namespace'])).fetchone()
@@ -83,10 +85,13 @@ def export_members(db,config,person,directory):
                 drawn=_draw(copy,(0,0,rgb.width,rgb.height),shifted);_png(copy,target)
             return dict(status='exported',file=target.name,drawn_indices=drawn)
         image=_image(row['crop'],directory/name,annotate=annotate)
+        admission=admission_report.person(quality,config,policies,row['contract'],independent=True)
+        image['thresholds']=admission_panel.export(image,admission,directory,name,
+            observation=row['id'],role=row['role'],rejection=row['rejected'])
         samples.append(dict(observation_id=row['id'],evidence_kind='person',linked_face=row['face'],
             scene_id=scene,scan_id=row['scan'],scan_status=row['scan_status'],cue_index=cue,seconds=row['seconds'],
             contract=row['contract'],contract_matches_current=row['contract']==contract(config),
-            quality=quality,geometry=geometry,retained_rejection=row['rejected'],image=image,
+            quality=quality,geometry=geometry,retained_rejection=row['rejected'],image=image,admission=admission,
             assignment=dict(role=row['role'],status=row['assignment_status']),decision=json.loads(row['proof']),
             anchor_pixel_gate=pixel_gate(row['quality'],config.data['sapiensid']['identities']),
             policy_matches_current=row['policy']==policy(config),
