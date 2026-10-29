@@ -33,7 +33,7 @@ def test_query_evidence_clears_three_simultaneous_gates_outside_local_grid(tmp_p
     goals = make_auxiliary(config, people)
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        result = solve(config, goals, db, feasibility_trials=0, maximum=2)
+        result = solve(config, goals, db, targeted_trials=0, feasibility_trials=0, maximum=2)
     assert result['status'] == 'fully_solved' and result['selected_trial'] == 'trial-1'
     changes = {c['parameter']:c['proposed'] for c in result['best_result']['changes']}
     assert set(changes) == {PREFIX+k for k in ('face_floor','person_threshold','min_support')}
@@ -56,7 +56,7 @@ def test_quality_hints_jointly_admit_rows_filtered_before_query_recovery(tmp_pat
         min_anchor_sharpness=50, min_auxiliary_sharpness=50))
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people], by_performer=False)
-        result = solve(config, goals, db, feasibility_trials=0, maximum=2)
+        result = solve(config, goals, db, targeted_trials=0, feasibility_trials=0, maximum=2)
     assert result['status'] == 'fully_solved' and result['selected_trial'] == 'trial-1'
     changes = {c['parameter']:c['proposed'] for c in result['best_result']['changes']}
     assert changes == {'clustering.min_anchor_face_pixels':80, 'clustering.min_auxiliary_face_pixels':80,
@@ -76,7 +76,7 @@ def test_query_separation_interval_and_overlapping_scores(tmp_path, between):
         matching=dict(face_floor=.8, person_threshold=.9, min_support=3))
     goals = make_auxiliary(config, people)
     with _open_readonly(config.database) as db:
-        result = solve(config, goals, db, feasibility_trials=0, maximum=2)
+        result = solve(config, goals, db, targeted_trials=0, feasibility_trials=0, maximum=2)
     feedback = result['simulation']['trials']['baseline']['solver_feedback']['query']
     interval = next(i for i in feedback['separation_intervals'] if i['parameter'] == PREFIX+'face_floor')
     assert interval['feasible'] is (between < .785)
@@ -221,7 +221,7 @@ def test_cli_interrupt_exports_logged_winner_with_default_500_trials(tmp_path, m
     monkeypatch.setattr(replay_simulation, 'rebuild_selected', interrupted)
     output, document = tmp_path/'report.json', tmp_path/'winner.yml'
     argv = ['report-merge','--face-config',str(config.source_path),'--faces-db',str(config.database),
-            '--solve','--feasibility-trials','0','--output',str(output),'--yaml-output',str(document)]
+            '--solve','--targeted-trials','0','--feasibility-trials','0','--output',str(output),'--yaml-output',str(document)]
     for group in goals['groups']:
         argv.extend(['--performer-set',','.join(m['performer_id'] for m in group['members'])])
     assert main(argv) == 130

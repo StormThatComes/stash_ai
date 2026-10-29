@@ -560,10 +560,71 @@ values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
 
+### Targeted merge trials
+
+After baseline replay, `--targeted-trials 8` (default) first tries measured routes
+for each unsolved set. The allowance is capped at one third of non-baseline
+slots, rounded down, with one targeted trial allowed in a two-trial run. These
+trials consume `--max-trials`; they do not add rebuilds outside that budget.
+`--targeted-trials 0` disables this lane. To disable both early lanes, also set
+`--feasibility-trials 0`.
+
+`solver_feedback.targeted.sets` reports current fragments, their scene links,
+missing target scenes, pooled core deficit, and observed blockers per historical
+performer. Performers are diagnostic addresses, not preservation obligations:
+identity mode still permits weak samples or an entire historical identity to
+disappear when the pooled set retains the required core and scene support.
+Strict mode still requires every original observation.
+
+Candidates use measured face, hybrid and independent-body boundaries. Query
+routes can lower face/body/support gates together; admission routes can recover
+retained samples filtered by quality, including body samples that currently have
+no identity. Linked face/body alternatives count once. No missing model features
+are fabricated and measurement contracts remain unchanged.
+
+The lane rotates between sets and reads the best completed parent's current
+diagnosis. After a useful admission or merge, subsequent routes therefore use
+the rebuilt references and fragments. Equivalent YAML patches share one replay;
+complementary bridge proposals can connect multiple fragments at once. A connected
+pair graph is only a candidate, never proof that production complete-core checks
+will accept the whole set. Every candidate runs the full production replay with
+all competitors, set-separation requirements, scene exclusions and outside-impact
+limits. The winner uses the original goal policy.
+
+Console trial headers identify the set, route, involved performers and blockers;
+JSON includes `search_target`, `search.targeted` and the bounded candidate list.
+At most 16 candidates per set and 64 overall are retained. If no usable route
+remains, or the allowance is consumed, search falls through to construction
+probes and ordinary optimization. A new best state may offer additional targeted
+routes within the remaining allowance. Failed targeted trials or truncated
+diagnostics never establish global impossibility. Resume requires the same
+`--targeted-trials` setting as the original checkpoint.
+
+The retained-evidence benchmark accepts `--targeted-trials 0` or `8` for comparison.
+In three alternating runs per mode with `--max-trials 12`, both modes solved all
+six synthetic cases. Counts below include baseline:
+
+| Case | First solution, targeted off | First solution, targeted on |
+| --- | ---: | ---: |
+| Face | 2 replays | 2 replays |
+| Hybrid query | 2 | 2 |
+| Disjoint sets | 6 | 2 |
+| Missing body | 2 | 2 |
+| Admission quality | 3 | 2 |
+| Body modes | 2 | 2 |
+
+For disjoint sets, median cumulative replay time to first solution fell from
+0.529 s to 0.171 s; for admission quality, from 0.118 s to 0.089 s. The diagnosis
+has overhead: the same-count face case took 0.124 s versus 0.101 s, and full
+12-trial runtime including polishing did not consistently improve. These small
+synthetic fixtures do not establish a speedup on a real library. Raw repetitions
+and timing scope are in `benchmarks/results/merge_solver_targeted_comparison.json`.
+
 ### Initial construction feasibility
 
-After baseline replay, the solver first checks whether the requested sets can
-actually be constructed with the retained evidence and enabled identity routes.
+After targeted trials, the solver checks whether the requested sets can actually
+be constructed with the retained evidence and enabled identity routes. A joint
+construction witness from baseline or a targeted trial skips permissive probes.
 `--feasibility-trials 6` (default) permits up to six initial production replays;
 these consume the existing `--max-trials` budget, including failed resource-limited
 attempts. The probe allowance is capped at half the non-baseline slots (rounded

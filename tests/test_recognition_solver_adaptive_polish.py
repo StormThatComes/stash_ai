@@ -102,10 +102,11 @@ def test_full_replay_ablation_removes_redundant_gate_and_resumes(tmp_path, monke
             raise KeyboardInterrupt
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        first = solve(config, goals, db, maximum=30, checkpoint=path, progress=stop)
+        # Exercise the injected redundant proposal, not the targeted shortcut.
+        first = solve(config, goals, db, maximum=30, targeted_trials=0, checkpoint=path, progress=stop)
         assert first['interrupted']
-        result = solve(config, goals, db, maximum=30, checkpoint=path, resume=True)
-        fresh = solve(config, goals, db, maximum=30)
+        result = solve(config, goals, db, maximum=30, targeted_trials=0, checkpoint=path, resume=True)
+        fresh = solve(config, goals, db, maximum=30, targeted_trials=0)
     assert result['search']['restored_trials'] == len(first['simulation']['trials'])
     assert result['best_result']['fully_solved']
     assert [c['parameter'] for c in result['best_result']['changes']] == [PREFIX+'face_floor']

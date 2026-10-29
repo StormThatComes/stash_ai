@@ -21,7 +21,7 @@ def test_initial_production_probe_constructs_merge_and_exports_safe_winner(tmp_p
     c, goals = fixture(tmp_path, case)
     before = c.database.read_bytes()
     with _open_readonly(c.database) as db:
-        result = solve(c, goals, db, maximum=8)
+        result = solve(c, goals, db, targeted_trials=0, maximum=8)
         witness = result['feasibility']['joint_witness_trial']
         assert result['feasibility']['status'] == 'possible'
         trial = result['simulation']['trials'][witness]
@@ -38,7 +38,7 @@ def test_combined_probe_crosses_matching_and_admission_gates(tmp_path):
     c, _ = seeded(tmp_path, clustering=dict(min_anchor_face_pixels=100, min_auxiliary_face_pixels=100))
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']])
-        result = solve(c, goals, db, maximum=8)
+        result = solve(c, goals, db, targeted_trials=0, maximum=8)
     assert result['feasibility']['status'] == 'possible'
     assert result['feasibility']['joint_witness_trial'] == 'trial-3'
     assert result['simulation']['trials']['trial-3']['search_strategy'] == 'all_floors'
@@ -48,7 +48,7 @@ def test_overmerge_is_a_witness_and_repair_parent_but_not_a_winner(tmp_path, mon
     from tests.test_recognition_solver_bidirectional import plateau
     c, goals = plateau(tmp_path, monkeypatch, size=20)
     with _open_readonly(c.database) as db:
-        result = solve(c, goals, db, maximum=8)
+        result = solve(c, goals, db, targeted_trials=0, maximum=8)
     trials = result['simulation']['trials']
     first = trials['trial-1']
     assert first['search_phase'] == 'feasibility'
@@ -65,7 +65,7 @@ def test_baseline_witness_avoids_redundant_probes_even_with_negative_conflict(tm
     c, _ = fixture(tmp_path)
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']], scene_exclusions=[('900', '3')])
-        result = solve(c, goals, db, maximum=12)
+        result = solve(c, goals, db, targeted_trials=0, maximum=12)
     baseline = result['simulation']['trials']['baseline']['goal_result']
     assert baseline['construction']['status'] == 'possible_with_conflicts'
     assert not baseline['scene_exclusions_satisfied']
@@ -78,7 +78,7 @@ def test_budget_and_opt_out_do_not_claim_impossibility(tmp_path, maximum, probes
     c, _ = seeded(tmp_path)
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']])
-        result = solve(c, goals, db, maximum=maximum, feasibility_trials=probes)
+        result = solve(c, goals, db, targeted_trials=0, maximum=maximum, feasibility_trials=probes)
     assert result['search']['attempted'] <= maximum
     assert result['feasibility']['probe_budget'] == min(probes, maximum-1, max(1, (maximum-1)//2))
     if maximum == 1:
@@ -226,7 +226,7 @@ def test_body_handoff_is_construction_witness_without_relaxing_goal_policy(tmp_p
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900']], policy=policy)
         assert len(goals['groups'][0]['members'][0]['observations']) == 3
-        result = solve(c, goals, db, maximum=1)
+        result = solve(c, goals, db, targeted_trials=0, maximum=1)
         status = result['simulation']['trials']['baseline']['goal_result']
         assert not status['fully_solved']
         assert result['feasibility']['status'] == 'possible_goal_mismatch'
@@ -258,19 +258,19 @@ def test_resource_limited_probe_continues_and_resume_does_not_retry_failure(tmp_
     monkeypatch.setattr(replay, 'rebuild_selected', guarded)
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']])
-        result = solve(c, goals, db, maximum=6, checkpoint=checkpoint)
+        result = solve(c, goals, db, targeted_trials=0, maximum=6, checkpoint=checkpoint)
         assert result['feasibility']['probes_failed'] >= 1
         assert result['feasibility']['failed_probes']['trial-1']['reason'] == 'resource_limit'
         assert 'trial-1' not in result['simulation']['trials'] and result['selected_trial'] != 'trial-1'
         assert result['search']['attempted'] == 6
         assert len(calls) == 6
         calls.clear()
-        resumed = solve(c, goals, db, maximum=6, checkpoint=checkpoint, resume=True)
+        resumed = solve(c, goals, db, targeted_trials=0, maximum=6, checkpoint=checkpoint, resume=True)
         assert not calls and resumed['search']['restored_trials'] == 6
         assert resumed['simulation']['trials'] == result['simulation']['trials']
         assert resumed['feasibility'] == result['feasibility']
         with pytest.raises(ValueError, match='incompatible'):
-            solve(c, goals, db, maximum=6, feasibility_trials=0, checkpoint=checkpoint, resume=True)
+            solve(c, goals, db, targeted_trials=0, maximum=6, feasibility_trials=0, checkpoint=checkpoint, resume=True)
     assert c.database.read_bytes() == before
 
 
@@ -291,7 +291,7 @@ def test_unrelated_probe_errors_are_not_suppressed(tmp_path, monkeypatch, error)
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']])
         with pytest.raises(type(error), match=str(error)):
-            solve(c, goals, db, maximum=3)
+            solve(c, goals, db, targeted_trials=0, maximum=3)
 
 
 def test_interrupt_during_probe_keeps_only_completed_results(tmp_path, monkeypatch):
@@ -307,7 +307,7 @@ def test_interrupt_during_probe_keeps_only_completed_results(tmp_path, monkeypat
     monkeypatch.setattr(replay, 'rebuild_selected', interrupted)
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900', '901']])
-        result = solve(c, goals, db, maximum=4)
+        result = solve(c, goals, db, targeted_trials=0, maximum=4)
     assert result['interrupted'] and list(result['simulation']['trials']) == ['baseline']
     assert result['feasibility']['status'] == 'not_demonstrated'
     assert not result['feasibility']['failed_probes']
@@ -318,7 +318,7 @@ def test_cli_exposes_feasibility_and_rejects_negative_budget(tmp_path, capsys, s
     from stash_ai.recognition.cli import main, parser
     c, _ = seeded(tmp_path)
     args = ['report-merge', '--face-config', str(c.source_path), '--faces-db', str(c.database),
-            '--performer-set', '900,901', '--solve', '--max-trials', '2', '--progress-style', style]
+            '--performer-set', '900,901', '--solve', '--targeted-trials', '0', '--max-trials', '2', '--progress-style', style]
     assert main(args) == 0
     output = capsys.readouterr()
     result = json.loads(output.out)

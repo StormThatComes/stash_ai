@@ -19,6 +19,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'report-merge':
             if result.feasibility_trials < 0:
                 self.error('--feasibility-trials must be nonnegative.')
+            if result.targeted_trials < 0:
+                self.error('--targeted-trials must be nonnegative.')
             outside = [getattr(result, name) for name in ('max_outside_coverage_loss',
                        'max_outside_split_pairs', 'max_outside_joined_pairs', 'max_new_outsider_observations')]
             if any(v is not None and v < 0 for v in outside):
@@ -193,6 +195,9 @@ def parser():
     merge_report.add_argument('--feasibility-trials', type=int, default=6,
         help='Initial permissive production probes within --max-trials (default: 6; 0 disables early probes). '
              'Reports observed reachability separately from goal acceptance.')
+    merge_report.add_argument('--targeted-trials', type=int, default=8,
+        help='Measured per-set merge trials before permissive probes, within --max-trials '
+             '(default: 8; 0 disables the targeted lane).')
     for flag, meaning in (
             ('coverage-loss', 'lost assignments'), ('split-pairs', 'split observation pairs'),
             ('joined-pairs', 'newly joined observation pairs')):

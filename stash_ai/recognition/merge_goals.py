@@ -132,6 +132,11 @@ def execute(args, config):
                                   file=sys.stderr, flush=True)
                         if item.get('search_phase') == 'feasibility':
                             print(f"  Search: phase=feasibility profile={item['search_strategy']}", file=sys.stderr, flush=True)
+                        if item.get('search_phase') == 'targeted':
+                            target = item['search_target']
+                            print(f"  Search: phase=targeted set={target['set']+1} route={target['route']} "
+                                  f"performers={json.dumps(target['performers'])} blockers={json.dumps(target['blockers'])}",
+                                  file=sys.stderr, flush=True)
                     elif stage == 'complete':
                         for group in item['goal_result']['groups']:
                             print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
@@ -148,7 +153,8 @@ def execute(args, config):
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
-                                yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6), outside_limits={
+                                yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
+                                targeted_trials=getattr(args, 'targeted_trials', 8), outside_limits={
                                     key: getattr(args, attr, None) for key, attr in (
                                         ('coverage_lost', 'max_outside_coverage_loss'),
                                         ('split_pairs', 'max_outside_split_pairs'),

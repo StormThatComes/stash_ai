@@ -232,7 +232,7 @@ def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabl
         hints=analyse(db,c,goals)
         assert hints['options'].keys()=={PIXEL_PARAMETER}
         assert {80,81,120,121}<=set(hints['options'][PIXEL_PARAMETER])
-        result=solve(c,goals,db,maximum=4,feasibility_trials=feasibility_trials)
+        result=solve(c,goals,db,maximum=4,targeted_trials=0,feasibility_trials=feasibility_trials)
         assert not result['simulation']['trials']['baseline']['goal_result']['fully_solved']
         assert result['status']=='fully_solved'
         patch={r['parameter']:r['proposed'] for r in result['recommendation']['changes']}

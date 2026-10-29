@@ -6,7 +6,7 @@ from .threshold_boundaries import sides
 from .body_parameters import active
 
 
-def options_and_quality(db,config,goals):
+def options_and_quality(db,config,goals,*,frozen_goals=None):
     """Numerical proposals use retained measurements, never new model inputs."""
     import json
     from .body_observations import contract
@@ -26,19 +26,22 @@ def options_and_quality(db,config,goals):
     if 'sapiensid.identities.min_appearance_distance' in options:
         options['sapiensid.identities.min_appearance_distance']=list(range(65))
     people=sorted({m['identity_id'] for g in goals['groups'] for m in g['members']})
-    body_rows=db.execute('SELECT b.quality FROM body_observations b JOIN body_members m ON m.observation=b.id '
-        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
+    ids=sorted({r['id'] for g in (frozen_goals or {'groups':[]})['groups'] for m in g['members'] for r in m.get('observations',())})
+    body_rows=db.execute('SELECT b.id,b.quality FROM body_observations b LEFT JOIN body_members m ON m.observation=b.id '
+        'JOIN scans s ON s.id=b.scan WHERE (m.person IN (SELECT value FROM json_each(?)) '
+        'OR b.id IN (SELECT value FROM json_each(?)) OR b.face IN (SELECT value FROM json_each(?))) '
         "AND s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? "
         'AND b.rejected IS NULL AND b.embedding IS NOT NULL AND '+current_scan()+' ORDER BY b.id',
-        (encoded(people),goals['scope'],goals['namespace'],contract(config))) if enabled(config) and available(db) else ()
-    face_rows=db.execute('SELECT e.metadata AS quality FROM person_evidence e JOIN observations o ON o.id=e.observation '
-        'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-        'WHERE m.person IN (SELECT value FROM json_each(?)) AND s.scope=? AND s.namespace=? '
+        (encoded(people),encoded(ids),encoded(ids),goals['scope'],goals['namespace'],contract(config))) if enabled(config) and available(db) else ()
+    face_rows=db.execute('SELECT o.id,e.metadata AS quality FROM person_evidence e JOIN observations o ON o.id=e.observation '
+        'LEFT JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+        'WHERE (m.person IN (SELECT value FROM json_each(?)) OR o.id IN (SELECT value FROM json_each(?))) AND s.scope=? AND s.namespace=? '
         "AND s.status='complete' AND o.rejected IS NULL AND e.contract=? AND e.status='ready' AND "+current_scan(),
-        (encoded(people),goals['scope'],goals['namespace'],person_contract(config))) if PIXEL_PARAMETER in options and persons_available(db) else ()
-    joint={}
+        (encoded(people),encoded(ids),goals['scope'],goals['namespace'],person_contract(config))) if PIXEL_PARAMETER in options and persons_available(db) else ()
+    joint={};measurements=[]
     for row in chain(body_rows,face_rows):
         quality=json.loads(row['quality']).get('quality',{})
+        patch={}
         for field,key in (('keypoints','sapiensid.identities.anchor_min_keypoints'),
                           ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER)):
             if key not in options:continue
@@ -49,14 +52,16 @@ def options_and_quality(db,config,goals):
             if value<parameter(config.data,key):
                 admitted=domain.project(int(value) if domain.kind is int else value)
                 joint[key]=min(joint.get(key,admitted),admitted)
+                patch[key]=admitted
+        if patch and frozen_goals is not None:measurements.append(dict(observation=row['id'],patch=patch))
         if any(len(values)>256 for values in options.values()):options=compact(config,{},options)
-    return compact(config,{},options),([joint] if joint else [])
+    return compact(config,{},options),([joint] if joint else []),measurements
 
 
-def analyse(db,config,goals):
-    output=dict(options={},proposals=[],evidence=dict(enabled=False,pairs=[]))
+def analyse(db,config,goals,*,frozen_goals=None):
+    output=dict(options={},proposals=[],quality=[],evidence=dict(enabled=False,pairs=[]))
     if not active(config):return output
-    output['options'],quality_proposals=options_and_quality(db,config,goals)
+    output['options'],quality_proposals,output['quality']=options_and_quality(db,config,goals,frozen_goals=frozen_goals)
     output['proposals']=quality_proposals
     if not enabled(config) or not available(db):return output
     owners={m['identity_id']:g.get('index',i) for i,g in enumerate(goals['groups']) for m in g['members']}
