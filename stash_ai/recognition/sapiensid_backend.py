@@ -52,7 +52,7 @@ def association_choices(faces, people):
                     right+tolerance >= x+w and bottom+tolerance >= y+h):
                 continue
             head = person['keypoints'][:3]
-            if any(x <= px <= x+w and y <= py <= y+h for px, py in head):
+            if any(px >= 0 and py >= 0 and x <= px <= x+w and y <= py <= y+h for px, py in head):
                 indices.append(index)
         choices.append(indices)
     return choices

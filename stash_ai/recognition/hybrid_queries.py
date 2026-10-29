@@ -38,10 +38,13 @@ def _recover(database, selected, config, *, births=()):
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
         'AND o.scan IN (SELECT value FROM json_each(?)) AND '+query_sql('o',config.data['clustering'])+
         ' ORDER BY o.scan,o.cue,o.id',(contract(config),policy,encoded(list(births)),encoded([s['scan'] for s in selected])))
-    used=0
+    used=0;claim_rows=[]
     source_counts=dict(db.execute('SELECT person,COUNT(*) FROM members WHERE person IN '
         '(SELECT value FROM json_each(?)) GROUP BY person',(encoded(list(births)),)))
     for row in rows:
+        if not config.data['clustering']['auxiliary_matching']:
+            from .pose_policy import is_anchor
+            if not is_anchor(row['quality'],config.data['clustering']):continue
         face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
         if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
@@ -87,7 +90,21 @@ def _recover(database, selected, config, *, births=()):
         used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
         if used>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID query plan_bytes budget exceeded.')
+        claim_rows.append(dict(row,person=owner))
         claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],vote))
+    # Resolve against every new claim and existing accepted face in each cue,
+    # even when the winning queries used different original merged cores.
+    from .decision_resolution import conflicting_claims
+    pending={r['id'] for r in claim_rows}
+    for scan,cue in sorted({(r['scan'],r['cue']) for r in claim_rows}):
+        for row in db.execute('SELECT o.id,o.scan,o.cue,o.geometry,o.dimensions,o.embedding,m.person '
+                'FROM observations o JOIN members m ON m.observation=o.id '
+                'WHERE o.scan=? AND o.cue=? AND o.rejected IS NULL',(scan,cue)):
+            if row['id'] not in pending:claim_rows.append(dict(row))
+    threshold=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
+    blocked={r['id'] for r in conflicting_claims(sorted(claim_rows,key=lambda r:(r['person'],r['scan'],r['cue'],r['id'])),
+        threshold,deduplicate=config.data['clustering'].get('deduplicate_detections',False))}
+    claims=[c for c in claims if c[1] not in blocked]
     accepted=0
     birth_claims=defaultdict(list)
     for claim in claims:
