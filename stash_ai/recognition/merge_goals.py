@@ -4,7 +4,7 @@ from .models import namespace
 from .merge_goal_index import evaluation_scope
 
 
-def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity'):
+def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity', scene_exclusions=()):
     from .merge_goal_identity import POLICY, freeze
     from .merge_goal_sets import freeze_set
     from .reference_roles import strict_sql
@@ -34,8 +34,15 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             item = members.setdefault(identity, dict(identity_id=identity, performer_id=person['performer'],
                 requested_ids=[], observations=[]))
             item['requested_ids'].append(identifier)
+        groups.append(dict(index=index, members=list(members.values())))
+    from .merge_scene_exclusions import resolve as resolve_exclusions, freeze_targets
+    exclusions = resolve_exclusions(db, config, scene_exclusions, scope, owners)
+    for group in groups:
+        forbidden = {e['scene'] for e in exclusions if e['set'] == group['index']}
         set_rows = []
-        for identity, item in members.items():
+        kept, excluded = [], []
+        for item in group['members']:
+            identity = item['identity_id']
             rows = [dict(r) for r in db.execute(
                 'SELECT o.id,s.id AS scan,s.scene,o.cue,o.seconds,o.quality,o.rejected,s.status, '
                 +strict_sql()+' AS reference_authority FROM members m JOIN observations o ON o.id=m.observation '
@@ -47,18 +54,31 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             for row in rows:row['evidence_kind']='face'
             from .body_reports import goal_rows
             rows.extend(goal_rows(db,config,identity))
+            removed = [r for r in rows if r['scene'] in forbidden]
+            if removed:
+                item['excluded_observations'] = [dict(id=r['id'], scene=r['scene']) for r in removed]
+                rows = [r for r in rows if r['scene'] not in forbidden]
+                if not rows:
+                    excluded.append(item)
+                    continue
+            kept.append(item)
             item['observations'] = [{k:r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state','evidence_kind')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
                 set_rows.extend(rows)
-        group = dict(index=index, members=list(members.values()))
+        group['members'] = kept
+        if excluded:
+            group['excluded_members'] = excluded
         if policy == 'identity':
             group['identity_evidence'] = freeze_set(set_rows)
-        groups.append(group)
-    return dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
+    result = dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
                 selector='performer' if by_performer else 'identity', sample_diagnostics=diagnostics,
                 goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),
                 groups=groups, status='goals_resolved', recommendations=[])
+    if exclusions:
+        result['scene_exclusions'] = exclusions
+        freeze_targets(db, config, result)
+    return result
 
 
 def execute(args, config):
@@ -80,7 +100,8 @@ def execute(args, config):
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
-                         policy=getattr(args, 'goal_policy', 'identity'))
+                         policy=getattr(args, 'goal_policy', 'identity'),
+                         scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
         result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
@@ -109,6 +130,9 @@ def execute(args, config):
                     elif stage == 'complete':
                         for group in item['goal_result']['groups']:
                             print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
+                        from .merge_scene_exclusions import summary_lines
+                        for line in summary_lines(item['goal_result']):
+                            print(line, file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
@@ -197,7 +221,8 @@ def assess(goals, observations, retained, predicted):
         from .merge_goal_identity import apply
         apply(goals, result, observations, predicted)
     from .merge_goal_samples import attach
-    return attach(goals, result, observations, predicted)
+    from .merge_scene_exclusions import apply as apply_exclusions
+    return apply_exclusions(goals, attach(goals, result, observations, predicted), observations, predicted)
 
 
 def evaluate(config, goals, db, variants=None):
@@ -212,6 +237,13 @@ def objective(status):
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)
+    if 'scene_exclusions_satisfied' in status:
+        unguarded = {k: v for k, v in status.items() if k != 'scene_exclusions_satisfied'}
+        # Positive coverage is still required for admissibility. Among failed
+        # trials reward repairing more explicit negatives before consolidation.
+        return (status['admissible'], status['scene_exclusions_satisfied'],
+                -sum(not r['satisfied'] for r in status['scene_exclusions']),
+                -sum(r['matching_count'] for r in status['scene_exclusions'])) + objective(unguarded)
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import objective as identity_objective
         return identity_objective(status)
@@ -234,8 +266,8 @@ def unmet_conditions(status):
     """Every unsatisfied goal, including empty members and cross-set merges."""
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import unmet
-        return unmet(status) + status.get('outside_violations', [])
-    reasons = list(status.get('outside_violations', []))
+        return unmet(status) + status.get('outside_violations', []) + status.get('scene_exclusion_violations', [])
+    reasons = list(status.get('outside_violations', [])) + status.get('scene_exclusion_violations', [])
     for group in status.get('groups', []):
         for member in group['members']:
             base = dict(set=group['index'], identity=member['identity_id'])
@@ -288,4 +320,5 @@ def goal_diagnostics(status):
                 strict_fully_solved=status.get('strict_fully_solved', status['fully_solved']),
                 strict_disjoint=status.get('strict_disjoint', status['disjoint']),
                 soft_lost_units=sum(g.get('soft_lost_units', 0) for g in status['groups']),
-                soft_budget_excess=sum(g.get('soft_budget_excess', 0) for g in status['groups']))
+                soft_budget_excess=sum(g.get('soft_budget_excess', 0) for g in status['groups']),
+                **({'scene_exclusions': status['scene_exclusions']} if 'scene_exclusions' in status else {}))

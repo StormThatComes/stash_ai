@@ -154,12 +154,18 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     measurement_goals = dict(goals, groups=[dict(g, members=[m for m in g['members']
         if any(r['scan'] in selected_scans for r in m['observations'])]) for g in goals['groups']])
     target_ids = goal_index().observation_ids
+    outcome_ids = goal_index().outcome_ids
     proofs = []
     hybrid = {}
     options = (measured_options(db, config, measurement_goals, proofs, hybrid=hybrid)
                if scans else {})
     if not scans:
         hybrid.update(enabled=False, options={}, proposals=[])
+    from .merge_exclusion_feedback import analyse as exclusion_feedback
+    excluded = exclusion_feedback(db, config, goals) if goals.get('scene_exclusions') else None
+    if excluded:
+        for key, values in excluded['options'].items():
+            options.setdefault(key, []).extend(values)
     options = compact(config, {}, options)
     initial_hybrid = public(hybrid)
     hybrid_changes = list(hybrid['proposals'])
@@ -208,7 +214,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         # Canonicalize destination UUIDs so identical partitions share a beam slot.
         labels = {}
         outcomes[name] = digest([(oid, None if predicted.get(oid) is None else
-            labels.setdefault(predicted[oid], len(labels))) for oid in sorted(target_ids)])
+            labels.setdefault(predicted[oid], len(labels))) for oid in sorted(outcome_ids)])
         feedback[name] = latest_feedback.copy()
         latest_feedback['provenance']['trial'] = name
         return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid),
@@ -254,6 +260,15 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             targets=targets,
             options=updated, hybrid_proposals=list(hybrid['proposals']),
             provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations']))
+        if excluded:
+            latest_feedback['scene_exclusions'] = {k: v for k, v in excluded.items() if k not in ('proposals', 'options')}
+            for family in ('face', 'hybrid'):
+                # Face-only runs still receive their negative boundary hints.
+                hints = [p for p in excluded['proposals']
+                         if any(k.startswith('sapiensid.') for k in p) == (family == 'hybrid')]
+                latest_feedback['proposals'][family] = hints + latest_feedback['proposals'][family]
+            for key, values in excluded['options'].items():
+                updated.setdefault(key, []).extend(values)
         for extra in (queries['options'], separation['options']):
             for key, values in extra.items():
                 updated[key] = list(updated.get(key, ())) + list(values)

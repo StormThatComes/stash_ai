@@ -62,6 +62,13 @@ def performer_set(value):
     return [stash_id(part.strip()) for part in value.split(',')]
 
 
+def performer_scene(value):
+    parts = value.split(':')
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError('Expected PERFORMER_ID:SCENE_ID')
+    return tuple(stash_id(part.strip()) for part in parts)
+
+
 def parser():
     root = RecognitionParser(prog='stash_ai.py recognition', allow_abbrev=False,
                                    description='On-demand facial recognition independent of tagging.')
@@ -176,6 +183,10 @@ def parser():
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--goal-policy', choices=('identity','strict'), default='identity',
         help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; strict requires every original observation. Applies to solver and set evaluation.')
+    merge_report.add_argument('--exclude-performer-scene', action='append', type=performer_scene,
+        metavar='PERFORMER_ID:SCENE_ID',
+        help='Declare that a performer from a goal set must not appear in this scene; repeatable. '
+             'Applies to the whole set after alias resolution, in both goal policies; never forces recognition assignments.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
     for flag, meaning in (
             ('coverage-loss', 'lost assignments'), ('split-pairs', 'split observation pairs'),
@@ -225,7 +236,7 @@ def main(argv=None, *, services=None):
         from .identity_report import execute
         return execute(args, config)
     if args.command == 'report-merge':
-        if args.solve or args.performer_set or len(args.performer_id or args.identity_id) > 2:
+        if args.solve or args.performer_set or args.exclude_performer_scene or len(args.performer_id or args.identity_id) > 2:
             from .merge_goals import execute
             return execute(args, config)
         from .merge_report import execute
