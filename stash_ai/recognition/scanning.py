@@ -130,9 +130,9 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                                 sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']),seconds=cue.start)
                         pending_bytes+=sum(sum(len(v) for v in row if isinstance(v,(str,bytes)))
                             +(config.data['storage']['max_crop_bytes']+32768 if grouped else 0) for row in pending[start:])
+                        if grouped:pending_bytes+=collector.pending_bytes()
                         if (on_cue is not None and not grouped or cursor % config.data['execution']['checkpoint_cues'] == 0
-                                or pending_bytes>=config.data['execution']['scan_queue_bytes']//4
-                                or grouped and config.data['sapiensid']['collection']['enabled']):checkpoint()
+                                or pending_bytes>=config.data['execution']['scan_queue_bytes']//4):checkpoint()
                         if on_cue is not None and not grouped:
                             image=next(image for i,_,image in batch if i==index)
                             on_cue(db,identifier,index,image)

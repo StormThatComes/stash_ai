@@ -74,6 +74,15 @@ def scores(left,right):
     import numpy as np
     if not len(left) or not len(right):return None
     low=1.;total=0.;count=0
+    from .disk_body_modes import Matrix
+    if isinstance(left,Matrix) or isinstance(right,Matrix):
+        for start in range(0,len(left),16):
+            a=np.asarray(left[start:start+16],dtype='float64')
+            for other in range(0,len(right),64):
+                b=np.asarray(right[other:other+64],dtype='float64')
+                values=a @ b.T
+                low=min(low,float(values.min()));total+=float(values.sum(dtype='float64'));count+=values.size
+        return dict(minimum=low,mean=total/count)
     from .run_cache import packed
     right64=packed(right)
     left64=packed(left)
@@ -248,8 +257,9 @@ def catalogue(db, config, scope, namespace):
         arrays.extend(v for _,faces,bodies in item.query_cores for v in (faces,bodies))
         for array in arrays:
             if array is not None:
-                array.flags.writeable=False
-                size+=array.nbytes*2+256
+                from .disk_body_modes import Matrix,resident_bytes
+                if not isinstance(array,Matrix):array.flags.writeable=False
+                size+=resident_bytes(array)*2+256
         size+=1024+sum(len(v)+128 for v in item.observations+item.person_observations+item.guard_observations)
     if generation is not None:cache.put(key,found,size)
     return found

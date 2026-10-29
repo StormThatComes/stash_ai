@@ -5,6 +5,7 @@ nominates candidates only: original witnesses still determine every merge gate.
 No ANN recall assumptions, top-k pruning, or N-by-N score matrix are involved.
 """
 import numpy as np
+from .disk_body_modes import Matrix,resident_bytes
 
 
 class Lookup:
@@ -18,10 +19,11 @@ class Lookup:
         # centroid bank before allocating it. Python/SQLite overhead is separate.
         required=2*sum(i.faces.nbytes+i.persons.nbytes for i in identities)
         required+=2*sum(g.nbytes for i in identities for g in (i.guard_faces,i.guard_persons) if g is not None)
-        required+=2*sum(mode.nbytes for i in identities for mode in i.body_modes)
+        required+=2*sum(resident_bytes(mode) for i in identities for mode in i.body_modes)
         required+=2*sum(f.nbytes+b.nbytes for i in identities for _,f,b in i.query_cores)
         required+=len(identities)*(face_dim+person_dim)*8
         required+=2*64*64*8
+        if any(isinstance(m,Matrix) for i in identities for m in i.body_modes):required+=4*1024**2
         if required>budget:
             raise ValueError('SapiensID reference_bytes budget exceeded by lookup working set.')
         from .memory_size import Reservation

@@ -46,17 +46,27 @@ def _select(records,config):
 
 
 def catalogue_rows(db,config,scope,namespace,owners):
-    """One ordered SQL cursor for all owners; budget complete mode witnesses."""
+    """Stream each owner through a repeatable disk spool before selection."""
     from itertools import groupby
+    from .disk_body_modes import Records
+    from .independent_evidence import Votes
     result={};used=0
     for owner,rows in groupby(_rows(db,config,scope,namespace,owners),key=lambda r:r['owner']):
-        records=[]
-        for row in rows:
-            used+=2*len(row['embedding'])+len(row['quality'])+len(row['person_metadata'])+1024
-            if used>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('SapiensID reference_bytes budget exceeded by mode witnesses.')
-            records.append(row)
-        result[owner]=_select(records,config)
+        spool=Records();keep=False
+        try:
+            for row in rows:spool.add(row)
+            chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
+                          vector_reader=body_vector,quality_reader=body_quality)
+            selected=BodyRows(spool.selected(i for i,_ in chosen))
+            selected.modes,support=spool.modes(config)
+            votes=Votes()
+            for row in selected:votes.add(row)
+            selected.support=support if selected.modes else len(votes)
+            used+=sum(2*len(r['embedding'])+len(r['quality'])+len(r['person_metadata'])+1024 for r in selected)
+            if used+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
+                raise ValueError('SapiensID reference_bytes budget exceeded by selected witnesses.')
+            result[owner]=selected;keep=bool(selected.modes)
+        finally:spool.close(keep=keep)
     return result
 
 
