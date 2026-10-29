@@ -185,7 +185,7 @@ Inherited cores on both endpoints must agree with each other as well as with
 the current endpoints. Older proofs recover omitted vetoes from retained source
 attachments without granting those attachments reference authority.
 
-original cores can still veto contradictory merges but cannot nominate merge
+Original cores can still veto contradictory merges but cannot nominate merge
 candidates or add support votes. Their frozen appearances can support query-only
 recovery; recovered observations remain attachments. Missing or superseded original evidence blocks further
 hybrid merges instead of hiding a contradictory endpoint.
@@ -385,7 +385,7 @@ Global body matching first compares unnormalized mean vectors in bounded tiles.
 The reference cap limits nomination and rival lookup, not the complete core
 cohesion check or persisted veto witnesses. If a replacement scan is incomplete
 and its scene previously supplied identity memberships, reports block merge
-decisions with `incomplete_reference_scans`. A run must finish that scene before
+decisions with `incomplete_reference_scans`. A SapiensID run must finish that scene before
 rebuilding identities in the same scope and model namespace; the failed rescan
 cannot silently remove a historical competitor.
 Only nominated identity pairs and explicitly requested diagnostic pairs receive

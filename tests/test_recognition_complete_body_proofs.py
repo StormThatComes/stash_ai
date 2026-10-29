@@ -162,6 +162,7 @@ def test_failed_replacement_blocks_rebuild_before_any_assignment_changes(tmp_pat
     config,people=seeded(tmp_path)
     with FaceDatabase(config.database) as state:
         db=state.connection
+        config=enable(config,db)
         old=list(db.execute('SELECT * FROM scans LIMIT 1').fetchone())
         old[0]=str(uuid.uuid4());old[4]='replacement';old[-1]='partial';old[-2]=0
         db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',old);db.commit()

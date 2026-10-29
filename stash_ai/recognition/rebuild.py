@@ -398,7 +398,7 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
-    if selected:
+    if selected and config.data['sapiensid']['enabled']:
         first=database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
         if first is not None:
             from .incomplete_rivals import require_complete
