@@ -75,6 +75,11 @@ class PersonCollector:
         except BaseException:
             self.abort();raise
 
+    def pending_bytes(self):
+        # Completed inference waits for the same atomic face/body checkpoint.
+        return sum(len(crop or b'')+(getattr(vector,'nbytes',0))+len(str(metadata))+256
+                   for _,metadata,vector,crop in (self.deferred or ()))
+
     def take_records(self):
         self.flush()
         records,self.deferred=self.deferred or [],None

@@ -9,7 +9,6 @@ class FaceGuard:
     def __init__(self, db, config):
         self.db = db
         self.floor = config.data['sapiensid']['matching']['face_floor']
-        self.owners = {}
 
     def allows(self, row, bank, person=None):
         face = row.get('_face_vector')
@@ -17,11 +16,11 @@ class FaceGuard:
             return True
         others = [r['_face_vector'] for r in bank if r.get('_face_vector') is not None]
         if person is not None:
-            if person not in self.owners:
-                self.owners[person] = [vector(r) for r in self.db.execute(
-                    'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                    'ON m.observation=o.id WHERE m.person=? AND o.rejected IS NULL', (person,))]
-            others = self.owners[person]
+            # Stream complete face vetoes; a large owner must not allocate an
+            # unbounded second reference bank outside the configured budget.
+            others = (vector(r) for r in self.db.execute(
+                'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
+                'ON m.observation=o.id WHERE m.person=? AND o.rejected IS NULL', (person,)))
         return all(len(face) == len(other) and float(np.dot(face, other)) >= self.floor
                    for other in others)
 

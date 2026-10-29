@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import replace
 import json
 import numpy as np
+from .disk_body_modes import resident_bytes
 
 from .database import encoded
 from .person_signal import contract
@@ -36,7 +37,7 @@ def retain(db,config,scope,namespace,identities):
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                    compatibility=fallback_sql(db,config,namespace))
     expected=contract(config);result=[]
-    used=2*sum(i.faces.nbytes+i.persons.nbytes+sum(m.nbytes for m in i.body_modes) for i in identities)
+    used=2*sum(i.faces.nbytes+i.persons.nbytes+sum(resident_bytes(m) for m in i.body_modes) for i in identities)
     for identity in identities:
         ids=sorted(guards[identity.person]-set(identity.observations))
         body_ids=sorted(body_guards[identity.person]-set(identity.person_observations))

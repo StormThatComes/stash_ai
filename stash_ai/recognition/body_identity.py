@@ -81,13 +81,47 @@ def distinct_pixels(rows):
 
 
 class Scores:
-    def __init__(self,config):self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
+    """Exact weighted banks; identical vectors share computation, not votes."""
+    def __init__(self,config):
+        from collections import OrderedDict
+        self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
+        self.banks={};self.cache=OrderedDict()
+        self.cache_limit=max(1,min(4096,config.data['sapiensid']['execution']['reference_bytes']//65536))
+
+    def bank(self,rows):
+        key=id(rows);state=self.banks.get(key)
+        if state is None:
+            state=dict(rows=rows,length=0,pixels=set(),vectors={});self.banks[key]=state
+        # Scene banks grow append-only and remain frozen for attachments.
+        for row in rows[state['length']:]:
+            pixel=(quality(row).get('pixel_digest') if 'quality' in row else None) or ('observation',row['id'])
+            if pixel in state['pixels']:continue
+            state['pixels'].add(pixel)
+            value=row['_vector']
+            feature=row.get('_score_key')
+            if feature is None:feature=row['_score_key']=value.tobytes()
+            if feature in state['vectors']:state['vectors'][feature][1]+=1
+            else:state['vectors'][feature]=[value,1]
+        state['length']=len(rows)
+        return state['vectors']
+
     def compare(self,first,second):
-        first,second=distinct_pixels(first),distinct_pixels(second)
-        self.count+=len(first)*len(second)
-        if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
-        values=[float(np.dot(a['_vector'],b['_vector'])) for a in first for b in second]
-        return (sum(values)/len(values),min(values)) if values else (-1.,-1.)
+        bank=self.bank(second);total=0.;minimum=float('inf');count=0
+        for row in distinct_pixels(first):
+            value=row['_vector']
+            feature=row.get('_score_key')
+            if feature is None:feature=row['_score_key']=value.tobytes()
+            for other,(sample,weight) in bank.items():
+                key=(feature,other)
+                score=self.cache.get(key)
+                if score is None:
+                    self.count+=1
+                    if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
+                    score=float(np.dot(value,sample));self.cache[key]=score
+                    if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
+                else:self.cache.move_to_end(key)
+                total+=score*weight;count+=weight;minimum=min(minimum,score)
+        return (total/count,minimum) if count else (-1.,-1.)
 
 
 def scene_plan(db,scan,config):
@@ -189,6 +223,8 @@ def scene_plan(db,scan,config):
 def rebuild(database,selected,config,result):
     if not selected or not available(database.connection):return result
     db=database.connection
+    from .body_cache import cached,stamp as cache_stamp
+    if cached(db,selected,config):return results(db,selected,result)
     # Plan every selected scene before replacing any derived state.
     plans=[]
     if enabled(config):
@@ -223,6 +259,7 @@ def rebuild(database,selected,config,result):
         if plans:
             from .body_global import reconcile
             reconcile(database,selected,config)
+        cache_stamp(db,selected,config)
     return results(db,selected,result)
 
 

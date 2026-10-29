@@ -1,5 +1,6 @@
 """Pure bounded hybrid jobs; SQLite and decisions stay on coordinator."""
 from .compute import current, Work
+from .disk_body_modes import Matrix,resident_bytes
 from stash_ai.runtime.cleanup import closing
 
 
@@ -69,8 +70,9 @@ def proofs(db,owned,nominations,config):
         jobs=[];keys=[]
         for offset,(a,b) in enumerate(block):
             left,right=owned[a],owned[b]
-            size=16384+8*sum(v.nbytes for i in (left,right) for v in
+            size=16384+8*sum(resident_bytes(v) for i in (left,right) for v in
                 (i.faces,i.persons,i.guard_faces,i.guard_persons,*i.body_modes) if v is not None)
+            if any(isinstance(m,Matrix) for i in (left,right) for m in i.body_modes):size+=4*1024**2
             payload=left,right,settings,present[a,b],threshold
             hit=cache.get(cache_key(payload)) if cache is not None else MISSING
             if hit is not MISSING:
