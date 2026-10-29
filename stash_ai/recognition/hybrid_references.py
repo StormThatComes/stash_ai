@@ -59,10 +59,13 @@ def catalogue_rows(db,config,scope,namespace,owners):
                           vector_reader=body_vector,quality_reader=body_quality)
             selected=BodyRows(spool.selected(i for i,_ in chosen))
             selected.modes,support=spool.modes(config)
+            selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal'))
+            selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
             votes=Votes()
             for row in selected:votes.add(row)
             selected.support=support if selected.modes else len(votes)
             used+=sum(2*len(r['embedding'])+len(r['quality'])+len(r['person_metadata'])+1024 for r in selected)
+            used+=sum(len(i)+64 for i in selected.witnesses)
             if used+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ValueError('SapiensID reference_bytes budget exceeded by selected witnesses.')
             result[owner]=selected;keep=bool(selected.modes)
@@ -76,6 +79,8 @@ def body_rows(db,config,scope,namespace,owner):
 
 class BodyRows(list):
     modes=()
+    witnesses=()
+    unsupported_modes=False
 
 
 def body_quality(row):

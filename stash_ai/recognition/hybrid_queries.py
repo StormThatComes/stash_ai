@@ -65,7 +65,7 @@ def _recover(database, selected, config, *, births=()):
             measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             score=max((m['mean'] for m in measures),default=None)
-            admissible=bool(measures and not identity.guard_missing and
+            admissible=bool(measures and not identity.guard_missing and not identity.unsupported_body_modes and
                 len(identity.independent)>=settings['min_support'] and
                 any(m['minimum']>=settings['person_threshold'] for m in measures))
             choices.append((score,identity.person,admissible,group))

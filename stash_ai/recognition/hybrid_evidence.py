@@ -29,6 +29,8 @@ class Identity:
     guard_face_missing: tuple = ()
     query_cores: tuple = ()
     body_modes: tuple = ()
+    body_witness_observations: tuple = ()
+    unsupported_body_modes: bool = False
 
 
 def _catalogue(db, config, scope, namespace):
@@ -64,7 +66,9 @@ def _catalogue(db, config, scope, namespace):
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
                 np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(getattr(records,'support',len(votes)))),
                 missing,person_observations=tuple(body_ids),
-                body_modes=getattr(records,'modes',None) or body_modes(records,config)))
+                body_modes=records.modes if hasattr(records,'modes') else body_modes(records,config),
+                body_witness_observations=getattr(records,'witnesses',tuple(body_ids)),
+                unsupported_body_modes=getattr(records,'unsupported_modes',False)))
     from .hybrid_guards import retain
     return retain(db,config,scope,namespace,tuple(result))
 
@@ -99,6 +103,10 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
     mode_score=covered_score(left.body_modes,right.body_modes,settings)
     if mode_score is not None:person=mode_score
     blockers=[]
+    if left.unsupported_body_modes or right.unsupported_body_modes:
+        blockers.append('unsupported_body_mode')
+    if left.body_modes and right.body_modes and mode_score is None:
+        blockers.append('incomplete_body_mode_coverage')
     # Former source cores are vetoes only: no extra votes or nominations.
     for kind,measurement in (('faces',face),('persons',person)):
         a,b=getattr(left,'guard_'+kind),getattr(right,'guard_'+kind)
@@ -109,6 +117,13 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
                 for mode in guard_modes(bank,settings['person_threshold']):
                     guard=query_score(mode,bank,settings,modes)
                     measurement['minimum']=min(measurement['minimum'],guard['minimum'])
+            # Current endpoints cannot hide a contradiction between inherited
+            # cores. Every inherited mode needs reciprocal coverage as well.
+            if a is not None and b is not None:
+                inherited=covered_score(guard_modes(a,settings['person_threshold']),
+                                        guard_modes(b,settings['person_threshold']),settings)
+                if inherited is None:blockers.append('original_body_core_contradiction')
+                else:measurement['minimum']=min(measurement['minimum'],inherited['minimum'])
             continue
         for first,second in ((a,getattr(right,kind)),(getattr(left,kind),b),(a,b)):
             if first is None or second is None:continue
@@ -126,6 +141,7 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
     return dict(format=1,left=left.person,right=right.person,face=face,person=person,
         observations=[list(left.observations),list(right.observations)],
         person_observations=[list(left.person_observations),list(right.person_observations)],
+        body_witness_observations=[list(i.body_witness_observations or i.person_observations) for i in (left,right)],
         guard_observations=[list(left.guard_observations),list(right.guard_observations)],
         guard_person_observations=[list(left.guard_person_observations),list(right.guard_person_observations)],
         missing_original_cores=[list(left.guard_missing),list(right.guard_missing)],
@@ -238,7 +254,8 @@ def plan(db,config,identities,*,focus=None):
 def report(db,config,scope,namespace,*,focus=None):
     if not config.data['sapiensid']['enabled']:
         return dict(enabled=False)
-    return plan(db,config,catalogue(db,config,scope,namespace),focus=focus)
+    from .incomplete_rivals import protect
+    return protect(db,scope,namespace,plan(db,config,catalogue(db,config,scope,namespace),focus=focus))
 
 
 def catalogue(db, config, scope, namespace):
@@ -260,6 +277,6 @@ def catalogue(db, config, scope, namespace):
                 from .disk_body_modes import Matrix,resident_bytes
                 if not isinstance(array,Matrix):array.flags.writeable=False
                 size+=resident_bytes(array)*2+256
-        size+=1024+sum(len(v)+128 for v in item.observations+item.person_observations+item.guard_observations)
+        size+=1024+sum(len(v)+128 for v in item.observations+item.person_observations+item.guard_observations+item.body_witness_observations)
     if generation is not None:cache.put(key,found,size)
     return found
