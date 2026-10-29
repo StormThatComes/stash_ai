@@ -515,3 +515,22 @@ The person input contract is revised for every model variant (including the lega
 pose model), so recognition recollects affected person evidence instead of reusing
 vectors prepared with discarded boundary points. Compatible older independent
 body banks remain conservative rivals until rebuilt.
+
+Normal recognition rebuilds and query recovery build pixel aliases only for the
+selected server scope and model namespace. Evidence from another server/model
+cannot exhaust the current run's alias working budget.
+
+Building disk-backed appearance modes now shares one
+`execution.max_witness_comparisons` budget across all owners in the catalogue.
+The limit is checked before the next exact dot product and progress reports
+completed comparisons. An exhausted budget fails the rebuild atomically;
+incomplete mode banks cannot authorize merges.
+
+Local body grouping can certify a sole candidate group using its fixed pivot and
+maximum distance to every retained witness. Cauchy–Schwarz gives a conservative
+lower bound for every similarity, including a float32 rounding allowance. Only a
+bound above both match and cohesion gates skips the full cross product. Competing
+groups, score reporting and inconclusive bounds still use exact witness scores.
+This also accelerates construction of a single frozen face-owner appearance.
+The 1415-distinct-vector regression uses fewer than three comparisons per sample
+instead of exceeding one million, with the same final assignments.

@@ -103,6 +103,37 @@ class Scores:
         state['length']=len(rows)
         return state['vectors']
 
+    def _charge(self):
+        if self.count>=self.limit:
+            raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
+        self.count+=1
+
+    def certifies(self,row,rows,threshold):
+        """Prove every cosine clears a threshold; never approximate rival scores.
+
+        Each sample is within radius of the fixed pivot. Cauchy-Schwarz gives
+        q.sample >= q.pivot - ||q|| * radius. The explicit float32 dot error
+        allowance also covers the exact scorer's rounding. An inconclusive
+        bound always falls back to every retained witness.
+        """
+        if not rows:return False
+        self.bank(rows);state=self.banks[id(rows)]
+        if 'pivot' not in state:
+            state.update(pivot=rows[0]['_vector'],radius=0.,max_norm=0.,cap_length=0)
+        pivot=state['pivot'].astype('float64')
+        for sample in rows[state['cap_length']:]:
+            value=sample['_vector'].astype('float64')
+            self._charge()
+            state['radius']=max(state['radius'],float(np.linalg.norm(value-pivot))+1e-12)
+            state['max_norm']=max(state['max_norm'],float(np.linalg.norm(value))+1e-12)
+        state['cap_length']=len(rows)
+        value=row['_vector'].astype('float64');norm=float(np.linalg.norm(value))+1e-12
+        self._charge()
+        unit=np.finfo(np.float32).eps/2
+        operations=2*len(value);gamma=operations*unit/(1-operations*unit)
+        lower=float(np.dot(value,pivot))-norm*state['radius']-gamma*norm*state['max_norm']-1e-10
+        return lower>=threshold
+
     def compare(self,first,second):
         bank=self.bank(second);total=0.;minimum=float('inf');count=0
         for row in distinct_pixels(first):
@@ -113,8 +144,7 @@ class Scores:
                 key=(feature,other)
                 score=self.cache.get(key)
                 if score is None:
-                    self.count+=1
-                    if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
+                    self._charge()
                     score=float(np.dot(value,sample));self.cache[key]=score
                     if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
                 else:self.cache.move_to_end(key)
@@ -175,6 +205,11 @@ def scene_plan(db,scan,config):
     groups=[];weak=[]
     for row in remaining:
         if not anchor(row,settings):weak.append(row);continue
+        # With one possible owner there is no rival ordering to approximate.
+        # A lower bound above both gates proves the same complete-link decision.
+        if (len(groups)==1 and not copresent([row],groups[0]) and guard.allows(row,groups[0])
+                and scores.certifies(row,groups[0],max(settings['match_threshold'],settings['cohesion_threshold']))):
+            groups[0].append(row);continue
         ranked=[]
         for index,group in enumerate(groups):
             mean,minimum=scores.compare([row],group)
@@ -207,6 +242,10 @@ def scene_plan(db,scan,config):
     # Weak observations may attach to frozen accepted cores but never train them.
     banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']
     for row in weak:
+        if (len(banks)==1 and not copresent([row],banks[0][1]) and guard.allows(row,banks[0][1])
+                and scores.certifies(row,banks[0][1],max(settings['match_threshold'],settings['cohesion_threshold']))):
+            decisions[row['id']]=dict(person=banks[0][0],status='accepted',role='auxiliary',reason='body_core_attachment')
+            continue
         ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks],key=lambda x:(-x[0][0],x[1]))
         best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
         good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2]) and guard.allows(row,best[2])

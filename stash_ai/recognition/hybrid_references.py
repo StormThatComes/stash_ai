@@ -47,28 +47,31 @@ def _select(records,config):
 def catalogue_rows(db,config,scope,namespace,owners):
     """Stream each owner through a repeatable disk spool before selection."""
     from itertools import groupby
-    from .disk_body_modes import Records
+    from .disk_body_modes import Records,ComparisonBudget
+    from .progress import work
     from .independent_evidence import Votes
     result={};used=0
-    for owner,rows in groupby(_rows(db,config,scope,namespace,owners),key=lambda r:r['owner']):
-        spool=Records();keep=False
-        try:
-            for row in rows:spool.add(row)
-            chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
-                          vector_reader=body_vector,quality_reader=body_quality)
-            selected=BodyRows(spool.selected(i for i,_ in chosen))
-            selected.modes,support=spool.modes(config)
-            selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal'))
-            selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
-            votes=Votes()
-            for row in selected:votes.add(row)
-            selected.support=support if selected.modes else len(votes)
-            used+=sum(2*len(r['embedding'])+len(r['quality'])+len(r['person_metadata'])+1024 for r in selected)
-            used+=sum(len(i)+64 for i in selected.witnesses)
-            if used+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('SapiensID reference_bytes budget exceeded by selected witnesses.')
-            result[owner]=selected;keep=bool(selected.modes)
-        finally:spool.close(keep=keep)
+    with work('Build complete body appearances',unit='comparison') as progress:
+        budget=ComparisonBudget(config,progress)
+        for owner,rows in groupby(_rows(db,config,scope,namespace,owners),key=lambda r:r['owner']):
+            spool=Records();keep=False
+            try:
+                for row in rows:spool.add(row)
+                chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
+                              vector_reader=body_vector,quality_reader=body_quality)
+                selected=BodyRows(spool.selected(i for i,_ in chosen))
+                selected.modes,support=spool.modes(config,budget)
+                selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal'))
+                selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
+                votes=Votes()
+                for row in selected:votes.add(row)
+                selected.support=support if selected.modes else len(votes)
+                used+=sum(2*len(r['embedding'])+len(r['quality'])+len(r['person_metadata'])+1024 for r in selected)
+                used+=sum(len(i)+64 for i in selected.witnesses)
+                if used+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
+                    raise ValueError('SapiensID reference_bytes budget exceeded by selected witnesses.')
+                result[owner]=selected;keep=bool(selected.modes)
+            finally:spool.close(keep=keep)
     return result
 
 

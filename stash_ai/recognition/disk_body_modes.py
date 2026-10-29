@@ -48,6 +48,20 @@ def resident_bytes(value):
     return 256 if isinstance(value,Matrix) else value.nbytes
 
 
+class ComparisonBudget:
+    """One exact-comparison budget across all owners in a catalogue."""
+    def __init__(self,config,progress):
+        self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
+        self.count=0;self.progress=progress
+
+    def score(self,left,right):
+        if self.count>=self.limit:
+            raise ValueError('Body appearance construction exceeds sapiensid.execution.max_witness_comparisons.')
+        result=float(np.dot(left,right));self.count+=1
+        self.progress.advance()
+        return result
+
+
 class Records:
     """Repeatable SQL spool; only bounded selected rows return to the catalogue."""
     def __init__(self):
@@ -71,7 +85,13 @@ class Records:
         wanted=set(ids)
         return [r for r in self.rows() if r['id'] in wanted]
 
-    def modes(self,config):
+    def modes(self,config,budget=None):
+        if budget is not None:return self._modes(config,budget)
+        from .progress import work
+        with work('Build complete body appearances',unit='comparison') as progress:
+            return self._modes(config,ComparisonBudget(config,progress))
+
+    def _modes(self,config,budget):
         from .hybrid_references import body_vector
         from .memory_size import size
         threshold=config.data['sapiensid']['matching']['person_threshold']
@@ -82,7 +102,7 @@ class Records:
             for cluster in range(len(votes)):
                 if self.db.execute('SELECT 1 FROM features WHERE cluster=? AND embedding=?',(cluster,blob)).fetchone():
                     compatible.append(cluster);continue
-                if all(float(np.dot(value,np.frombuffer(r[0],dtype='<f4')))>=threshold
+                if all(budget.score(value,np.frombuffer(r[0],dtype='<f4'))>=threshold
                        for r in self.db.execute('SELECT embedding FROM features WHERE cluster=?',(cluster,))):
                     compatible.append(cluster)
             if len(compatible)==1:cluster=compatible[0]
