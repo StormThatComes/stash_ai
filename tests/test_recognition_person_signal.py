@@ -46,7 +46,7 @@ def test_variant_validation_rejects_unsupported_values(variant):
         validate(data)
 
 
-def test_wb12m_default_and_wb4m_preserves_original_evidence_contract():
+def test_wb12m_default_and_wb4m_boundary_revision_invalidates_old_evidence():
     from stash_ai.recognition.config import digest
     from stash_ai.recognition.sapiensid_backend import identity_contract
     from stash_ai.recognition.sapiensid_registry import MODELS, LEGACY_POSE_SHA256
@@ -58,7 +58,8 @@ def test_wb12m_default_and_wb4m_preserves_original_evidence_contract():
     s['pose']['sha256']=LEGACY_POSE_SHA256
     legacy=digest(dict(format='sapiensid-wb4m-person-v2',model_yaml=s['model']['model_yaml_sha256'],
                        pose={k:v for k,v in s['pose'].items() if k!='path'}))
-    assert contract(config)==legacy and contract(config)!=wb12m
+    assert contract(config,legacy_boundaries=True)==legacy
+    assert contract(config)!=legacy and contract(config)!=wb12m
     assert identity_contract(config)['model_sha256']==MODELS['wb4m']['sha256']
 
 
@@ -77,8 +78,9 @@ def test_yolo26_default_separates_evidence_from_explicit_legacy_pose(variant):
                   pose={k:v for k,v in settings['pose'].items() if k!='path'})
     if variant=='wb4m':previous['format']='sapiensid-wb4m-person-v2'
     else:previous.update(variant=variant,model_sha256=MODELS[variant]['sha256'],source_revision=UPSTREAM_COMMIT)
-    assert contract(config)==digest(previous)!=current
-    assert identity_contract(config)['contract']=='sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
+    assert contract(config,legacy_boundaries=True)==digest(previous)
+    assert contract(config)!=digest(previous) and contract(config)!=current
+    assert identity_contract(config)['contract']=='sapiensid-v1-yolov8-pose-face-anchor-square384-v3'
     settings['pose'].update(path='',sha256='')
     assert contract(config)==current
     assert identity_contract(config)['pose_sha256']==POSE_SHA256

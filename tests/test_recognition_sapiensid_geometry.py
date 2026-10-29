@@ -137,3 +137,19 @@ def test_direct_encoder_input_still_rejects_invalid_geometry(point, match):
     with Image.new('RGB', (80, 145)) as image:
         with pytest.raises(ValueError, match=match):
             prepare_person_input(image, [point] + [[20, 20]] * 21)
+
+
+def test_confident_pose_points_on_zero_edges_survive_and_unusable_points_do_not(detector):
+    confidence=torch.ones((1,17));confidence[0,4]=0
+    points=torch.full((1,17,2),20.)
+    points[0,:6]=torch.tensor([[0,10],[10,0],[0,0],[-1,10],[0,10],[160,10]])
+    result=SimpleNamespace(boxes=SimpleNamespace(xyxy=torch.tensor([[0.,0.,160.,180.]]),conf=torch.tensor([.99])),
+                           keypoints=SimpleNamespace(xy=points,conf=confidence))
+    detector.pose=SimpleNamespace(predict=lambda **kw:[result])
+    with Image.new('RGB',(160,180)) as image:
+        face=checked_detection([0,0,40,40,20,20,25,20,20,25,15,30,25,30,.99])
+        detector.detect(image,faces=[face])
+        retained=detector.frame_people[0]['keypoints']
+        assert retained[:3]==[[0.,10.],[10.,0.],[0.,0.]]
+        assert retained[3:6]==[[-1.,-1.]]*3
+        assert detector.observation_quality(image,face)['quality']['keypoints']==14

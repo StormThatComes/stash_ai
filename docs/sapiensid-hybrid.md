@@ -501,3 +501,17 @@ with representative masked, out-of-frame, similar-clothing and changing-clothing
 examples before enabling global matching for a library. Synthetic lifecycle tests
 verify inference reuse, missing-face handling, replay and publication; they do not
 measure SapiensID recognition accuracy.
+
+Body anchors in both recognition routes now share `identities.anchor_min_keypoints`,
+`anchor_min_sharpness` and `anchor_min_person_pixels`. Missing/non-finite measurements
+cannot supply anchor authority; weak body observations may still be attachment queries.
+The face-associated collector measures the same source crop quality as independent
+collection, even when independent body identities are disabled. Changing these
+thresholds invalidates matching decisions, not retained embeddings.
+
+Pose points with sufficient confidence at x=0 or y=0 are valid inside the person
+box. Right/bottom edges remain exclusive and low-confidence points remain missing.
+The person input contract is revised for every model variant (including the legacy
+pose model), so recognition recollects affected person evidence instead of reusing
+vectors prepared with discarded boundary points. Compatible older independent
+body banks remain conservative rivals until rebuilt.

@@ -238,11 +238,12 @@ def matching_policy(config):
     from .context import policy_digest
     from .person_signal import contract
     return policy_digest(config, f'matching-v{MATCHING_FORMAT}-assignment-guards-v1', lambda: {
-        **({'assignment_guards': 3} if config.data['sapiensid']['enabled'] else {}),
+        **({'assignment_guards': 4} if config.data['sapiensid']['enabled'] else {}),
         **({'hybrid': {'contract': contract(config),
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
-        **({'body_anchor_pixels':config.data['sapiensid']['identities']['anchor_min_person_pixels']}
-           if config.data['sapiensid']['enabled'] and config.data['sapiensid']['identities']['anchor_min_person_pixels'] is not None else {}),
+        **({'body_anchor_quality':{k:config.data['sapiensid']['identities'][k] for k in
+              ('anchor_min_person_pixels','anchor_min_keypoints','anchor_min_sharpness')}}
+           if config.data['sapiensid']['enabled'] else {}),
         **({'body': {'local':config.data['sapiensid']['identities'],'global':config.data['sapiensid']['global_matching']}} if config.data['sapiensid']['identities']['enabled'] else {}),
         'format': MATCHING_FORMAT, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()

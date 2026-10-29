@@ -5,7 +5,7 @@ import numpy as np
 from stash_ai.recognition.database import FaceDatabase, encoded
 from tests.test_recognition_body_identity import configuration, scene
 from tests.test_recognition_merge_report import seeded
-from tests.test_recognition_hybrid_recovery import enable
+from tests.test_recognition_hybrid_recovery import enable,ANCHOR_METADATA
 
 def global_cap(p):
     from stash_ai.recognition.body_identity import rebuild
@@ -26,10 +26,10 @@ def unsupported_mode(p):
         db=state.connection;c=enable(c,db)
         good=np.zeros(4096,dtype='<f4');good[0]=1
         poor=good.copy();poor[:2]=[.84,math.sqrt(1-.84**2)]
-        meta=dict(person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
+        meta=dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
         db.execute('UPDATE person_evidence SET embedding=?,metadata=?',(good.tobytes(),encoded(meta)))
         last=db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY cue DESC LIMIT 1',(people[0],)).fetchone()[0]
-        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(poor.tobytes(),encoded(dict(person=dict(bounds=[0,0,1,1],score=0,keypoints=[]))),last));db.commit()
+        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(poor.tobytes(),encoded(dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,1,1],score=0,keypoints=[]))),last));db.commit()
         ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
         bank=catalogue(db,c,'scope',ns);r=report(db,c,'scope',ns)
         return dict(outlier=last,selected=[list(x.person_observations) for x in bank],mode_counts=[len(x.body_modes) for x in bank],decisions=r['decisions'],pairs=r['pairs'])
@@ -41,12 +41,12 @@ def uncovered_modes(p):
         db=state.connection;c=enable(c,db)
         good=np.zeros(4096,dtype='<f4');good[0]=1
         poor=good.copy();poor[:2]=[.76,math.sqrt(1-.76**2)]
-        meta=dict(person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
+        meta=dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
         db.execute('UPDATE person_evidence SET embedding=?,metadata=?',(good.tobytes(),encoded(meta)))
         ids=[(r[0],r[1]) for r in db.execute('SELECT o.id,o.cue FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY cue',(people[0],))]
         for identifier,cue in ids:
             angle=[-20,20,60][cue//3];v=good.copy();v[:2]=[math.cos(math.radians(angle)),math.sin(math.radians(angle))]
-            db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(v.tobytes(),encoded(meta if cue<6 else {}),identifier))
+            db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(v.tobytes(),encoded(meta if cue<6 else dict(ANCHOR_METADATA,person=dict(score=0))),identifier))
         db.commit();ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
         bank=catalogue(db,c,'scope',ns);r=report(db,c,'scope',ns)
         return dict(mode_counts=[len(x.body_modes) for x in bank],outcomes=[d['outcome'] for d in r['decisions']],person_scores=[x['person'] for x in r['pairs']],full_min=.5)
@@ -85,10 +85,10 @@ def lost_guard(p,legacy=False):
         db=state.connection;c=enable(c,db)
         good=np.zeros(4096,dtype='<f4');good[0]=1
         angled=good.copy();angled[:2]=[math.cos(math.pi/6),.5]
-        meta=dict(person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
+        meta=dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
         db.execute('UPDATE person_evidence SET embedding=?,metadata=?',(good.tobytes(),encoded(meta)))
         out=db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? AND cue=3',(people[1],)).fetchone()[0]
-        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(angled.tobytes(),encoded({}),out));db.commit()
+        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(angled.tobytes(),encoded(dict(ANCHOR_METADATA,person=dict(score=0))),out));db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
         first=apply(state,selected,c)
         if legacy:

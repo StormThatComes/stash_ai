@@ -26,10 +26,9 @@ def _rows(db, config, scope, namespace, owners):
         "AND o.rejected IS NULL AND e.status='ready' AND "+strict_sql()+' AND '+admission+
         ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     args=(contract(config),encoded(list(owners)),scope,namespace)
-    from .person_anchor import pixel_gate
+    from .person_anchor import anchor_gate
     rows=db.execute(sql,args)
-    if config.data['sapiensid']['identities']['anchor_min_person_pixels'] is None:return rows
-    return (row for row in rows if pixel_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible'])
+    return (row for row in rows if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible'])
 
 
 def _select(records,config):

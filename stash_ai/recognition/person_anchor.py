@@ -28,3 +28,22 @@ def pixel_gate(metadata,settings):
     reason=(None if minimum is None else 'body_anchor_pixels_missing' if measured is None else
             'body_anchor_pixels' if measured<minimum else None)
     return dict(pixels=measured,minimum=minimum,eligible=reason is None,reason=reason)
+
+
+def anchor_gate(metadata,settings):
+    """Measured pose and sharpness must qualify every body reference route."""
+    gate=pixel_gate(metadata,settings)
+    try:
+        record=json.loads(metadata) if isinstance(metadata,str) else metadata
+        quality=record.get('quality') or {}
+        points=quality.get('keypoints');sharpness=quality.get('sharpness')
+        valid=lambda value:type(value) in (int,float) and math.isfinite(value) and value>=0
+        reason=gate['reason']
+        if reason is None:
+            reason=('body_anchor_keypoints_missing' if not valid(points) else
+                    'body_anchor_keypoints' if points<settings['anchor_min_keypoints'] else
+                    'body_anchor_sharpness_missing' if not valid(sharpness) else
+                    'body_anchor_sharpness' if sharpness<settings['anchor_min_sharpness'] else None)
+    except (ValueError,TypeError,AttributeError):
+        points=sharpness=None;reason='body_anchor_quality_missing'
+    return dict(gate,keypoints=points,sharpness=sharpness,eligible=reason is None,reason=reason)

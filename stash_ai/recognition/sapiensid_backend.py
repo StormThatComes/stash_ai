@@ -8,13 +8,13 @@ from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING
 from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
 from .sapiensid_registry import POSE_SHA256, LEGACY_POSE_SHA256, POSE_INFERENCE, MODELS
 
-CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v3'
+CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
 
 def input_contract(config):
     checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
     if checksum == LEGACY_POSE_SHA256:
-        return 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
+        return 'sapiensid-v1-yolov8-pose-face-anchor-square384-v3'
     return CONTRACT
 
 
@@ -144,7 +144,7 @@ class SapiensIDFaces(YuNetDetector):
                 right, bottom = min(image.width, math.ceil(box[2])), min(image.height, math.ceil(box[3]))
                 if left >= right or top >= bottom:
                     raise ValueError('SapiensID pose detector returned an empty person box.')
-                usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps > 0).all(axis=1)
+                usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
                 usable &= (kps[:,0] >= left) & (kps[:,0] < right) & (kps[:,1] >= top) & (kps[:,1] < bottom)
                 kps[~usable] = -1
                 people.append({'bounds': [left,top,right,bottom], 'keypoints': kps.tolist(), 'score': float(score)})
@@ -162,7 +162,9 @@ class SapiensIDFaces(YuNetDetector):
     def observation_quality(self, image, face):
         self._owner()
         person = self._person(image, face)
-        return {'identity_input': input_contract(self.config), 'person': person,
+        from .body_collection import quality
+        measured=quality(image,person,self.frame_people,self.config.data['sapiensid']['collection'])[0] if person else {}
+        return {'identity_input': input_contract(self.config), 'person': person, 'quality': measured,
                 'identity_rejection': None if person else 'person_face_association_unavailable'}
 
     def _person_geometry(self, image, face):

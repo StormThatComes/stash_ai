@@ -7,7 +7,7 @@ from .sapiensid_registry import (POSE_NAME, POSE_SHA256, LEGACY_POSE_SHA256, POS
                                 MODEL_YAML_SHA256, MODELS, WB4M_SHA256, UPSTREAM_COMMIT)
 
 DIMENSIONS = 4096
-CONTRACT = 'sapiensid-person-v3'
+CONTRACT = 'sapiensid-person-v4'
 SCHEMA = '''
 CREATE TABLE person_evidence (
  observation TEXT NOT NULL REFERENCES observations(id),
@@ -113,17 +113,17 @@ def validate(settings):
             raise ValueError(f'sapiensid.{section}.{key} requires a lowercase SHA256.')
 
 
-def contract(config):
+def contract(config,*,legacy_boundaries=False):
     """Paths, matching thresholds and resource budgets do not change vectors."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
-    evidence=dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
+    evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
         evidence['pose_inference'] = POSE_INFERENCE
     if variant=='wb4m' and model['sha256']==WB4M_SHA256:
-        # Preserve existing evidence for the exact originally supported weights.
-        evidence['format']='sapiensid-wb4m-person-v2'
+        # Keep the historical format identifiable for conservative legacy rivals.
+        evidence['format']='sapiensid-wb4m-person-v2' if legacy_boundaries else 'sapiensid-wb4m-person-v3'
     else:
         evidence.update(variant=variant,model_sha256=model['sha256'],source_revision=UPSTREAM_COMMIT)
     return digest(evidence)

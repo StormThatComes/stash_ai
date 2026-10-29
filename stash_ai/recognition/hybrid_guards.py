@@ -14,7 +14,7 @@ def retain(db,config,scope,namespace,identities):
     from .clustering import reference_admission,vector
     from .reference_compatibility import fallback_sql
     from .scanning import scan_identity
-    from .person_anchor import pixel_gate
+    from .person_anchor import anchor_gate
     core_ids=defaultdict(set)
     owned={i.person:i for i in identities};guards=defaultdict(set);body_guards=defaultdict(set);proof_bytes=0
     for row in db.execute('SELECT a.target,a.evidence FROM identity_merges a JOIN people p ON p.id=a.target '
@@ -79,7 +79,7 @@ def retain(db,config,scope,namespace,identities):
                 persons.append(person);used+=2*person.nbytes
                 # Original evidence keeps veto power even below today's size
                 # floor, but cannot become an anchor for query recovery.
-                if pixel_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible']:
+                if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible']:
                     body_map[identifier]=person
             if used>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')

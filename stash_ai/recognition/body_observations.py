@@ -30,10 +30,10 @@ def available(db):
     return db.execute("SELECT 1 FROM sqlite_master WHERE name='body_observations' AND type='table'").fetchone() is not None
 
 
-def _contract(config,version):
+def _contract(config,version,*,legacy_boundaries=False):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
-    return digest([version,person_contract(config),settings])
+    return digest([version,person_contract(config,legacy_boundaries=legacy_boundaries),settings])
 
 
 def contract(config):
@@ -43,7 +43,8 @@ def contract(config):
 def compatible_contracts(config):
     # Old grayscale digests cannot train current cores, but their encoder and
     # collection policy are identical, so they remain conservative rivals.
-    return [contract(config),_contract(config,'independent-person-v1')]
+    return list(dict.fromkeys(_contract(config,version,legacy_boundaries=old)
+        for old in (False,True) for version in ('independent-person-v2-rgb-pixels','independent-person-v1')))
 
 
 def identifier(scan, cue, person, expected):
