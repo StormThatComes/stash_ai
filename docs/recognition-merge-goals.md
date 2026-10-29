@@ -21,6 +21,52 @@ mutually exclusive with those selectors. Alias overlap across sets is rejected.
 Without `--solve`, set input resolves retained goals; `--simulate` evaluates the
 baseline. No Stash writes, model loading, media access or source YAML writes occur.
 
+Use repeatable **`--exclude-performer-scene PERFORMER_ID:SCENE_ID`** to tell the
+solver that a declared person is absent from a specific scene:
+
+```powershell
+python stash_ai.py recognition report-merge --performer-set 47036,47034,47037 --exclude-performer-scene 47036:1234 --exclude-performer-scene 47036:5678 --solve --face-config input.yml --yaml-output corrected.yml --output corrected.json
+```
+
+The performer must belong to one of the selected goal sets (merged predecessor
+IDs are resolved automatically). Because a set declares one person, the exclusion
+applies to the **whole set**, including its merged or split destinations. A
+single-performer set is supported. The excluded scene must have a complete latest
+scan compatible with the input configuration; missing or incompatible evidence
+is an input error, not proof that the person is absent.
+
+An explicit negative overrides historical positive memberships in that scene for
+this set only. Those observations are removed from its frozen preservation/core
+goals, including under `--goal-policy strict`, but remain in the production replay
+as ordinary evidence. Other scenes remain positive obligations. A fragment left
+without positive observations is listed in `excluded_members`; a whole set left
+without positive evidence in another scene is rejected. Thus an erroneous existing
+scene link can be corrected without asking the solver to preserve it simultaneously.
+
+Every trial checks all final face and accepted independent-body assignments in the
+excluded scene. Frozen positive observation addresses and linked accepted body
+alternatives track the person through rebuilds; UUID spelling and reuse after a
+split do not identify a person. A different UUID, a body-only attachment, or a small leftover fragment
+cannot bypass the exclusion. Linked bodies do not add positive consolidation votes.
+Losing the person everywhere cannot satisfy the negative goal. Violations make a
+trial inadmissible under both policies; among inadmissible trials, fewer unsatisfied
+exclusions and forbidden assignments rank ahead of consolidation. Optional outside
+impact bounds retain their existing priority.
+
+Bounded face, hybrid-person and independent-body similarity measurements propose
+tighter rejection thresholds; full production replay decides whether they preserve
+the correct appearances. Reports and console progress show each exclusion's
+`satisfied`, `matches`, missing observations and target representation. Exclusions
+participate in checkpoint compatibility and report provenance. `--simulate` checks
+the baseline, including with exactly two performer selectors.
+
+These labels guide **offline configuration search**, not a runtime scene blacklist.
+The exported YAML contains ordinary recognition parameters, with the result verified
+on the retained snapshot. `best_effort` can still violate an exclusion; inspect the
+reported unmet conditions. Counts cover every observation; JSON observation examples
+are capped at 32 per condition to keep trial histories bounded. Recognition must be run with the selected YAML to apply
+it, and changed media/evidence requires revalidation.
+
 Each trial starts from the same read-only retained history in an independent RAM
 database and calls the ordinary production rebuild. All compatible complete latest
 scans in the scope participate, including competitors. `--solve` excludes scenes

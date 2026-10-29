@@ -72,6 +72,8 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
                            f"strict disjoint: {diagnostics['strict_disjoint']}; "
                            f"soft units lost/reassigned: {diagnostics['soft_lost_units']}. See JSON evidence details.\n")
                 header += ('# Preservation uses set scene coverage; member representation and soft budgets are diagnostics.\n')
+            if diagnostics.get('scene_exclusions'):
+                header += '# Explicit performer/scene exclusions were evaluated; see JSON. These are not runtime overrides.\n'
         if not recommendation['fully_solved']:
             reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
             header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
@@ -126,7 +128,8 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         code_hash.update(path.read_bytes())
     result['provenance'] = dict(code_sha256=code_hash.hexdigest(), snapshot_sha256=result.get('snapshot_sha256'), configuration_sha256=digest(plain(config.data)),
         source_sha256=hashlib.sha256(config.source).hexdigest(), namespace=result['namespace'],
-        goals_sha256=digest(dict(groups=result['groups'], goal_policy=result.get('goal_policy'))),
+        goals_sha256=digest(dict(groups=result['groups'], goal_policy=result.get('goal_policy'),
+            **({'scene_exclusions': result['scene_exclusions']} if result.get('scene_exclusions') else {}))),
         validity='Same retained evidence, scope, model, code and joint scene selection; changed media requires revalidation.')
     explain(result)
     text = json.dumps(result, indent=2, allow_nan=False) + '\n'
@@ -189,6 +192,8 @@ def summary(result):
         lines.append(f"  Goal policy: identity; strict_disjoint={goal['strict_disjoint']}; "
                      f"strict_fully_solved={goal['strict_fully_solved']}; largest_complete counts all original samples.")
     lines.extend(line for group in goal['groups'] for line in group_summary_lines(group))
+    from .merge_scene_exclusions import summary_lines
+    lines.extend(summary_lines(goal))
     for violation in selected['unmet_conditions']:
         detail = []
         for key, value in violation.items():
