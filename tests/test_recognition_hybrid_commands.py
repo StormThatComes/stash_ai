@@ -66,7 +66,7 @@ def test_evaluation_and_merge_goals_use_retained_body_features(tmp_path):
         assert 'sapiensid.matching.person_threshold' in options
         assert list(neighbours(config,{},options))
         old=fingerprint(db,config,'scope')
-        db.execute("UPDATE person_evidence SET metadata='{}'");db.commit()
+        db.execute("UPDATE person_evidence SET metadata=json_remove(metadata,'$.association')");db.commit()
         assert fingerprint(db,config,'scope')!=old
     result=evaluate(config,labels,batch_sizes=(0,),repeat_runs=2)
     assert all(t['hybrid']['ready']==6 for t in result['trials'].values())

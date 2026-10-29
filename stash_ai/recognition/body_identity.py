@@ -9,7 +9,7 @@ from .config import digest,plain
 from .database import encoded
 from .identity_merges import canonical
 from .progress import tracking
-from .person_anchor import pixel_gate
+from .person_anchor import pixel_gate,anchor_gate
 
 
 
@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v4-independent-modes',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v5-shared-quality',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -45,9 +45,7 @@ def quality(row):
 
 
 def anchor(row,settings):
-    q=quality(row)
-    return (q.get('keypoints',0)>=settings['anchor_min_keypoints'] and q.get('sharpness',0)>=settings['anchor_min_sharpness']
-            and (settings['anchor_min_person_pixels'] is None or pixel_gate(row['quality'],settings)['eligible']))
+    return anchor_gate(row['quality'],settings)['eligible']
 
 
 def independent(rows,settings):

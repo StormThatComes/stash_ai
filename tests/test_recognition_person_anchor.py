@@ -136,6 +136,7 @@ def test_face_anchor_body_bank_obeys_size_gate_without_demoting_faces(tmp_path):
         ids=[r[0] for r in db.execute('SELECT observation FROM members WHERE person=? ORDER BY observation',(people[0],))]
         for oid,width in zip(ids,[96,95,None]):
             metadata={'person':{'bounds':[0,0,width,240]}} if width is not None else {}
+            metadata['quality']=dict(keypoints=17,sharpness=100)
             db.execute('UPDATE person_evidence SET metadata=? WHERE observation=?',(encoded(metadata),oid))
         db.commit()
         rows=body_rows(db,c,'scope',ns,people[0])
@@ -155,7 +156,7 @@ def test_original_small_witnesses_keep_veto_power_but_not_query_authority(tmp_pa
         db=state.connection
         for owner,width in zip(people,[120,80]):
             db.execute('UPDATE person_evidence SET metadata=? WHERE observation IN (SELECT observation FROM members WHERE person=?)',
-                (encoded(dict(person=dict(bounds=[0,0,width,240]))),owner))
+                (encoded(dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,width,240]))),owner))
         db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
         apply(state,selected,c)
@@ -223,7 +224,7 @@ def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabl
     with FaceDatabase(c.database) as state:
         for owner,width in zip(people,[120,80.5]):
             state.connection.execute('UPDATE person_evidence SET metadata=? WHERE observation IN (SELECT observation FROM members WHERE person=?)',
-                (encoded(dict(person=dict(bounds=[0,0,width,240]))),owner))
+                (encoded(dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,width,240]))),owner))
         state.connection.commit()
     monkeypatch.setattr('stash_ai.recognition.models.load_backend',lambda *a,**k:pytest.fail('inference'))
     before=c.database.read_bytes()

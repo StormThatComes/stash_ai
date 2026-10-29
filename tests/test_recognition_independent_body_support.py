@@ -1,3 +1,4 @@
+from tests.test_recognition_hybrid_recovery import ANCHOR_METADATA
 """Independent route support, body appearances and stable split labels."""
 import json,math
 import numpy as np
@@ -66,7 +67,7 @@ def duplicate_hybrid(p):
             for i,row in enumerate(db.execute('SELECT o.* FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY cue',(owner,)).fetchall()):
                 ang=([0,20,20][i] if index==0 else math.degrees(math.acos(.9)) if index==1 else 0)
                 v=np.zeros(4096,dtype='<f4');v[:2]=[math.cos(math.radians(ang)),math.sin(math.radians(ang))]
-                save(db,row['id'],contract(c),{},v)
+                save(db,row['id'],contract(c),ANCHOR_METADATA,v)
                 if index==0 and i==0:base=dict(row);db.execute("UPDATE observations SET quality=json_set(quality,'$.evidence_pixel_sha256',?) WHERE id=?",('a'*64,row['id']))
         db.execute('DELETE FROM members WHERE person=?',(people[2],));db.execute("UPDATE candidates SET person=NULL,status='withheld' WHERE person=?",(people[2],));db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')];before=recover(state,selected,c)
@@ -74,7 +75,7 @@ def duplicate_hybrid(p):
         base=dict(db.execute('SELECT * FROM observations WHERE id=?',(base['id'],)).fetchone())
         for i in range(100):
             row=dict(base,id=str(uuid.uuid4()),cue=i+3,seconds=float(i+3))
-            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',tuple(row.values()));db.execute('INSERT INTO members VALUES (?,?)',(row['id'],people[0]));db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),row['scan'],matching_policy(c),people[0],'accepted',encoded(dict(observation=row['id'],reason='candidate_group'))));save(db,row['id'],contract(c),{},v)
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',tuple(row.values()));db.execute('INSERT INTO members VALUES (?,?)',(row['id'],people[0]));db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),row['scan'],matching_policy(c),people[0],'accepted',encoded(dict(observation=row['id'],reason='candidate_group'))));save(db,row['id'],contract(c),ANCHOR_METADATA,v)
         db.execute('UPDATE scans SET total=103,cursor=103 WHERE id=?',(base['scan'],));db.commit()
         after=recover(state,selected,c)
         return dict(before=before,after=after,independent_owner_crops=3,repeated_crops=100)
@@ -123,7 +124,7 @@ def test_body_query_support_is_separate_for_each_frozen_appearance(tmp_path):
         for owner,cutoff in zip(people,(3,2)):
             for row in db.execute('SELECT o.id,o.cue FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=?',(owner,)).fetchall():
                 vector=np.zeros(4096,dtype='<f4');vector[int(row['cue']>=cutoff)]=1
-                save(db,row['id'],contract(config),{},vector)
+                save(db,row['id'],contract(config),ANCHOR_METADATA,vector)
         db.execute('DELETE FROM members WHERE person=?',(people[1],))
         db.execute("UPDATE candidates SET person=NULL,status='withheld' WHERE person=?",(people[1],));db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]

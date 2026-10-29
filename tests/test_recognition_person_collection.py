@@ -15,7 +15,7 @@ class Person:
     def __init__(self,*args): self.calls=0;self.closed=False;self.fail=False
     def detect(self,image,faces=None): return faces
     def observation_quality(self,image,face):
-        return dict(identity_rejection=None,person=dict(bounds=[0,0,image.width,image.height]))
+        return dict(identity_rejection=None,quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,image.width,image.height]))
     def embed(self,image,face):
         self.calls+=1
         if self.fail and self.calls==2:raise RuntimeError('broken inference')

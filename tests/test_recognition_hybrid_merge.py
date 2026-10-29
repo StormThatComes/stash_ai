@@ -19,7 +19,7 @@ def prepared(tmp_path):
         db=state.connection
         db.execute('UPDATE candidates SET policy=?',(matching_policy(config),))
         for row in db.execute('SELECT id FROM observations').fetchall():
-            save(db,row['id'],contract(config),{'association':'unique'},np.ones(4096))
+            save(db,row['id'],contract(config),{'association':'unique','quality':dict(keypoints=17,sharpness=100)},np.ones(4096))
         db.commit()
     return config,people
 
@@ -90,13 +90,13 @@ def test_later_merge_cannot_hide_an_original_source_contradiction(tmp_path):
         db=state.connection
         db.execute('UPDATE candidates SET policy=?',(matching_policy(config),))
         for row in db.execute('SELECT observation,person FROM members').fetchall():
-            if row['person']!=people[2]:save(db,row['observation'],contract(config),{},np.ones(4096))
+            if row['person']!=people[2]:save(db,row['observation'],contract(config),{"quality":dict(keypoints=17,sharpness=100)},np.ones(4096))
         db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
         apply(state,selected,config)
         assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1
         for row in db.execute('SELECT observation FROM members WHERE person=?',(people[2],)).fetchall():
-            save(db,row['observation'],contract(config),{},np.ones(4096))
+            save(db,row['observation'],contract(config),{"quality":dict(keypoints=17,sharpness=100)},np.ones(4096))
         db.commit()
         result=apply(state,selected,config)
         assert db.execute('SELECT COUNT(DISTINCT person) FROM members').fetchone()[0]==2

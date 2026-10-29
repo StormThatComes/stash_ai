@@ -9,10 +9,14 @@ from stash_ai.recognition.hybrid_evidence import catalogue, report
 from stash_ai.recognition.clustering import matching_policy
 
 
+ANCHOR_METADATA=dict(quality=dict(keypoints=17,sharpness=100),
+                     person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
+
+
 def enable(config, db):
     config=replace(config,data=plain(config.data));config.data['sapiensid']['enabled']=True
     db.execute('UPDATE candidates SET policy=?',(matching_policy(config),))
-    for r in db.execute('SELECT id FROM observations').fetchall():save(db,r[0],contract(config),{},np.ones(4096))
+    for r in db.execute('SELECT id FROM observations').fetchall():save(db,r[0],contract(config),ANCHOR_METADATA,np.ones(4096))
     db.commit();return config
 
 

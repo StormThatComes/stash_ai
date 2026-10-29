@@ -27,7 +27,7 @@ def prepared(tmp_path, faces, bodies, *, count=3, matching=None):
         for person, body in zip(people, bodies):
             for row in state.connection.execute('SELECT observation FROM members WHERE person=?', (person,)).fetchall():
                 if body is not None:
-                    save(state.connection, row[0], contract(config), {}, np.pad(body, (0, 4096-len(body))))
+                    save(state.connection, row[0], contract(config), {"quality":dict(keypoints=17,sharpness=100)}, np.pad(body, (0, 4096-len(body))))
         state.connection.commit()
     return config, people
 
@@ -156,7 +156,7 @@ def test_real_mode_replay_does_not_lower_threshold_to_cross_look_minimum(tmp_pat
             rows = state.connection.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
                                             'WHERE m.person=? AND o.cue>=3', (person,)).fetchall()
             for row in rows:
-                save(state.connection, row[0], contract(config), {}, np.pad(body, (0, 4092)))
+                save(state.connection, row[0], contract(config), {"quality":dict(keypoints=17,sharpness=100)}, np.pad(body, (0, 4092)))
         state.connection.commit()
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
