@@ -36,8 +36,10 @@ def banks(db,config,scope,namespace):
         witnesses=independent(rows,settings)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
         if not selected and rows:selected=rows[:1]
-        refs=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in selected]
-        output[person]=dict(refs=refs,cores=[refs],missing_original=False,support=len(witnesses),
+        core=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in witnesses]
+        by_id={r['id']:r for r in core}
+        refs=[by_id[r['id']] for r in selected]
+        output[person]=dict(refs=refs,cores=[core],missing_original=False,support=len(witnesses),
                             faces=[],face_ids=[],cues=set(),witnesses=witnesses,provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
         used+=size(output[person])+size(person)+128;reserve(0)
 
@@ -51,7 +53,7 @@ def banks(db,config,scope,namespace):
 
     # Preserve proof multiplicity for future replays, while identical cores
     # share metadata storage and the exact-score cache.
-    signatures={p:{tuple(r['id'] for r in b['refs']):b['refs']} for p,b in output.items()}
+    signatures={p:{tuple(r['id'] for r in b['cores'][0]):b['cores'][0]} for p,b in output.items()}
     original_faces={p:set() for p in output}
     confirmation_witnesses={p:set() for p in output}
     for alias in db.execute('SELECT target,evidence FROM identity_merges'):
@@ -60,7 +62,15 @@ def banks(db,config,scope,namespace):
         bank=output[target]
         if proof.get('provisional_confirmation'):
             confirmation_witnesses[target].update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
-        for ids in proof.get('cores',{}).values():
+        for owner,ids in proof.get('cores',{}).items():
+            if not proof.get('complete_body_witnesses'):
+                # Before complete proofs, only the capped core was persisted.
+                # Original anchor roles remain in attachment decision payloads.
+                extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b '
+                    'JOIN body_members m ON m.observation=b.id WHERE b.contract=? '
+                    "AND json_extract(m.proof,'$.global_merge.source')=? "
+                    "AND json_extract(m.proof,'$.role')='anchor'",(expected,owner))]
+                ids=list(dict.fromkeys([*ids,*extra]))
             signature=tuple(ids)
             if signature in signatures[target]:
                 if signatures[target][signature]:bank['cores'].append(signatures[target][signature])

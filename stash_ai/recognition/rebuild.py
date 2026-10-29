@@ -398,6 +398,11 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
+    if selected:
+        first=database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
+        if first is not None:
+            from .incomplete_rivals import require_complete
+            require_complete(database.connection,*first)
     from .rebuild_transaction import atomic
     with atomic(database), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews

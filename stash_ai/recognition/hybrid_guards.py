@@ -32,8 +32,18 @@ def retain(db,config,scope,namespace,identities):
             body_groups=pair.get('person_observations') or pair['observations']
             for face_ids,person_ids in zip(pair['observations'],body_groups):
                 core_ids[root].add((tuple(face_ids),tuple(person_ids)))
-            for observations in body_groups+pair.get('guard_person_observations',pair.get('guard_observations',[])):
+            for observations in pair.get('body_witness_observations',body_groups)+pair.get('guard_person_observations',pair.get('guard_observations',[])):
                 body_guards[root].update(observations)
+        if any('body_witness_observations' not in pair for pair in proof['proofs']):
+            # Old proofs capped representatives. Retained source attachments
+            # recover omitted vetoes without acquiring reference authority.
+            from .reference_roles import observation_sql
+            sources=proof.get('original_cores',proof.get('people',[]))
+            body_guards[root].update(r[0] for r in db.execute(
+                'SELECT DISTINCT o.id FROM observations o JOIN candidates c ON o.id='+observation_sql('c')+
+                ' JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
+                "WHERE json_extract(c.payload,'$.hybrid_merge.source') IN (SELECT value FROM json_each(?)) "
+                "AND e.status='ready'",(contract(config),encoded(sources))))
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                    compatibility=fallback_sql(db,config,namespace))
     expected=contract(config);result=[]

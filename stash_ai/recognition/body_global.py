@@ -23,7 +23,8 @@ def report(db,config,scope,namespace,*,focus=None):
     result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
-    return plan(db,config,banks(db,config,scope,namespace),focus=focus)
+    from .incomplete_rivals import protect
+    return protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus))
 
 
 def plan(db,config,bank,*,focus=None):
@@ -137,7 +138,7 @@ def reconcile(database,selected,config):
             'WHERE p.id IN (SELECT value FROM json_each(?)) ORDER BY has_face DESC,p.created,p.id',(encoded(people),)))
         target=rows[0]['id']
         provisional=bool(db.execute("SELECT 1 FROM body_members WHERE status='provisional' AND person IN (SELECT value FROM json_each(?)) LIMIT 1",(encoded(people),)).fetchone())
-        proof=dict(decision,provisional_confirmation=provisional,route='body_global',scenes=sorted(scenes,key=int),contract=contract(config),policy=policy(config))
+        proof=dict(decision,complete_body_witnesses=True,provisional_confirmation=provisional,route='body_global',scenes=sorted(scenes,key=int),contract=contract(config),policy=policy(config))
         proof_bytes+=len(encoded(proof))*(len(rows)-1)
         if proof_bytes>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('Body alias proofs exceed sapiensid.execution.plan_bytes.')

@@ -178,6 +178,13 @@ an eligible pair while correctly leaving it unapplied. The oldest identity wins.
 Source samples become attachment-only and do not become new strict face anchors.
 Original cores and numeric proof remain in alias evidence; candidate records
 point to that proof without duplicating it per observation. On later passes,
+the proof retains every body witness used by the complete mode check, even when
+the representative cap is smaller. An unsupported mode or uncovered confirmed
+mode blocks merging; it never falls back to a smaller representative-only proof.
+Inherited cores on both endpoints must agree with each other as well as with
+the current endpoints. Older proofs recover omitted vetoes from retained source
+attachments without granting those attachments reference authority.
+
 original cores can still veto contradictory merges but cannot nominate merge
 candidates or add support votes. Their frozen appearances can support query-only
 recovery; recovered observations remain attachments. Missing or superseded original evidence blocks further
@@ -375,6 +382,12 @@ not removed. A body core wholly confirmed by an existing face bank records a
 local promotion alias even when global body consolidation is disabled.
 
 Global body matching first compares unnormalized mean vectors in bounded tiles.
+The reference cap limits nomination and rival lookup, not the complete core
+cohesion check or persisted veto witnesses. If a replacement scan is incomplete
+and its scene previously supplied identity memberships, reports block merge
+decisions with `incomplete_reference_scans`. A run must finish that scene before
+rebuilding identities in the same scope and model namespace; the failed rescan
+cannot silently remove a historical competitor.
 Only nominated identity pairs and explicitly requested diagnostic pairs receive
 full witness checks. A conservative rounding envelope preserves threshold-edge
 candidates; exact retained-vector scores still decide every acceptance gate.
