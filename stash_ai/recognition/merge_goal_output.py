@@ -59,7 +59,7 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
             if raw:
                 path=Path(raw).expanduser()
                 data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
-    serialized = yaml.safe_dump(data, sort_keys=False)
+    serialized = yaml.safe_dump(data, sort_keys=True)
     if mode == 'diff':
         serialized = ('# YAML diff: merge these keys into the input baseline configuration.\n'
                       '# This is not a standalone --face-config document.\n'
