@@ -130,3 +130,12 @@ def test_weak_queries_use_certificate_but_cannot_train_bank(tmp_path,monkeypatch
         assert {decisions[i]['status'] for i in ids[count:]}=={'accepted'}
         assert all(decisions[i]['independent_support']==count for i in ids[:count])
         assert observed[0].count<1000
+
+
+def test_identical_features_still_share_one_exact_comparison(tmp_path):
+    config=configuration(tmp_path);config.data['sapiensid']['execution']['max_witness_comparisons']=1
+    with FaceDatabase(config.database) as state:
+        item,ids=scene(state.connection,config,vectors=[[1,0]]*20)
+        decisions=scene_plan(state.connection,item['scan'],config)[2]
+        assert all(r['status']=='accepted' for r in decisions.values())
+        assert len({r['person'] for r in decisions.values()})==1

@@ -117,7 +117,10 @@ class Scores:
         bound always falls back to every retained witness.
         """
         if not rows:return False
-        self.bank(rows);state=self.banks[id(rows)]
+        bank=self.bank(rows);state=self.banks[id(rows)]
+        # Preserve the exact score cache for repeated identical features.
+        if len(bank)==1 and row['_vector'].tobytes() in bank:
+            return self.compare([row],rows)[1]>=threshold
         if 'pivot' not in state:
             state.update(pivot=rows[0]['_vector'],radius=0.,max_norm=0.,cap_length=0)
         pivot=state['pivot'].astype('float64')
