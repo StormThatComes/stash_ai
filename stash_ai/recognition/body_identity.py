@@ -146,14 +146,18 @@ def scene_plan(db,scan,config):
                 groups[index].append(row)
             else:decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',reason='body_group_ambiguous')
         else:groups.append([row])
+    from .body_origins import physical_key, origins_for_scene
+    origins_by_key=origins_for_scene(db,record)
     used=set()
     for group in groups:
         # Exact source observation origins, not previous assignments, preserve
         # IDs across reruns while allowing changed evidence to split a group.
-        origins=[r[0] for row in group for r in db.execute('SELECT person FROM body_origins WHERE observation=?',(row['id'],))]
+        origins=[p for row in group for p in origins_by_key.get(physical_key(record,row),())]
         person=next((p for p in sorted(set(origins)) if p not in used),None)
         if person is None:
-            person=str(uuid.uuid5(uuid.NAMESPACE_URL,digest(['body-person',record['scope'],record['namespace'],expected,group[0]['id']])))
+            person=str(uuid.uuid5(uuid.NAMESPACE_URL,digest(['body-person',physical_key(record,group[0])])))
+        if person in used:
+            person=str(uuid.uuid5(uuid.UUID(person),group[0]['id']))
         used.add(person)
         support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
         for row in group:

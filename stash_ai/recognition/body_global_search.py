@@ -194,6 +194,8 @@ def exact_pair(a,b,bank,config,evidence):
     if min(first['support'],second['support'])<settings['min_support']:blockers.append('independent_support')
     if first['cues']&second['cues']:blockers.append('person_copresence')
     if first['missing_original'] or second['missing_original']:blockers.append('missing_original_body_witness')
+    if first.get('stale_policy') or second.get('stale_policy'):
+        blockers.append('historical_body_policy_requires_rebuild')
     face_min=None
     if first['faces'] and second['faces']:
         face_min=evidence.compare(first['faces'],second['faces'],'face')[1]

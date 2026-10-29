@@ -18,8 +18,8 @@ def banks(db,config,scope,namespace):
         if used+extra>limit:
             raise ValueError('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
     where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? AND b.rejected IS NULL "
-           "AND m.status='accepted' AND m.role='anchor' AND m.policy=? AND "+current_scan())
-    args=(scope,namespace,expected,policy(config))
+           "AND m.status='accepted' AND m.role='anchor' AND "+current_scan())
+    args=(scope,namespace,expected)
     source=' FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
     owners={}
     for row in db.execute('SELECT DISTINCT m.person'+source+'WHERE '+where,args):
@@ -28,7 +28,7 @@ def banks(db,config,scope,namespace):
     # Fetch quality for one identity at a time, never its crop/embedding blobs.
     for person,aliases in owners.items():
         rows=[];working=0
-        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,length(b.embedding) AS bytes'+source+
+        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,length(b.embedding) AS bytes'+source+
             'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
             (*args,encoded(aliases))):
             if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
@@ -38,7 +38,7 @@ def banks(db,config,scope,namespace):
         if not selected and rows:selected=rows[:1]
         refs=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in selected]
         output[person]=dict(refs=refs,cores=[refs],missing_original=False,support=len(witnesses),
-                            faces=[],face_ids=[],cues=set())
+                            faces=[],face_ids=[],cues=set(),stale_policy=any(r['policy']!=policy(config) for r in rows))
         used+=size(output[person])+size(person)+128;reserve(0)
 
     def body(identifier):
