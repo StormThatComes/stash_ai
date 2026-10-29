@@ -2,7 +2,7 @@
 import json
 
 from .body_identity import independent,policy
-from .body_observations import contract
+from .body_observations import contract,compatible_contracts
 from .database import encoded
 from .identity_merges import canonical
 from .memory_size import size
@@ -17,9 +17,9 @@ def banks(db,config,scope,namespace):
     def reserve(extra):
         if used+extra>limit:
             raise ValueError('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
-    where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? AND b.rejected IS NULL "
+    where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL "
            "AND m.status IN ('accepted','provisional') AND m.role='anchor' AND "+current_scan())
-    args=(scope,namespace,expected)
+    args=(scope,namespace,encoded(compatible_contracts(config)))
     source=' FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
     owners={}
     for row in db.execute('SELECT DISTINCT m.person'+source+'WHERE '+where,args):
@@ -45,8 +45,8 @@ def banks(db,config,scope,namespace):
 
     def body(identifier):
         raw=db.execute('SELECT b.id,b.scan,b.cue,b.quality,length(b.embedding) AS bytes FROM body_observations b '
-            'JOIN scans s ON s.id=b.scan WHERE b.id=? AND b.contract=? AND b.rejected IS NULL AND '+current_scan(),
-            (identifier,expected)).fetchone()
+            'JOIN scans s ON s.id=b.scan WHERE b.id=? AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL AND '+current_scan(),
+            (identifier,encoded(compatible_contracts(config)))).fetchone()
         if raw is None or raw['bytes'] is None:return None
         if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
         return dict(id=raw['id'],scan=raw['scan'],cue=raw['cue'],quality=raw['quality'])
@@ -67,9 +67,9 @@ def banks(db,config,scope,namespace):
                 # Before complete proofs, only the capped core was persisted.
                 # Original anchor roles remain in attachment decision payloads.
                 extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b '
-                    'JOIN body_members m ON m.observation=b.id WHERE b.contract=? '
+                    'JOIN body_members m ON m.observation=b.id WHERE b.contract IN (SELECT value FROM json_each(?)) '
                     "AND json_extract(m.proof,'$.global_merge.source')=? "
-                    "AND json_extract(m.proof,'$.role')='anchor'",(expected,owner))]
+                    "AND json_extract(m.proof,'$.role')='anchor'",(encoded(compatible_contracts(config)),owner))]
                 ids=list(dict.fromkeys([*ids,*extra]))
             signature=tuple(ids)
             if signature in signatures[target]:

@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v3-physical-evidence',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v4-independent-modes',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -160,18 +160,16 @@ def scene_plan(db,scan,config):
         if strong:seeds.setdefault(person,[]).append(row)
     # Face-linked bodies are frozen before processing faceless queries.
     queries=[r for r in rows if r['id'] not in decisions]
+    from .body_seed_modes import FrozenSeeds
+    frozen=FrozenSeeds(seeds,scores,settings) if queries else None
     remaining=[]
     for row in queries:
-        ranked=[]
-        for person,bank in seeds.items():
-            mean,minimum=scores.compare([row],bank)
-            ranked.append((mean,minimum,person,bank))
-        ranked.sort(key=lambda x:(-x[0],x[2]))
-        if ranked and ranked[0][0]>=settings['match_threshold']-settings['ambiguity_margin']:
-            mean,minimum,person,bank=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
-            good=(mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
-                  and mean-runner>=settings['ambiguity_margin'] and not copresent([row],bank)
-                  and len(independent(bank,settings))>=settings['attach_min_support'] and guard.allows(row,bank,person))
+        ranked=frozen.rank(row,guard)
+        if ranked and max(r[5] for r in ranked)>=settings['match_threshold']-settings['ambiguity_margin']:
+            choices=[r for r in ranked if r[4]]
+            mean,minimum,person,bank,admissible,_=(choices or ranked)[0]
+            runner=max((r[5] for r in ranked if r[2]!=person),default=-1.)
+            good=admissible and mean-runner>=settings['ambiguity_margin']
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
                 score=mean,minimum=minimum,runner=runner)
@@ -190,18 +188,20 @@ def scene_plan(db,scan,config):
                 groups[index].append(row)
             else:decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',reason='body_group_ambiguous')
         else:groups.append([row])
-    from .body_origins import physical_key, origins_for_scene
+    from .body_origins import physical_key, origins_for_scene,labels_for_groups
     origins_by_key=origins_for_scene(db,record)
-    used=set()
-    for group in groups:
+    labels=labels_for_groups(db,record,groups,origins_by_key,settings)
+    used=set(labels.values())
+    for index,group in enumerate(groups):
         # Exact source observation origins, not previous assignments, preserve
         # IDs across reruns while allowing changed evidence to split a group.
-        origins=[p for row in group for p in origins_by_key.get(physical_key(record,row),())]
-        person=next((p for p in sorted(set(origins)) if p not in used),None)
+        person=labels.get(index)
         if person is None:
             person=str(uuid.uuid5(uuid.NAMESPACE_URL,digest(['body-person',physical_key(record,group[0])])))
-        if person in used:
-            person=str(uuid.uuid5(uuid.UUID(person),group[0]['id']))
+            attempt=0;seed=person
+            while person in used:
+                person=str(uuid.uuid5(uuid.UUID(seed),encoded(['split',physical_key(record,group[0]),attempt])))
+                attempt+=1
         used.add(person)
         support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
         for row in group:

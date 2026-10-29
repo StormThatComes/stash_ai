@@ -6,8 +6,9 @@ from .dependencies import version, supported
 
 
 def key(selected,config):
+    from .body_identity import policy
     return 'body-rebuild:'+digest([sorted((i['scan'],i['scene']) for i in selected),
-                                  plain(config.data)])
+                                  plain(config.data),policy(config)])
 
 
 def cached(db,selected,config):
