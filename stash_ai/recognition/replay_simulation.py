@@ -122,7 +122,9 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                     if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
                         raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
                     data = plain(settings.data)
-                    data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
+                    from .solver_execution import current as solver_execution
+                    runtime = solver_execution()
+                    data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=bool(runtime and runtime.profile))
                     settings = replace(settings, data=data)
                     if progress:
                         progress(name, 'start', None)
@@ -138,6 +140,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         if progress:progress(name,'complete',item)
                         continue
                     started = time.perf_counter()
+                    cpu_started = time.process_time()
                     active_stage = 'Prepare replay'
                     try:
                         with closing(_ram(settings)) as target:
@@ -171,6 +174,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
                                 exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
                                 raise
+                            rebuild_metrics = getattr(state, "last_rebuild_profile", None)
                             predictions = dict.fromkeys(observations)
                             predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
                                                if r[0] in observations)
@@ -191,6 +195,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         baseline = predictions
                     item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=time.perf_counter()-started,
                         versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                    if runtime and runtime.profile:
+                        item["performance"] = dict(cpu_seconds=time.process_time()-cpu_started, rebuild=rebuild_metrics)
                     if consume is not None:
                         item.update(consume(name, observations, retained, predictions))
                     if evidence is not None:

@@ -130,7 +130,9 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None):
+    from .solver_execution import current as execution_plan
+    runtime = execution_plan()
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside
     outside_limits = validate_outside(outside_limits)
     if type(maximum) is not int or maximum < 1:
@@ -152,7 +154,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials)),
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.document() if runtime else None)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
@@ -589,6 +591,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
                     attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
                     scheduling='targeted_then_feasibility_and_bidirectional_beam',
+                    execution=runtime.document() if runtime else None,
                     targeted=dict(requested=targeted_trials,budget=targeted.budget,
                         executed=sum(origins.get(n,{}).get('search_phase')=='targeted' for n in result['trials'])),
                     bidirectional=dict(enabled=bidirectional.enabled if bidirectional else False,

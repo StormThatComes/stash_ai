@@ -65,7 +65,9 @@ def solver_scope(function):
     @wraps(function)
     def wrapped(config, goals, *args, **kwargs):
         from .run_cache import scope
-        with scope(config), prepared(goals):
+        from .solver_execution import plan, scope as execution_scope
+        execution = plan(config, kwargs["execution"]) if kwargs.get("execution") is not None else None
+        with execution_scope(execution), scope(config), prepared(goals):
             return function(config, goals, *args, **kwargs)
     return wrapped
 
