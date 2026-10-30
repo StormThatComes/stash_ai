@@ -25,7 +25,7 @@ def execute(args,config,*,services=None):
     with close_database(_open_readonly(path)) as db:
         entries=plan(db,scope,model_namespace,config,getattr(args,'scene_id',()) or ())
         document=dict(format=1,kind='recognition_publication_sync',scope=scope,namespace=model_namespace,
-                      counts=inventory(db,scope,model_namespace),scenes=entries)
+                      counts=inventory(db,scope,model_namespace,config),scenes=entries)
     if not args.apply:
         print(json.dumps(document,indent=2,sort_keys=True));return 0
     from tqdm import tqdm

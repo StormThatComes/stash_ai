@@ -3,7 +3,7 @@ import json
 from .database import encoded
 from .identity_merges import canonical
 from .publication import (ensure_person,publish_person,operation_id,PendingRecognition,
-                          LINK_INPUT_CONTRACT,legacy_rejected_link)
+                          LINK_INPUT_CONTRACT,legacy_rejected_link,before_dispatch)
 from .stash import checked_id,checked_token,owns
 
 
@@ -100,7 +100,11 @@ def publish_people(database,client,report,scope,scene,targets,*,guard=None):
             identifiers=[_record(db,scope,scene,*entry,'pending') for entry in batch]
         from stash_ai.runtime.mutations import write
         try:
-            write(report,'recognition_link_batch',lambda:method(scene,[entry[1] for entry in batch]))
+            def dispatch():
+                with before_dispatch():
+                    if guard:guard()
+                return method(scene,[entry[1] for entry in batch])
+            write(report,'recognition_link_batch',dispatch)
         except BaseException as error:
             from .diagnostics import message
             from stash_ai.runtime.cleanup import cleanup

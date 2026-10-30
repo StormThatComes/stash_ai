@@ -67,14 +67,18 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
         counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
         try:
             from .publication_queue import current,acknowledge
-            from .publication_queue import snapshot
-            _,desired,_=snapshot(db,scope,namespace,scene,config)
-            if desired!=accepted:
+            from .publication_queue import snapshot,validate,body_policy
+            captured,desired,signature=snapshot(db,scope,namespace,scene,config)
+            if captured['scan']!=scan or desired!=accepted:
                 raise ValueError('Rebuilt recognition results disagree with current scene decisions.')
             queued=current(db,scope,namespace,scene)
             revision=queued['revision'] if queued and queued['scan']==scan else None
-            check=(lambda:guard(item)) if guard is not None else None
-            if check:check()
+            entry=dict(captured,people=desired,signature=signature,revision=revision,
+                       policy=matching_policy(config),body=body_policy(config))
+            def check():
+                validate(db,scope,namespace,entry,config=config)
+                if guard is not None:guard(item)
+            check()
             from .publication_batch import ensure_people,publish_people
             # Resolve all desired identities before unlinking old model profiles.
             with work('Prepare scene identities',len(accepted),unit='person') as prepared:
