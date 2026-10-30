@@ -53,6 +53,11 @@ Recognition defaults to CUDA. CPU installations use `models.device: cpu` in
 `facial_recognition.yml`, or the command's `--device cpu` override.
 See [facial recognition](docs/facial-recognition.md) for scope and configuration.
 
+For visual detector tuning, `python stash_ai.py recognition audit-detection
+--scene-id 123 --output-dir recognition_detection_audit/scene-123-run01` exports
+every VTT cue as a full-size PNG with face and pose landmarks, plus a JSON
+manifest, using the current recognition YAML.
+
 ## Quick start
 
 ```powershell

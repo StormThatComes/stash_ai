@@ -140,6 +140,14 @@ def parser():
     audit.add_argument('--face-config', type=Path, help='Recognition YAML used for detector and quality gates.')
     audit.add_argument('--device', choices=('cuda','cpu','auto'),
         help='YuNet detector execution device; recognizer weights are not loaded.')
+    detection = commands.add_parser('audit-detection', allow_abbrev=False,
+        help='Export every VTT cue of one scene as PNG with face and pose detections for visual tuning.')
+    detection.add_argument('--scene-id', type=stash_id, required=True)
+    detection.add_argument('--output-dir', type=Path, required=True,
+        help='New local directory for annotated full-cue PNGs and manifest.json.')
+    detection.add_argument('--face-config', type=Path, help='Current detector YAML; default facial_recognition.yml.')
+    detection.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
+    detection.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
     portraits = commands.add_parser('portraits', allow_abbrev=False,
         help="Refresh existing identities' portraits without scanning or rebuilding identities.",
         description='Refresh portraits from retained identity memberships and current portrait settings. '
@@ -239,6 +247,9 @@ def main(argv=None, *, services=None):
     if args.command == 'audit-alignment':
         from .alignment_audit import execute as audit
         return audit(args, config, services=services)
+    if args.command == 'audit-detection':
+        from .detection_audit import execute
+        return execute(args, config, services=services)
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
