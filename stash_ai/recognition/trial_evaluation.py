@@ -8,6 +8,17 @@ from .body_reports import members as body_members, report as body_report
 from .person_signal import coverage
 
 
+def settings_for_replay(settings, runtime):
+    from dataclasses import replace
+    from .config import plain
+    data = plain(settings.data)
+    data['execution'].update(rebuild_checkpoint_scenes=0,
+                             profile_rebuild=bool(runtime and runtime.profile))
+    if runtime and runtime.trials > 1:
+        data['execution']['rebuild_cohort_backend'] = 'threads'
+    return replace(settings, data=data)
+
+
 def evaluate(name, settings, *, seed, source, scope, namespace, installation, scans,
              observations, rebuild, inspect_trial=None, progress=None, copy_inputs=copy_history):
     active_stage = 'Prepare replay'

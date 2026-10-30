@@ -17,6 +17,15 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
         if result.command == 'report-merge':
+            for field in ('solver_cpus', 'solver_trials'):
+                value = getattr(result, field)
+                if value is not None and not 1 <= value <= 16:
+                    self.error('--' + field.replace('_', '-') + ' must be in 1..16.')
+            if result.solver_memory_gib is not None and result.solver_memory_gib < 1:
+                self.error('--solver-memory-gib must be positive.')
+            if not result.solve and (result.solver_cpus is not None or result.solver_trials != 1
+                    or result.solver_memory_gib is not None or result.profile_solver or result.solver_scheduling != 'batch'):
+                self.error('Solver execution options require --solve.')
             if result.feasibility_trials < 0:
                 self.error('--feasibility-trials must be nonnegative.')
             if result.targeted_trials < 0:
@@ -213,6 +222,11 @@ def parser():
             help='Optional maximum '+meaning+' outside goal observations, relative to baseline replay.')
     merge_report.add_argument('--max-new-outsider-observations', type=int,
         help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
+    merge_report.add_argument('--solver-cpus', type=int, help='Joint CPU budget, 1..16; enables bounded solver execution.')
+    merge_report.add_argument('--solver-trials', type=int, default=1, help='Maximum simultaneous trials (default: 1); limited by CPU/RAM admission.')
+    merge_report.add_argument('--solver-memory-gib', type=int, help='Total trial memory admission budget in GiB; not a hard RSS limit.')
+    merge_report.add_argument('--solver-scheduling', choices=('batch', 'async'), default='batch', help='Deterministic batches or completion-driven search; both support checkpoint resume.')
+    merge_report.add_argument('--profile-solver', action='store_true', help='Include per-trial CPU, SQL, cache and rebuild measurements.')
     merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
     merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')
     merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')

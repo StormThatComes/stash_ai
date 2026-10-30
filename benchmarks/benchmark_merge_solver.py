@@ -81,7 +81,7 @@ def measure(config, goals, maximum, **solver_options):
         cumulative += t['elapsed_seconds']
         rank = objective(t['goal_result'])
         best = max(best,rank) if best is not None else rank
-        history.append(dict(trial=name,completed=number+1,seconds=cumulative,best_objective=list(best),
+        history.append(dict(trial=name,completed=number+1,seconds=t.get('completed_wall_seconds',cumulative),best_objective=list(best),
             admissible=t['goal_result']['admissible'],fully_solved=t['goal_result']['fully_solved'],
             disjoint=t['goal_result']['disjoint']))
     return dict(seconds=elapsed,selected=result['selected_trial'],quality=result['status'],search=result['search'],

@@ -65,7 +65,7 @@ def replay(config, variants, **kwargs):
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
-            prepared_selection=None, trial_error=None):
+            prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -106,77 +106,100 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
             result['stop_reason'] = 'no_compatible_scans'
             return result
         baseline = None
+        wall_started = time.perf_counter()
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
         with (prepared_history(db, config, scope, ns, installation) if reuse_history else nullcontext(None)) as seed:
-            try:
-                if progress and not inputs['complete_scope']:
-                    progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
-                             'compatible complete scenes; excluded scenes will be listed in the report', None)
-                for name, settings in chain([('baseline', config)], stream):
-                    if name != 'baseline':
-                        if name in seen_names:
-                            raise ValueError('Duplicate simulation name.')
-                        seen_names.add(name)
-                    if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
-                        raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
-                    data = plain(settings.data)
-                    from .solver_execution import current as solver_execution
-                    runtime = solver_execution()
-                    data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=bool(runtime and runtime.profile))
-                    settings = replace(settings, data=data)
-                    if progress:
-                        progress(name, 'start', None)
-                    restored = restore_trial(name,settings) if restore_trial else None
-                    if restored is not None:
-                        item,restored_baseline = restored
-                        if baseline is None:baseline=restored_baseline
-                        if item.get('failed'):
-                            result.setdefault('failed_trials', {})[name] = item
-                            if progress:progress(name, 'failed', item)
+            from .solver_execution import current as solver_execution
+            from .solver_pool import Trials
+            runtime = solver_execution()
+            context = dict(seed_path=seed.execute('PRAGMA database_list').fetchone()[2],
+                installation=installation, scans=scans, observations=observations) if parallel_request else None
+            manager = Trials(runtime, parallel_request, context, journal, progress) if parallel_request else nullcontext(None)
+            with manager as pool:
+                yield_entries = pool.entries(stream) if pool else stream
+                result['execution'] = runtime.document() if runtime else None
+                try:
+                    if progress and not inputs['complete_scope']:
+                        progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
+                                 'compatible complete scenes; excluded scenes will be listed in the report', None)
+                    for name, settings in chain([('baseline', config)], yield_entries):
+                        if name != 'baseline':
+                            if name in seen_names:
+                                raise ValueError('Duplicate simulation name.')
+                            seen_names.add(name)
+                        if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
+                            raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
+                        from .trial_evaluation import settings_for_replay
+                        settings = settings_for_replay(settings, runtime)
+                        if progress and (not pool or name == 'baseline'):
+                            progress(name, 'start', None)
+                        restored = restore_trial(name,settings) if restore_trial else None
+                        if restored is not None:
+                            item,restored_baseline = restored
+                            if pool: pool.ready.pop(name, None)
+                            if baseline is None:baseline=restored_baseline
+                            if item.get('failed'):
+                                result.setdefault('failed_trials', {})[name] = item
+                                if progress:progress(name, 'failed', item)
+                                continue
+                            result['trials'][name]=item
+                            if progress:progress(name,'complete',item)
                             continue
-                        result['trials'][name]=item
-                        if progress:progress(name,'complete',item)
-                        continue
-                    started = time.perf_counter()
-                    cpu_started = time.process_time()
-                    active_stage = 'Prepare replay'
-                    try:
-                        from .trial_evaluation import evaluate
-                        evaluated = evaluate(name, settings, seed=seed, source=db, scope=scope,
-                            namespace=ns, installation=installation, scans=scans, observations=observations,
-                            rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
-                        predictions = evaluated['predictions']
-                        bodies, hybrid = evaluated['independent_person'], evaluated['hybrid']
-                        evidence, rebuild_metrics = evaluated['decision_evidence'], evaluated['rebuild_profile']
-                    except Exception as exc:
-                        failure = trial_error(name, settings, exc, getattr(exc, 'replay_stage', active_stage)) if trial_error else None
-                        if failure is None:
-                            raise
-                        failure.update(failed=True, elapsed_seconds=time.perf_counter()-started)
-                        result.setdefault('failed_trials', {})[name] = failure
-                        if record_trial:record_trial(name, settings, failure, inputs)
-                        if progress:progress(name, 'failed', failure)
-                        continue
-                    if baseline is None:
-                        baseline = predictions
-                    item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=time.perf_counter()-started,
-                        versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
-                    if runtime and runtime.profile:
-                        item["performance"] = dict(cpu_seconds=time.process_time()-cpu_started, rebuild=rebuild_metrics)
-                    if consume is not None:
-                        item.update(consume(name, observations, retained, predictions))
-                    if evidence is not None:
-                        item['decision_evidence'] = evidence
-                    result['trials'][name] = item
-                    if record_trial:record_trial(name,settings,item,inputs)
-                    if progress:
-                        progress(name, 'complete', item)
-            except KeyboardInterrupt:
-                if variant_stream is None:
-                    raise
-                result['interrupted'] = True
+                        started = time.perf_counter()
+                        cpu_started = time.process_time()
+                        active_stage = 'Prepare replay'
+                        try:
+                            if pool and name != 'baseline':
+                                evaluated = pool.ready.pop(name)
+                                if evaluated.get('failed'):
+                                    error = ValueError(evaluated['error'])
+                                    error.replay_stage = evaluated['stage']
+                                    raise error
+                                if parallel_accept:
+                                    parallel_accept(settings, evaluated)
+                            else:
+                                from .trial_evaluation import evaluate
+                                from .solver_execution import scope as execution_scope
+                                baseline_runtime = replace(runtime, trials=1, inner_workers=max(1, runtime.cpus-1)) if runtime and name == 'baseline' else runtime
+                                with execution_scope(baseline_runtime):
+                                    evaluated = evaluate(name, settings, seed=seed, source=db, scope=scope,
+                                        namespace=ns, installation=installation, scans=scans, observations=observations,
+                                        rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
+                            predictions = evaluated['predictions']
+                            bodies, hybrid = evaluated['independent_person'], evaluated['hybrid']
+                            evidence, rebuild_metrics = evaluated['decision_evidence'], evaluated['rebuild_profile']
+                        except Exception as exc:
+                            failure = trial_error(name, settings, exc, getattr(exc, 'replay_stage', active_stage)) if trial_error else None
+                            if failure is None:
+                                raise
+                            failure.update(failed=True, elapsed_seconds=time.perf_counter()-started)
+                            result.setdefault('failed_trials', {})[name] = failure
+                            if record_trial:record_trial(name, settings, failure, inputs)
+                            if progress:progress(name, 'failed', failure)
+                            continue
+                        if baseline is None:
+                            baseline = predictions
+                        item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
+                            versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                        if runtime and runtime.profile:
+                            item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started), rebuild=rebuild_metrics)
+                        if runtime:
+                            item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds') if k in evaluated}
+                        if consume is not None:
+                            item.update(consume(name, observations, retained, predictions))
+                        if evidence is not None:
+                            item['decision_evidence'] = evidence
+                        item['completed_wall_seconds'] = time.perf_counter()-wall_started
+                        result['trials'][name] = item
+                        if record_trial:record_trial(name,settings,item,inputs)
+                        if progress:
+                            progress(name, 'complete', item)
+                except KeyboardInterrupt:
+                    if variant_stream is None:
+                        raise
+                    result['interrupted'] = True
         result['history_preparations'] = 1 if reuse_history else len(result['trials'])
         return result
 

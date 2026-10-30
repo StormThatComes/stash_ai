@@ -256,10 +256,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             solver_feedback={k:v for k,v in latest_feedback.items() if k not in ('proposals','options','hybrid_proposals')},
             best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]),
             **transitions[name])
-    def inspect(target, settings):
-        from .solver_feedback import collect
-        result, fresh, measured, changes, updated = collect(target, settings, goals, feasibility,
-            query_feedback, initial_changes, excluded, bool(targeted.budget))
+    def adopt(settings, collected):
+        result, fresh, measured, changes, updated = collected
         latest_feedback.clear(); latest_feedback.update(fresh)
         hybrid.clear(); hybrid.update(measured)
         hybrid_changes[:] = changes
@@ -272,8 +270,26 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         options.clear(); options.update(bounded)
         latest_feedback['options'] = compact(settings, {}, updated, parents=parents)
         return result
+    def inspect(target, settings):
+        from .solver_feedback import collect
+        return adopt(settings, collect(target, settings, goals, feasibility,
+            query_feedback, initial_changes, excluded, bool(targeted.budget)))
+    def request(name, settings, context):
+        from .solver_trial import Request
+        from dataclasses import replace
+        from .config import plain
+        return Request(name, replace(settings, data=plain(settings.data)),
+            context['seed_path'], goals['scope'], goals['namespace'], context['installation'],
+            context['scans'], context['observations'], goals, feasibility, initial_changes, excluded,
+            bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime)
+    def accept(settings, evaluated):
+        adopt(settings, evaluated['feedback'])
+        query_feedback.visits = dict(latest_feedback['query'].get('sampling_visits', {}))
+        query_feedback.priorities = dict(latest_feedback.get('targets', {}).get('priorities', {}))
+    retire = lambda name: None
+    pending_search = {}
     def stream():
-        nonlocal search, bidirectional, stop_reason
+        nonlocal search, bidirectional, stop_reason, retire
         trials, attempts, probes_attempted = 1, 0, 0
         previous_name, previous_changes = 'baseline', {}
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
@@ -320,6 +336,29 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         alternate_streak = 0
         def changes_for(name):
             return {c['parameter']:c['proposed'] for c in patches.get(name,{}).get('changes',())}
+        def completed(name):
+            nonlocal normal_exhausted, alternate_streak
+            if name not in pending_search:
+                return
+            normalized, family, phase, parent, strategy = pending_search.pop(name)
+            if name in failures:
+                search.rejected(family, strategy)
+                return
+            alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
+            search.completed(phase, parent=parent)
+            improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
+                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase)
+            if improved:
+                normal_exhausted = False
+                search.stop_reason = None
+            bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
+            # Keep detailed hints only for parents that can still be expanded.
+            for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
+                        {'baseline'} - {bidirectional.safe['name'] if bidirectional.safe else 'baseline'} -
+                        set(sorted(ranks,key=ranking,reverse=True)[:2]) - set(pending_search) -
+                        {v[3] for v in pending_search.values()}):
+                del feedback[old]
+        retire = completed
         while trials < maximum and attempts < maximum * 100:
             reserve = allowance(maximum, changes_for(best),
                 feedback[best]['provenance']['active_parameters'])
@@ -408,29 +447,14 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
             if phase == 'targeted':
                 origins[name]['search_target'] = {k:v for k,v in target.items() if k != 'patch'}
+            pending_search[name] = normalized, family, phase, parent, strategy
+            if polishing is not None:
+                polishing.completed(phase)
             yield name, variant
             previous_name, previous_changes = name, normalized
             trials += 1
             probes_attempted += int(phase == 'feasibility')
             targeted.executed += int(phase == 'targeted')
-            if name in failures:
-                search.rejected(family, strategy)
-                continue
-            alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
-            if polishing is not None:
-                polishing.completed(phase)
-            search.completed(phase, parent=parent)
-            improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
-                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase)
-            if improved:
-                normal_exhausted = False
-                search.stop_reason = None
-            bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
-            # Keep detailed hints only for parents that can still be expanded.
-            for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
-                        {'baseline'} - {bidirectional.safe['name'] if bidirectional.safe else 'baseline'} -
-                        set(sorted(ranks,key=ranking,reverse=True)[:2])):
-                del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
     def restore(name,settings):
@@ -473,7 +497,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if winner_text is not None:written_winner=best
     def trial_progress(name, stage, item):
         nonlocal probe_state
-        if stage == 'complete':durations[name]=item['elapsed_seconds']
+        if stage == 'complete':
+            durations[name]=item['elapsed_seconds']
+            retire(name)
+        elif stage == 'failed':
+            retire(name)
         if stage == 'start':
             probe_state = (deepcopy(dict(options=options, hybrid=hybrid, hybrid_changes=hybrid_changes,
                 feedback=latest_feedback, visits=query_feedback.visits, priorities=query_feedback.priorities))
@@ -482,10 +510,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
     def trial_error(name, settings, exc, stage):
-        if origins.get(name, {}).get('search_phase') != 'feasibility' or not resource_limit(exc):
+        if not resource_limit(exc) or (not runtime and origins.get(name, {}).get('search_phase') != 'feasibility'):
             return None
         query_feedback.reset()
-        if probe_state is not None:
+        if probe_state is not None and not (runtime and runtime.trials > 1):
             options.clear(); options.update(probe_state['options'])
             hybrid.clear(); hybrid.update(probe_state['hybrid'])
             hybrid_changes[:] = probe_state['hybrid_changes']
@@ -499,7 +527,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
             inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
-            restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error)
+            restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error,
+            parallel_request=request if runtime and runtime.trials > 1 else None,
+            parallel_accept=accept, journal=journal)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     robustness.clear()
     for name in result['trials']:
