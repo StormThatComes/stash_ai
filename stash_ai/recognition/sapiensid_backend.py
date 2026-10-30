@@ -109,13 +109,14 @@ class SapiensIDFaces(YuNetDetector):
         if get_ident() != self.owner:
             raise RuntimeError('SapiensID inference must remain on its owning thread.')
 
-    def detect(self, image, faces=None):
+    def detect(self, image, faces=None, *, force_pose=False):
+        """Detect faces/people; visual audits can inspect pose even without faces."""
         self._owner()
         if faces is None and not self.has_detector:
             raise ValueError('Supplemental collection requires retained face detections.')
         faces = super().detect(image) if faces is None else faces
         people = []
-        if faces or self.config.data['sapiensid']['collection']['enabled']:
+        if force_pose or faces or self.config.data['sapiensid']['collection']['enabled']:
             settings = self.config.data['sapiensid']
             # Explicitly select the one-to-many head: iou remains effective on
             # YOLO26 instead of being silently ignored by NMS-free inference.

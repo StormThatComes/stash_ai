@@ -41,3 +41,4 @@ Thumbs.db
 
 # Local sensitive face alignment audits
 recognition_alignment_audit/
+recognition_detection_audit/
