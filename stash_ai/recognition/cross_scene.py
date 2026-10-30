@@ -48,17 +48,18 @@ def _rank_reference(samples, references, match, cohesion):
     by_person = {}
     for query in samples:
         for reference, mean, minimum in comparisons(
-                references, query, float('-inf'), cohesion):
-            if minimum >= cohesion:
-                by_person.setdefault(reference.identifier, []).append(
-                    (mean, minimum, reference))
+                references, query, float('-inf'), float('-inf')):
+            by_person.setdefault(reference.identifier, []).append(
+                (mean, minimum, reference))
     ranked=[]
     for _, evidence in by_person.items():
         if len(evidence)!=len(samples):
             continue
         mean=sum(item[0] for item in evidence)/len(evidence)
-        if mean >= match-0.15:
-            ranked.append((mean,evidence[0][2].identifier,evidence[0][2]))
+        # Qualification and competition differ: a weak edge may prohibit
+        # attachment without making a high-mean rival disappear.
+        ranked.append((mean,evidence[0][2].identifier,evidence[0][2],
+                       all(item[1]>=cohesion for item in evidence)))
     ranked.sort(key=lambda v:(-v[0],v[1]))
     return ranked
 
@@ -134,7 +135,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                   unit='group') as tracked:
         for group in tracked:
             ranked = _rank_reference(group.samples, references, match, cohesion)
-            if not ranked or ranked[0][0] < match:
+            if not ranked or ranked[0][0] < match or not ranked[0][3]:
                 continue
             if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < margin:
                 continue
