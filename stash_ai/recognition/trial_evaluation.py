@@ -50,8 +50,8 @@ def evaluate(name, settings, *, seed, source, scope, namespace, installation, sc
             # The last printed stage can lag behind. Preserve the
             # original exception and expose locations, never locals.
             from pathlib import Path
-            from traceback import extract_tb
-            frames = extract_tb(exc.__traceback__, limit=-5)
+            from traceback import extract_tb, extract_stack
+            frames = extract_stack(limit=2)[:-1] + extract_tb(exc.__traceback__, limit=-4)
             location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
             exc.replay_stage = active_stage
             exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
