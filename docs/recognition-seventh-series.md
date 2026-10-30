@@ -96,3 +96,18 @@ including interruption. For a live checkpoint use
 `solver_journal_events.load_document(path)` to fold newer events. A torn final
 append is discarded on resume; corrupt complete events are rejected. Winner
 YAML still updates atomically after its recovery record is durable.
+
+## PR6 — scan and inference (17, 21, 22, 23)
+
+Scan checkpoint accounting adds the current body buffer once. Inference models
+are flushed and closed before CPU identity rebuilding. ViTPose configurations
+reuse the pinned and verified YOLO weights with only the Detect head branches;
+pose-only modules are removed after loading. ViTPose crops can be batched across
+consecutive VTT cues, with a queue capped by the scan byte budget. Results retain
+frame/person order, including empty frames, and decoded tensors cross to CPU
+once per batch. Queued image copies are closed on success, cancellation and errors.
+
+Validation: 70 existing scan/collection/run/ViTPose tests; three new tests exercise
+exact Detect/Pose box parity on real Torch modules, cross-frame ViTPose mapping,
+and durable scan checkpoints after queued cues. No GPU throughput claim is made;
+production GPU benchmarking remains dependent on the deployment hardware.

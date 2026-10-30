@@ -79,6 +79,7 @@ class SapiensIDFaces(YuNetDetector):
     def __init__(self, config, paths, *, load_identity=True, load_detector=True):
         self.encoder = self.pose = self.pose_refiner = None
         self._person_frame = None
+        self._prepared_frames = {}
         self.owner = get_ident()
         try:
             self.config=config
@@ -104,12 +105,18 @@ class SapiensIDFaces(YuNetDetector):
         if get_ident() != self.owner:
             raise RuntimeError('SapiensID inference must remain on its owning thread.')
 
-    def detect(self, image, faces=None, *, force_pose=False):
+    def detect(self, image, faces=None, *, force_pose=False, _defer=None):
         """Detect faces/people; visual audits can inspect pose even without faces."""
         self._owner()
         if faces is None and not self.has_detector:
             raise ValueError('Supplemental collection requires retained face detections.')
         faces = super().detect(image) if faces is None else faces
+        prepared = self._prepared_frames.pop(id(image), None)
+        if prepared is not None:
+            original, expected_faces, people = prepared
+            if original is not image or [tuple(f.row) for f in faces] != [tuple(f.row) for f in expected_faces]:
+                raise ValueError('Prepared pose frame changed before consumption.')
+            return self._activate(image, faces, people)
         people = []
         if force_pose or faces or self.config.data['sapiensid']['collection']['enabled']:
             settings = self.config.data['sapiensid']
@@ -142,6 +149,9 @@ class SapiensIDFaces(YuNetDetector):
                 selected.append(index)
                 bounds.append([left, top, right, bottom])
             if self.pose_refiner is not None:
+                if _defer is not None:
+                    _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))
+                    return faces
                 points, confidences = self.pose_refiner.predict(image, bounds)
             else:
                 points = result.keypoints.xy.detach().cpu().numpy()
@@ -151,16 +161,49 @@ class SapiensIDFaces(YuNetDetector):
                         or np.any((confidences < 0) | (confidences > 1))):
                     raise ValueError('SapiensID pose detector returned malformed COCO17 geometry.')
                 points, confidences = points[selected], confidences[selected]
-            if (points.shape != (len(bounds), 17, 2) or confidences.shape != (len(bounds), 17)
-                    or any(not np.isfinite(a).all() for a in (points, confidences))
-                    or np.any((confidences < 0) | (confidences > 1))):
-                raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
-            for box, index, kps, confidence in zip(bounds, selected, points, confidences):
-                left, top, right, bottom = box
-                usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
-                usable &= (kps[:,0] >= left) & (kps[:,0] < right) & (kps[:,1] >= top) & (kps[:,1] < bottom)
-                kps[~usable] = -1
-                people.append({'bounds': box, 'keypoints': kps.tolist(), 'score': float(scores[index])})
+            people = self._people(bounds, [float(scores[i]) for i in selected], points, confidences)
+        if _defer is not None:
+            _defer.append((image, faces, [], []))
+            return faces
+        return self._activate(image, faces, people)
+
+    def _people(self, bounds, scores, points, confidences):
+        import numpy as np
+        if (points.shape != (len(bounds),17,2) or confidences.shape != (len(bounds),17)
+                or any(not np.isfinite(a).all() for a in (points,confidences))
+                or np.any((confidences<0)|(confidences>1))):
+            raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
+        people = []
+        for box, score, raw, confidence in zip(bounds, scores, points, confidences):
+            left, top, right, bottom = box
+            kps = raw.copy()
+            usable = (confidence > self.config.data['sapiensid']['pose']['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
+            usable &= (kps[:,0]>=left)&(kps[:,0]<right)&(kps[:,1]>=top)&(kps[:,1]<bottom)
+            kps[~usable] = -1
+            people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score)))
+        return people
+
+    def detect_many(self, frames):
+        self._owner()
+        if self._prepared_frames:
+            raise RuntimeError('Consume prepared pose frames before preparing another batch.')
+        if self.pose_refiner is None or not callable(getattr(self.pose_refiner, 'predict_many', None)):
+            for image, faces in frames:
+                self.detect(image, faces=faces)
+                self._prepared_frames[id(image)] = image, faces, self.frame_people
+            return
+        deferred = []
+        for image, faces in frames:
+            self.detect(image, faces=faces, _defer=deferred)
+        predictions = self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
+        if len(predictions) != len(deferred):
+            raise ValueError('ViTPose returned an invalid frame count.')
+        prepared = {}
+        for (image,faces,bounds,scores), (points,confidence) in zip(deferred,predictions):
+            prepared[id(image)] = image, faces, self._people(bounds,scores,points,confidence)
+        self._prepared_frames = prepared
+
+    def _activate(self, image, faces, people):
         matches = associate(faces, people)
         self.frame_people, self.face_matches = people, matches
         self._person_frame = image, {tuple(face.row): people[index] if index is not None else None
@@ -244,6 +287,7 @@ class SapiensIDFaces(YuNetDetector):
     def close(self):
         self._owner()
         self._person_frame = None
+        self._prepared_frames.clear()
         self.pose = None
         self.pose_refiner = None
         try:

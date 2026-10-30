@@ -258,6 +258,8 @@ def _execute(args, config, *, services=None):
                             inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                             database.progress(run, 'run', dict(counts))
                     inputs.close()
+                    person_collector.flush()
+                    person_collector.close()
                     if selected:
                         last_scene = selected[-1]['scene']
                         def reference_progress(**values):

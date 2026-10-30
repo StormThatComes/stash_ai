@@ -14,8 +14,16 @@ class PersonCollector:
         self.model = None
         self.pipeline = None
         self.deferred = None
+        self.pose_frames = []
+        self.pose_bytes = 0
+
+    def _close_pose_frames(self):
+        frames, self.pose_frames = self.pose_frames, []
+        self.pose_bytes = 0
+        for _, _, _, image, _, _ in frames:image.close()
 
     def close(self):
+        self._close_pose_frames()
         resources = [('stop person preparation', self.pipeline), ('close person model', self.model)]
         self.pipeline = self.model = None
         cleanup([(name, resource.close) for name, resource in resources if resource is not None])
@@ -59,6 +67,7 @@ class PersonCollector:
             self.model=self.factory(self.config,self.paths)
 
     def abort(self):
+        self._close_pose_frames()
         self.deferred=None
         # Failed inference may leave CUDA/session state unusable. A later scene
         # must acquire a fresh owner, even if closing this owner also fails.
@@ -68,6 +77,7 @@ class PersonCollector:
 
     def flush(self):
         try:
+            self._flush_pose()
             if self.pipeline is not None:self.pipeline.flush()
         except BaseException:
             self.abort();raise
@@ -80,13 +90,38 @@ class PersonCollector:
     def collect_records(self,db,scan,index,image,rows,*,seconds=0.):
         """Prepare fresh faces without rereading or committing them per cue."""
         if self.deferred is None:self.deferred=[]
-        try:return self._collect_frame(db,scan,index,image,rows=rows,seconds=seconds)
+        try:
+            if (self.config.data['sapiensid']['enabled'] and
+                    self.config.data['sapiensid']['pose'].get('backend') == 'vitpose_plus_large'):
+                self._load()
+                if callable(getattr(self.model, 'detect_many', None)):
+                    size = image.width*image.height*3+4096
+                    limit = self.config.data['execution']['scan_queue_bytes']//4
+                    if self.pose_frames and self.pose_bytes+size > limit:self._flush_pose()
+                    if size <= limit:
+                        self.pose_frames.append((db, scan, index, image.copy(), rows, seconds))
+                        self.pose_bytes += size
+                        if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:
+                            self._flush_pose()
+                        return
+            return self._collect_frame(db,scan,index,image,rows=rows,seconds=seconds)
         except BaseException:
             self.abort();raise
 
+    def _flush_pose(self):
+        if not self.pose_frames:return
+        try:
+            frames = [(image, [checked_detection(json.loads(r['geometry'])) for r in rows])
+                      for _, _, _, image, rows, _ in self.pose_frames]
+            self.model.detect_many(frames)
+            for db, scan, index, image, rows, seconds in self.pose_frames:
+                self._collect_frame(db, scan, index, image, rows=rows, seconds=seconds)
+        finally:
+            self._close_pose_frames()
+
     def pending_bytes(self):
         # Completed inference waits for the same atomic face/body checkpoint.
-        return sum(len(crop or b'')+(getattr(vector,'nbytes',0))+len(str(metadata))+256
+        return self.pose_bytes+sum(len(crop or b'')+(getattr(vector,'nbytes',0))+len(str(metadata))+256
                    for _,metadata,vector,crop in (self.deferred or ()))
 
     def take_records(self):
