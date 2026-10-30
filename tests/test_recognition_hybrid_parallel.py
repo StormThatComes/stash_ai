@@ -43,3 +43,18 @@ def test_only_changed_endpoint_proofs_recompute_but_rivals_remain_live(monkeypat
         bank[0]=replace(bank[0],guard_missing=('lost-original',))
         changed=plan(None,config,bank)
         assert len(calls)==count+3 and changed!=first
+
+
+def test_parallel_nomination_tiles_preserve_all_rivals_and_cache(monkeypatch):
+    from stash_ai.recognition.compute import compute_scope
+    from stash_ai.recognition.run_cache import scope
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus', lambda: 16)
+    config = SimpleNamespace(data=defaults())
+    config.data['execution']['rebuild_workers'] = 4
+    bank = [identity(str(i), i*.037) for i in range(145)]
+    expected = list(Lookup(bank, 10**7).pairs(incident={'1', '99'}, face_floor=.85))
+    with scope(config), compute_scope(config) as pool:
+        lookup = Lookup(bank, 10**7)
+        assert list(lookup.pairs(incident={'1', '99'}, face_floor=.85)) == expected
+        assert list(lookup.pairs(incident={'1', '99'}, face_floor=.85)) == expected
+        assert pool.records['hybrid_nomination']['computed'] > 2

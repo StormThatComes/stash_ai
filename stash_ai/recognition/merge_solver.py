@@ -8,13 +8,15 @@ from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
     interleave as _interleave, spread, BeamSearch, refinement, restart_probes, cadence, BASELINE_WARMUP, PREFIX, PERSON_PREFIX, GATES)
 from .merge_goal_index import solver_scope
+from .parallel_numeric import diagnostic_scope
 
 
+@diagnostic_scope
 def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goals=None):
     from .clustering import _groups
     from .scanning import scan_identity
     from .reference_compatibility import fallback_sql
-    from .merge_solver_measurements import reference_stats
+    from .merge_solver_measurements import measured_pairs
     from .resource_plan import plan
     ns = goals['namespace']
     groups = _groups(db, goals['scope'], ns, config.data['clustering'],
@@ -26,9 +28,9 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     for g in goals['groups']:
         for m in g['members']:owners.setdefault(m['identity_id'], set()).add(g['index'])
     face_pairs = {}
-    for a, b in combinations(selected, 2):
-        minimum, mean, maximum, (i, j) = reference_stats(a.samples, b.samples,
-            max_bytes=min(4194304, plan(config).working))
+    for a, b, values in measured_pairs(combinations(selected, 2),
+            max_bytes=min(4194304, plan(config).working)):
+        minimum, mean, maximum, (i, j) = values
         if proofs is not None:
             proofs.append(dict(left=a.identifier, right=b.identifier,
                 minimum=minimum, mean=mean, maximum=maximum,

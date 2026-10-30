@@ -34,27 +34,30 @@ class Lookup:
         for index,item in enumerate(identities):
             self.faces[index]=item.faces.mean(axis=0,dtype='float64') if len(item.faces) else 0
             self.persons[index]=item.persons.mean(axis=0,dtype='float64') if len(item.persons) else 0
+        self.faces.flags.writeable=self.persons.flags.writeable=False
 
     def pairs(self, *, face_floor=None, person_floor=None, incident=None):
         count=len(self.identities)
         active=None if incident is None else np.array([i.person in incident for i in self.identities])
-        for start in range(0,count,64):
-            for other in range(start,count,64):
-                if active is not None and not (active[start:start+64].any() or active[other:other+64].any()):continue
-                from .run_cache import products
-                faces=products(self.faces[start:start+64],self.faces[other:other+64])
-                persons=products(self.persons[start:start+64],self.persons[other:other+64])
-                rows=np.arange(start,start+len(faces))[:,None]
-                columns=np.arange(other,other+faces.shape[1])[None,:]
-                mask=rows<columns
-                if active is not None:mask &= active[rows] | active[columns]
-                if face_floor is not None or person_floor is not None:
-                    nominated=np.zeros_like(mask)
-                    if face_floor is not None:nominated |= faces+1e-6>=face_floor
-                    if person_floor is not None:nominated |= persons+1e-6>=person_floor
-                    mask &= nominated
-                for i,j in zip(*np.nonzero(mask)):
-                    left,right=self.identities[start+i],self.identities[other+j]
-                    yield (left.person,right.person,
-                        float(faces[i,j]) if len(left.faces) and len(right.faces) else None,
-                        float(persons[i,j]) if len(left.persons) and len(right.persons) else None)
+        from .parallel_numeric import matrix_tiles
+        def tiles():
+            for start in range(0,count,64):
+                for other in range(start,count,64):
+                    if active is not None and not (active[start:start+64].any() or active[other:other+64].any()):continue
+                    yield (start,other), ((self.faces[start:start+64],self.faces[other:other+64]),
+                                          (self.persons[start:start+64],self.persons[other:other+64]))
+        for (start,other),(faces,persons) in matrix_tiles(tiles(),kind='hybrid_nomination'):
+            rows=np.arange(start,start+len(faces))[:,None]
+            columns=np.arange(other,other+faces.shape[1])[None,:]
+            mask=rows<columns
+            if active is not None:mask &= active[rows] | active[columns]
+            if face_floor is not None or person_floor is not None:
+                nominated=np.zeros_like(mask)
+                if face_floor is not None:nominated |= faces+1e-6>=face_floor
+                if person_floor is not None:nominated |= persons+1e-6>=person_floor
+                mask &= nominated
+            for i,j in zip(*np.nonzero(mask)):
+                left,right=self.identities[start+i],self.identities[other+j]
+                yield (left.person,right.person,
+                    float(faces[i,j]) if len(left.faces) and len(right.faces) else None,
+                    float(persons[i,j]) if len(left.persons) and len(right.persons) else None)

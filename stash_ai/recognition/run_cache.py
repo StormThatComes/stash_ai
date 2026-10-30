@@ -221,16 +221,40 @@ def packed(bank):
     return result
 
 
+def product_input(left, right):
+    """Coordinator-only cache lookup; return the key and optional frozen tile."""
+    cache = current()
+    from .solver_shared import current as shared_current, key as shared_key
+    shared = shared_current()
+    signature = shared_key('hybrid-products-v1', (left, right)) if shared is not None else None
+    key = None
+    found = MISSING
+    if cache is not None:
+        key = ('matrix', 'hybrid-products', left.dtype.str, right.dtype.str,
+               left.shape, right.shape, left.tobytes(), right.tobytes())
+        found = cache.get(key)
+    if found is MISSING and shared is not None:
+        value = shared.get(signature)
+        if value is not None:
+            found = value
+    return (key, signature), None if found is MISSING else found
+
+
+def product_output(identity, value):
+    """Publish pure worker output under its exact input content identity."""
+    from .solver_shared import current as shared_current
+    key, signature = identity
+    shared = shared_current()
+    if shared is not None:
+        value = shared.put(signature, value)
+    value.flags.writeable = False
+    cache = current()
+    if cache is not None and key is not None:
+        cache.put(key, value, len(key[-2])+len(key[-1])+value.nbytes)
+    return value
+
+
 def products(left,right):
     """Reuse unchanged graph tiles while all candidates/rivals stay live."""
-    cache=current()
-    if cache is None:return left @ right.T
-    a,b=left.tobytes(),right.tobytes()
-    key=('matrix','hybrid-products',left.dtype.str,right.dtype.str,left.shape,right.shape,a,b)
-    result=cache.get(key)
-    if result is MISSING:
-        from .solver_shared import numerical
-        result=numerical('hybrid-products-v1', (left, right), lambda: left @ right.T)
-        result.flags.writeable=False
-        cache.put(key,result,len(a)+len(b)+result.nbytes)
-    return result
+    key, found = product_input(left, right)
+    return found if found is not None else product_output(key, left @ right.T)

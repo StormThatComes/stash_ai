@@ -7,6 +7,9 @@ from .merge_solver_hybrid import public
 from .merge_solver_targets import deficits
 from .merge_solver_constraints import component_proposals
 
+from .parallel_numeric import diagnostic_scope
+
+@diagnostic_scope
 def collect(target, settings, goals, feasibility, query_feedback, initial_changes, excluded, targeted):
     from .merge_solver import measured_options, rebuilt_goals
     from .merge_solver_feedback import pair_separation, quality_feedback, face_fallbacks

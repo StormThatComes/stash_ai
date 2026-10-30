@@ -48,3 +48,10 @@ rows. Shared files contain no executable pickle and never cache merge decisions.
 The directory outlives workers and is removed after their shutdown, including on
 interruption. With sufficient inner CPU budget the next scene is prefetched on an
 isolated read-only connection; its CPU slot is deducted from numerical workers.
+
+Face diagnostics use the same CPU allocation as the rebuild. Complete reference
+banks are measured concurrently, preserving float64 tile order, weakest-witness
+tie breaking and coordinator-owned caches. Hybrid nomination multiplies bounded
+centroid tiles concurrently; every incident rival remains eligible. A batch
+retires completely before exposing its results, so consumers can safely request
+exact proofs from the same pool. Oversized work uses the original serial path.

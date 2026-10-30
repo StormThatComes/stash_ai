@@ -48,3 +48,31 @@ def reference_stats(left, right, *, max_bytes=4194304):
     if cache is not None and key is not None:
         cache.put(key, result, sum(len(v)+128 for v in a+b)+256)
     return result
+
+
+def _measure(payload):
+    left, right, max_bytes, cached = payload
+    return cached if cached is not None else reference_stats(left, right, max_bytes=max_bytes)
+
+
+def measured_pairs(pairs, *, max_bytes=4194304):
+    """Parallel complete face banks; only the coordinator reads/writes caches."""
+    from .parallel_numeric import map_bounded
+    from .run_cache import current, immutable_samples, MISSING
+    cache = current()
+    def prepared():
+        for left, right in pairs:
+            a, b = immutable_samples(left.samples), immutable_samples(right.samples)
+            key = ('solver-face-stats', max_bytes, a, b) if a is not None and b is not None else None
+            found = cache.get(key) if cache is not None and key is not None else MISSING
+            size = sum(v.nbytes+128 for v in (*left.samples, *right.samples)) + max_bytes + 4096
+            yield left, right, key, None if found is MISSING else found, size
+    def payload(item):
+        a, b, _, cached, _ = item
+        return tuple(a.samples), tuple(b.samples), max_bytes, cached
+    for item, result in map_bounded(_measure, prepared(), cost=lambda item: item[4],
+                                    payload=payload, kind='face_measurements'):
+        left, right, key, cached, _ = item
+        if cached is None and cache is not None and key is not None:
+            cache.put(key, result, sum(len(v)+128 for v in key[2]+key[3])+256)
+        yield left, right, result
