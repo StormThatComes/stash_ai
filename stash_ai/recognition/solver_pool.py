@@ -36,6 +36,11 @@ class Trials(AbstractContextManager):
         self.event = multiprocessing.get_context('spawn').Event()
         self.started = time.monotonic()
         self.peak = 0
+        from pathlib import Path
+        from .solver_shared import Arrays
+        self.shared_directory = str(Path(context['seed_path']).parent/'numerical')
+        Arrays.prepare(self.shared_directory)
+        self.shared_bytes = min(execution.memory_bytes // 16, 1024**3)
 
     def __enter__(self):
         return self
@@ -61,7 +66,10 @@ class Trials(AbstractContextManager):
                 self.executor = ProcessPoolExecutor(max_workers=self.execution.trials,
                     mp_context=multiprocessing.get_context('spawn'), initializer=initialize,
                     initargs=(self.event,))
-            future = self.executor.submit(work, self.factory(name, settings, self.context))
+            from dataclasses import replace
+            request = replace(self.factory(name, settings, self.context),
+                shared_directory=self.shared_directory, shared_bytes=self.shared_bytes)
+            future = self.executor.submit(work, request)
         self.pending[name] = settings, future
         self.peak = max(self.peak, len(self.pending))
         if self.journal:

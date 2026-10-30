@@ -214,7 +214,8 @@ def packed(bank):
     key=('packed',bank.dtype.str,bank.shape,content)
     result=cache.get(key)
     if result is MISSING:
-        result=np.array(bank,dtype='float64',copy=True,order='C')
+        from .solver_shared import numerical
+        result=numerical('packed-f64-v1', (bank,), lambda: np.array(bank,dtype='float64',copy=True,order='C'))
         result.flags.writeable=False
         cache.put(key,result,len(content)+result.nbytes+256)
     return result
@@ -228,7 +229,8 @@ def products(left,right):
     key=('matrix','hybrid-products',left.dtype.str,right.dtype.str,left.shape,right.shape,a,b)
     result=cache.get(key)
     if result is MISSING:
-        result=left @ right.T
+        from .solver_shared import numerical
+        result=numerical('hybrid-products-v1', (left, right), lambda: left @ right.T)
         result.flags.writeable=False
         cache.put(key,result,len(a)+len(b)+result.nbytes)
     return result
