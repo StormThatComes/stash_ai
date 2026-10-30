@@ -196,7 +196,7 @@ def test_parallel_cli_keeps_json_clean_and_reports_ready_and_completion(tmp_path
     from stash_ai.recognition.cli import main
     from tests.test_recognition_merge_trial_progress import arguments
     config, goals = fixture(tmp_path/'input', 'disjoint')
-    argv = arguments(config, goals, tmp_path, style) + ['--solver-cpus', '4', '--solver-trials', '2']
+    argv = arguments(config, goals, tmp_path, style) + ['--solver-cpus', '4', '--solver-trials', '2', '--solver-memory-gib', '128']
     assert main(argv) == 0
     captured = capsys.readouterr()
     result = json.loads(captured.out)
