@@ -12,7 +12,7 @@ CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
 
 def input_contract(config):
-    if config.data['sapiensid']['pose']['backend'] == 'vitpose_plus_large':
+    if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         return 'sapiensid-v1-vitpose-plus-large-coco17-face-anchor-square384-v1'
     checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
     if checksum == LEGACY_POSE_SHA256:
@@ -32,7 +32,7 @@ def identity_contract(config):
             'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
             'person_nms_threshold': settings['pose']['nms_threshold'],
             'max_people_per_frame': settings['pose']['max_people_per_frame']}
-    if settings['pose']['backend'] == 'vitpose_plus_large':
+    if settings['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract
         result['pose_refiner'] = vitpose_contract()
     return result
@@ -92,7 +92,7 @@ class SapiensIDFaces(YuNetDetector):
                 self.encoder = load_encoder(config)
             self.device = str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
             self.pose = load_pose(config)
-            if config.data['sapiensid']['pose']['backend'] == 'vitpose_plus_large':
+            if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
                 from .vitpose_pose import load
                 self.pose_refiner = load(config, self.device)
             self.provenance['recognizer'] = identity_contract(config)

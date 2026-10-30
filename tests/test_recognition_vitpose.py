@@ -47,6 +47,17 @@ def test_old_yaml_and_yolo_contract_are_unchanged(tmp_path):
     assert contract(config) == digest(before)
 
 
+def test_historical_yolo_snapshot_without_new_keys_keeps_its_fingerprint():
+    from stash_ai.recognition.body_observations import contract as body_contract
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    data = defaults()
+    config = SimpleNamespace(data=data)
+    expected = contract(config), body_contract(config), identity_contract(config)
+    for name in ('backend', 'batch_size', 'vitpose_directory'):
+        data['sapiensid']['pose'].pop(name)
+    assert (contract(config), body_contract(config), identity_contract(config)) == expected
+
+
 def test_backend_and_model_changes_separate_evidence_but_paths_and_batches_do_not(monkeypatch):
     from stash_ai.recognition.body_observations import contract as body_contract
     from stash_ai.recognition.sapiensid_backend import identity_contract, input_contract

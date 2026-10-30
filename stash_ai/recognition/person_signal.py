@@ -128,7 +128,8 @@ def contract(config,*,legacy_boundaries=False):
               if k not in ('path','backend','vitpose_directory','batch_size')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
         evidence['pose_inference'] = POSE_INFERENCE
-    if s['pose']['backend'] == 'vitpose_plus_large':
+    # Historical run snapshots predate this selector and always used YOLO.
+    if s['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract
         evidence['pose_refiner'] = vitpose_contract()
     if variant=='wb4m' and model['sha256']==WB4M_SHA256:
