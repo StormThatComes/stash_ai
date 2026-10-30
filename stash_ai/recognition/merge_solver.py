@@ -257,61 +257,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]),
             **transitions[name])
     def inspect(target, settings):
-        from .database import encoded
-        ids = target_ids | feasibility.addresses
-        result = latest_decisions(target, ids)
-        membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
-            'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
-        from .body_reports import members as body_members
-        membership.update((k,v) for k,v in body_members(target,settings).items() if k in ids)
-        targets = deficits(goals, membership, membership)
-        query_feedback.priorities = targets['priorities']
-        current_goals = rebuilt_goals(target, goals)
-        hybrid.clear()
-        updated = measured_options(target, settings, current_goals, hybrid=hybrid,
-                                   frozen_goals=goals if targeted.budget else None)
-        hybrid_changes[:] = list({digest(p): p for p in hybrid['proposals'] + list(initial_changes)}.values())
-        queries = query_feedback.finish(settings)
-        separation = pair_separation(settings, hybrid)
-        quality = quality_feedback(target, settings, goals,
-            priorities=targets['priorities'] if goals.get('goal_policy', {}).get('name') == 'identity' else None)
-        if not queries['positive_witnesses']:
-            queries['face_routes'] = []
-            queries['face_proposals'].extend(face_fallbacks(target, settings, goals, targets,
-                evidence=queries['face_routes'] if targeted.budget else None))
-        separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
-        directed = list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
-        # Clear simultaneous query and reference blockers under one configuration.
-        if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
-            joint = dict(hybrid_changes[0])
-            for key,value in queries['proposals'][0].items():
-                joint[key] = min(joint.get(key,value), value)
-            directed.insert(0, joint)
-        if directed and quality['proposals']:
-            directed.append(dict(directed[0], **quality['proposals'][0]))
-        latest_feedback.clear()
-        latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
-            separation_intervals=separation['intervals'], quality=quality['observations'],
-            proposals=dict(hybrid=directed, face=
-                [dict(p, **q) for p in queries['face_proposals'][:2] for q in quality['proposals'][:1]] +
-                queries['face_proposals'] + quality['proposals']),
-            targets=targets,
-            options=updated, hybrid_proposals=list(hybrid['proposals']),
-            provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations']))
-        if targeted.budget:
-            latest_feedback['targeted'] = targeted_plan(target, settings, goals, feasibility, membership, latest_feedback, hybrid)
-        if excluded:
-            latest_feedback['scene_exclusions'] = {k: v for k, v in excluded.items() if k not in ('proposals', 'options')}
-            for family in ('face', 'hybrid'):
-                # Face-only runs still receive their negative boundary hints.
-                hints = [p for p in excluded['proposals']
-                         if any(k.startswith('sapiensid.') for k in p) == (family == 'hybrid')]
-                latest_feedback['proposals'][family] = hints + latest_feedback['proposals'][family]
-            for key, values in excluded['options'].items():
-                updated.setdefault(key, []).extend(values)
-        for extra in (queries['options'], separation['options']):
-            for key, values in extra.items():
-                updated[key] = list(updated.get(key, ())) + list(values)
+        from .solver_feedback import collect
+        result, fresh, measured, changes, updated = collect(target, settings, goals, feasibility,
+            query_feedback, initial_changes, excluded, bool(targeted.budget))
+        latest_feedback.clear(); latest_feedback.update(fresh)
+        hybrid.clear(); hybrid.update(measured)
+        hybrid_changes[:] = changes
         parents = [{k: parameter(settings.data, k) for k in updated if parameter(settings.data, k) is not None}]
         if search:
             parents.extend(c['changes'] for c in search.beam.values())

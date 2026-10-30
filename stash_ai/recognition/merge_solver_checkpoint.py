@@ -105,6 +105,17 @@ class Journal:
         if sha(raw)!=entry['sha256']:raise ValueError('Corrupt solver checkpoint trial.')
         return json.loads(raw)
 
+    def task(self, name, settings, status):
+        if status not in ('queued', 'running', 'completed', 'failed', 'interrupted'):
+            raise ValueError('Invalid trial lifecycle state.')
+        tasks = self.document.setdefault('tasks', {})
+        configuration = digest(plain(settings.data))
+        previous = tasks.get(name)
+        if previous and previous['configuration'] != configuration:
+            raise ValueError('Checkpoint pending trial configuration changed.')
+        tasks[name] = dict(configuration=configuration, status=status)
+        self.file.write(json.dumps(self.document, allow_nan=False))
+
     def record(self,name,settings,item,state,winner_text):
         record=dict(name=name,configuration=digest(plain(settings.data)),item=item,state=state)
         text=json.dumps(record,allow_nan=False)
@@ -112,7 +123,11 @@ class Journal:
         path=self.directory/filename
         # A crash may leave an uncommitted record; only this journal owns the directory.
         AtomicFile(path,sha(path.read_bytes()) if path.exists() else None).write(text)
-        self.document['records'].append(dict(file=filename,sha256=sha(text.encode())))
+        entry = dict(file=filename,sha256=sha(text.encode()))
+        self.document['records'].append(entry)
+        self.records[name] = entry
+        if name in self.document.get('tasks', {}):
+            self.document['tasks'][name]['status'] = 'failed' if item.get('failed') else 'completed'
         if self.winner and winner_text is not None:
             self.document['winner']=dict(path=str(self.winner.path),text=winner_text,
                 sha256=sha(winner_text.encode()),previous_sha256=self.winner.expected)
