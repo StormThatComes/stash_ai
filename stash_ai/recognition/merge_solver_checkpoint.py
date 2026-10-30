@@ -105,6 +105,31 @@ class Journal:
         if sha(raw)!=entry['sha256']:raise ValueError('Corrupt solver checkpoint trial.')
         return json.loads(raw)
 
+    def schedule(self, kind, name):
+        self.document.setdefault('schedule', []).append(dict(kind=kind, name=name))
+        self.file.write(json.dumps(self.document, allow_nan=False))
+
+    def save_raw_result(self, name, settings, result):
+        content = json.dumps(result, allow_nan=False)
+        filename = name + '-raw-' + sha(content.encode()) + '.json'
+        path = self.directory / filename
+        AtomicFile(path, sha(path.read_bytes()) if path.exists() else None).write(content)
+        self.document.setdefault('raw_results', {})[name] = dict(file=filename,
+            sha256=sha(content.encode()), configuration=digest(plain(settings.data)))
+        self.file.write(json.dumps(self.document, allow_nan=False))
+
+    def raw_result(self, name):
+        row = self.document.get('raw_results', {}).get(name)
+        if row is None:
+            return None
+        # Paths are coordinator-generated basenames, never arbitrary destinations.
+        if Path(row['file']).name != row['file']:
+            raise ValueError('Invalid checkpoint result path.')
+        content = (self.directory / row['file']).read_bytes()
+        if sha(content) != row['sha256']:
+            raise ValueError('Corrupt completed trial result.')
+        return json.loads(content)
+
     def task(self, name, settings, status):
         if status not in ('queued', 'running', 'completed', 'failed', 'interrupted'):
             raise ValueError('Invalid trial lifecycle state.')

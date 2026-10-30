@@ -3,6 +3,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
 import sqlite3
+import os
 import time
 
 from .config import plain
@@ -69,4 +70,7 @@ def evaluate(request):
     result['feedback'] = collected
     result['elapsed_seconds'] = time.perf_counter()-started
     result['cpu_seconds'] = time.process_time()-cpu
+    result['worker_pid'] = os.getpid()
+    result['started_monotonic_seconds'] = started
+    result['finished_monotonic_seconds'] = time.perf_counter()
     return result

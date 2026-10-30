@@ -150,11 +150,19 @@ def execute(args, config):
                                   f"goals_satisfied={construction['goals_satisfied']}", file=sys.stderr, flush=True)
                     elif stage == 'failed':
                         print(f"  Feasibility probe incomplete: {item['reason']}; {item['error']}", file=sys.stderr, flush=True)
+            execution = None
+            if (getattr(args, 'solver_cpus', None) is not None or getattr(args, 'solver_trials', 1) != 1
+                    or getattr(args, 'solver_memory_gib', None) is not None or getattr(args, 'profile_solver', False)
+                    or getattr(args, 'solver_scheduling', 'batch') != 'batch'):
+                execution = dict(trials=getattr(args, 'solver_trials', 1),
+                    profile=getattr(args, 'profile_solver', False), scheduling=getattr(args, 'solver_scheduling', 'batch'))
+                if args.solver_cpus is not None: execution['cpus'] = args.solver_cpus
+                if args.solver_memory_gib is not None: execution['memory_bytes'] = args.solver_memory_gib * 1024**3
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                 yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
-                                targeted_trials=getattr(args, 'targeted_trials', 8), outside_limits={
+                                targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
                                     key: getattr(args, attr, None) for key, attr in (
                                         ('coverage_lost', 'max_outside_coverage_loss'),
                                         ('split_pairs', 'max_outside_split_pairs'),
