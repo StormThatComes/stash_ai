@@ -68,7 +68,7 @@ def reference_admission(policy, *, scan_policy=None, label_scenes=(), compatibil
 
 
 @measured('references')
-def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=(), compatibility=None):
+def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=(), compatibility=None, people=None):
     anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes,compatibility=compatibility) + ' AND o.rejected IS NULL'
     strict = strict_sql()
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
@@ -78,17 +78,19 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
     from .reference_index import current
     index = current(db)
     usage.begin(stage, reset=True, report=index is None)
-    if index is not None and scan_policy is None:
+    if index is not None and scan_policy is None and people is None:
         result = index.snapshot(policy, usage)
         usage.emit(force=True)
         return result
     maximum = policy['max_people_per_lookup']
-    rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
+    wanted = '' if people is None else 'AND id IN (SELECT value FROM json_each(?)) '
+    args = (scope, namespace) if people is None else (scope, namespace, encoded(sorted(people)))
+    rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '+wanted+
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
                       f'AND EXISTS (SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
                       f'WHERE m.person=people.id AND {anchor} AND {strict}) '
                       'ORDER BY created,id LIMIT ?',
-                      (scope, namespace, maximum + 1)).fetchall()
+                      (*args, maximum + 1)).fetchall()
     if len(rows) > maximum:
         raise ResourceLimit('Face identity lookup exceeds configured person budget.')
     result = []

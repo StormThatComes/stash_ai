@@ -46,7 +46,8 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                     target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
                     copy_inputs(source, target, [], scope, namespace)
                 else:
-                    seed.backup(target)
+                    from .trial_inputs import prepare
+                    prepare(target, seed)
                     pages = settings.data['execution']['rebuild_memory_bytes']//target.execute('PRAGMA page_size').fetchone()[0]
                     target.execute(f'PRAGMA max_page_count={pages}')
             state = SimpleNamespace(connection=target, installation=installation)

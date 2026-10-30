@@ -19,16 +19,18 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     from .merge_solver_measurements import measured_pairs
     from .resource_plan import plan
     ns = goals['namespace']
-    groups = _groups(db, goals['scope'], ns, config.data['clustering'],
-        scan_policy=scan_identity(config, ns), compatibility=fallback_sql(db, config, ns))
     wanted = {m['identity_id'] for g in goals['groups'] for m in g['members']}
+    groups = _groups(db, goals['scope'], ns, config.data['clustering'],
+        scan_policy=scan_identity(config, ns), compatibility=fallback_sql(db, config, ns), people=wanted)
     selected = [g for g in groups if g.identifier in wanted]
     scores = set()
     owners = {}
     for g in goals['groups']:
         for m in g['members']:owners.setdefault(m['identity_id'], set()).add(g['index'])
     face_pairs = {}
-    for a, b, values in measured_pairs(combinations(selected, 2),
+    from .merge_solver_measurements import diagnostic_pairs
+    pairs, coverage = diagnostic_pairs(selected, config)
+    for a, b, values in measured_pairs(pairs,
             max_bytes=min(4194304, plan(config).working)):
         minimum, mean, maximum, (i, j) = values
         if proofs is not None:
@@ -47,6 +49,9 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
         for value in (minimum, mean, maximum):
             from .threshold_boundaries import sides
             scores.update(sides(value))
+        if len(scores)>384:
+            ordered=sorted(scores)
+            scores={ordered[i*(len(ordered)-1)//127] for i in range(128)}
     options = {key: sorted(scores, reverse=True) for key in (
         'recognition.match_threshold', 'clustering.cohesion_threshold',
         'clustering.view_match_threshold', 'clustering.view_cohesion_threshold',
@@ -72,6 +77,7 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
             options['clustering.'+key] = [current/2, current] if 'pose' not in key else [current, min(1.,current+.1)]
     from .merge_solver_hybrid import analyse
     analysis = analyse(db, config, goals)
+    analysis['face_measurement_coverage'] = coverage
     from .body_solver import analyse as body_analyse
     bodies=body_analyse(db,config,goals,frozen_goals=frozen_goals)
     analysis['independent_person']=bodies['evidence']

@@ -287,5 +287,9 @@ def catalogue(db, config, scope, namespace):
                 if not isinstance(array,Matrix):array.flags.writeable=False
                 size+=resident_bytes(array)*2+256
         size+=1024+sum(len(v)+128 for v in item.observations+item.person_observations+item.guard_observations+item.body_witness_observations)
-    if generation is not None:cache.put(key,found,size)
+    if generation is not None:
+        # Construction can populate disposable dependency digests. Cache the
+        # finished generation so those writes do not force another catalogue.
+        key=('hybrid-catalogue',database_key(db),scope,namespace,digest(plain(config.data)))
+        cache.put(key,found,size)
     return found

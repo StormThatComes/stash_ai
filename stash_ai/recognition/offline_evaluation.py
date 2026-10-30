@@ -26,7 +26,7 @@ from .scan_heads import predicate as current_scan
 
 
 def _ram(config):
-    db = sqlite3.connect(':memory:')
+    db = sqlite3.connect(':memory:', uri=True)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA temp_store=MEMORY')

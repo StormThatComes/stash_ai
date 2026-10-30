@@ -9,16 +9,18 @@ import time
 
 _cancel = None
 _updates = None
+_context = None
 
 
-def initialize(event, updates=None):
-    global _cancel, _updates
+def initialize(event, updates=None, context=None):
+    global _cancel, _updates, _context
     from stash_ai.runtime.cancellation import Cancellation
     # Ctrl-C belongs to the coordinator; children receive cooperative cancellation.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     _cancel = Cancellation()
     _cancel.event = event
     _updates = updates
+    _context = context
     if updates is not None:
         # Best-effort telemetry must never delay worker shutdown on a full pipe.
         updates.cancel_join_thread()
@@ -26,7 +28,9 @@ def initialize(event, updates=None):
 
 def work(request):
     from stash_ai.runtime.cancellation import use
-    from .solver_trial import evaluate
+    from .solver_trial import evaluate, Task, restore
+    if isinstance(request, Task):
+        request = restore(request, _context)
     from .solver_progress import LiveProgress
     telemetry = LiveProgress(request.name, _updates) if _updates is not None else nullcontext(None)
     with use(_cancel), telemetry as progress:
@@ -80,14 +84,16 @@ class Trials(AbstractContextManager):
         if cached is not None:
             self.ready[name] = cached
         if not completed and cached is None:
+            from dataclasses import replace
+            from .solver_trial import split
+            request = replace(self.factory(name, settings, self.context),
+                shared_directory=self.shared_directory, shared_bytes=self.shared_bytes)
+            context, task = split(request)
             if self.executor is None:
                 self.executor = ProcessPoolExecutor(max_workers=self.execution.trials,
                     mp_context=multiprocessing.get_context('spawn'), initializer=initialize,
-                    initargs=(self.event, self.updates))
-            from dataclasses import replace
-            request = replace(self.factory(name, settings, self.context),
-                shared_directory=self.shared_directory, shared_bytes=self.shared_bytes)
-            future = self.executor.submit(work, request)
+                    initargs=(self.event, self.updates, context))
+            future = self.executor.submit(work, task)
         self.pending[name] = settings, future
         self.dispatched[name] = time.monotonic()
         self.peak = max(self.peak, len(self.pending))

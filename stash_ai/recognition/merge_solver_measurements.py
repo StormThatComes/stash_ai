@@ -60,20 +60,66 @@ def measured_pairs(pairs, *, max_bytes=4194304):
     """Parallel complete face banks; only the coordinator reads/writes caches."""
     from .parallel_numeric import map_bounded
     from .run_cache import current, immutable_samples, MISSING
+    from .solver_shared import current as shared_current, key as shared_key
+    import numpy as np
     cache = current()
+    shared = shared_current()
     def prepared():
         for left, right in pairs:
             a, b = immutable_samples(left.samples), immutable_samples(right.samples)
             key = ('solver-face-stats', max_bytes, a, b) if a is not None and b is not None else None
             found = cache.get(key) if cache is not None and key is not None else MISSING
+            signature = shared_key('face-stats-v1', (*left.samples, *right.samples),
+                extra=(max_bytes,len(left.samples))) if shared is not None else None
+            if found is MISSING and shared is not None:
+                value = shared.get(signature)
+                if value is not None:
+                    found = (float(value[0]),float(value[1]),float(value[2]),(int(value[3]),int(value[4])))
             size = sum(v.nbytes+128 for v in (*left.samples, *right.samples)) + max_bytes + 4096
-            yield left, right, key, None if found is MISSING else found, size
+            yield left, right, key, None if found is MISSING else found, size, signature
     def payload(item):
-        a, b, _, cached, _ = item
+        a, b, _, cached, _, _ = item
         return tuple(a.samples), tuple(b.samples), max_bytes, cached
     for item, result in map_bounded(_measure, prepared(), cost=lambda item: item[4],
                                     payload=payload, kind='face_measurements'):
-        left, right, key, cached, _ = item
+        left, right, key, cached, _, signature = item
+        if cached is None and shared is not None:
+            shared.put(signature,np.asarray([*result[:3],*result[3]],dtype='float64'))
         if cached is None and cache is not None and key is not None:
             cache.put(key, result, sum(len(v)+128 for v in key[2]+key[3])+256)
         yield left, right, result
+
+
+def diagnostic_pairs(groups, config):
+    """Bound search hints separately from complete production acceptance.
+
+    Small goal sets retain the historical order. Large sets visit adjacent
+    owners around a deterministic ring before denser distances, giving sparse
+    fragments a chance without allocating or walking every possible pair.
+    """
+    from itertools import combinations, islice
+    limits = config.data['sapiensid']['execution']
+    pair_limit = min(limits['max_candidate_pairs'], limits['plan_bytes']//8192)
+    witness_limit = limits['max_witness_comparisons']
+    total = len(groups)*(len(groups)-1)//2
+    coverage = dict(total_pairs=total, examined_pairs=0, measured_pairs=0,
+        witness_comparisons=0, pair_limit=pair_limit, witness_limit=witness_limit,
+        complete=False, sampling='all_pairs' if total<=pair_limit else 'deterministic_ring',
+        purpose='search_hints_only')
+    def ring():
+        n=len(groups)
+        for distance in range(1,n//2+1):
+            for i in range(n//2 if distance*2==n else n):
+                yield groups[i],groups[(i+distance)%n]
+    def admitted():
+        source=combinations(groups,2) if total<=pair_limit else ring()
+        for left,right in islice(source,pair_limit):
+            coverage['examined_pairs']+=1
+            cost=len(left.samples)*len(right.samples)
+            if coverage['witness_comparisons']+cost>witness_limit:
+                continue
+            coverage['witness_comparisons']+=cost
+            coverage['measured_pairs']+=1
+            yield left,right
+        coverage['complete']=coverage['measured_pairs']==total
+    return admitted(),coverage

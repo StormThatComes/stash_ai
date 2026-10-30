@@ -13,6 +13,20 @@ ROUTES=('body_global','body_scene')
 
 
 def banks(db,config,scope,namespace):
+    from .run_cache import current, database_key, MISSING
+    from .config import digest, plain
+    cache=current();generation=database_key(db)
+    policy_key=digest(plain(config.data))
+    key=('body-global-banks',generation,scope,namespace,policy_key)
+    found=cache.get(key) if generation is not None else MISSING
+    if found is not MISSING:return found
+    found=_banks(db,config,scope,namespace)
+    if generation is not None:
+        cache.put(('body-global-banks',database_key(db),scope,namespace,policy_key),found,size(found))
+    return found
+
+
+def _banks(db,config,scope,namespace):
     expected=contract(config);settings=config.data['sapiensid']['identities']
     limit=config.data['sapiensid']['execution']['reference_bytes'];used=0
     def reserve(extra):
