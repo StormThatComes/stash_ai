@@ -107,12 +107,25 @@ class Search:
             self.index.execute('PRAGMA journal_mode=OFF');self.index.execute('PRAGMA cache_size=-1024')
             self.index.execute('PRAGMA mmap_size=0')
             self.index.execute('CREATE TABLE means (ordinal INTEGER PRIMARY KEY,vector BLOB NOT NULL)')
+            self.entries=[];self.owner_modes={}
+            from .body_global_modes import references as appearance_references
             with tracking(self.identities,'Index global person means',unit='identity') as people:
-                for i,person in enumerate(people):
-                    refs=self.bank[person]['refs'];mean=np.zeros(4096,dtype='<f8')
-                    for row in refs:mean+=self.evidence.feature(row)
-                    if refs:mean/=len(refs)
-                    self.index.execute('INSERT INTO means VALUES (?,?)',(i,mean.tobytes()))
+                for owner,person in enumerate(people):
+                    modes=appearance_references(self.bank[person],self.config,self.evidence)
+                    self.owner_modes[person]=len(modes)
+                    for refs in modes:
+                        ordinal=len(self.entries);self.entries.append((owner,refs))
+                        mean=np.zeros(4096,dtype='<f8')
+                        for row in refs:mean+=self.evidence.feature(row)
+                        if refs:mean/=len(refs)
+                        self.index.execute('INSERT INTO means VALUES (?,?)',(ordinal,mean.tobytes()))
+            extra=size(self.entries)+size(self.owner_modes)+len(self.entries)*8
+            self.stats['reference_working_bytes']+=extra
+            if self.stats['reference_working_bytes']>limit:
+                raise ValueError('Global body appearances exceed sapiensid.execution.reference_bytes.')
+            self.reservation.set(self.stats['reference_working_bytes'])
+            self.mode_owners=np.asarray([owner for owner,_ in self.entries],dtype='int64')
+            self.stats['appearance_centroids']=len(self.entries)
             self.index.commit();self.stats['centroid_disk_bytes']=path.stat().st_size
             return self
         except BaseException:
@@ -123,7 +136,7 @@ class Search:
         return self.stack.__exit__(*args)
 
     def tiles(self,active=None):
-        count=len(self.identities);block=self.block
+        count=len(self.entries);block=self.block
         def read(start):
             return np.array([np.frombuffer(r[0],dtype='<f8') for r in self.index.execute(
                 'SELECT vector FROM means WHERE ordinal>=? AND ordinal<? ORDER BY ordinal',(start,start+block))])
@@ -144,17 +157,23 @@ class Search:
     def nominations(self,focus):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
         wanted=np.array([p in focus for p in self.identities])
+        seen=set()
         for i,j,values in self.tiles():
-            rows=np.arange(i,i+values.shape[0]);cols=np.arange(j,j+values.shape[1])
+            rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
             mask=(rows[:,None]<cols[None,:]) & ((values+ROUNDING>=floor) |
                   (wanted[rows,None] & wanted[None,cols]))
             for a,b in zip(*np.nonzero(mask)):
+                pair=self.identities[rows[a]],self.identities[cols[b]]
+                if pair in seen:continue
+                seen.add(pair)
+                if len(seen)*256>self.config.data['sapiensid']['execution']['plan_bytes']:
+                    raise ValueError('Global body nominations exceed sapiensid.execution.plan_bytes.')
                 self.stats['candidate_pairs']+=1
                 limit=self.config.data['sapiensid']['execution']['max_candidate_pairs']
                 if self.stats['candidate_pairs']>limit:
                     raise ValueError(f"Global body candidate pairs {self.stats['candidate_pairs']} exceed "
                         f'sapiensid.execution.max_candidate_pairs={limit}; identities={len(self.identities)}.')
-                yield self.identities[i+a],self.identities[j+b]
+                yield pair
 
     def nearest(self,lanes,pairs):
         """Exact strongest outsider for each group member, including weak rivals.
@@ -163,8 +182,8 @@ class Search:
         witness pair within the conservative rounding envelope of that maximum.
         No top-k truncation or discarded-candidate assumption can hide a rival.
         """
-        groups=[np.array([lane.get(p,-1) for p in self.identities]) for lane in lanes]
-        active=np.array([any(g[i]>=0 for g in groups) for i in range(len(self.identities))])
+        groups=[np.array([lane.get(self.identities[owner],-1) for owner,_ in self.entries]) for lane in lanes]
+        active=np.array([any(g[i]>=0 for g in groups) for i in range(len(self.entries))])
         if not active.any():return [{} for _ in lanes]
         maxima=[np.full(len(self.identities),-np.inf) for _ in lanes]
         result=[{} for _ in lanes]
@@ -176,22 +195,23 @@ class Search:
                 for lane,g in enumerate(groups):
                     for r in np.flatnonzero(g[start:start+len(tile)]>=0):
                         index=start+r;allowed=g[other:other+tile.shape[1]]!=g[index]
-                        if allowed.any():maxima[lane][index]=max(maxima[lane][index],float(tile[r,allowed].max()))
+                        owner=self.mode_owners[index]
+                        if allowed.any():maxima[lane][owner]=max(maxima[lane][owner],float(tile[r,allowed].max()))
         def requests():
             for i,j,values in self.tiles(active):
                 for start,other,tile in rows(i,j,values):
                     for lane,g in enumerate(groups):
                         for r in np.flatnonzero(g[start:start+len(tile)]>=0):
-                            index=start+r;a=self.identities[index]
-                            allowed=(g[other:other+tile.shape[1]]!=g[index]) & (tile[r]+2*ROUNDING>=maxima[lane][index])
+                            index=start+r;owner=self.mode_owners[index];a=self.identities[owner]
+                            allowed=(g[other:other+tile.shape[1]]!=g[index]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
                             for c in np.flatnonzero(allowed):
-                                b=self.identities[other+c];key=tuple(sorted((a,b)))
+                                b=self.identities[self.mode_owners[other+c]];key=tuple(sorted((a,b)))
                                 known=pairs.get(key)
-                                if known is not None:
+                                if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
                                     update(lane,a,b,known['score'])
                                 else:
                                     result[lane].setdefault(a,None)
-                                    yield (lane,a,b),self.bank[key[0]]['refs'],self.bank[key[1]]['refs'],'body'
+                                    yield (lane,a,b),self.entries[index][1],self.entries[other+c][1],'body'
         def update(lane,a,b,score):
             previous=result[lane].get(a)
             if previous is None or (-score,b)<(-previous['score'],previous['rival']):

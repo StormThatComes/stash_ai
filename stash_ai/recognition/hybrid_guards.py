@@ -7,6 +7,7 @@ from .disk_body_modes import resident_bytes
 
 from .database import encoded
 from .person_signal import contract
+from .scan_heads import predicate as current_scan
 
 
 def retain(db,config,scope,namespace,identities):
@@ -17,6 +18,7 @@ def retain(db,config,scope,namespace,identities):
     from .person_anchor import anchor_gate
     core_ids=defaultdict(set)
     owned={i.person:i for i in identities};guards=defaultdict(set);body_guards=defaultdict(set);proof_bytes=0
+    body_route_faces=defaultdict(set)
     for row in db.execute('SELECT a.target,a.evidence FROM identity_merges a JOIN people p ON p.id=a.target '
                           'WHERE p.scope=? AND p.namespace=?',(scope,namespace)):
         root=canonical(db,row['target'])
@@ -25,6 +27,14 @@ def retain(db,config,scope,namespace,identities):
         if proof_bytes>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID plan_bytes budget exceeded by original core history.')
         proof=json.loads(row['evidence'])
+        if proof.get('route') in ('body_global','body_scene'):
+            ids={i for values in proof.get('face_witnesses',{}).values() for i in values}
+            # Older promotions did not persist an explicit face witness list.
+            body_ids=list({i for values in proof.get('cores',{}).values() for i in values})
+            ids.update(r[0] for r in db.execute('SELECT face FROM body_observations WHERE face IS NOT NULL '
+                'AND id IN (SELECT value FROM json_each(?))',(encoded(body_ids),)))
+            guards[root].update(ids);body_route_faces[root].update(ids)
+            continue
         if proof.get('route')!='sapiensid_hybrid':continue
         for pair in proof['proofs']:
             for observations in pair['observations']+pair.get('guard_observations',[]):
@@ -60,8 +70,9 @@ def retain(db,config,scope,namespace,identities):
             'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
             'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
             "WHERE o.id IN (SELECT value FROM json_each(?)) AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
-            'AND o.rejected IS NULL AND '+admission,
-            (expected,encoded(wanted),identity.person,scope,namespace))} if wanted else {}
+            'AND o.rejected IS NULL AND (('+admission+') OR (o.id IN (SELECT value FROM json_each(?)) AND '+
+            current_scan()+'))',
+            (expected,encoded(wanted),identity.person,scope,namespace,encoded(sorted(body_route_faces[identity.person]))))} if wanted else {}
         for identifier in wanted:
             row=retained.get(identifier)
             if row is None:

@@ -409,6 +409,8 @@ def rebuild_selected(database, selected, config, *, progress=None):
         from .consolidation_queue import expand
         selected=expand(database.connection,selected,config)
         while True:
+            from .body_aliases import retire_disabled
+            retire_disabled(database,selected,config)
             excluded=set()
             with alias_scope(database.connection,*(first or (None,None)),budget=config.data['clustering']['max_reference_bytes'],persist=True):
                 for attempt in range(2):

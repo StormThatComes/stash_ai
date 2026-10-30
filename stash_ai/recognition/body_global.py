@@ -24,7 +24,9 @@ def report(db,config,scope,namespace,*,focus=None):
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
     from .incomplete_rivals import protect
-    return protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus))
+    result=protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus))
+    from .body_reference_gaps import protect as protect_contracts
+    return protect_contracts(db,config,scope,namespace,result)
 
 
 def plan(db,config,bank,*,focus=None):
@@ -149,8 +151,12 @@ def reconcile(database,selected,config):
             # Original face anchors retain vetoes in the ordinary hybrid system;
             # a body-based alias cannot promote them into new face references.
             db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
-            db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.prior_reason',json_extract(payload,'$.reason'),"
-                "'$.reason','body_global_identity','$.reference_role','attachment','$.reference_selected',json('false')) WHERE person=?",(target,source))
+            db.execute("UPDATE candidates SET person=?,payload=json_set(payload,"
+                "'$.body_merge_origin',json(COALESCE(json_extract(payload,'$.body_merge_origin'),json_object("
+                "'person',person,'reason',json_extract(payload,'$.reason'),'reference_role',json_extract(payload,'$.reference_role'),"
+                "'reference_selected',json_extract(payload,'$.reference_selected')))),"
+                "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','body_global_identity',"
+                "'$.reference_role','attachment','$.reference_selected',json('false')) WHERE person=?",(target,source))
         # Cross-scene proof can confirm individually provisional scene cores.
         db.execute("UPDATE body_members SET status='accepted' WHERE person=? AND status='provisional'",(target,))
         for scene in scenes:enqueue(db,scope,namespace,scene,config,'body_global_merge')
