@@ -105,6 +105,12 @@ class Cache:
         self.matrices.clear()
         self.size = self.matrix_bytes = 0
 
+    def retain_numeric(self):
+        # Closed trial database handles, ownership plans and evidence partitions
+        # must not survive a trial. These keys depend exclusively on content.
+        pure = {'metadata','pair','packed','matrix','body-exact','vector-sha','solver-face-stats'}
+        self.discard(lambda key:key[0] not in pure)
+
 
 class Partition:
     """A sealed replay's evidence shares the run budget, with private keys."""
@@ -227,7 +233,7 @@ def product_input(left, right):
     cache = current()
     from .solver_shared import current as shared_current, key as shared_key
     shared = shared_current()
-    signature = shared_key('hybrid-products-v1', (left, right)) if shared is not None else None
+    signature = None
     key = None
     found = MISSING
     if cache is not None:
@@ -235,9 +241,12 @@ def product_input(left, right):
                left.shape, right.shape, left.tobytes(), right.tobytes())
         found = cache.get(key)
     if found is MISSING and shared is not None:
+        signature = shared_key('hybrid-products-v1', (left, right))
         value = shared.get(signature)
         if value is not None:
             found = value
+            if cache is not None and key is not None:
+                cache.put(key,value,len(key[-2])+len(key[-1])+value.nbytes)
     return (key, signature), None if found is MISSING else found
 
 

@@ -70,18 +70,20 @@ def measured_pairs(pairs, *, max_bytes=4194304):
             key = ('solver-face-stats', max_bytes, a, b) if a is not None and b is not None else None
             found = cache.get(key) if cache is not None and key is not None else MISSING
             signature = shared_key('face-stats-v1', (*left.samples, *right.samples),
-                extra=(max_bytes,len(left.samples))) if shared is not None else None
+                extra=(max_bytes,len(left.samples))) if shared is not None and found is MISSING else None
             if found is MISSING and shared is not None:
                 value = shared.get(signature)
                 if value is not None:
                     found = (float(value[0]),float(value[1]),float(value[2]),(int(value[3]),int(value[4])))
+                    if cache is not None and key is not None:
+                        cache.put(key,found,sum(len(v)+128 for v in key[2]+key[3])+256)
             size = sum(v.nbytes+128 for v in (*left.samples, *right.samples)) + max_bytes + 4096
             yield left, right, key, None if found is MISSING else found, size, signature
     def payload(item):
         a, b, _, cached, _, _ = item
         return tuple(a.samples), tuple(b.samples), max_bytes, cached
     for item, result in map_bounded(_measure, prepared(), cost=lambda item: item[4],
-                                    payload=payload, kind='face_measurements'):
+                                    payload=payload, kind='face_measurements',cached=lambda item:item[3]):
         left, right, key, cached, _, signature = item
         if cached is None and shared is not None:
             shared.put(signature,np.asarray([*result[:3],*result[3]],dtype='float64'))

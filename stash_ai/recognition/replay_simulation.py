@@ -237,7 +237,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 rebuild=rebuild_metrics, trial=evaluated.get('trial_profile'))
                             item['performance']['result_wait_seconds'] = max(0.,time.perf_counter()-evaluated.get('finished_monotonic_seconds',time.perf_counter()))
                         if runtime:
-                            item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds') if k in evaluated}
+                            item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds','worker_cache_reused') if k in evaluated}
                         if consume is not None:
                             consume_started = time.perf_counter()
                             item.update(consume(name, observations, retained, predictions))

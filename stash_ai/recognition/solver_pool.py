@@ -10,10 +10,16 @@ import time
 _cancel = None
 _updates = None
 _context = None
+_reuse = None
 
 
 def initialize(event, updates=None, context=None):
-    global _cancel, _updates, _context
+    global _cancel, _updates, _context, _reuse
+    if _reuse is not None:_reuse.close()
+    from .solver_worker_reuse import Reuse
+    from multiprocessing.util import Finalize
+    _reuse=Reuse()
+    Finalize(_reuse,_reuse.close,exitpriority=10)
     from stash_ai.runtime.cancellation import Cancellation
     # Ctrl-C belongs to the coordinator; children receive cooperative cancellation.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -33,8 +39,14 @@ def work(request):
         request = restore(request, _context)
     from .solver_progress import LiveProgress
     telemetry = LiveProgress(request.name, _updates) if _updates is not None else nullcontext(None)
-    with use(_cancel), telemetry as progress:
-        return evaluate(request, progress=progress)
+    reused=_reuse.prepare(request) if _reuse is not None else False
+    try:
+        with use(_cancel), telemetry as progress:
+            result=evaluate(request, progress=progress)
+            result['worker_cache_reused']=reused
+            return result
+    finally:
+        if _reuse is not None:_reuse.completed()
 
 
 class Trials(AbstractContextManager):
