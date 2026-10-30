@@ -9,7 +9,8 @@ from stash_ai.recognition.fragmentation_report import _open_readonly
 
 
 def test_joint_cpu_and_memory_admission(tmp_path, monkeypatch):
-    monkeypatch.setattr('stash_ai.recognition.solver_execution.os.cpu_count', lambda: 16)
+    # Python 3.13+ uses affinity-aware process_cpu_count rather than cpu_count.
+    monkeypatch.setattr('stash_ai.recognition.solver_execution.os.process_cpu_count', lambda: 16, raising=False)
     config, _ = fixture(tmp_path, 'face')
     first = plan(config, dict(cpus=16, trials=4))
     assert first.trials == 4 and first.inner_workers == 3
