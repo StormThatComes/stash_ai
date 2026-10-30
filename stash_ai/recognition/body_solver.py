@@ -8,7 +8,6 @@ from .body_parameters import active
 
 def options_and_quality(db,config,goals,*,frozen_goals=None):
     """Numerical proposals use retained measurements, never new model inputs."""
-    import json
     from .body_observations import contract
     from .database import encoded
     from .merge_report_policy import parameter
@@ -16,7 +15,7 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
     from .merge_solver_search import gate_values
     from .merge_solver_options import compact
     from .scan_heads import predicate as current_scan
-    from .person_anchor import pixels,PIXEL_PARAMETER
+    from .person_anchor import anchor_gate,PIXEL_PARAMETER
     from .person_signal import contract as person_contract,available as persons_available
     from itertools import chain
     domains=registry(config)
@@ -37,15 +36,16 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
         'LEFT JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
         'WHERE (m.person IN (SELECT value FROM json_each(?)) OR o.id IN (SELECT value FROM json_each(?))) AND s.scope=? AND s.namespace=? '
         "AND s.status='complete' AND o.rejected IS NULL AND e.contract=? AND e.status='ready' AND "+current_scan(),
-        (encoded(people),encoded(ids),goals['scope'],goals['namespace'],person_contract(config))) if PIXEL_PARAMETER in options and persons_available(db) else ()
+        (encoded(people),encoded(ids),goals['scope'],goals['namespace'],person_contract(config))) if options and config.data['sapiensid']['enabled'] and persons_available(db) else ()
     joint={};measurements=[]
     for row in chain(body_rows,face_rows):
-        quality=json.loads(row['quality']).get('quality',{})
+        measured=anchor_gate(row['quality'],config.data['sapiensid']['identities'],
+            collection=config.data['sapiensid']['collection'])
         patch={}
         for field,key in (('keypoints','sapiensid.identities.anchor_min_keypoints'),
                           ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER)):
             if key not in options:continue
-            value=pixels(row['quality']) if field=='pixels' else quality.get(field);domain=domains[key]
+            value=measured.get(field);domain=domains[key]
             if type(value) not in (int,float) or not domain.low<=value<=domain.high:continue
             values=([int(value),int(value)+1] if domain.kind is int else sides(value,upper=domain.high))
             options[key].extend(domain.project(v) for v in values)

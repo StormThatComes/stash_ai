@@ -135,7 +135,7 @@ def rebuilt_goals(db, goals):
 def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None):
     from .solver_execution import current as execution_plan
     runtime = execution_plan()
-    from .merge_solver_outside import validate as validate_outside, apply as apply_outside
+    from .merge_solver_outside import validate as validate_outside, apply as apply_outside, outsiders
     outside_limits = validate_outside(outside_limits)
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
@@ -214,6 +214,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     bidirectional = None
     stop_reason = None
     best, best_rank, baseline = None, None, None
+    baseline_outsiders = None
     robustness = {}
     restored_count = 0
     written_winner = None
@@ -228,13 +229,17 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             goal_diagnostics=goal_diagnostics(status),
             **patches.get(name,proposal(config,{})))
     def consume(name, observations, retained, predicted):
-        nonlocal best, best_rank, baseline
+        nonlocal best, best_rank, baseline, baseline_outsiders
         status = assess(goals, observations, retained, predicted)
         summaries[name] = status
         if baseline is None:
             baseline = dict(predicted)
         outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                          {k:v for k,v in predicted.items() if k not in target_ids})
+        if 'new_outsider_observations' in outside_limits:
+            attached=outsiders(status,predicted,target_ids)
+            if baseline_outsiders is None:baseline_outsiders=attached
+            outside['new_outsider_observations']=len(attached-baseline_outsiders)
         apply_outside(status, outside, summaries['baseline'], outside_limits)
         status['construction'] = feasibility.assess(status, observations, predicted,
                                                     latest_feedback['provenance']['blocker_trace'])
@@ -462,7 +467,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
     def restore(name,settings):
-        nonlocal baseline,best,best_rank,restored_count
+        nonlocal baseline,baseline_outsiders,best,best_rank,restored_count
         if journal is None or name not in journal.records:return None
         record=journal.get(name)
         if record['configuration']!=digest(settings.data):
@@ -481,7 +486,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         options.clear();options.update(state['options'])
         hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
         robustness.clear();robustness.update(state['robustness'])
-        if name=='baseline':baseline=state['baseline']
+        if name=='baseline':
+            baseline=state['baseline']
+            if 'new_outsider_observations' in outside_limits:
+                baseline_outsiders=outsiders(summaries[name],baseline,target_ids)
         best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
         return deepcopy(record['item']),baseline
     def record(name,settings,item,inputs):

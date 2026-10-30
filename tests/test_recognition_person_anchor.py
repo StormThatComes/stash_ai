@@ -231,7 +231,7 @@ def test_solver_uses_legacy_person_bounds_when_independent_identities_are_disabl
     with _open_readonly(c.database) as db:
         goals=resolve(db,c,[people],by_performer=False)
         hints=analyse(db,c,goals)
-        assert hints['options'].keys()=={PIXEL_PARAMETER}
+        assert hints['options'].keys()=={PIXEL_PARAMETER,'sapiensid.identities.anchor_min_keypoints','sapiensid.identities.anchor_min_sharpness'}
         assert {80,81,120,121}<=set(hints['options'][PIXEL_PARAMETER])
         result=solve(c,goals,db,maximum=4,targeted_trials=0,feasibility_trials=feasibility_trials)
         assert not result['simulation']['trials']['baseline']['goal_result']['fully_solved']
