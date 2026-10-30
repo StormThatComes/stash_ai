@@ -78,3 +78,21 @@ invalidate generations. Body policy v10 invalidates old attachment decisions.
 Shared numerical files carry checksums and shape/dtype contracts in the ledger.
 Valid-format files with altered data fall back to exact computation. Verification
 is reused only while the file identity and modification stamps remain unchanged.
+
+## Worker transport and durable scheduling
+
+Workers receive baseline predictions once and return exact assignment deltas,
+including explicit unassignments. The coordinator reconstructs the same full
+predictions for scoring. Completed raw checkpoint results are removed only after
+the applied trial record is durable.
+
+The ordered scheduler refills its bounded window after each retirement instead
+of waiting for a whole batch. Results still apply in dispatch order; async mode
+retains its completion-based behavior. Dispatch/retirement events preserve resume.
+
+Checkpoint transitions append to a checksummed, fsynced `events.jsonl` chain in
+the owned `.trials` directory. The main JSON snapshot is refreshed on solver exit,
+including interruption. For a live checkpoint use
+`solver_journal_events.load_document(path)` to fold newer events. A torn final
+append is discarded on resume; corrupt complete events are rejected. Winner
+YAML still updates atomically after its recovery record is durable.

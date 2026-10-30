@@ -67,7 +67,9 @@ class Journal:
         self.records={}
         self.winner=winner
         if resume:
-            raw=self.path.read_bytes();self.document=json.loads(raw)
+            raw=self.path.read_bytes()
+            from .solver_journal_events import read
+            self.document, sequence, previous, valid_bytes = read(self.path)
             if self.document['signature']!=signature:
                 raise ValueError('Solver checkpoint is incompatible with retained inputs, config, goals, code or search settings.')
             self.file=AtomicFile(self.path,sha(raw))
@@ -90,7 +92,16 @@ class Journal:
             self.file=AtomicFile(self.path)
             self.directory.mkdir()  # Existing journals are never silently overwritten.
             self.document=dict(signature=signature,records=[],winner=None)
+            from .solver_journal_events import Events
+            self.events = Events(self)
             self.file.write(json.dumps(self.document,allow_nan=False))
+        if resume:
+            from .solver_journal_events import Events
+            self.events = Events(self, resume=True, state=(sequence,previous,valid_bytes) if self.document.get('journal_format') == 1 else None)
+
+    def flush_snapshot(self):
+        self.document['journal_applied'] = self.events.sequence
+        self.file.write(json.dumps(self.document, allow_nan=False))
 
     def get(self,name):
         entry=self.records[name]
@@ -100,7 +111,7 @@ class Journal:
 
     def schedule(self, kind, name):
         self.document.setdefault('schedule', []).append(dict(kind=kind, name=name))
-        self.file.write(json.dumps(self.document, allow_nan=False))
+        self.events.append(dict(kind='schedule', entry=dict(kind=kind, name=name)))
 
     def save_raw_result(self, name, settings, result):
         content = json.dumps(result, allow_nan=False)
@@ -109,7 +120,7 @@ class Journal:
         AtomicFile(path, sha(path.read_bytes()) if path.exists() else None).write(content)
         self.document.setdefault('raw_results', {})[name] = dict(file=filename,
             sha256=sha(content.encode()), configuration=digest(plain(settings.data)))
-        self.file.write(json.dumps(self.document, allow_nan=False))
+        self.events.append(dict(kind='raw', name=name, entry=self.document['raw_results'][name]))
 
     def raw_result(self, name, settings=None):
         row = self.document.get('raw_results', {}).get(name)
@@ -134,7 +145,7 @@ class Journal:
         if previous and previous['configuration'] != configuration:
             raise ValueError('Checkpoint pending trial configuration changed.')
         tasks[name] = dict(configuration=configuration, status=status)
-        self.file.write(json.dumps(self.document, allow_nan=False))
+        self.events.append(dict(kind='task', name=name, entry=tasks[name]))
 
     def record(self,name,settings,item,state,winner_text):
         record=dict(name=name,configuration=digest(plain(settings.data)),item=item,state=state)
@@ -151,7 +162,13 @@ class Journal:
         if self.winner and winner_text is not None:
             self.document['winner']=dict(path=str(self.winner.path),text=winner_text,
                 sha256=sha(winner_text.encode()),previous_sha256=self.winner.expected)
-        self.file.write(json.dumps(self.document,allow_nan=False))
+        raw = self.document.get('raw_results', {}).pop(name, None)
+        self.events.append(dict(kind='record', name=name, entry=entry,
+            task=self.document.get('tasks', {}).get(name),
+            winner=self.document['winner'] if self.winner and winner_text is not None else None))
+        # The applied record is durable before its superseded raw result is removed.
+        if raw is not None and Path(raw['file']).name == raw['file']:
+            (self.directory/raw['file']).unlink(missing_ok=True)
         if self.winner and winner_text is not None:self.winner.write(winner_text)
 
 

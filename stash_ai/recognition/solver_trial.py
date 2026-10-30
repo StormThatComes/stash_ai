@@ -29,6 +29,7 @@ class Request:
     execution: object
     shared_directory: str | None = None
     shared_bytes: int = 0
+    baseline_predictions: dict | None = None
 
 
 # Only these small, changing fields travel through the process task queue.
@@ -98,4 +99,9 @@ def evaluate(request, *, progress=None):
     result['worker_pid'] = os.getpid()
     result['started_monotonic_seconds'] = started
     result['finished_monotonic_seconds'] = time.perf_counter()
+    if request.baseline_predictions is not None:
+        predictions = result.pop('predictions')
+        result['prediction_delta'] = {oid: person for oid, person in predictions.items()
+                                      if request.baseline_predictions.get(oid) != person}
+        result['prediction_encoding'] = 'baseline-delta-v1'
     return result
