@@ -46,6 +46,11 @@ class Compute:
         native = settings.get('rebuild_native_threads', 1)
         self.workers = max(1, min(requested or min(16, max(1, available-2)),
                                   max(1, available//native)))
+        from .solver_execution import current as solver_execution
+        solver = solver_execution()
+        if solver is not None:
+            self.workers = solver.inner_workers
+            native = 1
         self.native_threads = native
         from .resource_plan import plan
         self.resources = plan(config)
