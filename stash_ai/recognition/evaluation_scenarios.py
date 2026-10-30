@@ -38,28 +38,31 @@ def copy_history(source, target, selected, scope, namespace):
     copy_heads(source, target)
     target.executemany('INSERT INTO people VALUES (?,?,?,?,?,?)',
         source.execute('SELECT * FROM people WHERE scope=? AND namespace=? ORDER BY rowid', (scope, namespace)))
-    scans = {r[0] for r in target.execute('SELECT id FROM scans')}
-    people = {r[0] for r in target.execute('SELECT id FROM people')}
-    observations = {r[0] for r in target.execute('SELECT id FROM observations')}
+    scan_query = ('SELECT id FROM scans WHERE scope=? AND namespace=? '
+                  'AND scene NOT IN (SELECT value FROM json_each(?))')
+    people_query = 'SELECT id FROM people WHERE scope=? AND namespace=?'
+    observation_query = f'SELECT id FROM observations WHERE scan IN ({scan_query})'
+    body_query = f'SELECT id FROM body_observations WHERE scan IN ({scan_query})'
+    scan_args, people_args = (scope, namespace, excluded), (scope, namespace)
     rules = {
-        'members': lambda r: r['observation'] in observations and r['person'] in people,
-        'candidates': lambda r: r['scan'] in scans,
-        'identity_origins': lambda r: r['observation'] in observations and r['person'] in people,
-        'identity_merges': lambda r: r['source'] in people and r['target'] in people,
-        'merge_support': lambda r: r['observation'] in observations and r['source'] in people and r['target'] in people,
+        'members': (f'observation IN ({observation_query}) AND person IN ({people_query})', scan_args+people_args),
+        'candidates': (f'scan IN ({scan_query})', scan_args),
+        'identity_origins': (f'observation IN ({observation_query}) AND person IN ({people_query})', scan_args+people_args),
+        'identity_merges': (f'source IN ({people_query}) AND target IN ({people_query})', people_args*2),
+        'merge_support': (f'observation IN ({observation_query}) AND source IN ({people_query}) AND target IN ({people_query})', scan_args+people_args*2),
     }
     from .body_identity import available as body_available
     if body_available(source):
-        bodies={r[0] for r in target.execute('SELECT id FROM body_observations')}
-        rules.update(body_members=lambda r:r['observation'] in bodies and (r['person'] is None or r['person'] in people),
-                     body_origins=lambda r:r['observation'] in bodies and r['person'] in people)
-    for table, allowed in rules.items():
+        rules.update(body_members=(f'observation IN ({body_query}) AND (person IS NULL OR person IN ({people_query}))', scan_args+people_args),
+                     body_origins=(f'observation IN ({body_query}) AND person IN ({people_query})', scan_args+people_args))
+    for table, (where, args) in rules.items():
         columns = len(target.execute(f'PRAGMA table_info({table})').fetchall())
         target.executemany(f'INSERT INTO {table} VALUES (' + ','.join('?' for _ in range(columns)) + ')',
-            (tuple(r) for r in source.execute(f'SELECT * FROM {table} ORDER BY rowid') if allowed(r)))
+            source.execute(f'SELECT * FROM {table} WHERE {where} ORDER BY rowid', args))
     target.commit()
-    return dict(scenes=len({r[0] for r in target.execute('SELECT scene FROM scans')}),
-                observations=len(observations), people=len(people))
+    return dict(scenes=target.execute('SELECT COUNT(DISTINCT scene) FROM scans').fetchone()[0],
+                observations=target.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
+                people=target.execute('SELECT COUNT(*) FROM people').fetchone()[0])
 
 
 def snapshot(target, config, labels):

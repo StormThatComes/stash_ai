@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import time
 import sqlite3
 import tempfile
+from contextvars import ContextVar
+
+_prepared_sources = ContextVar('recognition_prepared_sources', default=())
 
 from .config import plain
 from .database import FaceDatabase, encoded
@@ -43,19 +46,37 @@ def impact(before, after):
 @contextmanager
 def prepared_history(db, config, scope, ns, installation):
     """One disk-backed immutable seed; each experiment still gets fresh RAM."""
+    if any(source is db and key == (scope, ns, installation) for source, key in _prepared_sources.get()):
+        yield db
+        return
     from .database import SCHEMA
     with tempfile.TemporaryDirectory(prefix='recognition-replay-') as directory:
         with closing(sqlite3.connect(directory+'/seed.sqlite3')) as seed:
             seed.execute('PRAGMA cache_size=-2048')
+            page_size = seed.execute('PRAGMA page_size').fetchone()[0]
+            seed.execute(f"PRAGMA max_page_count={config.data['execution']['replay_snapshot_bytes']//page_size}")
             seed.executescript(SCHEMA)
             seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
-            copy_history(db, seed, [], scope, ns)
+            try:
+                copy_history(db, seed, [], scope, ns)
+            except sqlite3.OperationalError as error:
+                if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
+                    raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error
+                raise
+            statistics = dict(embedding_bytes=sum(seed.execute(
+                f'SELECT COALESCE(SUM(length(embedding)),0) FROM {table}').fetchone()[0]
+                for table in ('observations','person_evidence','body_observations')))
+            seed.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('replay-input-statistics', encoded(statistics)))
             seed.commit()
             size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
-            if size > config.data['execution']['rebuild_memory_bytes']:
-                raise ResourceLimit('Retained replay snapshot exceeds execution.rebuild_memory_bytes.')
+            if size > config.data['execution']['replay_snapshot_bytes']:
+                raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.')
             seed.execute('PRAGMA query_only=ON')
-            yield seed
+            token = _prepared_sources.set((*_prepared_sources.get(), (seed, (scope, ns, installation))))
+            try:
+                yield seed
+            finally:
+                _prepared_sources.reset(token)
 
 
 def replay(config, variants, **kwargs):
