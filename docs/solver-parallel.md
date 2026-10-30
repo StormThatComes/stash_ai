@@ -39,3 +39,12 @@ Each trial preserves full production replay, chronological identity updates,
 competitors, exclusions and original-core guards. Parallel ablations are separate
 experiments, never automatically combined. More trials per second do not imply a
 better result per second: compare both quality-at-time and time-to-quality.
+
+Spawned trials share content-addressed packed numerical banks and matrix products
+through read-only memory mappings in a disposable directory beside the seed.
+A SQLite reservation ledger bounds published arrays; contention falls back to
+exact local computation. Private replay databases still contain their own retained
+rows. Shared files contain no executable pickle and never cache merge decisions.
+The directory outlives workers and is removed after their shutdown, including on
+interruption. With sufficient inner CPU budget the next scene is prefetched on an
+isolated read-only connection; its CPU slot is deducted from numerical workers.

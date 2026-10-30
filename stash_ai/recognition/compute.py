@@ -49,7 +49,7 @@ class Compute:
         from .solver_execution import current as solver_execution
         solver = solver_execution()
         if solver is not None:
-            self.workers = solver.inner_workers
+            self.workers = max(1, solver.inner_workers - int(settings.get('rebuild_prefetch_scenes', False)))
             native = 1
         self.native_threads = native
         from .resource_plan import plan

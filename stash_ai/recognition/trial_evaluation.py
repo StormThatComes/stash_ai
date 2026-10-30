@@ -14,6 +14,8 @@ def settings_for_replay(settings, runtime):
     data = plain(settings.data)
     data['execution'].update(rebuild_checkpoint_scenes=0,
                              profile_rebuild=bool(runtime and runtime.profile))
+    if runtime and runtime.inner_workers >= 2:
+        data['execution']['rebuild_prefetch_scenes'] = True
     if runtime and runtime.trials > 1:
         data['execution']['rebuild_cohort_backend'] = 'threads'
     return replace(settings, data=data)

@@ -27,6 +27,8 @@ class Request:
     visits: dict
     priorities: dict
     execution: object
+    shared_directory: str | None = None
+    shared_bytes: int = 0
 
 
 def evaluate(request):
@@ -40,10 +42,8 @@ def evaluate(request):
     from .solver_execution import scope as execution_scope
     from .merge_solver_feasibility import resource_limit
     started, cpu = time.perf_counter(), time.process_time()
-    data = plain(request.config.data)
-    data['execution'].update(rebuild_checkpoint_scenes=0,
-        profile_rebuild=request.execution.profile, rebuild_cohort_backend='threads')
-    config = replace(request.config, data=data)
+    from .trial_evaluation import settings_for_replay
+    config = settings_for_replay(request.config, request.execution)
     observer = QueryFeedback(request.goals)
     observer.visits, observer.priorities = dict(request.visits), dict(request.priorities)
     collected = None
@@ -52,7 +52,8 @@ def evaluate(request):
         collected = collect(db, settings, request.goals, request.feasibility, observer,
                             request.initial_changes, request.excluded, request.targeted)
         return collected[0]
-    with execution_scope(request.execution), cache_scope(config), prepared(request.goals), observe_queries(observer):
+    from .solver_shared import scope as shared_scope
+    with execution_scope(request.execution), shared_scope(request.shared_directory, request.shared_bytes), cache_scope(config), prepared(request.goals), observe_queries(observer):
         uri = Path(request.seed_path).resolve().as_uri() + '?mode=ro'
         with closing(sqlite3.connect(uri, uri=True)) as seed:
             try:
