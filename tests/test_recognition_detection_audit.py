@@ -131,7 +131,7 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
         assert image.getpixel((32, 40)) == POSE_COLOR
         assert image.getpixel((49, 60)) == FACE_COLORS[0]
         assert image.getpixel((80, 84)) == FACE_COLORS[2]  # face drawn above pose
-        assert image.getpixel((4, 120)) == BOX_COLOR
+        assert image.getpixel((4, 120)) == POSE_COLOR
         assert image.getpixel((16, 120)) == BOX_COLOR
     with Image.open(case.destination / empty['file']) as image, textured_image() as original:
         assert image.tobytes() == original.tobytes()

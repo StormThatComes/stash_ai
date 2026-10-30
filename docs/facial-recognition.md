@@ -239,10 +239,11 @@ python .\stash_ai.py recognition audit-detection --scene-id 123 --face-config fa
 The new output directory contains `scene-123_cue-000000.png`, one PNG per cue
 in original VTT order (zero-based), and `manifest.json`. Each PNG preserves the
 whole cue at its original size and overlays **all returned face and person
-boxes**, five face landmarks and measured COCO17 pose points. Colors and point
-labels match the identity/person audits: yellow boxes, magenta pose points,
-cyan eyes, red nose and green mouth corners. `F0`/`P0` label detection indices
-and scores. A cue with no detections is still exported, with unchanged pixels.
+boxes**, five face landmarks and measured COCO17 pose points. Face boxes and
+`F0` labels are yellow; person/pose boxes and `P0` labels are magenta. These
+labels show detection indices and scores. Landmark colors and point labels
+match the identity/person audits: magenta pose points, cyan eyes, red nose and
+green mouth corners. A cue with no detections is still exported, with unchanged pixels.
 The manifest records timestamps, original sprite rectangles, cue dimensions,
 geometry, scores, face/person associations, counters, source fingerprint and
 the applied detector settings.
