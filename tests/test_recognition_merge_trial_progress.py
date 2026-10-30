@@ -69,9 +69,10 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
         assert 'nan' not in captured.err
         assert 'best=trial-1 best_number=1' in captured.err
         lines = captured.err.splitlines()
-        for name, item in trials.items():
+        for completed, (name, item) in enumerate(trials.items(), 1):
             heading = f"Merge solver {name}: complete disjoint={item['goal_result']['disjoint']} best={item['best_trial']} best_number={item['best_trial_number']}"
             heading += f" goal_policy=identity strict_disjoint={item['goal_result']['strict_disjoint']}"
+            heading += f" elapsed={item['elapsed_seconds']:.1f}s completed={completed}/3"
             position = lines.index(heading)
             stop = next((i for i in range(position+1, len(lines)) if lines[i].startswith('Merge solver ')), len(lines))
             details = lines[position+1:stop]

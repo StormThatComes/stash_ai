@@ -499,20 +499,33 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             journal.record(name,settings,item,state,winner_text)
         elif winner_text is not None:winner_writer.write(winner_text)
         if winner_text is not None:written_winner=best
+    last_stage_progress = 0.
     def trial_progress(name, stage, item):
         nonlocal probe_state
+        nonlocal last_stage_progress
+        if stage.startswith('stage: '):
+            import time
+            now = time.monotonic()
+            if now - last_stage_progress < 1.:
+                return
+            last_stage_progress = now
         if stage == 'complete':
             durations[name]=item['elapsed_seconds']
             retire(name)
         elif stage == 'failed':
             retire(name)
         if stage == 'start':
+            if name == 'baseline' and progress:
+                detail = (f'cpus={runtime.cpus} trials={runtime.trials} inner_workers={runtime.inner_workers} '
+                          f'scheduling={runtime.scheduling}' if runtime else 'trials=1 scheduling=serial')
+                progress('execution', 'plan', dict(text=f'{detail} max_trials={maximum}; baseline runs first'))
             probe_state = (deepcopy(dict(options=options, hybrid=hybrid, hybrid_changes=hybrid_changes,
                 feedback=latest_feedback, visits=query_feedback.visits, priorities=query_feedback.priorities))
                 if origins.get(name, {}).get('search_phase') == 'feasibility' else None)
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
+    trial_progress.telemetry_enabled = progress is not None
     def trial_error(name, settings, exc, stage):
         if name == 'baseline' or not resource_limit(exc) or (not runtime and origins.get(name, {}).get('search_phase') != 'feasibility'):
             return None
