@@ -47,4 +47,3 @@ def retire_disabled(database,selected,config):
     for row,proof,root in pending:
         _restore_faces(db,row,proof,root)
         db.execute('DELETE FROM identity_merges WHERE source=?',(row['source'],))
-
