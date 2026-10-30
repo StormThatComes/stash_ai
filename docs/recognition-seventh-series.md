@@ -61,3 +61,20 @@ When a source is available, solver admission uses conservative input-derived
 reference bounds while retaining both private SQLite RAM ceilings (trial history
 and inner production replay). The estimate is admission accounting, not a hard
 process RSS limit. Explicit production reference and page limits still apply.
+
+## Exact evidence reuse
+
+Ordered float32 witness reductions and local dot products can be reused across
+trials by content. Mean/minimum accumulation order, weights, complete original
+cores and live thresholds remain unchanged. Rival search retains resolved owners
+and repeats matrix passes only for unresolved owners after a hard veto.
+
+Face veto banks are cached only after a complete read, within a byte limit.
+Portrait configuration and crop-backfill artifacts no longer invalidate body
+matching. Historical triggers are accepted only when they exactly match audited
+DDL, then upgraded atomically by the writer; real evidence/owner changes still
+invalidate generations. Body policy v10 invalidates old attachment decisions.
+
+Shared numerical files carry checksums and shape/dtype contracts in the ledger.
+Valid-format files with altered data fall back to exact computation. Verification
+is reused only while the file identity and modification stamps remain unchanged.

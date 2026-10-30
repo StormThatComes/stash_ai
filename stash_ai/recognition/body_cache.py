@@ -8,7 +8,17 @@ from .dependencies import version, supported
 def key(selected,config):
     from .body_identity import policy
     return 'body-rebuild:'+digest([sorted((i['scan'],i['scene']) for i in selected),
-                                  plain(config.data),policy(config)])
+                                  matching_settings(config),policy(config)])
+
+
+def matching_settings(config):
+    """Recognition dependencies only; portrait/storage/execution tuning is unrelated."""
+    from .scanning import scan_identity
+    from .models import namespace
+    person = config.data['sapiensid']
+    return [scan_identity(config, namespace(config)), plain(config.data['recognition']),
+            plain(config.data['clustering']), person['enabled'], plain(person['identities']),
+            plain(person['matching']), plain(person['global_matching']), plain(person['execution'])]
 
 
 def cached(db,selected,config):

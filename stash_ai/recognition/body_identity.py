@@ -126,11 +126,12 @@ class Scores:
         from stash_ai.runtime.cancellation import current
         token=current()
         if token is not None:token.check()
-        from hashlib import sha256
-        key=('face',sha256(first.tobytes()).digest(),sha256(second.tobytes()).digest())
+        from .body_numeric import vector_digest
+        key=('face',vector_digest(first),vector_digest(second))
         score=self.cache.get(key)
         if score is None:
-            self._charge();score=float(np.dot(first,second));self.cache[key]=score
+            from .body_numeric import dot
+            score=dot(first,second,self._charge,'face-dot');self.cache[key]=score
             if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
         else:self.cache.move_to_end(key)
         return score
@@ -177,8 +178,8 @@ class Scores:
                 key=(feature,other)
                 score=self.cache.get(key)
                 if score is None:
-                    self._charge()
-                    score=float(np.dot(value,sample));self.cache[key]=score
+                    from .body_numeric import dot
+                    score=dot(value,sample,self._charge);self.cache[key]=score
                     if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
                 else:self.cache.move_to_end(key)
                 total+=score*weight*fresh;count+=weight*fresh;minimum=min(minimum,score)

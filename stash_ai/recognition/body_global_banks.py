@@ -15,8 +15,9 @@ ROUTES=('body_global','body_scene')
 def banks(db,config,scope,namespace):
     from .run_cache import current, database_key, MISSING
     from .config import digest, plain
+    from .body_cache import matching_settings
     cache=current();generation=database_key(db)
-    policy_key=digest(plain(config.data))
+    policy_key=digest(matching_settings(config))
     key=('body-global-banks',generation,scope,namespace,policy_key)
     found=cache.get(key) if generation is not None else MISSING
     if found is not MISSING:return found

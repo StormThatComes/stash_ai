@@ -121,13 +121,48 @@ for table in ('body_members','body_origins'):
         BODY_MEMBER_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '+''.join(body)+' END'
 BODY_MEMBER_SCHEMA=';\n'.join(BODY_MEMBER_TRIGGERS.values())+';\n'
 
+# Same schema shape, narrower audited update triggers. Old installations are
+# validated against these exact historical definitions before an atomic upgrade.
+LEGACY_ARTIFACT_TRIGGERS = {}
+for mapping, name, table, metadata, columns in (
+    (EXTRA_TRIGGERS, 'recognition_version_person_evidence_update', 'person_evidence', 'metadata',
+     ('observation','contract','status','metadata','embedding')),
+    (RAW_TRIGGERS, 'recognition_raw_person_evidence_update', 'person_evidence', 'metadata',
+     ('observation','contract','status','metadata','embedding')),
+    (BODY_TRIGGERS, 'recognition_body_body_observations_update', 'body_observations', 'quality',
+     ('id','scan','cue','seconds','contract','face','geometry','quality','rejected','embedding'))):
+    original = mapping[name]
+    LEGACY_ARTIFACT_TRIGGERS[name] = original
+    changes = [f'old.{c} IS NOT new.{c}' for c in columns if c != metadata]
+    clean = lambda side: f"json_remove({side}.{metadata},'$.crop_status','$.crop_attempt_limit')"
+    changes.append(f'CASE WHEN json_valid(old.{metadata}) AND json_valid(new.{metadata}) '
+                   f'THEN {clean("old")} IS NOT {clean("new")} ELSE old.{metadata} IS NOT new.{metadata} END')
+    mapping[name] = original.replace(f'AFTER UPDATE ON {table} BEGIN',
+        f'AFTER UPDATE OF {",".join(columns)} ON {table} WHEN ('+' OR '.join(changes)+') BEGIN')
+EXTRA_SCHEMA=';\n'.join(EXTRA_TRIGGERS.values())+';\n'
+RAW_SCHEMA=';\n'.join(RAW_TRIGGERS.values())+';\n'
+BODY_TRIGGER_SCHEMA=';\n'.join(BODY_TRIGGERS.values())+';\n'
+
+
+def upgrade_artifact_triggers(db):
+    """Called only after exact executable-schema validation."""
+    current = {**EXTRA_TRIGGERS, **RAW_TRIGGERS, **BODY_TRIGGERS}
+    with db:
+        for name in LEGACY_ARTIFACT_TRIGGERS:
+            row = db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()
+            if row and ' '.join(row[0].split()) != ' '.join(current[name].split()):
+                db.execute('DROP TRIGGER '+name)
+                db.execute(current[name])
+
+
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
     accepted={**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
-        if kind!='trigger' or name not in accepted or normalize(sql)!=normalize(accepted[name]):
+        allowed = (accepted.get(name, ''), LEGACY_ARTIFACT_TRIGGERS.get(name, ''))
+        if kind!='trigger' or name not in accepted or normalize(sql) not in {normalize(v) for v in allowed}:
             raise ValueError('Unsupported facial recognition schema triggers or views.')
     expected=set(TRIGGERS)
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='evidence_thumbnails'").fetchone():expected.update(EXTRA_TRIGGERS)

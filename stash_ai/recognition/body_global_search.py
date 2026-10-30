@@ -48,6 +48,18 @@ class Evidence:
         if key in self.scores:
             self.stats['score_cache_hits']+=1;self.scores.move_to_end(key);return self.scores[key]
         count=len(left)*len(right)
+        if len(left)+len(right)<=128 and (len(left)+len(right))*(4096*4+512)<=self.cache_bytes//2:
+            from .body_numeric import lookup, publish
+            from .body_parallel import _compare
+            first=tuple(self.feature(row,kind) for row in left)
+            second=tuple(self.feature(row,kind) for row in right)
+            identity,found=lookup(first,second,kind)
+            if found is None:
+                self.charge(count,kind)
+                found=publish(identity,_compare((first,second)))
+            else:self.stats['score_cache_hits']+=1
+            self.remember(key,found)
+            return found
         self.charge(count,kind)
         total=0.;minimum=float('inf')
         for a in left:
@@ -232,16 +244,18 @@ class Search:
             # If the approximate maximum has an unmeasured hard contradiction,
             # discard that pair and find the next maximum. Weak/unknown rivals
             # remain eligible regardless of their positive matching thresholds.
+            result=[{} for _ in lanes]
+            pending=[{i for i,p in enumerate(self.identities) if lane.get(p,-1)>=0} for lane in lanes]
             while True:
                 before=len(excluded)
                 maxima=[np.full(len(self.identities),-np.inf) for _ in lanes]
-                result=[{} for _ in lanes]
                 for i,j,values in self.tiles(active):
                     for start,other,tile in rows(i,j,values):
                         for lane,g in enumerate(groups):
                             for r in np.flatnonzero(g[start:start+len(tile)]>=0):
                                 index=start+r;allowed=mask(g,index,other,tile.shape[1])
                                 owner=self.mode_owners[index]
+                                if owner not in pending[lane]:continue
                                 if allowed.any():maxima[lane][owner]=max(maxima[lane][owner],float(tile[r,allowed].max()))
                 def requests():
                     for i,j,values in self.tiles(active):
@@ -249,6 +263,7 @@ class Search:
                             for lane,g in enumerate(groups):
                                 for r in np.flatnonzero(g[start:start+len(tile)]>=0):
                                     index=start+r;owner=self.mode_owners[index];a=self.identities[owner]
+                                    if owner not in pending[lane]:continue
                                     allowed=mask(g,index,other,tile.shape[1]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
                                     for c in np.flatnonzero(allowed):
                                         b=self.identities[self.mode_owners[other+c]];key=tuple(sorted((a,b)))
@@ -266,6 +281,11 @@ class Search:
                 for (lane,a,b),(score,_) in comparisons(self.evidence,requests()):
                     update(lane,a,b,score)
                 if len(excluded)==before:return result
+                pending=[{owner for owner in wanted if self.identities[owner] not in result[lane]
+                          and np.isfinite(maxima[lane][owner])} for lane,wanted in enumerate(pending)]
+                unresolved=set().union(*pending)
+                if not unresolved:return result
+                active=np.array([owner in unresolved for owner,_ in self.entries])
         finally:
             exclusion_budget.set(0)
 

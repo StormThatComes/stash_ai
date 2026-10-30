@@ -10,6 +10,37 @@ class FaceGuard:
         self.scores=scores if scores is not None else Scores(config)
         self.db = db
         self.floor = config.data['sapiensid']['matching']['face_floor']
+        from collections import OrderedDict
+        self.banks = OrderedDict()
+        self.bank_bytes = 0
+        self.bank_limit = min(8*1024**2, config.data['sapiensid']['execution']['reference_bytes']//16)
+
+    def witnesses(self, person):
+        from .scan_heads import predicate as current_scan
+        key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
+        if key in self.banks:
+            self.banks.move_to_end(key)
+            yield from self.banks[key][0]
+            return
+        retained, used = [], 512
+        for raw in self.db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
+            'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
+            "AND o.rejected IS NULL AND s.status='complete' AND "+current_scan(), (person,)):
+            value = vector(raw)
+            value.flags.writeable = False
+            used += value.nbytes+256
+            if used <= self.bank_limit:
+                retained.append(value)
+            else:
+                retained.clear()
+            yield value
+        # Only a fully consumed bank is reusable; early vetoes store no prefix.
+        if used <= self.bank_limit:
+            while self.banks and self.bank_bytes+used > self.bank_limit:
+                _, (_, amount) = self.banks.popitem(last=False)
+                self.bank_bytes -= amount
+            self.banks[key] = retained, used
+            self.bank_bytes += used
 
     def allows(self, row, bank, person=None):
         face = row.get('_face_vector')
@@ -19,11 +50,7 @@ class FaceGuard:
         if person is not None:
             # Stream complete face vetoes; a large owner must not allocate an
             # unbounded second reference bank outside the configured budget.
-            from .scan_heads import predicate as current_scan
-            others = (vector(r) for r in self.db.execute(
-                'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-                "AND o.rejected IS NULL AND s.status='complete' AND "+current_scan(), (person,)))
+            others = self.witnesses(person)
         from .progress import tracking
         from stash_ai.runtime.cancellation import current
         token=current()
