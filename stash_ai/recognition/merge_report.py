@@ -70,10 +70,16 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         if left['scope'] != right['scope']:
             raise ValueError('Identity comparison requires the same Stash scope.')
         identities = (left['id'], right['id'])
+        from .solver_measurement_budget import measure
+        coverage = {}
+        def optional(name, function, fallback):
+            return measure(function, fallback, coverage.setdefault(name, {}))
         from .hybrid_evidence import report as hybrid_report
-        hybrid = hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities))
+        hybrid = optional('hybrid',lambda:hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities)),
+                          dict(enabled=config.data['sapiensid']['enabled'],pairs=[],decisions=[]))
         from .body_global import report as person_report
-        independent_person=person_report(db,config,left['scope'],model_namespace,focus=set(identities))
+        independent_person=optional('independent_person',lambda:person_report(db,config,left['scope'],model_namespace,focus=set(identities)),
+                                    dict(enabled=config.data['sapiensid']['global_matching']['enabled'],pairs=[],decisions=[]))
         result = dict(format=1, kind='recognition_identity_merge', scope=left['scope'],
             namespace=model_namespace, matching_policy=matching_policy(config),
             requested_identity_ids=[requested_left['id'], requested_right['id']], identity_ids=list(identities),
@@ -81,6 +87,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
             performer_ids=[left['performer'], right['performer']],
             current_configuration={key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
             paths=[], recommendations=[], hybrid=hybrid, independent_person=independent_person,
+            measurement_coverage=coverage,
             verification_scope='production_replay' if simulate else 'frozen_catalogue_only', replay_trials=0,
             analysis_basis='production_frozen_catalogue_counterfactual',
             guarantees_full_rebuild_merge=False,
@@ -122,11 +129,13 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         result['paths'].append(analyse(db, config, identities, 'confirmed_views', views))
         if config.data['sapiensid']['enabled']:
             from .hybrid_report import analyse as hybrid_analyse
-            result['paths'].append(hybrid_analyse(db,config,identities,left['scope'],model_namespace))
+            result['paths'].append(optional('hybrid_path',lambda:hybrid_analyse(db,config,identities,left['scope'],model_namespace),
+                dict(route='sapiensid_hybrid',recommendations=[],attempts=[],unresolved_reasons=['diagnostic_resource_limit'])))
         from .body_identity import enabled as body_enabled
         if body_enabled(config):
             from .body_merge_report import analyse as body_analyse
-            result['paths'].append(body_analyse(db,config,identities,left['scope'],model_namespace,verify=False))
+            result['paths'].append(optional('independent_person_path',lambda:body_analyse(db,config,identities,left['scope'],model_namespace,verify=False),
+                dict(route='independent_person',recommendations=[],proposals=[],attempts=[],unresolved_reasons=['diagnostic_resource_limit'])))
         for path in result['paths']:
             for item in [*path['recommendations'],*(path.get('proposals',[]) if simulate else [])]:
                 component = item['verification']['shared_component']
@@ -139,6 +148,8 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         unchanged = any(not item['changes'] for item in result['recommendations'])
         result['status'] = ('eligible_under_current_parameters' if unchanged else
                             'verified_parameter_changes' if result['recommendations'] else 'no_verified_proposal')
+        if not result['recommendations'] and any(not c['complete'] for c in coverage.values()):
+            result['status'] = 'diagnostics_incomplete'
         result['next_action'] = dict(
             scene_ids=sorted({s for person in result['identities'] for s in person['scenes']}, key=lambda s: (int(s), s)),
             requires_identity_rebuild=True, portraits_only_is_sufficient=False)

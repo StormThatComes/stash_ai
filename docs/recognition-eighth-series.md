@@ -25,3 +25,13 @@ report marks interrupted feasibility aggregation rather than inventing an empty
 run. Cooperative worker shutdown has a bounded grace period, followed by process
 termination for unresponsive isolated trials. Crop retention metadata is omitted
 from source fingerprints while all matching measurements remain authoritative.
+
+## Goal and diagnostic coverage
+
+Physical goal addresses are shared by scoring, destination discovery and query
+ownership. Optional pair-report body/hybrid failures mark `measurement_coverage`
+incomplete and preserve the other routes; unrelated data errors still propagate.
+Same-identity simulation distinguishes a reproduced merge from replay splitting
+or incomplete replay. Query measurements account for actual witness-pair work
+under a separate ceiling. Local body hints reserve work across goal sets/scenes,
+rotate oversubscribed scenes between trials and expose per-scene coverage.

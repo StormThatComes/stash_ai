@@ -3,6 +3,11 @@ from collections import defaultdict
 from .database import encoded
 
 
+def addresses(goals):
+    ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    return ids | {oid for source in ids for oid in goals.get('physical_alternatives', {}).get(source, ())}
+
+
 def freeze(db, config, goals):
     from .body_identity import enabled, available
     from .body_observations import contract

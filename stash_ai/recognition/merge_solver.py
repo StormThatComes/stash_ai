@@ -130,7 +130,8 @@ def rebuilt_goals(db, goals):
     """Follow observations through merges/splits without collapsing goal sets."""
     import json
     from .merge_goal_identity import destination_owners
-    ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    from .physical_goal import addresses
+    ids = addresses(goals)
     owners = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                             '(SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),)))
     from .body_reports import members as body_members

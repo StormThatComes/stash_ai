@@ -298,5 +298,10 @@ def merge_impact(config, report, source):
         item['replay_verified'] = result['trials'][item['simulation_trial']]['requested_pair']['fully_merged']
     report['rejected_recommendations'] = [i for i in report['recommendations'] if not i['replay_verified']]
     report['recommendations'] = [i for i in report['recommendations'] if i['replay_verified']]
-    report['status'] = 'replay_verified' if report['recommendations'] else 'no_replay_verified_proposal'
+    if len(set(report['identity_ids'])) == 1:
+        baseline = result['trials'].get('baseline')
+        report['status'] = ('already_merged_replay_incomplete' if baseline is None else
+                            'already_merged' if baseline['requested_pair']['fully_merged'] else 'retained_merge_not_reproduced')
+    else:
+        report['status'] = 'replay_verified' if report['recommendations'] else 'no_replay_verified_proposal'
     return result
