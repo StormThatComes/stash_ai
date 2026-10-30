@@ -61,40 +61,47 @@ class ViTPoseLarge:
         self.device, self.batch_size = device, batch_size
 
     def predict(self, image, bounds):
+        return self.predict_many([(image, bounds)])[0]
+
+    def predict_many(self, frames):
+        """Batch people across frames without changing their image coordinates."""
         import numpy as np
         import torch
-        count = len(bounds)
-        points = np.empty((count, 17, 2), dtype=np.float32)
-        scores = np.empty((count, 17), dtype=np.float32)
-        if not count:
-            return points, scores
-        boxes = np.asarray(bounds, dtype=np.float32).copy()
-        if (boxes.shape != (count, 4) or not np.isfinite(boxes).all()
-                or np.any(boxes[:, 2:] <= boxes[:, :2])):
-            raise ValueError('ViTPose requires finite, non-empty person boxes.')
-        boxes[:, 2:] -= boxes[:, :2]  # HF processor expects COCO xywh, not xyxy.
+        result, jobs = [], []
+        for frame, (image, bounds) in enumerate(frames):
+            count = len(bounds)
+            result.append((np.empty((count,17,2), dtype=np.float32), np.empty((count,17), dtype=np.float32)))
+            if not count:continue
+            boxes = np.asarray(bounds,dtype=np.float32).copy()
+            if boxes.shape != (count,4) or not np.isfinite(boxes).all() or np.any(boxes[:,2:]<=boxes[:,:2]):
+                raise ValueError('ViTPose requires finite, non-empty person boxes.')
+            boxes[:,2:] -= boxes[:,:2]
+            jobs.extend((frame, index, box) for index,box in enumerate(boxes))
         with torch.inference_mode():
-            for start in range(0, count, self.batch_size):
-                batch = boxes[start:start + self.batch_size]
-                inputs = self.processor(images=image, boxes=[batch], return_tensors='pt').to(self.device)
-                # One COCO expert index per person crop, including the final partial batch.
-                dataset_index = torch.zeros(len(batch), dtype=torch.long, device=self.device)
-                outputs = self.model(**inputs, dataset_index=dataset_index)
-                # No threshold here: retain all 17 labels and filter once in the shared adapter.
-                result = self.processor.post_process_pose_estimation(outputs, boxes=[batch], threshold=None)
-                if len(result) != 1 or len(result[0]) != len(batch):
+            for start in range(0,len(jobs),self.batch_size):
+                batch = jobs[start:start+self.batch_size]
+                owners = list(dict.fromkeys(frame for frame,_,_ in batch))
+                images = [frames[frame][0] for frame in owners]
+                boxes = [np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
+                inputs = self.processor(images=images[0] if len(images)==1 else images,
+                    boxes=boxes,return_tensors='pt').to(self.device)
+                dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
+                outputs = self.model(**inputs,dataset_index=dataset_index)
+                decoded = self.processor.post_process_pose_estimation(outputs,boxes=boxes,threshold=None)
+                if len(decoded)!=len(owners) or any(len(rows)!=len(b) for rows,b in zip(decoded,boxes)):
                     raise ValueError('ViTPose returned an invalid person count.')
-                for offset, person in enumerate(result[0]):
-                    xy = person['keypoints'].detach().cpu().numpy()
-                    confidence = person['scores'].detach().cpu().numpy()
-                    labels = person['labels'].detach().cpu().numpy()
-                    if (xy.shape != (17, 2) or confidence.shape != (17,) or labels.shape != (17,)
-                            or not np.array_equal(np.sort(labels), np.arange(17))
-                            or not np.isfinite(xy).all() or not np.isfinite(confidence).all()):
-                        raise ValueError('ViTPose returned malformed/non-finite COCO17 geometry.')
-                    order = np.argsort(labels)
-                    points[start + offset] = xy[order]
-                    # Heatmap maxima are not probabilities and may exceed 1 or be negative.
-                    scores[start + offset] = np.clip(confidence[order], 0., 1.)
-                del inputs, outputs, result
-        return points, scores
+                people = [person for rows in decoded for person in rows]
+                # One transfer per field for the entire people batch.
+                xy = torch.stack([p['keypoints'] for p in people]).detach().cpu().numpy()
+                confidence = torch.stack([p['scores'] for p in people]).detach().cpu().numpy()
+                labels = torch.stack([p['labels'] for p in people]).detach().cpu().numpy()
+                if (xy.shape!=(len(batch),17,2) or confidence.shape!=(len(batch),17) or labels.shape!=(len(batch),17)
+                        or not np.all(np.sort(labels,axis=1)==np.arange(17))
+                        or not np.isfinite(xy).all() or not np.isfinite(confidence).all()):
+                    raise ValueError('ViTPose returned malformed/non-finite COCO17 geometry.')
+                for offset,(frame,index,_) in enumerate(batch):
+                    order = np.argsort(labels[offset])
+                    result[frame][0][index] = xy[offset,order]
+                    result[frame][1][index] = np.clip(confidence[offset,order],0.,1.)
+                del inputs, outputs, decoded
+        return result
