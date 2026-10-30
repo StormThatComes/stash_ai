@@ -10,7 +10,8 @@ from stash_ai.recognition.merge_goals import evaluate
 
 
 @pytest.mark.parametrize('scheduling', ['batch', 'async'])
-def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling):
+@pytest.mark.parametrize('sampler', ['heuristic', 'tpe'])
+def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling, sampler):
     config, goals = fixture(tmp_path/'input', 'disjoint')
     checkpoint = tmp_path/'checkpoint.json'
     execution = dict(cpus=4, trials=2, scheduling=scheduling, profile=True)
@@ -19,12 +20,12 @@ def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling):
         if name == 'trial-2' and stage == 'complete':
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
-        first = solve(config, goals, db, maximum=8, execution=execution,
+        first = solve(config, goals, db, maximum=8, execution=execution, sampler=sampler,
             checkpoint=checkpoint, progress=interrupt)
         assert first['interrupted']
-        resumed = solve(config, goals, db, maximum=8, execution=execution,
+        resumed = solve(config, goals, db, maximum=8, execution=execution, sampler=sampler,
             checkpoint=checkpoint, resume=True)
-        repeated = solve(config, goals, db, maximum=8, execution=execution,
+        repeated = solve(config, goals, db, maximum=8, execution=execution, sampler=sampler,
             checkpoint=checkpoint, resume=True)
         assert repeated['simulation']['trials'] == resumed['simulation']['trials']
         assert repeated['search']['restored_trials'] == len(resumed['simulation']['trials'])
@@ -35,7 +36,9 @@ def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling):
     assert len(trials) <= 8
     assert len({t["worker"]["worker_pid"] for n,t in trials.items() if n != "baseline"}) >= 2
     assert len({json.dumps(t.get('yaml_patch', {}), sort_keys=True) for t in trials.values()}) == len(trials)
-    events = json.loads(checkpoint.read_text())['schedule']
+    document = json.loads(checkpoint.read_text())
+    assert all(t['status'] == 'completed' for t in document['tasks'].values())
+    events = document['schedule']
     active = peak = 0
     for event in events:
         active += 1 if event['kind'] == 'dispatch' else -1

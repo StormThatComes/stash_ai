@@ -47,12 +47,7 @@ class Evidence:
         if key in self.scores:
             self.stats['score_cache_hits']+=1;self.scores.move_to_end(key);return self.scores[key]
         count=len(left)*len(right)
-        charged=self.stats['body_witness_comparisons']+self.stats['face_witness_comparisons']+count
-        if charged>self.limit:
-            raise ValueError(f'Global body witness comparisons {charged} exceed '
-                f'sapiensid.execution.max_witness_comparisons={self.limit}; '
-                f"candidate pairs={self.stats['candidate_pairs']}.")
-        self.stats[kind+'_witness_comparisons']+=count
+        self.charge(count,kind)
         total=0.;minimum=float('inf')
         for a in left:
             first=self.feature(a,kind)
@@ -63,9 +58,22 @@ class Evidence:
         result=(total/count,minimum) if count else (-1.,-1.)
         # Keep the cache small even for large inherited veto banks.
         if len(left)+len(right)<=128:
-            self.scores[key]=result
-            if len(self.scores)>128:self.scores.popitem(last=False)
+            self.remember(key,result)
         return result
+
+
+    def charge(self,count,kind):
+        charged=self.stats['body_witness_comparisons']+self.stats['face_witness_comparisons']+count
+        if charged>self.limit:
+            raise ValueError(f'Global body witness comparisons {charged} exceed '
+                f'sapiensid.execution.max_witness_comparisons={self.limit}; '
+                f"candidate pairs={self.stats['candidate_pairs']}.")
+        self.stats[kind+'_witness_comparisons']+=count
+
+    def remember(self,key,result):
+        self.scores[key]=result
+        self.scores.move_to_end(key)
+        if len(self.scores)>128:self.scores.popitem(last=False)
 
 
 class Search:
@@ -119,15 +127,19 @@ class Search:
         def read(start):
             return np.array([np.frombuffer(r[0],dtype='<f8') for r in self.index.execute(
                 'SELECT vector FROM means WHERE ordinal>=? AND ordinal<? ORDER BY ordinal',(start,start+block))])
-        with tracking(range(0,count,block),'Compare global person means',unit='block') as starts:
-            for i in starts:
-                left=read(i)
-                for j in range(i,count,block):
-                    if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
-                    right=left if j==i else read(j)
-                    values=left @ right.T
-                    self.stats['centroid_pairs']+=(len(left)*(len(left)-1)//2 if i==j else values.size)
-                    yield i,j,values
+        from .parallel_numeric import matrix_tiles
+        def inputs():
+            with tracking(range(0,count,block),'Compare global person means',unit='block') as starts:
+                for i in starts:
+                    left=read(i);left.flags.writeable=False
+                    for j in range(i,count,block):
+                        if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
+                        right=left if j==i else read(j)
+                        right.flags.writeable=False
+                        yield (i,j), ((left,right),)
+        for (i,j),(values,) in matrix_tiles(inputs(),kind='body_centroids'):
+            self.stats['centroid_pairs']+=(values.shape[0]*(values.shape[0]-1)//2 if i==j else values.size)
+            yield i,j,values
 
     def nominations(self,focus):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
@@ -165,32 +177,68 @@ class Search:
                     for r in np.flatnonzero(g[start:start+len(tile)]>=0):
                         index=start+r;allowed=g[other:other+tile.shape[1]]!=g[index]
                         if allowed.any():maxima[lane][index]=max(maxima[lane][index],float(tile[r,allowed].max()))
-        for i,j,values in self.tiles(active):
-            for start,other,tile in rows(i,j,values):
-                for lane,g in enumerate(groups):
-                    for r in np.flatnonzero(g[start:start+len(tile)]>=0):
-                        index=start+r;a=self.identities[index]
-                        allowed=(g[other:other+tile.shape[1]]!=g[index]) & (tile[r]+2*ROUNDING>=maxima[lane][index])
-                        for c in np.flatnonzero(allowed):
-                            b=self.identities[other+c];key=tuple(sorted((a,b)))
-                            known=pairs.get(key)
-                            score=(known['score'] if known is not None else
-                                self.evidence.compare(self.bank[key[0]]['refs'],self.bank[key[1]]['refs'])[0])
-                            previous=result[lane].get(a)
-                            if previous is None or (-score,b)<(-previous['score'],previous['rival']):
-                                result[lane][a]=dict(identity=a,rival=b,score=score)
+        def requests():
+            for i,j,values in self.tiles(active):
+                for start,other,tile in rows(i,j,values):
+                    for lane,g in enumerate(groups):
+                        for r in np.flatnonzero(g[start:start+len(tile)]>=0):
+                            index=start+r;a=self.identities[index]
+                            allowed=(g[other:other+tile.shape[1]]!=g[index]) & (tile[r]+2*ROUNDING>=maxima[lane][index])
+                            for c in np.flatnonzero(allowed):
+                                b=self.identities[other+c];key=tuple(sorted((a,b)))
+                                known=pairs.get(key)
+                                if known is not None:
+                                    update(lane,a,b,known['score'])
+                                else:
+                                    result[lane].setdefault(a,None)
+                                    yield (lane,a,b),self.bank[key[0]]['refs'],self.bank[key[1]]['refs'],'body'
+        def update(lane,a,b,score):
+            previous=result[lane].get(a)
+            if previous is None or (-score,b)<(-previous['score'],previous['rival']):
+                result[lane][a]=dict(identity=a,rival=b,score=score)
+        from .body_parallel import comparisons
+        for (lane,a,b),(score,_) in comparisons(self.evidence,requests()):
+            update(lane,a,b,score)
         return result
 
 
 def exact_pair(a,b,bank,config,evidence):
+    return list(exact_pairs(((a,b),),bank,config,evidence))[0]
+
+
+def exact_pairs(pairs,bank,config,evidence):
+    """Batch complete proofs across candidates, original cores and face vetoes."""
+    from .body_parallel import comparisons
+    def requests():
+        for a,b in pairs:
+            first,second=bank[a],bank[b]
+            yield (a,b,'mean'),first['refs'],second['refs'],'body'
+            for left in first['cores']:
+                for right in second['cores']:
+                    yield (a,b,'core'),left,right,'body'
+            if first['faces'] and second['faces']:
+                yield (a,b,'face'),first['faces'],second['faces'],'face'
+    current=None;summary=None
+    for (a,b,kind),(mean,minimum) in comparisons(evidence,requests()):
+        if current != (a,b):
+            if current is not None:
+                yield _pair_result(*current,bank,config,**summary)
+            current=(a,b)
+            summary=dict(mean=mean,minimum=minimum,face_min=None,core_blocked=False)
+        if kind=='core':
+            summary['minimum']=min(summary['minimum'],minimum)
+            settings=config.data['sapiensid']['global_matching']
+            summary['core_blocked'] |= mean<settings['match_threshold'] or minimum<settings['cohesion_threshold']
+        elif kind=='face':summary['face_min']=minimum
+    if current is not None:
+        yield _pair_result(*current,bank,config,**summary)
+
+
+def _pair_result(a,b,bank,config,*,mean,minimum,face_min,core_blocked):
     first,second=bank[a],bank[b];settings=config.data['sapiensid']['global_matching']
-    mean,minimum=evidence.compare(first['refs'],second['refs']);blockers=[]
+    blockers=[]
     if mean<settings['match_threshold']:blockers.append('body_similarity')
-    for left in first['cores']:
-        for right in second['cores']:
-            m,n=evidence.compare(left,right);minimum=min(minimum,n)
-            if m<settings['match_threshold'] or n<settings['cohesion_threshold']:
-                if 'body_cohesion' not in blockers:blockers.append('body_cohesion')
+    if core_blocked:blockers.append('body_cohesion')
     if first.get('provisional') or second.get('provisional'):
         from .body_identity import independent
         local=config.data['sapiensid']['identities']
@@ -204,9 +252,6 @@ def exact_pair(a,b,bank,config,evidence):
     if first['missing_original'] or second['missing_original']:blockers.append('missing_original_body_witness')
     if first.get('stale_policy') or second.get('stale_policy'):
         blockers.append('historical_body_policy_requires_rebuild')
-    face_min=None
-    if first['faces'] and second['faces']:
-        face_min=evidence.compare(first['faces'],second['faces'],'face')[1]
     if face_min is not None and face_min<config.data['sapiensid']['matching']['face_floor']:blockers.append('face_contradiction')
     return dict(people=[a,b],score=mean,minimum=minimum,face_minimum=face_min,
         support=[first['support'],second['support']],face_evidence='compared' if face_min is not None else 'unavailable',

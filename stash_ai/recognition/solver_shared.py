@@ -21,7 +21,8 @@ def key(kind, arrays, extra=()):
         if not array.flags.c_contiguous or array.dtype.hasobject:
             return None
         h.update(json.dumps([array.dtype.str, array.shape]).encode())
-        h.update(memoryview(array).cast('B'))
+        if array.size:
+            h.update(memoryview(array).cast('B'))
     return h.hexdigest()
 
 

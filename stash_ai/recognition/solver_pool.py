@@ -57,8 +57,11 @@ class Trials(AbstractContextManager):
         if self.progress:
             self.progress(name, 'start', None)
         future = None
-        cached = self.journal.raw_result(name) if self.journal else None
         completed = self.journal and name in self.journal.records
+        if self.journal:
+            status = self.journal.document.get('tasks', {}).get(name, {}).get('status', 'completed') if completed else 'queued'
+            self.journal.task(name, settings, status)
+        cached = self.journal.raw_result(name, settings) if self.journal else None
         if cached is not None:
             self.ready[name] = cached
         if not completed and cached is None:
@@ -72,19 +75,24 @@ class Trials(AbstractContextManager):
             future = self.executor.submit(work, request)
         self.pending[name] = settings, future
         self.peak = max(self.peak, len(self.pending))
-        if self.journal:
+        if self.journal and not completed:
             self.journal.task(name, settings, 'running' if future else 'queued')
         if not restored:
             self.event_record('dispatch', name)
 
-    def harvest(self):
+    def harvest(self, *, stopping=False):
         now = time.monotonic()
         if self.progress and now - self.last_progress >= 5 and self.pending:
             self.last_progress = now
             self.progress('workers', f"running/queued={len(self.pending)} limit={self.execution.trials}", None)
         for name, (settings, future) in self.pending.items():
             if future is not None and future.done() and name not in self.ready:
-                result = future.result()
+                try:
+                    result = future.result()
+                except BaseException:
+                    if stopping:
+                        continue
+                    raise
                 self.ready[name] = result
                 if self.journal:
                     self.journal.save_raw_result(name, settings, result)
@@ -141,7 +149,7 @@ class Trials(AbstractContextManager):
     def __exit__(self, *error):
         try:
             # Persist completed-but-not-yet-applied results before cancelling.
-            self.harvest()
+            self.harvest(stopping=bool(error[0]))
         finally:
             self.event.set()
             for name, (settings, future) in self.pending.items():

@@ -55,3 +55,12 @@ tie breaking and coordinator-owned caches. Hybrid nomination multiplies bounded
 centroid tiles concurrently; every incident rival remains eligible. A batch
 retires completely before exposing its results, so consumers can safely request
 exact proofs from the same pool. Oversized work uses the original serial path.
+
+Global body consolidation now batches exact proofs across candidate pairs,
+original cores and inherited face vetoes. Witness loading and comparison-budget
+charges remain on the SQLite owner. Workers retain the original float32 dot and
+accumulation order. Both all-competitor centroid passes use bounded parallel
+matrix tiles; every rival within the rounding envelope still receives an exact
+proof. Near thresholds, weak rivals and missing original witnesses keep their
+existing acceptance rules. No top-k truncation or approximate merge acceptance
+is introduced.

@@ -29,7 +29,7 @@ def report(db,config,scope,namespace,*,focus=None):
 
 def plan(db,config,bank,*,focus=None):
     """Plan on a frozen metadata catalogue; source evidence is only read."""
-    from .body_global_search import Search,exact_pair
+    from .body_global_search import Search,exact_pairs
     from .memory_size import Reservation,size
     settings=config.data['sapiensid']['global_matching']
     result=dict(enabled=settings['enabled'],contract=contract(config),pairs=[],decisions=[],
@@ -48,8 +48,8 @@ def plan(db,config,bank,*,focus=None):
     reserve()
     try:
         with Search(db,config,bank) as search:
-            for a,b in search.nominations(focus):
-                pair=exact_pair(a,b,bank,config,search.evidence)
+            for pair in exact_pairs(search.nominations(focus),bank,config,search.evidence):
+                a,b=pair['people']
                 reserve(size(pair)+512)
                 pairs[a,b]=pair;result['pairs'].append(pair)
                 if not pair['blockers']:edges[a].add(b);edges[b].add(a)
