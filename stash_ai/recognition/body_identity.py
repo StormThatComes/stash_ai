@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v8-frozen-competition',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v9-complete-vetoes',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -103,13 +103,13 @@ class Scores:
         # Scene banks grow append-only and remain frozen for attachments.
         for row in rows[state['length']:]:
             pixel=(quality(row).get('pixel_digest') if 'quality' in row else None) or ('observation',row['id'])
-            if pixel in state['pixels']:continue
+            weight=int(pixel not in state['pixels'])
             state['pixels'].add(pixel)
             value=row['_vector']
             feature=row.get('_score_key')
             if feature is None:feature=row['_score_key']=value.tobytes()
-            if feature in state['vectors']:state['vectors'][feature][1]+=1
-            else:state['vectors'][feature]=[value,1]
+            if feature in state['vectors']:state['vectors'][feature][1]+=weight
+            else:state['vectors'][feature]=[value,weight]
         state['length']=len(rows)
         return state['vectors']
 
@@ -165,7 +165,10 @@ class Scores:
 
     def compare(self,first,second):
         bank=self.bank(second);total=0.;minimum=float('inf');count=0
-        for row in distinct_pixels(first):
+        pixels=set()
+        for row in first:
+            pixel=(quality(row).get('pixel_digest') if 'quality' in row else None) or ('observation',row['id'])
+            fresh=pixel not in pixels;pixels.add(pixel)
             value=row['_vector']
             feature=row.get('_score_key')
             if feature is None:feature=row['_score_key']=value.tobytes()
@@ -177,7 +180,7 @@ class Scores:
                     score=float(np.dot(value,sample));self.cache[key]=score
                     if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
                 else:self.cache.move_to_end(key)
-                total+=score*weight;count+=weight;minimum=min(minimum,score)
+                total+=score*weight*fresh;count+=weight*fresh;minimum=min(minimum,score)
         return (total/count,minimum) if count else (-1.,-1.)
 
 

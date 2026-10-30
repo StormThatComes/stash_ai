@@ -24,13 +24,25 @@ def _restore_faces(db,alias,proof,root):
         db.execute('UPDATE members SET person=? WHERE observation=? AND person=?',(source,payload['observation'],root))
 
 
+def prepare_replay(database,selected,config):
+    """Restore original labels before replay whenever body decisions are stale."""
+    from .body_cache import cached
+    if selected and not cached(database.connection,selected,config):
+        _retire(database,selected,('body_scene','body_global'))
+    else:
+        retire_disabled(database,selected,config)
+
+
 def retire_disabled(database,selected,config):
     if not selected:return
     from .body_identity import enabled
     routes=set()
     if not enabled(config):routes.update(('body_scene','body_global'))
     elif not config.data['sapiensid']['global_matching']['enabled']:routes.add('body_global')
-    if not routes:return
+    if routes:_retire(database,selected,routes)
+
+
+def _retire(database,selected,routes):
     db=database.connection
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     selection={item['scene'] for item in selected}

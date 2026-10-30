@@ -19,9 +19,11 @@ class FaceGuard:
         if person is not None:
             # Stream complete face vetoes; a large owner must not allocate an
             # unbounded second reference bank outside the configured budget.
+            from .scan_heads import predicate as current_scan
             others = (vector(r) for r in self.db.execute(
                 'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                'ON m.observation=o.id WHERE m.person=? AND o.rejected IS NULL', (person,)))
+                'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
+                "AND o.rejected IS NULL AND s.status='complete' AND "+current_scan(), (person,)))
         from .progress import tracking
         from stash_ai.runtime.cancellation import current
         token=current()

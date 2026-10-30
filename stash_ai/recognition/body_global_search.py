@@ -185,41 +185,81 @@ class Search:
         groups=[np.array([lane.get(self.identities[owner],-1) for owner,_ in self.entries]) for lane in lanes]
         active=np.array([any(g[i]>=0 for g in groups) for i in range(len(self.entries))])
         if not active.any():return [{} for _ in lanes]
-        maxima=[np.full(len(self.identities),-np.inf) for _ in lanes]
-        result=[{} for _ in lanes]
+        excluded=set();blocked_owners={}
+        positions={p:i for i,p in enumerate(self.identities)}
+        exclusion_budget=Reservation(self.config.data['sapiensid']['execution']['plan_bytes'])
+        hard={'person_copresence','face_contradiction'}
+        def exclude(a,b):
+            key=tuple(sorted((a,b)))
+            if key not in excluded:
+                exclusion_budget.set((len(excluded)+1)*512+size(positions))
+                excluded.add(key)
+                x,y=positions[a],positions[b]
+                blocked_owners.setdefault(x,set()).add(y)
+                blocked_owners.setdefault(y,set()).add(x)
+        for (a,b),known in pairs.items():
+            if hard.intersection(known['blockers']):exclude(a,b)
+        def forbidden(a,b):
+            key=tuple(sorted((a,b)))
+            if key in excluded:return True
+            known=pairs.get(key)
+            blocked=bool(hard.intersection(known['blockers'])) if known else False
+            if known is None:
+                left,right=self.bank[a],self.bank[b]
+                blocked=bool(left['cues'] & right['cues'])
+                if not blocked and left['faces'] and right['faces']:
+                    blocked=self.evidence.compare(left['faces'],right['faces'],'face')[1]<self.config.data['sapiensid']['matching']['face_floor']
+            if blocked:exclude(a,b)
+            return blocked
+        def mask(g,index,other,width):
+            allowed=g[other:other+width]!=g[index]
+            blocked=blocked_owners.get(self.mode_owners[index])
+            if blocked:
+                allowed &= ~np.isin(self.mode_owners[other:other+width],tuple(blocked))
+            return allowed
         def rows(i,j,values):
             yield i,j,values
             if i!=j:yield j,i,values.T
-        for i,j,values in self.tiles(active):
-            for start,other,tile in rows(i,j,values):
-                for lane,g in enumerate(groups):
-                    for r in np.flatnonzero(g[start:start+len(tile)]>=0):
-                        index=start+r;allowed=g[other:other+tile.shape[1]]!=g[index]
-                        owner=self.mode_owners[index]
-                        if allowed.any():maxima[lane][owner]=max(maxima[lane][owner],float(tile[r,allowed].max()))
-        def requests():
-            for i,j,values in self.tiles(active):
-                for start,other,tile in rows(i,j,values):
-                    for lane,g in enumerate(groups):
-                        for r in np.flatnonzero(g[start:start+len(tile)]>=0):
-                            index=start+r;owner=self.mode_owners[index];a=self.identities[owner]
-                            allowed=(g[other:other+tile.shape[1]]!=g[index]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
-                            for c in np.flatnonzero(allowed):
-                                b=self.identities[self.mode_owners[other+c]];key=tuple(sorted((a,b)))
-                                known=pairs.get(key)
-                                if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
-                                    update(lane,a,b,known['score'])
-                                else:
-                                    result[lane].setdefault(a,None)
-                                    yield (lane,a,b),self.entries[index][1],self.entries[other+c][1],'body'
-        def update(lane,a,b,score):
-            previous=result[lane].get(a)
-            if previous is None or (-score,b)<(-previous['score'],previous['rival']):
-                result[lane][a]=dict(identity=a,rival=b,score=score)
-        from .body_parallel import comparisons
-        for (lane,a,b),(score,_) in comparisons(self.evidence,requests()):
-            update(lane,a,b,score)
-        return result
+        try:
+            # If the approximate maximum has an unmeasured hard contradiction,
+            # discard that pair and find the next maximum. Weak/unknown rivals
+            # remain eligible regardless of their positive matching thresholds.
+            while True:
+                before=len(excluded)
+                maxima=[np.full(len(self.identities),-np.inf) for _ in lanes]
+                result=[{} for _ in lanes]
+                for i,j,values in self.tiles(active):
+                    for start,other,tile in rows(i,j,values):
+                        for lane,g in enumerate(groups):
+                            for r in np.flatnonzero(g[start:start+len(tile)]>=0):
+                                index=start+r;allowed=mask(g,index,other,tile.shape[1])
+                                owner=self.mode_owners[index]
+                                if allowed.any():maxima[lane][owner]=max(maxima[lane][owner],float(tile[r,allowed].max()))
+                def requests():
+                    for i,j,values in self.tiles(active):
+                        for start,other,tile in rows(i,j,values):
+                            for lane,g in enumerate(groups):
+                                for r in np.flatnonzero(g[start:start+len(tile)]>=0):
+                                    index=start+r;owner=self.mode_owners[index];a=self.identities[owner]
+                                    allowed=mask(g,index,other,tile.shape[1]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
+                                    for c in np.flatnonzero(allowed):
+                                        b=self.identities[self.mode_owners[other+c]];key=tuple(sorted((a,b)))
+                                        if forbidden(a,b):continue
+                                        known=pairs.get(key)
+                                        if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
+                                            update(lane,a,b,known['score'])
+                                        else:
+                                            yield (lane,a,b),self.entries[index][1],self.entries[other+c][1],'body'
+                def update(lane,a,b,score):
+                    previous=result[lane].get(a)
+                    if previous is None or (-score,b)<(-previous['score'],previous['rival']):
+                        result[lane][a]=dict(identity=a,rival=b,score=score)
+                from .body_parallel import comparisons
+                for (lane,a,b),(score,_) in comparisons(self.evidence,requests()):
+                    update(lane,a,b,score)
+                if len(excluded)==before:return result
+        finally:
+            exclusion_budget.set(0)
 
 
 def exact_pair(a,b,bank,config,evidence):
