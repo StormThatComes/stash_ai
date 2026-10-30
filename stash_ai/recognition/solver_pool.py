@@ -229,7 +229,8 @@ class Trials(AbstractContextManager):
                         if self.telemetry and self.pending:
                             self.progress('workers', 'pool', dict(text='cancelling pending trials; waiting for worker shutdown'))
                     finally:
-                        self.executor.shutdown(wait=True, cancel_futures=True)
+                        from .solver_shutdown import shutdown
+                        shutdown(self.executor, (f for _,f in self.pending.values()))
             finally:
                 if self.updates is not None:
                     self.updates.close()

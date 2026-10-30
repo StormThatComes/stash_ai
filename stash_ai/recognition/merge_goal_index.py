@@ -71,23 +71,33 @@ def solver_scope(function):
         from .trial_metrics import Metrics
         metrics = Metrics(bool((kwargs.get('execution') or {}).get('profile')))
         started_trials = False
+        result = None
         callback = kwargs.get('progress')
-        if callback is not None:
-            def progress(name, phase, item):
-                nonlocal started_trials
-                if phase == 'start':started_trials = True
-                return callback(name, phase, item)
-            progress.telemetry_enabled = getattr(callback, 'telemetry_enabled', True)
-            kwargs['progress'] = progress
+        def progress(name, phase, item):
+            nonlocal started_trials
+            if phase == 'start':started_trials = True
+            if callback is not None:return callback(name, phase, item)
+        progress.telemetry_enabled = callback is not None and getattr(callback, 'telemetry_enabled', True)
+        kwargs['progress'] = progress
         try:
             with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):
                 execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
                                  scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
             from .solver_journal_events import journal_scope
+            from contextlib import ExitStack
             with metrics.stage('Solve and finalize journal'):
-                with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
+                with ExitStack() as ownership, journal_scope(), execution_scope(execution), scope(config), prepared(goals):
+                    writer = kwargs.get('winner_writer')
+                    if writer is not None and kwargs.get('checkpoint') is None:
+                        from stash_ai.storage.writer_lock import writer_lock
+                        ownership.enter_context(writer_lock(writer.path))
                     result = function(config, goals, *args, **kwargs)
         except KeyboardInterrupt:
+            if result is not None:
+                result['interrupted'] = True
+                result['simulation']['interrupted'] = True
+                result['search']['stop_reason'] = 'interrupted'
+                return result
             if started_trials:
                 raise  # Replay owns interruption once a trial has started.
             result = dict(status='no_completed_trials', interrupted=True,

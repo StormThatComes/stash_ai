@@ -172,7 +172,7 @@ def execute(args, config):
         target = Path(args.output).expanduser().resolve()
         if target == config.database.resolve():
             raise ValueError('Report output must not overwrite the face database.')
-        with target.open('x', encoding='utf-8') as file:
-            file.write(output)
+        from .merge_solver_checkpoint import AtomicFile
+        AtomicFile(target).write(output)
         print(f'Identity merge report written: {target} ({result["status"]})')
     return 0

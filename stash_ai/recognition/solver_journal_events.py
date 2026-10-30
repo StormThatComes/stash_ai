@@ -66,7 +66,8 @@ def load_document(path):
 
 class Events:
     def __init__(self, journal, *, resume=False, state=None):
-        self.journal = journal
+        import weakref
+        self.journal = weakref.proxy(journal)
         self.path = log_path(journal.path)
         if state is None:
             from .merge_solver_checkpoint import AtomicFile
@@ -79,9 +80,6 @@ class Events:
                     stream.truncate(self.size); stream.flush(); os.fsync(stream.fileno())
         journal.document.setdefault('journal_format', 1)
         journal.document.setdefault('journal_applied', 0)
-        owners = _journals.get()
-        if owners is not None:
-            owners.append(journal)
 
     def append(self, event):
         self.journal.file.check()
@@ -104,7 +102,7 @@ def journal_scope():
         yield
     finally:
         try:
-            for journal in journals:
-                journal.flush_snapshot()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('close solver journal', journal.close) for journal in journals])
         finally:
             _journals.reset(token)

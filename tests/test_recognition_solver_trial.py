@@ -46,6 +46,7 @@ def test_trial_journal_tracks_inflight_configuration(tmp_path):
     journal = Journal(path, {'test': 1})
     journal.task('trial-1', config, 'queued')
     journal.task('trial-1', config, 'running')
+    journal.close()
     resumed = Journal(path, {'test': 1}, resume=True)
     assert resumed.document['tasks']['trial-1']['status'] == 'running'
     with pytest.raises(ValueError, match='configuration changed'):
