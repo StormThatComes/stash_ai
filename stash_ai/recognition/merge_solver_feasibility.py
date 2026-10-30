@@ -113,6 +113,7 @@ class Feasibility:
         return dict(status=outcome, merged=merged, goals_satisfied=status['fully_solved'], groups=groups)
 
     def report(self, trials, failures, budget):
+        failures = {name:item for name,item in failures.items() if item.get('search_phase')=='feasibility'}
         completed = {n: t['goal_result']['construction'] for n, t in trials.items()}
         joint = next((n for n, c in completed.items() if c['status'] == 'possible'), None)
         joint = joint or next((n for n, c in completed.items() if c['merged']), None)

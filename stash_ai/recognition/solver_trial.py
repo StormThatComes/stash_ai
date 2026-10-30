@@ -88,6 +88,7 @@ def evaluate(request, *, progress=None):
                 if not resource_limit(exc):
                     raise
                 return dict(failed=True, reason='resource_limit', error=str(exc),
+                    trial_profile=getattr(exc,'trial_profile',None), resource=exc.document(),
                     diagnostics=list(getattr(exc, '__notes__', ())),
                     stage=getattr(exc, 'replay_stage', 'Prepare replay'),
                     elapsed_seconds=time.perf_counter()-started)

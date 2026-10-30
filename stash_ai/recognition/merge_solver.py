@@ -565,6 +565,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             query_feedback.visits = probe_state['visits']
             query_feedback.priorities = probe_state['priorities']
         item = dict(reason='resource_limit', error=str(exc), diagnostics=list(getattr(exc, '__notes__', ())),
+                    trial_profile=getattr(exc,'trial_profile',None), resource=exc.document(),
                     stage=stage, **origins[name], **patches[name])
         failures[name] = item
         return item

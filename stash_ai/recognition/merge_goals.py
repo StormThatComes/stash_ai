@@ -91,6 +91,10 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     return result
 
 
+from .report_metrics import command as report_command, phase as report_phase, attach as report_profile
+
+
+@report_command
 def execute(args, config):
     from contextlib import closing
     from .fragmentation_report import _open_readonly
@@ -110,14 +114,15 @@ def execute(args, config):
     sets = args.performer_set or [args.performer_id or args.identity_id]
     from .report_snapshot import snapshot
     from contextlib import ExitStack
-    from .solver_progress import startup
     with ExitStack() as snapshots:
-        with startup(args):
+        with report_phase('Prepare report inputs'):
             db = snapshots.enter_context(snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None))
-            result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
-                             policy=getattr(args, 'goal_policy', 'identity'),
-                             scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
-            result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
+            with report_phase('Resolve goals'):
+                result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
+                                 policy=getattr(args, 'goal_policy', 'identity'),
+                                 scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
+            with report_phase('Fingerprint retained inputs'):
+                result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
             from .merge_goal_output import group_summary_lines
@@ -181,22 +186,26 @@ def execute(args, config):
                     profile=getattr(args, 'profile_solver', False), scheduling=getattr(args, 'solver_scheduling', 'batch'))
                 if args.solver_cpus is not None: execution['cpus'] = args.solver_cpus
                 if args.solver_memory_gib is not None: execution['memory_bytes'] = args.solver_memory_gib * 1024**3
-            result.update(solve(config, result, db, maximum=args.max_trials,
-                                 progress=progress if args.progress_style != 'off' else None,
-                                checkpoint=checkpoint,resume=resume,winner_writer=writer,
-                                sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
-                                yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
-                                targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
-                                    key: getattr(args, attr, None) for key, attr in (
-                                        ('coverage_lost', 'max_outside_coverage_loss'),
-                                        ('split_pairs', 'max_outside_split_pairs'),
-                                        ('newly_joined_pairs', 'max_outside_joined_pairs'),
-                                        ('new_outsider_observations', 'max_new_outsider_observations'))}))
+            with report_phase('Solve merge goals',quiet=True):
+                result.update(solve(config, result, db, maximum=args.max_trials,
+                                     progress=progress if args.progress_style != 'off' else None,
+                                    checkpoint=checkpoint,resume=resume,winner_writer=writer,
+                                    sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
+                                    yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
+                                    targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
+                                        key: getattr(args, attr, None) for key, attr in (
+                                            ('coverage_lost', 'max_outside_coverage_loss'),
+                                            ('split_pairs', 'max_outside_split_pairs'),
+                                            ('newly_joined_pairs', 'max_outside_joined_pairs'),
+                                            ('new_outsider_observations', 'max_new_outsider_observations'))}))
         elif args.simulate:
-            result['simulation'] = evaluate(config, result, db)
+            with report_phase('Replay merge goals'):
+                result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
     from .merge_goal_output import export
-    export(config, result, args.output, args.yaml_output,yaml_owner=writer,yaml_mode=yaml_mode)
+    report_profile(result)
+    with report_phase('Serialize and publish report'):
+        export(config, result, args.output, args.yaml_output,yaml_owner=writer,yaml_mode=yaml_mode)
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
         print(summary(result), file=sys.stderr, flush=True)

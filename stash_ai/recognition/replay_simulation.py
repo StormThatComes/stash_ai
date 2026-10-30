@@ -194,6 +194,9 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                     error = ResourceLimit(evaluated['error'])
                                     error.replay_stage = evaluated['stage']
                                     error.worker_elapsed_seconds = evaluated['elapsed_seconds']
+                                    error.trial_profile = evaluated.get('trial_profile')
+                                    for key in ('budget','limit','requested'):
+                                        setattr(error,key,evaluated.get('resource',{}).get(key))
                                     for note in evaluated.get('diagnostics', ()):
                                         error.add_note(note)
                                     raise error

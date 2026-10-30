@@ -26,13 +26,17 @@ def evaluate(name, settings, *, seed, source, scope, namespace, installation, sc
     from .solver_progress import ReplayProgress, heartbeat
     from .trial_metrics import Metrics
     metrics = Metrics(settings.data['execution'].get('profile_rebuild', False))
-    with heartbeat(name, progress) as live:
-        reporter = ReplayProgress(name, live) if live else None
-        with observe_updates(reporter.update) if reporter else nullcontext():
-            result = _evaluate(name, settings, seed=seed, source=source, scope=scope,
-                namespace=namespace, installation=installation, scans=scans,
-                observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,
-                copy_inputs=copy_inputs, metrics=metrics)
+    try:
+        with heartbeat(name, progress) as live:
+            reporter = ReplayProgress(name, live) if live else None
+            with observe_updates(reporter.update) if reporter else nullcontext():
+                result = _evaluate(name, settings, seed=seed, source=source, scope=scope,
+                    namespace=namespace, installation=installation, scans=scans,
+                    observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,
+                    copy_inputs=copy_inputs, metrics=metrics)
+    except BaseException as error:
+        error.trial_profile=metrics.snapshot()
+        raise
     result['trial_profile'] = metrics.snapshot()
     return result
 
@@ -81,7 +85,8 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
         import sqlite3
         if isinstance(exc, sqlite3.OperationalError) and getattr(exc, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
             from .resource_errors import ResourceLimit
-            limit = ResourceLimit('Trial replay exceeds execution.rebuild_memory_bytes.')
+            limit = ResourceLimit('Trial replay exceeds execution.rebuild_memory_bytes.',
+                                  budget='execution.rebuild_memory_bytes',limit=settings.data['execution']['rebuild_memory_bytes'])
             limit.replay_stage = active_stage
             limit.add_note(exc.__notes__[-1])
             raise limit from exc

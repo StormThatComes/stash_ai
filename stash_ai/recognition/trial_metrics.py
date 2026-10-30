@@ -33,5 +33,5 @@ class Metrics:
     def snapshot(self):
         if not self.enabled:return None
         return dict(elapsed_seconds=time.perf_counter()-self.started, cpu_seconds=time.process_time()-self.cpu,
-                    stages=self.stages, process_peak_rss_bytes=peak_rss_bytes(),
+                    stages=dict(self.stages), process_peak_rss_bytes=peak_rss_bytes(),
                     rss_scope='process lifetime high water mark, not incremental trial allocation')

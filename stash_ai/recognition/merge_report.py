@@ -18,6 +18,7 @@ from .reference_roles import strict_sql
 from .reference_usage import ReferenceUsage
 from .scanning import scan_identity
 from .strict_partition import summary_views
+from .report_metrics import command as report_command, phase as report_phase, attach as report_profile
 
 
 def _identity(db, requested, person, group, config):
@@ -73,7 +74,8 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         from .solver_measurement_budget import measure
         coverage = {}
         def optional(name, function, fallback):
-            return measure(function, fallback, coverage.setdefault(name, {}))
+            with report_phase("Measure "+name):
+                return measure(function, fallback, coverage.setdefault(name, {}))
         from .hybrid_evidence import report as hybrid_report
         hybrid = optional('hybrid',lambda:hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities)),
                           dict(enabled=config.data['sapiensid']['enabled'],pairs=[],decisions=[]))
@@ -171,19 +173,23 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         return result
 
 
+@report_command
 def execute(args, config):
     by_performer = args.performer_id is not None
     identifiers = args.performer_id if by_performer else args.identity_id
-    result = build(config, *identifiers, scope=args.scope, by_performer=by_performer,
-                   simulate=getattr(args, 'simulate', False))
-    output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
-    if args.output is None:
-        print(output, end='')
-    else:
-        target = Path(args.output).expanduser().resolve()
-        if target == config.database.resolve():
-            raise ValueError('Report output must not overwrite the face database.')
-        from .merge_solver_checkpoint import AtomicFile
-        AtomicFile(target).write(output)
-        print(f'Identity merge report written: {target} ({result["status"]})')
+    with report_phase('Analyse identity pair'):
+        result = build(config, *identifiers, scope=args.scope, by_performer=by_performer,
+                       simulate=getattr(args, 'simulate', False))
+    report_profile(result)
+    with report_phase('Serialize and publish report'):
+        output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
+        if args.output is None:
+            print(output, end='')
+        else:
+            target = Path(args.output).expanduser().resolve()
+            if target == config.database.resolve():
+                raise ValueError('Report output must not overwrite the face database.')
+            from .merge_solver_checkpoint import AtomicFile
+            AtomicFile(target).write(output)
+            print(f'Identity merge report written: {target} ({result["status"]})')
     return 0

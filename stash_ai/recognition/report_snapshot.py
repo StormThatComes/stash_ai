@@ -20,8 +20,12 @@ def snapshot(config, identifier, *, scope=None, by_performer=False, other_identi
             if compared['scope'] != person['scope']:
                 raise ValueError('Identity comparison requires the same Stash scope.')
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))
-        with prepared_history(source, config, person['scope'], namespace(config), installation) as seed:
-            seed.row_factory = sqlite3.Row
-            # The seed owns all evidence and bindings needed by this report.
-            source.close()
+        from contextlib import ExitStack
+        from .report_metrics import phase
+        with ExitStack() as retained:
+            with phase('Copy retained snapshot'):
+                seed=retained.enter_context(prepared_history(source, config, person['scope'], namespace(config), installation))
+                seed.row_factory = sqlite3.Row
+                # The seed owns all evidence and bindings needed by this report.
+                source.close()
             yield seed
