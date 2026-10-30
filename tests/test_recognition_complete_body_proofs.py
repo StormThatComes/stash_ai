@@ -144,9 +144,11 @@ def test_complete_witnesses_survive_merge_and_veto_a_later_merge(tmp_path,legacy
     assert 'merge' not in result['later']
 
 
-def test_partial_replacement_cannot_hide_a_historical_rival(tmp_path):
+def test_partial_replacement_rechecks_a_previously_contradictory_rival(tmp_path):
     result=retired_rival(tmp_path)
-    assert result['before']==[('blocked',['body_ambiguity'])]
+    # A known face contradiction cannot compete; missing current evidence
+    # after replacement is unknown and must block publication again.
+    assert result['before']==[('merge',[])]
     assert result['after']==[('blocked',['incomplete_reference_scans'])]
 
 
