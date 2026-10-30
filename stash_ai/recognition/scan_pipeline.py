@@ -267,32 +267,38 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
 
 
 def cue_batches(frames, maximum, limit):
-    """Own frame copies until an entire ordered microbatch has been consumed."""
-    pending, size = [], 0
+    """Transfer prefetched images, or own one copy of an expiring source crop."""
+    from .frame_ownership import CueBatch
+    pending, size = CueBatch(), 0
+    transferred = getattr(frames, 'transfers_images', False)
     try:
         for index, cue, image in frames:
             required = image.width*image.height*3*8 + 4096
-            if pending and (len(pending) >= maximum or size+required > limit):
-                yield pending
-                for _, _, owned in pending:
-                    owned.close()
-                pending, size = [], 0
+            if transferred:
+                owned = image
+            else:
+                try:owned = image.copy()
+                finally:image.close()
             try:
-                owned = image.copy()
+                if pending and (len(pending) >= maximum or size+required > limit):
+                    yield pending
+                    pending.close()
+                    pending, size = CueBatch(), 0
+                pending.add(index, cue, owned)
+                owned = None
+                size += required
+                if required > limit:
+                    yield pending
+                    pending.close()
+                    pending, size = CueBatch(), 0
             finally:
-                image.close()
-            pending.append((index, cue, owned))
-            size += required
-            if required > limit:
-                yield pending
-                for _, _, owned in pending:
-                    owned.close()
-                pending, size = [], 0
+                # The next transferred frame can already be in hand when a
+                # caller stops while consuming the previous microbatch.
+                if owned is not None:owned.close()
         if pending:
             yield pending
     finally:
-        for _, _, owned in pending:
-            owned.close()
+        pending.close()
 
 
 def process_cues(batch, backend, visibility, config, *, stage, **callbacks):

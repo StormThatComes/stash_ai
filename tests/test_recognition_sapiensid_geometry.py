@@ -27,7 +27,8 @@ def detector(monkeypatch):
     result = SimpleNamespace(
         boxes=SimpleNamespace(xyxy=torch.tensor([[10., 20., 91., 140.]]), conf=torch.tensor([.99])),
         keypoints=SimpleNamespace(xy=torch.full((1, 17, 2), 30.), conf=confidence))
-    monkeypatch.setattr(backend, 'load_pose', lambda _: SimpleNamespace(predict=lambda **kw: [result]))
+    monkeypatch.setattr(backend, 'load_pose', lambda _: SimpleNamespace(
+        predict=lambda **kw: [result] * (len(kw['source']) if isinstance(kw['source'],list) else 1)))
     model = backend.SapiensIDFaces(config, {}, load_identity=False, load_detector=False)
     model.encoder = SapiensIDV1Encoder(PersonModel(), None, device='cpu')
     try:

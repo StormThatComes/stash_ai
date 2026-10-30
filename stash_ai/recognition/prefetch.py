@@ -13,6 +13,8 @@ from stash_ai.runtime.startup import submit_owned
 
 
 class FramePrefetch:
+    transfers_images = True
+
     def __init__(self, source, start, limit):
         self.source, self.start = source, start
         self.channel = ManagedStream(limit)

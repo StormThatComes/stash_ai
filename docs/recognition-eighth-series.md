@@ -95,3 +95,20 @@ Intermediate solver body reports may replace `identities` with explicitly marked
 baseline and selected winner keep complete lists. Deltas are lossless and used
 only when smaller, including worker transport and checkpoint records. Ordinary
 non-solver replay output retains complete lists.
+
+## Scan and pose pipeline
+
+YOLO person detection batches equal-sized frames under `pose.batch_size`, keeping
+rectangular padding, frame order, thresholds and NMS settings. Both native YOLO
+pose and ViTPose refinement use the queued path. Accelerator ViTPose inference
+can overlap one CPU heatmap decode with the next model batch; model execution and
+device transfers remain on the owner thread. CPU execution stays synchronous.
+
+Prefetched frames transfer ownership to cue batches. Explicit leases keep a
+frame alive for queued person collection without another pixel copy, including
+abort and early-generator-close paths. Deferred record byte accounting updates
+on append/take/abort instead of rescanning all buffered records per cue.
+
+Geometry, batching, ownership and overlap scheduling have CPU regression tests.
+This environment has no CUDA device; accelerator throughput requires measurement
+on representative media and target hardware before making speedup claims.

@@ -14,15 +14,18 @@ class PersonCollector:
         self.model = None
         self.pipeline = None
         self.deferred = None
+        self.deferred_bytes = 0
         self.pose_frames = []
         self.pose_bytes = 0
 
     def _close_pose_frames(self):
         frames, self.pose_frames = self.pose_frames, []
         self.pose_bytes = 0
-        for _, _, _, image, _, _ in frames:image.close()
+        cleanup([lease.close for *_, lease in frames])
 
     def close(self):
+        self.deferred = None
+        self.deferred_bytes = 0
         self._close_pose_frames()
         resources = [('stop person preparation', self.pipeline), ('close person model', self.model)]
         self.pipeline = self.model = None
@@ -67,13 +70,14 @@ class PersonCollector:
             self.model=self.factory(self.config,self.paths)
 
     def abort(self):
-        self._close_pose_frames()
         self.deferred=None
+        self.deferred_bytes=0
         # Failed inference may leave CUDA/session state unusable. A later scene
         # must acquire a fresh owner, even if closing this owner also fails.
         resources=[('abort person preparation',self.pipeline),('close failed person model',self.model)]
         self.pipeline=self.model=None
-        cleanup([(name,resource.close) for name,resource in resources if resource is not None])
+        cleanup([('release queued pose frames',self._close_pose_frames),
+                 *[(name,resource.close) for name,resource in resources if resource is not None]])
 
     def flush(self):
         try:
@@ -87,19 +91,20 @@ class PersonCollector:
         except BaseException:
             self.abort();raise
 
-    def collect_records(self,db,scan,index,image,rows,*,seconds=0.):
+    def collect_records(self,db,scan,index,image,rows,*,seconds=0.,frame_owner=None):
         """Prepare fresh faces without rereading or committing them per cue."""
         if self.deferred is None:self.deferred=[]
         try:
-            if (self.config.data['sapiensid']['enabled'] and
-                    self.config.data['sapiensid']['pose'].get('backend') == 'vitpose_plus_large'):
+            if self.config.data['sapiensid']['enabled']:
                 self._load()
                 if callable(getattr(self.model, 'detect_many', None)):
                     size = image.width*image.height*3+4096
                     limit = self.config.data['execution']['scan_queue_bytes']//4
                     if self.pose_frames and self.pose_bytes+size > limit:self._flush_pose()
                     if size <= limit:
-                        self.pose_frames.append((db, scan, index, image.copy(), rows, seconds))
+                        from .frame_ownership import Lease
+                        lease = frame_owner.retain(image) if frame_owner is not None else Lease(image.copy())
+                        self.pose_frames.append((db, scan, index, lease.image, rows, seconds, lease))
                         self.pose_bytes += size
                         if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:
                             self._flush_pose()
@@ -112,25 +117,30 @@ class PersonCollector:
         if not self.pose_frames:return
         try:
             frames = [(image, [checked_detection(json.loads(r['geometry'])) for r in rows])
-                      for _, _, _, image, rows, _ in self.pose_frames]
+                      for _, _, _, image, rows, _, _ in self.pose_frames]
             self.model.detect_many(frames)
-            for db, scan, index, image, rows, seconds in self.pose_frames:
+            for db, scan, index, image, rows, seconds, _ in self.pose_frames:
                 self._collect_frame(db, scan, index, image, rows=rows, seconds=seconds)
         finally:
             self._close_pose_frames()
 
     def pending_bytes(self):
         # Completed inference waits for the same atomic face/body checkpoint.
-        return self.pose_bytes+sum(len(crop or b'')+(getattr(vector,'nbytes',0))+len(str(metadata))+256
-                   for _,metadata,vector,crop in (self.deferred or ()))
+        return self.pose_bytes+self.deferred_bytes
 
     def take_records(self):
         self.flush()
         records,self.deferred=self.deferred or [],None
+        self.deferred_bytes=0
         return records
 
     def _write(self,db,rows):
-        if self.deferred is not None:self.deferred.extend(rows)
+        if self.deferred is not None:
+            for row in rows:
+                _,metadata,vector,crop=row
+                self.deferred_bytes+=(len(crop or b'')+getattr(vector,'nbytes',len(vector) if isinstance(vector,bytes) else 0)
+                                      +len(str(metadata))+256)
+                self.deferred.append(row)
         else:
             with db:
                 self.write_records(db,rows)
