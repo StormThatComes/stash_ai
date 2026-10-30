@@ -77,6 +77,16 @@ def parser():
     root = RecognitionParser(prog='stash_ai.py recognition', allow_abbrev=False,
                                    description='On-demand facial recognition independent of tagging.')
     commands = root.add_subparsers(dest='command', required=True)
+    for name, aliases, help_text in (
+            ('db-status', ['db-report'], 'Inspect recognition database health, table sizes and estimated VACUUM savings (offline).'),
+            ('db-vacuum', ['db-compact'], 'Compact the idle recognition database without changing evidence or history (offline).')):
+        maintenance = commands.add_parser(name, aliases=aliases, allow_abbrev=False, help=help_text)
+        maintenance.add_argument('--face-config', type=Path, help='Recognition YAML selecting the database path.')
+        maintenance.add_argument('--faces-db', type=Path, help='Existing recognition SQLite; overrides storage.database.')
+        maintenance.add_argument('--json', action='store_true', help='Print machine-readable sizes and counts as JSON.')
+        maintenance.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
+        if name == 'db-vacuum':
+            maintenance.add_argument('--dry-run', action='store_true', help='Report estimated savings without executing VACUUM.')
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
     evaluation = commands.add_parser('evaluate', allow_abbrev=False,
@@ -238,6 +248,9 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command in ('db-status', 'db-report', 'db-vacuum', 'db-compact'):
+        from .db_maintenance import execute
+        return execute(args, config)
     if args.command == 'evaluate':
         from .offline_evaluation import execute
         return execute(args, config)

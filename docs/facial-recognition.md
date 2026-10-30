@@ -647,6 +647,67 @@ ordering/symmetry estimates. They do not prove that every feature is unoccluded.
 Sharpness is measured on a normalized grayscale crop; actual face dimensions,
 exposure and clipping are retained separately.
 
+### Recognition database status and VACUUM
+
+These offline commands operate on the **whole recognition database**, across
+all scopes and model namespaces. They never contact Stash or load models:
+
+```powershell
+# Health, all table/index sizes, total disk use and estimated space savings
+python .\stash_ai.py recognition db-status
+
+# Preview without compacting
+python .\stash_ai.py recognition db-vacuum --dry-run
+
+# Execute VACUUM and report before/after disk use and actual savings
+python .\stash_ai.py recognition db-vacuum
+
+# An explicit database, or select storage.database using --face-config
+python .\stash_ai.py recognition db-status --faces-db D:\stash\faces_state.sqlite3 --json
+```
+
+`db-report` and `db-compact` are aliases for `db-status` and `db-vacuum`,
+matching the tagger's maintenance terminology. Both commands accept
+`--face-config`, `--faces-db`, `--json` and `--progress-style off`.
+The destination defaults to `storage.database` in the current recognition YAML.
+The database must already exist; maintenance never initializes or migrates it.
+
+Status includes SQLite/schema versions, `quick_check`, row counts and a table
+ranking by occupied bytes. With SQLite's [dbstat](https://www.sqlite.org/dbstat.html)
+extension, each table has separate data and index sizes (including overflow
+pages and automatic indexes), their combined size, and unused bytes inside
+occupied pages. Table/index totals, schema/other pages and freelist pages account
+for the logical allocated database size. Physical disk totals separately include
+the main file, WAL, SHM and rollback journal; WAL bytes are not allocated database
+pages and must not be counted twice. Disposable media/cache companion databases are
+outside this command's scope. Physical file sizes can change during a concurrent
+writer, while SQL measurements belong to one consistent read snapshot.
+
+Some SQLite builds lack `dbstat`. In that case the report explicitly marks
+physical per-table sizes as unavailable and ranks tables by logical value bytes:
+actual BLOB/UTF-8 lengths, with numbers measured in text form. This fallback
+excludes indexes and SQLite overhead; it is **not a physical size estimate**.
+Whole-database sizes, freelist estimates, row counts and VACUUM remain available.
+
+The conservative VACUUM estimate is `freelist_count * page_size`. Unused bytes
+inside occupied pages are shown separately, without promising that all can be
+reclaimed. [VACUUM](https://www.sqlite.org/lang_vacuum.html) can also repack those
+pages, so actual savings can differ. The final report measures total disk use
+before/after; JSON additionally separates the logical allocated-byte reduction.
+An active WAL can make disk savings differ from the main-file reduction.
+
+VACUUM uses recognition's existing exclusive writer lock, validates the database
+before and after, checks temporary disk headroom (up to twice the logical/main
+database size plus existing WAL and 16 MiB), and checkpoints/truncates WAL.
+Another recognition writer or a busy pre-VACUUM WAL checkpoint causes a refusal.
+Afterward, health, table row counts and aggregate states are verified. It retains
+all evidence, embeddings, crops, IDs, bindings, pending/unknown publications and
+history; even stale `running` history rows are left unchanged. It does not invoke
+the normal database opener's orphan recovery. Supported old schemas are compacted
+in place without an upgrade. Status and `--dry-run` do not acquire the writer lock.
+Progress reports the current phase and elapsed time; SQLite does not expose an
+exact VACUUM completion percentage.
+
 ## Recognition observation quality
 
 Detection quality gates run before embedding and grouping. They keep unreliable

@@ -341,6 +341,11 @@ any required inference.
 
 ### Database health, upgrades, and compaction
 
+For the separate facial recognition database, use `python stash_ai.py recognition
+db-status` to inspect table/index sizes and estimated savings, and `python
+stash_ai.py recognition db-vacuum` to compact it. `--dry-run` previews the operation;
+`--faces-db` selects an existing file. See [recognition database maintenance](docs/facial-recognition.md#recognition-database-status-and-vacuum).
+
 `--db-update` upgrades the database selected by `--state-db` from
 schema **v18 or newer** to the current **v27**, across all scopes.
 Normal execution and `--dry-run` require the current schema; new databases
