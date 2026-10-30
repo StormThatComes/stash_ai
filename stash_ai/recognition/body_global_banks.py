@@ -42,23 +42,45 @@ def _banks(db,config,scope,namespace):
         owners.setdefault(canonical(db,row[0]),[]).append(row[0])
     used=size(owners);reserve(0);output={}
     # Bounded owner batches eliminate a metadata query for every identity.
+    def owner_batch(batch):
+        from contextlib import closing
+        aliases={alias:person for person in batch for alias in owners[person]}
+        groups={person:[] for person in batch};working=0
+        retry=False
+        try:
+            with closing(db.execute('SELECT m.person AS owner,b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
+                'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
+                (*args,encoded(list(aliases))))) as cursor:
+                for raw in cursor:
+                    if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
+                    row=dict(raw);person=aliases[row.pop('owner')]
+                    working+=size(row);reserve(working);groups[person].append(row)
+        except ResourceLimit:
+            if len(batch)==1:raise
+            retry=True
+        if retry:
+            # Batch buffering must not reject a catalogue whose individual
+            # identity working sets fit. Release the failed batch before retry.
+            groups.clear();row=raw=None
+            middle=len(batch)//2
+            yield from owner_batch(batch[:middle])
+            yield from owner_batch(batch[middle:])
+            return
+        for index,person in enumerate(batch):
+            rows=groups.pop(person)
+            working-=sum(size(r) for r in rows)
+            yield person,rows
+            rows=row=raw=None
+            if groups and used+working>limit:
+                # Materialized banks now own more memory than the input rows
+                # they replaced. Drop speculative remaining rows and read again.
+                groups.clear()
+                yield from owner_batch(batch[index+1:])
+                return
     def owner_rows():
         people=list(owners)
         for start in range(0,len(people),32):
-            batch=people[start:start+32]
-            aliases={alias:person for person in batch for alias in owners[person]}
-            groups={person:[] for person in batch};working=0
-            for raw in db.execute('SELECT m.person AS owner,b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
-                'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
-                (*args,encoded(list(aliases)))):
-                if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
-                row=dict(raw);person=aliases[row.pop('owner')]
-                working+=size(row);reserve(working);groups[person].append(row)
-            for person in batch:
-                rows=groups.pop(person)
-                yield person,rows
-                working-=sum(size(r) for r in rows)
-                reserve(working)
+            yield from owner_batch(people[start:start+32])
     for person,rows in owner_rows():
         witnesses=independent(rows,settings)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
@@ -70,6 +92,7 @@ def _banks(db,config,scope,namespace):
         output[person]=dict(refs=refs,cores=[core],missing_original=False,support=len(witnesses),
                             faces=[],face_ids=[],cues=set(),witnesses=witnesses,provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
         used+=size(output[person])+size(person)+128;reserve(0)
+        rows=None  # Only independent witnesses remain owned by the final bank.
 
     def bodies(identifiers):
         yield from metadata_rows(db,identifiers,body=True,contracts=compatible_contracts(config),reserve=reserve)
