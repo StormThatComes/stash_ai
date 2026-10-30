@@ -7,13 +7,13 @@ FACE_COLORS = ((0, 240, 255), (0, 240, 255), (255, 80, 80),
                (150, 255, 80), (150, 255, 80))
 
 
-def _draw(image, bounds, points, *, face_only=False, labels=True):
+def _draw(image, bounds, points, *, face_only=False, labels=True, box_color=BOX_COLOR):
     from PIL import ImageDraw
     painter = ImageDraw.Draw(image)
     left, top, right, bottom = bounds
     clipped = (max(0, left), max(0, top), min(image.width-1, right), min(image.height-1, bottom))
     if clipped[0] <= clipped[2] and clipped[1] <= clipped[3]:
-        painter.rectangle(clipped, outline=BOX_COLOR, width=2)
+        painter.rectangle(clipped, outline=box_color, width=2)
     drawn = []
     for index, (x, y) in enumerate(points):
         # The adapter replaces rejected/missing measurements with (-1,-1).

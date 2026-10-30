@@ -9,13 +9,13 @@ from .config import plain
 from .person_audit import BOX_COLOR, FACE_COLORS, POSE_COLOR, _draw
 
 
-def _label(image, bounds, text):
+def _label(image, bounds, text, *, color=BOX_COLOR):
     from PIL import ImageDraw
     painter = ImageDraw.Draw(image)
     box = painter.textbbox((0, 0), text)
     x = max(0, min(bounds[0], image.width - (box[2] - box[0]) - 2))
     y = max(0, min(bounds[1] - 14, image.height - 14))
-    painter.text((x, y), text, fill=BOX_COLOR, stroke_width=1, stroke_fill=(0, 0, 0))
+    painter.text((x, y), text, fill=color, stroke_width=1, stroke_fill=(0, 0, 0))
 
 
 def audit_scene(source, detector, scene_id, directory, *, progress=None):
@@ -36,7 +36,7 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                 with image.convert('RGB') as annotated:
                     # People first: face landmarks remain visible in overlapping head regions.
                     for person_index, person in enumerate(people):
-                        drawn = _draw(annotated, person['bounds'], person['keypoints'])
+                        drawn = _draw(annotated, person['bounds'], person['keypoints'], box_color=POSE_COLOR)
                         record['people'].append(dict(person_index=person_index, **person, drawn_indices=drawn))
                     for face_index, face in enumerate(faces):
                         x, y, width, height = face.box
@@ -46,7 +46,7 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                             person_index=detector.face_matches[face_index]))
                     for person_index, person in enumerate(people):
                         left, _, _, bottom = person['bounds']
-                        _label(annotated, (left, bottom), f'P{person_index} {person["score"]:.3f}')
+                        _label(annotated, (left, bottom), f'P{person_index} {person["score"]:.3f}', color=POSE_COLOR)
                     for face_index, face in enumerate(faces):
                         _label(annotated, face.box, f'F{face_index} {face.score:.3f}')
                     _png(annotated, directory / name)
@@ -115,9 +115,10 @@ def execute(args, config, *, services=None, detector_factory=None):
                     },
                     execution=dict(max_cues=0, force_pose=True, embeddings=False),
                     annotations=dict(box_color=list(BOX_COLOR), pose_color=list(POSE_COLOR),
+                        face_box_color=list(BOX_COLOR), person_box_color=list(POSE_COLOR),
                         face_colors=[list(c) for c in FACE_COLORS], pose_point_order='COCO17 (0..16)',
                         face_point_order='five face-detector landmarks (0..4)',
-                        labels='F=index and score of face; P=index and score of person',
+                        labels='F=index and score of face; P=index and score of person; label colors match boxes',
                         coordinates='cue-local source pixels; face boxes are xywh, person bounds are xyxy'),
                     limitations=[
                         'Both detectors run on every cue, even when sapiensid/independent collection is disabled.',
