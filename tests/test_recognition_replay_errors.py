@@ -69,6 +69,7 @@ def test_cli_prints_exception_notes_with_existing_credential_redaction(monkeypat
 
 
 def test_failed_trial_preserves_completed_winner_and_can_resume(tmp_path, monkeypatch):
+    from stash_ai.recognition.solver_journal_events import load_document
     from benchmarks.benchmark_merge_solver import fixture
     from stash_ai.recognition.fragmentation_report import _open_readonly
     from stash_ai.recognition.merge_solver import solve
@@ -80,7 +81,7 @@ def test_failed_trial_preserves_completed_winner_and_can_resume(tmp_path, monkey
 
     def progress(name, state, item):
         if name == 'trial-2' and state == 'start':
-            saved.update(journal=checkpoint.read_bytes(), yaml=yaml.read_bytes())
+            saved.update(journal=load_document(checkpoint), yaml=yaml.read_bytes())
 
     def fail_after_completed_trials(*args):
         if saved:
@@ -95,7 +96,7 @@ def test_failed_trial_preserves_completed_winner_and_can_resume(tmp_path, monkey
               winner_writer=winner_file(yaml), progress=progress)
     assert 'Recognition replay trial-2; stage: Synthetic rebuild failure;' in caught.value.__notes__[0]
     assert yaml.read_bytes() == saved['yaml']
-    assert checkpoint.read_bytes() == saved['journal']
+    assert load_document(checkpoint) == saved['journal']
     assert len(json.loads(checkpoint.read_text())['records']) == 2
     assert config.database.read_bytes() == before
     monkeypatch.setattr(replay_simulation, 'rebuild_selected', original)

@@ -191,8 +191,7 @@ class Trials(AbstractContextManager):
                 raise ValueError('Invalid checkpoint schedule event.')
         exhausted = False
         while self.pending or not exhausted:
-            fill = self.execution.scheduling == 'async' or not self.pending
-            if fill:
+            if not exhausted:
                 while not exhausted and len(self.pending) < self.execution.trials:
                     try:
                         name, settings = next(source)

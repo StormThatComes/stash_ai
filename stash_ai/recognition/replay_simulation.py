@@ -162,6 +162,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             item,restored_baseline = restored
                             if pool: pool.ready.pop(name, None)
                             if baseline is None:baseline=restored_baseline
+                            if context is not None:context['baseline_predictions']=baseline
                             if item.get('failed'):
                                 result.setdefault('failed_trials', {})[name] = item
                                 if progress:progress(name, 'failed', item)
@@ -192,7 +193,12 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                     evaluated = evaluate(name, settings, seed=seed, source=db, scope=scope,
                                         namespace=ns, installation=installation, scans=scans, observations=observations,
                                         rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
-                            predictions = evaluated['predictions']
+                            if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
+                                if baseline is None or not evaluated['prediction_delta'].keys() <= baseline.keys():
+                                    raise ValueError('Invalid baseline prediction delta.')
+                                predictions = dict(baseline, **evaluated['prediction_delta'])
+                            else:
+                                predictions = evaluated['predictions']
                             bodies, hybrid = evaluated['independent_person'], evaluated['hybrid']
                             evidence, rebuild_metrics = evaluated['decision_evidence'], evaluated['rebuild_profile']
                         except Exception as exc:
@@ -206,6 +212,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             continue
                         if baseline is None:
                             baseline = predictions
+                        if context is not None:context['baseline_predictions']=baseline
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
                             versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
                         if runtime and runtime.profile:

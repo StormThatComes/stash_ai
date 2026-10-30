@@ -12,7 +12,8 @@ def test_resume_restores_completed_trials_and_live_yaml(tmp_path,monkeypatch):
     checkpoint=tmp_path/'solver.json';yaml=tmp_path/'winner.yml'
     def stop(name,stage,item):
         if stage=='complete' and name=='trial-2':
-            assert yaml.exists() and json.loads(checkpoint.read_text())['records'][-1]['file'].startswith('trial-2-')
+            from stash_ai.recognition.solver_journal_events import load_document
+            assert yaml.exists() and load_document(checkpoint)['records'][-1]['file'].startswith('trial-2-')
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
         first=solve(config,goals,db,maximum=7,checkpoint=checkpoint,winner_writer=winner_file(yaml),progress=stop)

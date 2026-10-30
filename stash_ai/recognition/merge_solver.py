@@ -300,7 +300,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return Request(name, replace(settings, data=plain(settings.data)),
             context['seed_path'], goals['scope'], goals['namespace'], context['installation'],
             context['scans'], context['observations'], goals, feasibility, initial_changes, excluded,
-            bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime)
+            bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime,
+            baseline_predictions=context.get('baseline_predictions'))
     def accept(settings, evaluated):
         adopt(settings, evaluated['feedback'])
         for key, amount in evaluated['sampling_visits_delta'].items():

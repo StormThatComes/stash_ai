@@ -69,7 +69,8 @@ def solver_scope(function):
         from .solver_execution import plan, scope as execution_scope
         execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
                          scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
-        with execution_scope(execution), scope(config), prepared(goals):
+        from .solver_journal_events import journal_scope
+        with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
             return function(config, goals, *args, **kwargs)
     return wrapped
 
