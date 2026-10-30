@@ -23,9 +23,10 @@ def report(db,config,scope,namespace,*,focus=None):
     from copy import deepcopy
     from .run_cache import current, database_key, MISSING
     from .config import digest, plain
+    from .body_cache import matching_settings
     from .memory_size import size
     cache=current();generation=database_key(db)
-    policy_key=digest([plain(config.data), sorted(focus.items()) if isinstance(focus,dict) else sorted(focus or ())])
+    policy_key=digest([matching_settings(config), sorted(focus.items()) if isinstance(focus,dict) else sorted(focus or ())])
     key=('body-global-report',generation,scope,namespace,policy_key)
     found=cache.get(key) if generation is not None else MISSING
     if found is MISSING:

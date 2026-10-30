@@ -32,6 +32,7 @@ class Arrays:
         self.directory, self.limit = Path(directory), limit
         self.db = None
         self.disabled = False
+        self.verified = {}
         try:
             self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
         except sqlite3.Error:
@@ -48,7 +49,10 @@ class Arrays:
         try:
             directory.mkdir(exist_ok=True)
             with sqlite3.connect(directory/'ledger.sqlite') as db:
-                db.execute('CREATE TABLE IF NOT EXISTS entries (key TEXT PRIMARY KEY, bytes INTEGER NOT NULL)')
+                db.execute('CREATE TABLE IF NOT EXISTS entries (key TEXT PRIMARY KEY, bytes INTEGER NOT NULL, checksum TEXT, shape TEXT, dtype TEXT)')
+                columns = {r[1] for r in db.execute('PRAGMA table_info(entries)')}
+                for column in ('checksum','shape','dtype'):
+                    if column not in columns:db.execute(f'ALTER TABLE entries ADD COLUMN {column} TEXT')
             return True
         except (OSError, sqlite3.Error):
             from .profiling import count
@@ -62,10 +66,26 @@ class Arrays:
         import numpy as np
         from .profiling import count
         try:
+            row = self.db.execute('SELECT checksum,shape,dtype FROM entries WHERE key=?', (signature,)).fetchone()
+            if row is None:
+                if path.exists():self.failed()  # Orphaned publication has no integrity contract.
+                return None
+            if row[0] is None:
+                return None  # Another worker's pending publication.
+            stat = path.stat()
+            stamp = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, tuple(row))
+            if self.verified.get(signature) != stamp:
+                with path.open('rb') as stream:
+                    if hashlib.file_digest(stream, 'sha256').hexdigest() != row[0]:
+                        raise ValueError('Shared numerical cache checksum mismatch.')
+                if len(self.verified) >= 256:self.verified.clear()
+                self.verified[signature] = stamp
             value = np.load(path, mmap_mode='r', allow_pickle=False)
+            if list(value.shape) != json.loads(row[1]) or value.dtype.str != row[2]:
+                raise ValueError('Shared numerical cache contract mismatch.')
         except FileNotFoundError:
             return None
-        except (OSError, ValueError, EOFError):
+        except (OSError, ValueError, EOFError, sqlite3.Error):
             self.failed()
             return None
         count('shared_numeric_hits')
@@ -86,7 +106,7 @@ class Arrays:
             used = self.db.execute('SELECT COALESCE(SUM(bytes),0) FROM entries').fetchone()[0]
             exists = self.db.execute('SELECT 1 FROM entries WHERE key=?', (signature,)).fetchone()
             if not exists and used + value.nbytes + 512 <= self.limit:
-                self.db.execute('INSERT INTO entries VALUES (?,?)', (signature, value.nbytes+512))
+                self.db.execute('INSERT INTO entries(key,bytes) VALUES (?,?)', (signature, value.nbytes+512))
                 reserved = True
             self.db.commit()
         except sqlite3.Error:
@@ -107,10 +127,15 @@ class Arrays:
             os.replace(filename, self.directory/(signature+'.npy'))
             published = True
             filename = None
+            with (self.directory/(signature+'.npy')).open('rb') as stream:
+                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+            with self.db:
+                self.db.execute('UPDATE entries SET checksum=?,shape=?,dtype=? WHERE key=?',
+                    (checksum, json.dumps(list(value.shape)), value.dtype.str, signature))
             count('shared_numeric_written_bytes', value.nbytes)
             found = self.get(signature)
             return value if found is None else found
-        except (OSError, ValueError):
+        except (OSError, ValueError, sqlite3.Error):
             self.failed()
             return value
         finally:

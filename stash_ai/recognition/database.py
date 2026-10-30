@@ -233,6 +233,8 @@ class FaceDatabase(AbstractContextManager):
         self._validate(SCHEMA, TABLES, tables)
         from .dependency_schema import validate_triggers
         validate_triggers(db,required=True)
+        from .dependency_schema import upgrade_artifact_triggers
+        upgrade_artifact_triggers(db)
         self.installation
         # Additive access paths: old valid state needs no evidence migration.
         with db:

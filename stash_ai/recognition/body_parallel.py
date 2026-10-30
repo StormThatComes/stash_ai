@@ -58,18 +58,27 @@ def comparisons(evidence, requests):
                     pool.fallback('body_proof_admission')
                     resolved[position] = evidence.compare(left, right, kind)
                     continue
-                evidence.charge(len(left)*len(right), kind)
                 a = tuple(evidence.feature(row, kind) for row in left)
                 b = tuple(evidence.feature(row, kind) for row in right)
+                from .body_numeric import lookup
+                identity, found = lookup(a, b, kind)
+                if found is not None:
+                    evidence.stats['score_cache_hits'] += 1
+                    resolved[position] = found
+                    if cacheable:evidence.remember(key,found)
+                    continue
+                evidence.charge(len(left)*len(right), kind)
                 for vector in a+b:
                     vector.flags.writeable = False
                 positions = [position]
                 if cacheable:
                     pending[key] = positions
-                yield key, positions, (a, b), estimate, cacheable
+                yield key, positions, (a, b), estimate, cacheable, identity
         for item, value in map_bounded(_compare, prepare(), cost=lambda item: item[3],
                                       payload=lambda item: item[2], kind='body_witness_proofs'):
-            key, positions, _, _, cacheable = item
+            key, positions, _, _, cacheable, identity = item
+            from .body_numeric import publish
+            value = publish(identity, value)
             if cacheable:
                 evidence.remember(key, value)
             for position in positions:
