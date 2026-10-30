@@ -89,3 +89,25 @@ def test_replay_compacts_intermediate_body_report_without_changing_decisions(tmp
     assert 'identities' not in trial['independent_person']
     assert expand(trial['independent_person'],reference)==full['trials']['same-policy']['independent_person']
     assert trial['versus_baseline']==full['trials']['same-policy']['versus_baseline']
+
+
+def test_owner_batches_shrink_under_budget_without_rejecting_valid_catalogue(tmp_path):
+    import json
+    from tests.test_recognition_body_integration import seeded
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from stash_ai.recognition.body_global_banks import banks
+    from stash_ai.recognition.models import namespace
+    config,_,_,_=seeded(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        for row in list(db.execute('SELECT id,scan,quality FROM body_observations')):
+            quality=json.loads(row['quality'])
+            quality['quality']['pixel_digest']=row['scan']
+            quality['padding']='x'*100000
+            db.execute('UPDATE body_observations SET quality=? WHERE id=?',(encoded(quality),row['id']))
+        db.commit()
+        expected=banks(db,config,'scope',namespace(config))
+        assert all(len(bank['witnesses'])==1 for bank in expected.values())
+        config.data['sapiensid']['execution']['reference_bytes']=650000
+        actual=banks(db,config,'scope',namespace(config))
+        assert actual==expected
