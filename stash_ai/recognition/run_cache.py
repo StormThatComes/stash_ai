@@ -3,6 +3,7 @@
 Keys contain content or a live database generation, never an identity label
 alone. Eviction changes cost only: all callers have their original exact path.
 """
+from .resource_errors import ResourceLimit
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -34,7 +35,7 @@ class Cache:
             return
         total = self.reserved_size - self.reservations.get(owner, 0) + size
         if total > self.working:
-            raise ValueError('Recognition working allocations exceed execution.rebuild_memory_bytes.')
+            raise ResourceLimit('Recognition working allocations exceed execution.rebuild_memory_bytes.')
         self.reserved_size = total
         if size:
             self.reservations[owner] = size

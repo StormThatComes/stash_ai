@@ -1,4 +1,5 @@
 """Query-only recovery after independent scene cores obtain global support."""
+from .resource_errors import ResourceLimit
 import json
 from .database import encoded
 
@@ -22,7 +23,7 @@ def recover(database,selected,config):
                 (item['scan'],contract(config),policy(config))):
             row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['proof'])+4096
             if cost>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('Person recovery references exceed sapiensid.execution.reference_bytes.')
+                raise ResourceLimit('Person recovery references exceed sapiensid.execution.reference_bytes.')
             row['_vector']=vector(row)
             row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
                 if row['face_embedding'] is not None and row['face_rejected'] is None else None)

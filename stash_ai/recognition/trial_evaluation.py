@@ -71,6 +71,13 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
         location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
         exc.replay_stage = active_stage
         exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
+        import sqlite3
+        if isinstance(exc, sqlite3.OperationalError) and getattr(exc, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
+            from .resource_errors import ResourceLimit
+            limit = ResourceLimit('Trial replay exceeds execution.rebuild_memory_bytes.')
+            limit.replay_stage = active_stage
+            limit.add_note(exc.__notes__[-1])
+            raise limit from exc
         raise
     return dict(predictions=predictions, independent_person=bodies, hybrid=hybrid,
                 decision_evidence=evidence, rebuild_profile=rebuild_metrics)

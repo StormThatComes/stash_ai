@@ -63,7 +63,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
                        face=row['id'] if row is not None else None,
                        face_accepted=face_accepted,rejected=reason))
         record=[identifier(scan,cue,person,expected),metadata,None,None]
-        value=model.person_geometry(image,person,usable_face) if face_accepted or reason is None else None
+        value=model.person_geometry(image,person,usable_face) if reason is None else None
         items.append((record,value))
     marker=[None,dict(_body_cue=(scan,expected,cue)),None,None]
     pipeline.collect_items(db,image,items+[ (marker,None) ])

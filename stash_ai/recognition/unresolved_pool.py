@@ -5,6 +5,7 @@ No inferred image, new schema, or earlier recovered attachment supplies support.
 Only the final rebuild transaction backfills confirmed derived assignments;
 Stash publication remains limited to selected scenes.
 """
+from .resource_errors import ResourceLimit
 import json,uuid
 
 from .clustering import Group,_groups,_similarities,matching_policy,vector,co_presence_allows
@@ -145,7 +146,7 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
             pending.append(Group(person,tuple(samples),False,tuple(ids)))
     groups=tuple(confirmed)+tuple(pending)
     if len(groups)>grouping['max_people_per_lookup']:
-        raise ValueError('Unresolved cohort lookup exceeds configured person budget.')
+        raise ResourceLimit('Unresolved cohort lookup exceeds configured person budget.')
     for group in history.groups:
         usage.add(group.samples,kind='Pool historical strict')
     for group in history.unavailable:

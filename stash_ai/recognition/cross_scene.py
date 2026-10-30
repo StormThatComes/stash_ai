@@ -5,6 +5,7 @@ uses local thresholds, or turns its own assignments into further reference
 evidence. A provisional person's samples remain uncommitted until the minimum
 independent support is met across at least two different selected scenes.
 """
+from .resource_errors import ResourceLimit
 from collections import defaultdict
 from dataclasses import dataclass
 import time
@@ -127,7 +128,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
     if not provisional:
         return
     if len(provisional) > clustering['max_people_per_lookup']:
-        raise ValueError('Cross-scene provisional candidates exceed max_people_per_lookup.')
+        raise ResourceLimit('Cross-scene provisional candidates exceed max_people_per_lookup.')
     # First, attach coherent provisional cues to a *previously confirmed*
     # identity. The destination must already have a reference in another scene.
     attached = set()

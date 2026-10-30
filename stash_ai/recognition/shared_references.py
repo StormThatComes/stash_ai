@@ -1,4 +1,5 @@
 """Frozen reference authority shared by anchor queries and auxiliary queries."""
+from .resource_errors import ResourceLimit
 from dataclasses import replace
 
 from .clustering import Group, _groups, matching_policy, co_presence_allows
@@ -172,7 +173,7 @@ def auxiliary_bank(db, config, scope, namespace, history, mapping, early):
     for view in views:
         usage.add(view.group.samples,kind='Shared view')
     if len({g.identifier for g in groups})>grouping['max_people_per_lookup']:
-        raise ValueError('Shared identity catalogue exceeds configured person budget.')
+        raise ResourceLimit('Shared identity catalogue exceeds configured person budget.')
     return groups,tuple(views),history.confirmations
 
 

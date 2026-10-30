@@ -5,6 +5,7 @@ erase an earlier pair by intersecting its proof with an unrelated confirmation.
 Bounded exemplars nominate centres; every centre obtains its own narrow votes
 and two-scene proof from the original, individually validated queries.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass, field
 from itertools import combinations
 
@@ -41,7 +42,7 @@ class PromotionCohorts:
 
     def _check(self, extra=0):
         if self.usage.bytes + self.scratch + extra > self.usage.limit:
-            raise ValueError('Corroborated view evidence exceeds clustering.max_reference_bytes.')
+            raise ResourceLimit('Corroborated view evidence exceeds clustering.max_reference_bytes.')
 
     def add(self, row, query, qualified, *, single=()):
         import numpy as np

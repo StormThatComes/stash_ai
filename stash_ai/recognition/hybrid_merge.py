@@ -1,4 +1,5 @@
 """Apply frozen hybrid plans to fully selected identities, preserving face authority."""
+from .resource_errors import ResourceLimit
 import hashlib
 import time
 
@@ -91,7 +92,7 @@ def apply(database,selected,config):
                            reference_policy='source_attachment_only',original_cores=people)
                 stored_bytes+=len(encoded(proof).encode())*(len(rows)-1)
                 if stored_bytes>config.data['sapiensid']['execution']['plan_bytes']:
-                    raise ValueError('SapiensID plan_bytes budget exceeded by alias evidence; transaction rolled back.')
+                    raise ResourceLimit('SapiensID plan_bytes budget exceeded by alias evidence; transaction rolled back.')
                 # Current publication reconciles scene links, preserving former
                 # profiles. This is a local alias, never a pending destructive merge.
                 for source in (r['id'] for r in rows[1:]):
@@ -113,7 +114,7 @@ def apply(database,selected,config):
         # once their selected scope includes every required scan.
         payload=encoded(dict(format=1,scope=scope,namespace=namespace,pending=pending))
         if len(payload.encode())>config.data['sapiensid']['execution']['plan_bytes']:
-            raise ValueError('SapiensID pending consolidation plan_bytes budget exceeded.')
+            raise ResourceLimit('SapiensID pending consolidation plan_bytes budget exceeded.')
         if pending:db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(queue_key,payload))
         else:db.execute('DELETE FROM metadata WHERE key=?',(queue_key,))
     result['pending_consolidations']=pending

@@ -4,6 +4,7 @@ Strict core members seed immutable local appearance medoids. A second pass may
 attach previously withheld anchors only; it never creates or merges identities
 or trains on its own attachments. Time never limits matches within a scene.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass
 
 from .clustering import Group, _groups, co_presence_allows, matching_policy, vector
@@ -69,7 +70,7 @@ def _confirmed(db, policy, grouping, usage):
             scratch+=add_cohort(slots,row,query,cohesion,complete=True,maximum=witness_limit(grouping))
             scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
             if usage.bytes+scratch>usage.limit:
-                raise ValueError('Local anchor view evidence exceeds clustering.max_reference_bytes.')
+                raise ResourceLimit('Local anchor view evidence exceeds clustering.max_reference_bytes.')
     emit()
     if grouping['context_view_enrichment']:
         _enrich_from_validated_context(db, policy, grouping, usage, result)

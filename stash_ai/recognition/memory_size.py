@@ -1,4 +1,5 @@
 """Conservative Python/container ownership estimate for bounded work admission."""
+from .resource_errors import ResourceLimit
 import sys
 from collections.abc import Mapping
 
@@ -29,6 +30,6 @@ class Reservation:
 
     def set(self, required):
         if required > self.limit:
-            raise ValueError('Recognition metadata exceeds execution.rebuild_memory_bytes.')
+            raise ResourceLimit('Recognition metadata exceeds execution.rebuild_memory_bytes.')
         if self.cache is not None:
             self.cache.reserve(self.owner,required)

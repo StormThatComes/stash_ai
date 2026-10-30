@@ -3,6 +3,7 @@
 Only the cold-replay coordinator owns these triggers and mutable state. Any
 transaction failure aborts its scope; nothing is reused after rollback.
 """
+from .resource_errors import ResourceLimit
 from contextlib import contextmanager
 from contextvars import ContextVar
 from heapq import merge
@@ -144,7 +145,7 @@ class ReferenceIndex:
                 (self.scope, self.namespace))]
         people = [person for person in self.roots if self.members.get(person)]
         if len(people) > policy['max_people_per_lookup']:
-            raise ValueError('Face identity lookup exceeds configured person budget.')
+            raise ResourceLimit('Face identity lookup exceeds configured person budget.')
         identity = tuple(people), policy['max_samples_per_person']
         if self.cached is not None and self.cached[0] == identity:
             if not self.dirty:

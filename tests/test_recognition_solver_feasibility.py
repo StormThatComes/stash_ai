@@ -1,3 +1,4 @@
+from stash_ai.recognition.resource_errors import ResourceLimit
 """Constructive witnesses use real production replay, without weakening goals."""
 import json
 import uuid
@@ -252,7 +253,7 @@ def test_resource_limited_probe_continues_and_resume_does_not_retry_failure(tmp_
     def guarded(state, selected, settings):
         calls.append(settings.data['recognition']['match_threshold'])
         if len(calls) == 2:
-            raise ValueError('Reference plan exceeds sapiensid.execution.plan_bytes.')
+            raise ResourceLimit('Reference plan exceeds sapiensid.execution.plan_bytes.')
         return original(state, selected, settings)
 
     monkeypatch.setattr(replay, 'rebuild_selected', guarded)

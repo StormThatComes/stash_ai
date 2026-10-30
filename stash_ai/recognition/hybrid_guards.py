@@ -1,4 +1,5 @@
 """Original merged cores veto later merges without acquiring reference authority."""
+from .resource_errors import ResourceLimit
 from collections import defaultdict
 from dataclasses import replace
 import json
@@ -25,7 +26,7 @@ def retain(db,config,scope,namespace,identities):
         if root not in owned:continue
         proof_bytes+=len(row['evidence'].encode())
         if proof_bytes>config.data['sapiensid']['execution']['plan_bytes']:
-            raise ValueError('SapiensID plan_bytes budget exceeded by original core history.')
+            raise ResourceLimit('SapiensID plan_bytes budget exceeded by original core history.')
         proof=json.loads(row['evidence'])
         if proof.get('route') in ('body_global','body_scene'):
             ids={i for values in proof.get('face_witnesses',{}).values() for i in values}
@@ -94,7 +95,7 @@ def retain(db,config,scope,namespace,identities):
                         collection=config.data['sapiensid']['collection'])['eligible']:
                     body_map[identifier]=person
             if used>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')
+                raise ResourceLimit('SapiensID reference_bytes budget exceeded by original cores.')
         cores=[];core_modes=[]
         for face_ids,person_ids in sorted(core_ids[identity.person]):
             if not face_ids or any(i not in face_map for i in face_ids):continue
@@ -114,7 +115,7 @@ def retain(db,config,scope,namespace,identities):
             core_modes.append(modes)
         used+=sum(f.nbytes+b.nbytes for _,f,b in cores)+sum(m.nbytes for modes in core_modes for m in modes)
         if used>config.data['sapiensid']['execution']['reference_bytes']:
-            raise ValueError('SapiensID reference_bytes budget exceeded by query cores.')
+            raise ResourceLimit('SapiensID reference_bytes budget exceeded by query cores.')
         result.append(replace(identity,guard_face_missing=tuple(face_missing),query_cores=tuple(cores),query_core_modes=tuple(core_modes),guard_observations=tuple(ids),guard_missing=tuple(missing),
             guard_faces=np.asarray(faces) if faces else None,guard_persons=np.asarray(persons) if persons else None,
             guard_person_observations=tuple(body_ids)))

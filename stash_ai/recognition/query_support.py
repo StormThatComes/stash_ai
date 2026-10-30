@@ -5,6 +5,7 @@ boundaries inside overlapping hypotheses with immutable observed centres. Each
 hypothesis uses half the angular cohesion radius; neither its accepted output nor
 another hypothesis can extend that radius. Raw training cues are never votes.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -77,7 +78,7 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
             unfinished.setdefault(origin, []).append((metadata, origin, query))
             used += query.nbytes
             if used > grouping['max_reference_bytes']:
-                raise ValueError('Frozen query cohorts exceed clustering.max_reference_bytes.')
+                raise ResourceLimit('Frozen query cohorts exceed clustering.max_reference_bytes.')
         else:
             used -= sum(q.nbytes for _, _, q in unfinished.pop(origin, ()))
     reservation.set(metadata_used+used)
