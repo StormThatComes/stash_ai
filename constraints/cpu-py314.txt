@@ -92,6 +92,7 @@ numpy==2.5.3
     #   -r requirements-cpu.txt
     #   -r requirements-dev.txt
     #   onnxruntime
+    #   scipy
     #   torchvision
     #   transformers
 onnx==1.23.2
@@ -146,6 +147,8 @@ safetensors==0.8.0
     #   -r requirements-cpu.txt
     #   -r requirements-dev.txt
     #   transformers
+scipy==1.18.1
+    # via -r requirements-dev.txt
 setuptools==84.0.0
     # via
     #   torch

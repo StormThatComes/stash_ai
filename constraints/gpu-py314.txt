@@ -101,6 +101,7 @@ numpy==2.5.3
     #   -r requirements-dev.txt
     #   -r requirements-gpu.txt
     #   onnxruntime-gpu
+    #   scipy
     #   torchvision
     #   transformers
 nvidia-cublas-cu12==12.6.4.1 ; sys_platform == 'linux'
@@ -206,6 +207,8 @@ safetensors==0.8.0
     #   -r requirements-dev.txt
     #   -r requirements-gpu.txt
     #   transformers
+scipy==1.18.1
+    # via -r requirements-dev.txt
 setuptools==84.0.0
     # via
     #   torch

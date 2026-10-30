@@ -11,3 +11,5 @@ packaging>=23.0
 # Optional ViTPose++ Large backend; uses the existing CPU/CUDA torch build.
 transformers>=4.49,<6
 safetensors>=0.4.1
+# ViTPose affine crops and heatmap postprocessing require SciPy.
+scipy>=1.10,<2

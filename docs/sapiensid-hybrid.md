@@ -100,6 +100,12 @@ sapiensid:
     vitpose_directory: ""
 ```
 
+The dependency file includes SciPy, required by the Transformers processor for
+affine crops and heatmap decoding. If an existing installation reports
+`NameError: name 'inv' is not defined`, reinstall the updated
+`requirements-sapiensid.txt` in the active CPU/GPU environment and restart the
+process. Missing SciPy is now reported before ViTPose assets are downloaded.
+
 YOLO still detects person boxes using the existing `pose.path`, `sha256`,
 `score_threshold`, `nms_threshold` and `max_people_per_frame` settings. ViTPose++
 Large replaces its keypoints for **every** accepted person, including people

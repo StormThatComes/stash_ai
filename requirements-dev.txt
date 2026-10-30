@@ -11,3 +11,6 @@ transformers>=4.36.2
 einops>=0.7.0
 safetensors>=0.4.1
 huggingface_hub>=0.26,<2
+
+# Real ViTPose processor/model regressions run in the standard pytest job.
+scipy>=1.10,<2
