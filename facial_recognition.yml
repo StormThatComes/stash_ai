@@ -341,14 +341,20 @@ sapiensid:
 
   pose:
     # Person/pose detector used to prepare SapiensID inputs.
+    backend: yolo
+    # yolo or vitpose_plus_large; ViTPose refines YOLO person boxes with COCO17 points.
+    batch_size: 4
+    # Maximum people per ViTPose inference batch (1..16); ignored by yolo.
+    vitpose_directory: ""
+    # ViTPose asset folder; empty uses models.directory/vitpose_plus_large/<pinned revision>.
     keypoint_score_threshold: 0.50
-    # Minimum confidence for a pose keypoint to be usable.
+    # Minimum pose keypoint score; ViTPose heatmap scores need independent calibration.
     max_people_per_frame: 100
     # Maximum body detections per thumbnail, independent of the face detection limit.
     nms_threshold: 0.70
     # Body-box IoU threshold for duplicate suppression, including YOLO26's one-to-many head.
     path: recognition_models/sapiensid_v1/yolo26m-pose.pt
-    # Local path/destination for the pinned YOLO26m-pose checkpoint.
+    # YOLO checkpoint path; also supplies person boxes for the ViTPose backend.
     score_threshold: 0.50
     # Minimum person detection confidence (0..1).
     sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4

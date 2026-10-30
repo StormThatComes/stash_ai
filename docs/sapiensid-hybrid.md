@@ -86,6 +86,61 @@ selects the one-to-many head with NMS, so `pose.nms_threshold` remains effective
 Both models supply COCO17 points; SapiensID still receives 17 pose points plus
 the five face landmarks, with the same 384x384 preparation and audit overlays.
 
+### ViTPose++ Large keypoints
+
+For a separate top-down pose estimator, install the updated
+`requirements-sapiensid.txt` and select:
+
+```yaml
+sapiensid:
+  enabled: true
+  pose:
+    backend: vitpose_plus_large
+    batch_size: 4
+    vitpose_directory: ""
+```
+
+YOLO still detects person boxes using the existing `pose.path`, `sha256`,
+`score_threshold`, `nms_threshold` and `max_people_per_frame` settings. ViTPose++
+Large replaces its keypoints for **every** accepted person, including people
+without a detected face. The COCO expert (`dataset_index=0`) returns 17 points
+in image coordinates. Shared boundary/confidence filtering, face association,
+SapiensID's 22-point input and audit overlays remain in use. `audit-detection`
+and `audit-alignment` select the same backend as recognition. The default
+`backend: yolo` preserves existing configurations and evidence contracts.
+
+The first use downloads the three pinned files from
+[`usyd-community/vitpose-plus-large`](https://huggingface.co/usyd-community/vitpose-plus-large/tree/e211df377e49c89dba508ab3e83ddef13c0832b4)
+at revision `e211df377e49c89dba508ab3e83ddef13c0832b4`: `config.json`,
+`preprocessor_config.json` and `model.safetensors` (1,737,705,492 bytes).
+SHA256 checks cover downloads and existing files. The default directory is
+`models.directory/vitpose_plus_large/<revision>`; `vitpose_directory` overrides
+it relative to the YAML. With `models.download_missing: false`, all three
+matching files must already exist. No remote Python code or pickle weights
+are loaded for ViTPose. Only selecting this backend loads its assets.
+
+Inference runs on `models.device` in FP32, with at most `pose.batch_size` people
+per batch (1..16; independent of the SapiensID embedding batch). Lower this
+setting if GPU memory is tight. Cost grows with the number of people in a cue.
+ViTPose heatmap peaks are clipped to [0,1] for the existing
+`keypoint_score_threshold`; they are not calibrated probabilities and should
+be tuned separately from YOLO scores. Missing face points in rear views are
+allowed; increasing the number of accepted points does not prove better accuracy.
+
+Switching the backend changes the person/body evidence contract. Run recognition
+again on the selected scenes to collect ViTPose-based embeddings before using
+the solver; retained face detections can be reused. Paths and pose batch sizes
+do not invalidate embeddings. Model revision, weights and preprocessing do.
+Accuracy on rear-view VTT thumbnails needs comparison on the operator's scenes.
+
+Offline regression coverage includes the real Transformers processor and a tiny
+random-weight model. To additionally exercise the pinned pretrained Large model
+on CPU, set `STASH_AI_VITPOSE_SMOKE=1` and run
+`python -m pytest -q tests/test_recognition_vitpose_smoke.py` (downloads ~1.8 GB,
+including YOLO; no SapiensID identity checkpoint is needed).
+
+### Shared geometry and existing YOLO configurations
+
 After a unique face/person association, landmarks outside the actual person
 crop are marked missing (`-1,-1`), including face-detector points and coordinates
 that round onto the excluded right/bottom edge in float32. They are not clamped

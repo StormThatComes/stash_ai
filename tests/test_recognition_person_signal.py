@@ -57,7 +57,8 @@ def test_wb12m_default_and_wb4m_boundary_revision_invalidates_old_evidence():
     s['model']['variant']='wb4m'
     s['pose']['sha256']=LEGACY_POSE_SHA256
     legacy=digest(dict(format='sapiensid-wb4m-person-v2',model_yaml=s['model']['model_yaml_sha256'],
-                       pose={k:v for k,v in s['pose'].items() if k!='path'}))
+                       pose={k:s['pose'][k] for k in ('sha256','score_threshold','keypoint_score_threshold',
+                                                      'nms_threshold','max_people_per_frame')}))
     assert contract(config,legacy_boundaries=True)==legacy
     assert contract(config)!=legacy and contract(config)!=wb12m
     assert identity_contract(config)['model_sha256']==MODELS['wb4m']['sha256']
@@ -75,7 +76,8 @@ def test_yolo26_default_separates_evidence_from_explicit_legacy_pose(variant):
     current=contract(config)
     settings['pose'].update(path='old/yolov8n-pose.pt',sha256=LEGACY_POSE_SHA256)
     previous=dict(format='sapiensid-person-v3',model_yaml=settings['model']['model_yaml_sha256'],
-                  pose={k:v for k,v in settings['pose'].items() if k!='path'})
+                  pose={k:settings['pose'][k] for k in ('sha256','score_threshold','keypoint_score_threshold',
+                                                       'nms_threshold','max_people_per_frame')})
     if variant=='wb4m':previous['format']='sapiensid-wb4m-person-v2'
     else:previous.update(variant=variant,model_sha256=MODELS[variant]['sha256'],source_revision=UPSTREAM_COMMIT)
     assert contract(config,legacy_boundaries=True)==digest(previous)
