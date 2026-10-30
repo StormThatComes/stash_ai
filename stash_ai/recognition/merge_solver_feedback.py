@@ -335,8 +335,7 @@ def face_fallbacks(db, config, goals, targets, limit=32, *, evidence=None):
         return []
     membership = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
     banks = [g for g in _groups(db, goals['scope'], goals['namespace'], config.data['clustering'],
-        scan_policy=scan_identity(config, goals['namespace']), compatibility=fallback_sql(db, config, goals['namespace']))
-        if g.identifier in profiles]
+        scan_policy=scan_identity(config, goals['namespace']), compatibility=fallback_sql(db, config, goals['namespace']), people=profiles)]
     buckets = defaultdict(list)
     for row in db.execute('SELECT o.*,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
             'WHERE o.rejected IS NULL AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',

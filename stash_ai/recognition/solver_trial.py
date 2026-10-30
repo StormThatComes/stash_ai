@@ -31,6 +31,28 @@ class Request:
     shared_bytes: int = 0
 
 
+# Only these small, changing fields travel through the process task queue.
+DYNAMIC = ('name', 'config', 'visits', 'priorities')
+
+
+@dataclass(frozen=True)
+class Task:
+    name: str
+    config: object
+    visits: dict
+    priorities: dict
+
+
+def split(request):
+    from dataclasses import fields
+    context = {f.name: getattr(request, f.name) for f in fields(Request) if f.name not in DYNAMIC}
+    return context, Task(*(getattr(request, k) for k in DYNAMIC))
+
+
+def restore(task, context):
+    return Request(**context, **{k: getattr(task, k) for k in DYNAMIC})
+
+
 def evaluate(request, *, progress=None):
     from .trial_evaluation import evaluate as replay_trial
     from .solver_feedback import collect

@@ -20,6 +20,23 @@ def defaults():
 
 
 def report(db,config,scope,namespace,*,focus=None):
+    from copy import deepcopy
+    from .run_cache import current, database_key, MISSING
+    from .config import digest, plain
+    from .memory_size import size
+    cache=current();generation=database_key(db)
+    policy_key=digest([plain(config.data), sorted(focus.items()) if isinstance(focus,dict) else sorted(focus or ())])
+    key=('body-global-report',generation,scope,namespace,policy_key)
+    found=cache.get(key) if generation is not None else MISSING
+    if found is MISSING:
+        found=_report(db,config,scope,namespace,focus=focus)
+        if generation is not None:
+            cache.put(('body-global-report',database_key(db),scope,namespace,policy_key),found,size(found))
+    # Solver relation tags and publication decisions belong to their caller.
+    return deepcopy(found)
+
+
+def _report(db,config,scope,namespace,*,focus=None):
     """Retain candidate proofs and requested diagnostic pairs, not an N² graph."""
     result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')

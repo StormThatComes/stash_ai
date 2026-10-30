@@ -732,9 +732,12 @@ resume reconstructs both frontiers and skips completed replays. As with other
 solver code changes, a checkpoint from an older version requires a fresh solve.
 
 Replay preparation now copies scoped retained history once into a temporary,
-immutable disk SQLite seed. Each trial receives an independent RAM backup, checks
-the same memory limit and runs production rebuild. No assignments or decisions
-from another trial are reused. The seed is deleted when replay exits.
+immutable disk SQLite seed. Each trial copies mutable history and ID/scan metadata
+to private RAM; indexed, read-only views share the face/body embeddings and
+thumbnail evidence from the seed. Production rebuild retains its bounded private
+selected-face working database. No assignments or decisions from another trial
+are reused. The seed is deleted when replay exits. Worker initialization sends the
+fixed corpus and goals once; subsequent tasks carry configuration and sampling state.
 
 Measured boundaries supply interval representatives in a separate search lane.
 A frozen-witness preview orders small batches of directed proposals by measured
@@ -766,8 +769,14 @@ still propose face and retained-quality changes. Production replay remains the
 only authority for accepting any proposed configuration.
 
 The solver selects compatible latest scans before measuring initial proposals.
-Face-bank statistics use bounded float64 tiles and cache immutable vector
-content, including initial measurements before baseline replay. Goal addresses
+Face-bank statistics use bounded float64 tiles and share exact numerical results
+by immutable vector content, including between worker trials. Diagnostic face
+pairs are bounded by the existing candidate, witness and plan-memory budgets;
+`face_measurement_coverage` reports measured and total pairs, work limits and
+whether coverage is complete. Large goal sets visit a deterministic ring of
+owners before denser pairs. These sampled hints never truncate production vetoes
+or certify acceptance. Catalogue and body-report caches require the same live
+database generation and policy, and callers receive private report proofs. Goal addresses
 and scene cohorts are compiled once; vote memoization is local to a single
 evaluation and cannot reuse assignments from a previous trial.
 
