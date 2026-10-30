@@ -70,13 +70,33 @@ def solver_scope(function):
         from .solver_progress import heartbeat
         from .trial_metrics import Metrics
         metrics = Metrics(bool((kwargs.get('execution') or {}).get('profile')))
-        with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):
-            execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
-                             scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
-        from .solver_journal_events import journal_scope
-        with metrics.stage('Solve and finalize journal'):
-            with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
-                result = function(config, goals, *args, **kwargs)
+        started_trials = False
+        callback = kwargs.get('progress')
+        if callback is not None:
+            def progress(name, phase, item):
+                nonlocal started_trials
+                if phase == 'start':started_trials = True
+                return callback(name, phase, item)
+            progress.telemetry_enabled = getattr(callback, 'telemetry_enabled', True)
+            kwargs['progress'] = progress
+        try:
+            with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):
+                execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
+                                 scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
+            from .solver_journal_events import journal_scope
+            with metrics.stage('Solve and finalize journal'):
+                with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
+                    result = function(config, goals, *args, **kwargs)
+        except KeyboardInterrupt:
+            if started_trials:
+                raise  # Replay owns interruption once a trial has started.
+            result = dict(status='no_completed_trials', interrupted=True,
+                selected_trial=None, best_result=None, recommendation=None,
+                simulation=dict(format=1, kind='recognition_replay_simulation', source_read_only=True,
+                                trials={}, selection=[], interrupted=True),
+                search=dict(max_trials=kwargs.get('maximum',500), executed=0, attempted=0,
+                            restored_trials=0, failed_trials=0, stop_reason='interrupted',
+                            proves_optimality=False, proves_infeasibility=False))
         if metrics.enabled:
             result['performance'] = metrics.snapshot()
         return result

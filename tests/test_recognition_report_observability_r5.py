@@ -96,3 +96,25 @@ def test_solver_profile_includes_copy_feedback_and_process_memory(tmp_path):
         assert set(stages)=={'Prepare replay','Rebuild selected identities','Collect trial predictions','Collect solver feedback'}
         assert all(v['elapsed_seconds']>=0 and v['cpu_seconds']>=0 for v in stages.values())
     json.dumps(result,allow_nan=False)
+
+
+def test_interrupt_at_every_startup_stage_keeps_no_completed_result(tmp_path):
+    from tests.test_recognition_merge_report import seeded
+    from stash_ai.recognition.fragmentation_report import _open_readonly
+    from stash_ai.recognition.merge_goals import resolve
+    from stash_ai.recognition.merge_solver import solve
+    from threading import enumerate as threads
+    config,people=seeded(tmp_path)
+    with _open_readonly(config.database) as db:
+        goals=resolve(db,config,[people],by_performer=False)
+        for label in ('Plan solver resources','Validate solver checkpoint',
+                      'Measure retained evidence','Prepare immutable replay inputs'):
+            seen=[]
+            def progress(name, stage, item):
+                if stage=='stage: '+label:
+                    seen.append(label)
+                    raise KeyboardInterrupt
+            result=solve(config,goals,db,maximum=2,progress=progress)
+            assert seen and result['interrupted'] and result['status']=='no_completed_trials'
+            assert result['simulation']['trials']=={} and result['best_result'] is None
+            assert not any(t.name=='solver-telemetry' for t in threads())
