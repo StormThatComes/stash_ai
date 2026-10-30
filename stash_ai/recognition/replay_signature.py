@@ -45,5 +45,15 @@ def fingerprint(db, scope, namespace):
         where,args=rules[table]
         for row in db.execute(f'SELECT {",".join(columns)} FROM {table} WHERE {where} ORDER BY rowid',args):
             add('row')
-            for value in row:add(value)
+            for column,value in zip(columns,row):
+                if (table,column) in (('person_evidence','metadata'),('body_observations','quality')):
+                    # These artifact-only fields are also excluded by the
+                    # audited matching dependency triggers. Preserve all other
+                    # fields, including unknown future evidence measurements.
+                    document=json.loads(value)
+                    if isinstance(document,dict):
+                        document.pop('crop_status',None)
+                        document.pop('crop_attempt_limit',None)
+                        value=json.dumps(document,sort_keys=True,separators=(',',':'),allow_nan=False)
+                add(value)
     return result.hexdigest()

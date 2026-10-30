@@ -54,7 +54,8 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
         data['storage']['database'] = str(config.database)
         data['models']['directory'] = str(config.model_dir)
         data['names']['file'] = str(config.names_path) if config.names_path else None
-        for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
+        for section,key in (('model','source_directory'),('model','checkpoint_directory'),
+                            ('pose','path'),('pose','vitpose_directory')):
             raw=data['sapiensid'][section][key]
             if raw:
                 path=Path(raw).expanduser()
@@ -109,8 +110,8 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         if yaml_owner is not None:
             yaml_owner.write(serialized)
         else:
-            with destination.open('x', encoding='utf-8') as stream:
-                stream.write(serialized)
+            from .merge_solver_checkpoint import AtomicFile
+            AtomicFile(destination).write(serialized)
         result['yaml_exported'] = True
         result['yaml_export_quality'] = recommendation.get('quality')
         result['yaml_export_mode'] = yaml_mode
@@ -136,8 +137,8 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
     explain(result)
     text = json.dumps(result, indent=2, allow_nan=False) + '\n'
     if output:
-        with output.expanduser().open('x', encoding='utf-8') as stream:
-            stream.write(text)
+        from .merge_solver_checkpoint import AtomicFile
+        AtomicFile(output).write(text)
     else:
         print(text, end='')
 

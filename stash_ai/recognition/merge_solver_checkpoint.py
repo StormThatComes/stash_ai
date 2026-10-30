@@ -62,6 +62,40 @@ def fingerprint(config,goals,db,settings):
 
 class Journal:
     def __init__(self,path,signature,*,resume=False,winner=None):
+        from contextlib import ExitStack
+        from stash_ai.storage.writer_lock import acquire_writer_lock
+        self._locks = ExitStack()
+        self._ready = False
+        paths = {Path(path).expanduser().resolve()}
+        if winner is not None:paths.add(winner.path)
+        try:
+            for destination in sorted(paths):
+                try:
+                    self._locks.enter_context(acquire_writer_lock(destination))
+                except RuntimeError as error:
+                    raise RuntimeError(f'Another solver owns checkpoint/output: {destination}') from error
+            self._initialize(path, signature, resume=resume, winner=winner)
+            self._ready = True
+            from .solver_journal_events import _journals
+            owners = _journals.get()
+            if owners is not None:owners.append(self)
+        except BaseException:
+            self._locks.close()
+            raise
+
+    def close(self):
+        try:
+            if self._ready:self.flush_snapshot()
+        finally:
+            self._ready = False
+            self._locks.close()
+
+    def __del__(self):
+        # Crash/abandoned standalone owner: events are already durable. Do not
+        # publish snapshots from a finalizer, but always release OS ownership.
+        if hasattr(self, '_locks'):self._locks.close()
+
+    def _initialize(self,path,signature,*,resume=False,winner=None):
         self.path=Path(path).expanduser().resolve()
         self.directory=self.path.with_name(self.path.name+'.trials')
         self.records={}

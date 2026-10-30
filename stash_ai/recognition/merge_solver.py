@@ -551,7 +551,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
-    trial_progress.telemetry_enabled = progress is not None
+    trial_progress.telemetry_enabled = progress is not None and getattr(progress, 'telemetry_enabled', True)
     def trial_error(name, settings, exc, stage):
         if name == 'baseline' or not resource_limit(exc):
             return None
@@ -573,68 +573,81 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error,
             parallel_request=request if runtime and runtime.trials > 1 else None,
             parallel_accept=accept, journal=journal)
-    # Ctrl-C can land after consume ranks a trial but before replay records it.
-    robustness.clear()
-    for name in result['trials']:
-        if origins.get(name,{}).get('search_strategy')=='robustness_probe':
-            parent=origins[name]['search_parent']
-            robustness.setdefault(parent,[]).append(ranks[name][:-2]>=ranks[parent][:-2])
-    best = max(result['trials'], key=ranking, default=None)
-    for name, patch in patches.items():
-        if name in result['trials']:
-            result['trials'][name].update(patch)
-            result['trials'][name]['search_family'] = families[name]
-            result['trials'][name].update(origins[name])
-    selection = None
-    if best is not None:
-        status = summaries[best]
-        quality = ('fully_solved' if status['fully_solved'] else
-                   'partial_solution' if status['admissible'] else 'best_effort')
-        selection = dict(trial=best, quality=quality, changed=best != 'baseline',
-            admissible=status['admissible'], fully_solved=status['fully_solved'],
-            unmet_conditions=unmet_conditions(status),
-            goal_diagnostics=goal_diagnostics(status),
-            **patches.get(best, proposal(config, {})))
-    tested_hybrid = {}
-    if config.data['sapiensid']['enabled'] and result['trials']:
-        for gate in GATES:
-            values = {config.data['sapiensid']['matching'][gate]}
-            values.update(change['proposed'] for name in result['trials']
-                for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
-            tested_hybrid[gate] = sorted(values)
-    return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
-        feasibility=feasibility.report(result['trials'], result.get('failed_trials', {}), probe_budget),
-        simulation=result, status=(result.get('stop_reason', 'no_completed_trials') if selection is None else
-            'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
-        selected_trial=best, best_result=selection,
-        recommendation=selection if selection is not None and selection['changed'] else None,
-        interrupted=result.get('interrupted', False),
-        robustness=dict(selected=best,checks=robustness.get(best,[]),
-            validated=bool(confidence(robustness.get(best,[]))),
-            candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
-        search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
-                    attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
-                    scheduling='targeted_then_feasibility_and_bidirectional_beam',
-                    execution=runtime.document() if runtime else None,
-                    targeted=dict(requested=targeted_trials,budget=targeted.budget,
-                        executed=sum(origins.get(n,{}).get('search_phase')=='targeted' for n in result['trials'])),
-                    bidirectional=dict(enabled=bidirectional.enabled if bidirectional else False,
-                        budget=bidirectional.budget if bidirectional else 0,
-                        frontier=list(bidirectional.frontier) if bidirectional else [],
-                        executed=sum(origins.get(n,{}).get('search_phase')=='bidirectional' for n in result['trials'])),
-                    stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
-                    beam_width=search.width if search else BeamSearch.width, peak_beam=search.peak_beam if search else 0,
-                    beam_trials=list(search.beam) if search else [],
-                    pruned_trials=search.pruned if search else 0,
-                    operators=search.operators if search else {}, restarts=search.restarts if search else 0,
-                    stagnation_patience=search.patience if search else None,
-                    refinement_budget=BeamSearch.refinement_budget,
-                    executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
-                                        for family in ('hybrid', 'face')},
-                    baseline_exploration_warmup=BASELINE_WARMUP,
-                    executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
-                    tested_hybrid_values=tested_hybrid,
-                    budget_exhausted=len(result['trials'])+len(failures) >= maximum,
-                    selection_scope='completed_trials_including_baseline',
-                    proves_optimality=False, proves_infeasibility=False))
+    def finish(*, interrupted=False):
+        if interrupted:result['interrupted'] = True
+        # Ctrl-C can land after consume ranks a trial but before replay records it.
+        robustness.clear()
+        for name in result['trials']:
+            if origins.get(name,{}).get('search_strategy')=='robustness_probe':
+                parent=origins[name]['search_parent']
+                robustness.setdefault(parent,[]).append(ranks[name][:-2]>=ranks[parent][:-2])
+        best = max(result['trials'], key=ranking, default=None)
+        for name, patch in patches.items():
+            if name in result['trials']:
+                result['trials'][name].update(patch)
+                result['trials'][name]['search_family'] = families[name]
+                result['trials'][name].update(origins[name])
+        selection = None
+        if best is not None:
+            status = summaries[best]
+            quality = ('fully_solved' if status['fully_solved'] else
+                       'partial_solution' if status['admissible'] else 'best_effort')
+            selection = dict(trial=best, quality=quality, changed=best != 'baseline',
+                admissible=status['admissible'], fully_solved=status['fully_solved'],
+                unmet_conditions=unmet_conditions(status),
+                goal_diagnostics=goal_diagnostics(status),
+                **patches.get(best, proposal(config, {})))
+        tested_hybrid = {}
+        if config.data['sapiensid']['enabled'] and result['trials']:
+            for gate in GATES:
+                values = {config.data['sapiensid']['matching'][gate]}
+                values.update(change['proposed'] for name in result['trials']
+                    for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
+                tested_hybrid[gate] = sorted(values)
+        return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
+            feasibility=(dict(format=1, status='interrupted', groups=[], probe_budget=probe_budget,
+                joint_witness_trial=None,
+                probes_completed=sum(t.get('search_phase')=='feasibility' for t in result['trials'].values()),
+                probes_failed=sum(t.get('search_phase')=='feasibility' for t in result.get('failed_trials',{}).values()),
+                failed_probes={n:t for n,t in result.get('failed_trials',{}).items() if t.get('search_phase')=='feasibility'},
+                interpretation='Final feasibility aggregation interrupted; completed trial evidence remains available.')
+                if interrupted else feasibility.report(result['trials'], result.get('failed_trials', {}), probe_budget)),
+            simulation=result, status=(result.get('stop_reason', 'no_completed_trials') if selection is None else
+                'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
+            selected_trial=best, best_result=selection,
+            recommendation=selection if selection is not None and selection['changed'] else None,
+            interrupted=result.get('interrupted', False),
+            robustness=dict(selected=best,checks=robustness.get(best,[]),
+                validated=bool(confidence(robustness.get(best,[]))),
+                candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
+            search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
+                        attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
+                        scheduling='targeted_then_feasibility_and_bidirectional_beam',
+                        execution=runtime.document() if runtime else None,
+                        targeted=dict(requested=targeted_trials,budget=targeted.budget,
+                            executed=sum(origins.get(n,{}).get('search_phase')=='targeted' for n in result['trials'])),
+                        bidirectional=dict(enabled=bidirectional.enabled if bidirectional else False,
+                            budget=bidirectional.budget if bidirectional else 0,
+                            frontier=list(bidirectional.frontier) if bidirectional else [],
+                            executed=sum(origins.get(n,{}).get('search_phase')=='bidirectional' for n in result['trials'])),
+                        stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
+                        beam_width=search.width if search else BeamSearch.width, peak_beam=search.peak_beam if search else 0,
+                        beam_trials=list(search.beam) if search else [],
+                        pruned_trials=search.pruned if search else 0,
+                        operators=search.operators if search else {}, restarts=search.restarts if search else 0,
+                        stagnation_patience=search.patience if search else None,
+                        refinement_budget=BeamSearch.refinement_budget,
+                        executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
+                                            for family in ('hybrid', 'face')},
+                        baseline_exploration_warmup=BASELINE_WARMUP,
+                        executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
+                            for name in result['trials']) for phase in ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
+                        tested_hybrid_values=tested_hybrid,
+                        budget_exhausted=len(result['trials'])+len(failures) >= maximum,
+                        selection_scope='completed_trials_including_baseline',
+                        proves_optimality=False, proves_infeasibility=False))
+
+    try:
+        return finish()
+    except KeyboardInterrupt:
+        return finish(interrupted=True)

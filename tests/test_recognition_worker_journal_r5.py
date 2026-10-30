@@ -18,6 +18,7 @@ def test_event_appends_do_not_rewrite_manifest_and_recover_torn_tail(tmp_path):
     assert path.read_bytes() == initial
     with log_path(path).open('ab') as stream:
         stream.write(b'{"sequence":21')
+    journal.close()
     resumed = Journal(path, {'test':1}, resume=True)
     assert len(resumed.document['tasks']) == 20
     resumed.task('trial-20', config, 'running')
@@ -33,6 +34,7 @@ def test_event_corruption_is_rejected(tmp_path):
     journal.task('trial-1', config, 'queued')
     event = log_path(path)
     event.write_bytes(event.read_bytes().replace(b'queued', b'failed'))
+    journal.close()
     with pytest.raises(ValueError, match='Corrupt'):
         Journal(path, {'test':1}, resume=True)
 
@@ -46,6 +48,7 @@ def test_applied_record_retires_raw_result_only_after_durable_event(tmp_path):
     assert raw.exists()
     journal.record('trial-1', config, {'failed':False}, {}, None)
     assert not raw.exists()
+    journal.close()
     resumed = Journal(path, {'test':1}, resume=True)
     assert resumed.get('trial-1')['item'] == {'failed':False}
     assert resumed.raw_result('trial-1') is None
