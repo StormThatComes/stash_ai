@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v6-physical-support',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v7-global-appearances',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -288,6 +288,8 @@ def rebuild(database,selected,config,result):
                 plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
     from .publication_queue import enqueue
     with db:
+        from .body_aliases import retire_disabled
+        retire_disabled(database,selected,config)
         for item in selected:
             scan=db.execute('SELECT * FROM scans WHERE id=?',(item['scan'],)).fetchone()
             db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
@@ -305,6 +307,8 @@ def rebuild(database,selected,config,result):
                         db.execute('INSERT OR IGNORE INTO body_origins VALUES (?,?)',(row['id'],person))
                 db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
                     (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision)))
+        for item in selected:
+            scan=db.execute('SELECT scope,namespace,scene FROM scans WHERE id=?',(item['scan'],)).fetchone()
             enqueue(db,scan['scope'],scan['namespace'],scan['scene'],config,'body_scene_rebuild')
         if plans:
             from .body_global import reconcile
