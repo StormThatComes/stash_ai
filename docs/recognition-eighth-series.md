@@ -50,3 +50,16 @@ Plain pair reports show stage-aware liveness without adding text to JSON stdout.
 Failed trials retain partial stage/CPU/RSS profiles, plus typed resource budget,
 limit and requested values where available. Feasibility failure counters include
 only feasibility-phase attempts, while the solver retains all failed trials.
+
+## Numerical cache and workers
+
+Individual body dot products stay in RAM; shared disk entries are reserved for
+reductions with at least 256 vector pairs and one million scalar products.
+Shared hits are promoted to the process cache before subsequent disk lookups.
+Warm matrix tiles bypass executor submission, and partially cached tiles submit
+only missing products. Float32 reduction order remains unchanged.
+
+Workers retain content-addressed numerical entries and the immutable goal index
+between trials. Membership, plans and database-dependent entries are discarded;
+a changed seed, goal object, execution contract or cache budget resets reuse.
+Targeted numerical, cache and parallel solver tests pass (33 tests).

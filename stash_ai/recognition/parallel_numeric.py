@@ -16,7 +16,7 @@ def diagnostic_scope(function):
     return wrapped
 
 
-def map_bounded(function, items, *, cost, payload=lambda item: item, kind):
+def map_bounded(function, items, *, cost, payload=lambda item: item, kind, cached=lambda item:None):
     """Yield (input, output) in order; consumers may schedule their own work.
 
     A whole batch retires before yielding, avoiding nested active CPU streams.
@@ -26,7 +26,8 @@ def map_bounded(function, items, *, cost, payload=lambda item: item, kind):
     pool = current()
     if pool is None or pool.workers == 1:
         for item in items:
-            yield item, function(payload(item))
+            found=cached(item)
+            yield item, found if found is not None else function(payload(item))
         return
     maximum = max(1, pool.limit//2)
     batch, used = [], 0
@@ -42,6 +43,15 @@ def map_bounded(function, items, *, cost, payload=lambda item: item, kind):
         return [(item, value) for (item, _), value in zip(batch, values)]
 
     for item in items:
+        found=cached(item)
+        if found is not None:
+            if batch:
+                yield from flush()
+                batch,used=[],0
+            from .profiling import count
+            count(kind+'_cached_jobs')
+            yield item,found
+            continue
         amount = cost(item)
         if batch and (used+amount > maximum or len(batch) >= pool.workers*2):
             yield from flush()
@@ -77,10 +87,12 @@ def matrix_tiles(tiles, *, kind):
                 identity, found = product_input(left, right)
                 keys.append(identity)
                 payload.append((left, right, found))
-                size += 3*(left.nbytes+right.nbytes) + 2*len(left)*len(right)*8
+                if found is None:size += 3*(left.nbytes+right.nbytes) + 2*len(left)*len(right)*8
             yield metadata, keys, payload, size
     for item, values in map_bounded(_matrices, prepare(), cost=lambda item: item[3],
-                                    payload=lambda item: item[2], kind=kind):
+                                    payload=lambda item: [p for p in item[2] if p[2] is None], kind=kind,
+                                    cached=lambda item: [] if all(p[2] is not None for p in item[2]) else None):
         metadata, keys, payload, _ = item
-        yield metadata, [value if inputs[2] is not None else product_output(key, value)
-                         for key, inputs, value in zip(keys, payload, values)]
+        values=iter(values)
+        yield metadata, [inputs[2] if inputs[2] is not None else product_output(key, next(values))
+                         for key, inputs in zip(keys, payload)]

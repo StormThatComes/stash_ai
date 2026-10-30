@@ -21,20 +21,27 @@ def lookup(left, right, kind):
     cache, shared = current(), shared_current()
     arrays = tuple(left) + tuple(right)
     extra = (kind, len(left), len(right))
-    signature = shared_key('ordered-witness-f32-v1', arrays, extra) if shared else None
+    signature = None
     key = ('body-exact', extra, tuple((v.dtype.str, v.shape, v.tobytes()) for v in arrays)) if cache else None
     found = cache.get(key) if cache else MISSING
-    if found is MISSING and shared:
+    # Files/ledger/checksums cost more than a local float32 dot. Reserve the
+    # shared cache for complete reductions with meaningful recomputation work.
+    work = len(left)*len(right)
+    profitable = work >= 256 and work*(len(arrays[0]) if arrays else 0) >= 1024**2
+    if found is MISSING and shared and profitable:
+        signature = shared_key('ordered-witness-f32-v1', arrays, extra)
         value = shared.get(signature)
         if value is not None:
             found = tuple(float(v) for v in value)
+            if cache and key is not None:
+                cache.put(key,found,sum(len(v[2])+256 for v in key[2])+256)
     return (key, signature), None if found is MISSING else found
 
 
 def publish(identity, result):
     key, signature = identity
     shared, cache = shared_current(), current()
-    if shared:
+    if shared and signature is not None:
         result = tuple(float(v) for v in shared.put(signature, np.asarray(result, dtype='<f8')))
     if cache and key is not None:
         cache.put(key, result, sum(len(v[2])+256 for v in key[2])+256)

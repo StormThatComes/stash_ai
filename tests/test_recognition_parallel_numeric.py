@@ -37,7 +37,7 @@ def test_complete_measurements_match_serial_including_weakest_ties(monkeypatch):
         actual = [v for _, _, v in measured_pairs(pairs, max_bytes=32768)]
         assert actual == expected
         assert [v for _, _, v in measured_pairs(pairs, max_bytes=32768)] == actual
-        assert pool.records['face_measurements']['computed'] == len(pairs)*2
+        assert pool.records['face_measurements']['computed'] == len(pairs)
 
 
 def test_trial_cancellation_reaches_inner_workers(monkeypatch):

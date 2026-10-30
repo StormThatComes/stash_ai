@@ -158,6 +158,10 @@ def current():
 
 @contextmanager
 def scope(directory, limit):
+    existing=current()
+    if existing is not None and directory and existing.directory==Path(directory) and existing.limit==limit:
+        yield existing
+        return
     value = Arrays(directory, limit) if directory else None
     token = _active.set(value)
     try:

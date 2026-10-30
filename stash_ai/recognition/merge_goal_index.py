@@ -10,6 +10,7 @@ _evaluation = ContextVar('merge_goal_evaluation', default=None)
 
 class GoalIndex:
     def __init__(self, goals):
+        self.goals = goals
         from .physical_goal import addresses
         self.observation_ids = frozenset(addresses(goals))
         self.observation_ids |= frozenset(r['id'] for g in goals['groups']
@@ -55,6 +56,10 @@ def current():
 
 @contextmanager
 def prepared(goals):
+    existing=current()
+    if existing is not None and existing.goals is goals:
+        yield existing
+        return
     token = _index.set(GoalIndex(goals))
     try:
         yield _index.get()
