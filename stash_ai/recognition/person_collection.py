@@ -23,6 +23,9 @@ class PersonCollector:
     def enrich(self, db, scan, source):
         if not self.config.data['sapiensid']['enabled']:
             return
+        from .body_observations import enabled,repair_projections
+        if enabled(self.config):
+            with db:repair_projections(db,self.config,scan)
         expected=contract(self.config)
         # Include every face in association, even if its identity evidence was
         # rejected. Otherwise a second face could disappear from ambiguity checks.
@@ -103,14 +106,18 @@ class PersonCollector:
 
     def _collect_frame(self,db,scan,index,image,*,rows=None,seconds=0.):
         if not self.config.data['sapiensid']['enabled']:return
-        self._load();expected=contract(self.config)
         fresh=rows is not None
+        from .body_observations import enabled,contract as body_contract,repair_projections
+        if enabled(self.config) and not fresh and db.execute(
+                'SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
+                (scan,body_contract(self.config),index)).fetchone():
+            with db:repair_projections(db,self.config,scan,cue=index)
+            return
+        self._load();expected=contract(self.config)
         if rows is None:rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
-            if not fresh and db.execute('SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
-                    (scan,body_contract(self.config),index)).fetchone():return
             self.model.detect(image,faces=faces)
             from .body_collection import collect
             if self.pipeline is None:

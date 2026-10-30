@@ -1,12 +1,13 @@
 """Face contradictions and simultaneous claims veto body-only evidence."""
 from collections import defaultdict
-import numpy as np
 
 from .clustering import vector
 
 
 class FaceGuard:
-    def __init__(self, db, config):
+    def __init__(self, db, config, *, scores=None):
+        from .body_identity import Scores
+        self.scores=scores if scores is not None else Scores(config)
         self.db = db
         self.floor = config.data['sapiensid']['matching']['face_floor']
 
@@ -21,12 +22,20 @@ class FaceGuard:
             others = (vector(r) for r in self.db.execute(
                 'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
                 'ON m.observation=o.id WHERE m.person=? AND o.rejected IS NULL', (person,)))
-        return all(len(face) == len(other) and float(np.dot(face, other)) >= self.floor
-                   for other in others)
+        from .progress import tracking
+        from stash_ai.runtime.cancellation import current
+        token=current()
+        with tracking(others,'Check body face vetoes',unit='face') as witnesses:
+            for other in witnesses:
+                if token is not None:token.check()
+                if len(face)!=len(other) or self.scores.face_similarity(face,other)<self.floor:return False
+        return True
 
 
-def resolve_claims(rows, decisions, config):
+def resolve_claims(rows, decisions, config, *, scores=None):
     """Frozen measured face owners participate; only inferred claims change."""
+    from .body_identity import Scores
+    if scores is None:scores=Scores(config)
     claims = defaultdict(list)
     for row in rows:
         decision = decisions[row['id']]
@@ -41,7 +50,7 @@ def resolve_claims(rows, decisions, config):
                 a, b = first.get('_face_vector'), second.get('_face_vector')
                 # A reflection needs measured face evidence. Similar clothes
                 # alone cannot prove that two simultaneous bodies are one person.
-                if a is None or b is None or len(a) != len(b) or float(np.dot(a, b)) < threshold:
+                if a is None or b is None or len(a) != len(b) or scores.face_similarity(a,b) < threshold:
                     conflict = True
         if conflict:
             for row in group:

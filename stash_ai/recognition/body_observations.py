@@ -99,3 +99,35 @@ def copy_evidence(source,target,scan):
                        'FROM body_observations WHERE scan=?',(scan,)))
     target.executemany('INSERT OR REPLACE INTO body_cues VALUES (?,?,?)',
                       source.execute('SELECT * FROM body_cues WHERE scan=?',(scan,)))
+
+
+
+def repair_projections(db,config,scan,*,cue=None):
+    """Restore missing face views of completed body cues without decoding.
+
+    The caller owns the transaction. An absent or ambiguous association remains
+    unavailable; a body collection rejection cannot become a ready projection.
+    """
+    import json
+    import numpy as np
+    from .person_signal import save,contract as person_contract
+    expected=contract(config);projection=person_contract(config)
+    condition='' if cue is None else ' AND o.cue=?'
+    parameters=(expected,projection,scan)+(() if cue is None else (cue,))
+    rows=db.execute('SELECT o.id,o.cue FROM observations o JOIN body_cues c ON c.scan=o.scan '
+        'AND c.cue=o.cue AND c.contract=? LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
+        'WHERE o.scan=? AND o.rejected IS NULL AND e.observation IS NULL'+condition,parameters).fetchall()
+    for row in rows:
+        bodies=db.execute('SELECT quality,rejected,embedding,crop FROM body_observations '
+            'WHERE scan=? AND cue=? AND contract=? AND face=? LIMIT 2',
+            (scan,row['cue'],expected,row['id'])).fetchall()
+        metadata=dict(person=None,identity_rejection='person_face_association_unavailable')
+        feature=crop=None
+        if len(bodies)==1:
+            body=bodies[0];metadata=dict(json.loads(body['quality']),identity_rejection=body['rejected'])
+            crop=body['crop'] if config.data['sapiensid']['storage']['retain_person_crops'] else None
+            if body['rejected'] is None:
+                if body['embedding'] is None:raise ValueError('Completed body cue is missing its retained feature.')
+                feature=np.frombuffer(body['embedding'],dtype='<f4')
+        save(db,row['id'],projection,metadata,feature,crop)
+    return len(rows)
