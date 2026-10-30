@@ -91,3 +91,32 @@ def test_body_mode_benchmark_contains_supported_person_appearances(tmp_path):
         bank=catalogue(state.connection,c,goals['scope'],goals['namespace'])
         assert len(bank)==2
         assert all(len(i.body_modes)==2 and all(len(m)==4 for m in i.body_modes) for i in bank)
+
+
+def test_resume_restores_outsider_baseline_before_new_trials(tmp_path,monkeypatch):
+    from benchmarks.benchmark_merge_solver import fixture
+    from stash_ai.recognition.fragmentation_report import _open_readonly
+    from stash_ai.recognition.merge_solver import solve
+    config,goals=fixture(tmp_path/'input','query');journal=tmp_path/'solver.json'
+    phase={'resumed':False}
+    # Set-difference semantics are tested above; isolate the checkpoint wiring.
+    monkeypatch.setattr('stash_ai.recognition.merge_solver_outside.outsiders',
+        lambda *args:{(0,'new' if phase['resumed'] else 'old')})
+    def stop(name,stage,item):
+        if name=='baseline' and stage=='complete':raise KeyboardInterrupt()
+    with _open_readonly(config.database) as db:
+        first=solve(config,goals,db,maximum=3,checkpoint=journal,
+                    outside_limits={'new_outsider_observations':0},progress=stop)
+    assert first['interrupted']
+    def progress(name,stage,item):
+        if name=='baseline' and stage=='complete':phase['resumed']=True
+    with _open_readonly(config.database) as db:
+        result=solve(config,goals,db,maximum=3,checkpoint=journal,resume=True,
+                     outside_limits={'new_outsider_observations':0},progress=progress)
+    trials=[v for k,v in result['simulation']['trials'].items() if k!='baseline']
+    assert trials
+    for item in trials:
+        status=item['goal_result']
+        assert not status['outside_preserved']
+        assert status['outside_violations']==[dict(reason='outside_impact_limit',
+            metric='new_outsider_observations',actual=1,maximum=0)]

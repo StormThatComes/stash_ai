@@ -467,7 +467,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
     def restore(name,settings):
-        nonlocal baseline,best,best_rank,restored_count
+        nonlocal baseline,baseline_outsiders,best,best_rank,restored_count
         if journal is None or name not in journal.records:return None
         record=journal.get(name)
         if record['configuration']!=digest(settings.data):
@@ -486,7 +486,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         options.clear();options.update(state['options'])
         hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
         robustness.clear();robustness.update(state['robustness'])
-        if name=='baseline':baseline=state['baseline']
+        if name=='baseline':
+            baseline=state['baseline']
+            if 'new_outsider_observations' in outside_limits:
+                baseline_outsiders=outsiders(summaries[name],baseline,target_ids)
         best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
         return deepcopy(record['item']),baseline
     def record(name,settings,item,inputs):
