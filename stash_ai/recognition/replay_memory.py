@@ -67,6 +67,8 @@ class Lookahead:
         from .clustering import vector
         with use(self.cancel), closing(sqlite3.connect(self.uri,uri=True),name='close replay lookahead reader') as db:
             db.row_factory=sqlite3.Row
+            from .replay_vector_inputs import install
+            install(db)
             db.execute('PRAGMA query_only=ON')
             values={}
             # This is a keyed cache, so matching-order sort keys are unnecessary.
@@ -91,6 +93,8 @@ class Lookahead:
         self.scan=scan
         try:
             with closing(sqlite3.connect(self.uri,uri=True),name='close prefetch admission reader') as db:
+                from .replay_vector_inputs import install
+                install(db)
                 required=db.execute('SELECT COALESCE(SUM(2*COALESCE(length(embedding),0)+1024),0) '
                     'FROM observations WHERE scan=? AND rejected IS NULL',(scan,)).fetchone()[0]
             self.pending_budget.set(required)

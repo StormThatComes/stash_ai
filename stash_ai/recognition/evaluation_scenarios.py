@@ -15,7 +15,7 @@ def ordered(scans, order, seed):
     return result
 
 
-def copy_history(source, target, selected, scope, namespace):
+def copy_history(source, target, selected, scope, namespace, *, commit=True):
     """Copy authoritative external evidence only, without images or run caches.
 
     Keep scan insertion order, including partial/newer scans that supersede old
@@ -59,7 +59,8 @@ def copy_history(source, target, selected, scope, namespace):
         columns = len(target.execute(f'PRAGMA table_info({table})').fetchall())
         target.executemany(f'INSERT INTO {table} VALUES (' + ','.join('?' for _ in range(columns)) + ')',
             source.execute(f'SELECT * FROM {table} WHERE {where} ORDER BY rowid', args))
-    target.commit()
+    if commit:
+        target.commit()
     return dict(scenes=target.execute('SELECT COUNT(DISTINCT scene) FROM scans').fetchone()[0],
                 observations=target.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
                 people=target.execute('SELECT COUNT(*) FROM people').fetchone()[0])

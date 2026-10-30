@@ -11,9 +11,9 @@ def test_prepared_history_matches_independent_copies(tmp_path,monkeypatch):
     import stash_ai.recognition.replay_simulation as module
     original=module.copy_history
     calls=[]
-    def copying(*args):
+    def copying(*args,**kwargs):
         calls.append(1)
-        return original(*args)
+        return original(*args,**kwargs)
     monkeypatch.setattr(module,'copy_history',copying)
     variants={'relaxed':patched(config,{'sapiensid.matching.face_floor':.4,'sapiensid.matching.min_support':3})}
     with _open_readonly(config.database) as db:

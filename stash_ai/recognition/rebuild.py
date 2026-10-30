@@ -37,9 +37,10 @@ from .compute import compute_scope, current as compute_current
 from .parallel_scores import FrozenScores
 
 
-def _observations(db, scan):
+def _observations(db, scan, *, share_vectors=False):
     return db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
-                      'o.quality,o.rejected,o.dimensions,o.embedding,s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
+                      'o.quality,o.rejected,o.dimensions,'+('NULL AS embedding' if share_vectors else 'o.embedding')+
+                      ',s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
                       'JOIN scans s ON s.id=o.scan WHERE o.scan=? ORDER BY o.cue,o.id', (scan,))
 
 
@@ -56,13 +57,13 @@ def _inserted(db, sql, rows):
         yield from batch
 
 
-def _copy_observations(db, replay, scan, *, retain_pose=False):
-    for batch in _batches(_observations(db, scan)):
+def _copy_observations(db, replay, scan, *, retain_pose=False, share_vectors=False):
+    for batch in _batches(_observations(db, scan, share_vectors=share_vectors)):
         from .pixel_storage import copy_rows
         copy_rows(db,replay,batch)
         # Source/rect are consumed by sample_key on the authoritative row.
         # Only the pose measurement is needed by opt-in pose-aware matching; never copy JPEGs.
-        replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        replay.executemany('INSERT INTO main.observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                            ((row['id'], row['scan'], row['cue'], row['seconds'], '', '[]',
                              row['geometry'], compact_quality(row['quality']),
                               row['rejected'], row['dimensions'],
@@ -116,6 +117,8 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
       CREATE TABLE origins(sample_key TEXT PRIMARY KEY, person TEXT, observation TEXT);
       CREATE TABLE old_people(id TEXT PRIMARY KEY, created REAL, performer TEXT, retired INTEGER);
     ''')
+    from .replay_vector_inputs import prepare
+    shared_vectors = prepare(db, replay)
     with tracking(
         db.execute(
             'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
@@ -145,7 +148,7 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
                 raise ValueError('Identity rebuild requires complete compatible selected scans.')
             replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
             with tracking(
-                _copy_observations(db, replay, item['scan'], retain_pose=retain_pose),
+                _copy_observations(db, replay, item['scan'], retain_pose=retain_pose, share_vectors=shared_vectors),
                 'Copy face observations',
                 unit='observation',
                 total=lambda: db.execute(

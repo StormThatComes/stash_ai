@@ -171,7 +171,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
     from .solver_progress import heartbeat
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.document() if runtime else None)),
+        journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
@@ -544,7 +544,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if stage == 'start':
             if name == 'baseline' and progress:
                 detail = (f'cpus={runtime.cpus} trials={runtime.trials} inner_workers={runtime.inner_workers} '
-                          f'scheduling={runtime.scheduling}' if runtime else 'trials=1 scheduling=serial')
+                          f'scheduling={runtime.scheduling} memory_admission={runtime.memory_admission}' if runtime else 'trials=1 scheduling=serial')
                 progress('execution', 'plan', dict(text=f'{detail} max_trials={maximum}; baseline runs first'))
             probe_state = (deepcopy(dict(options=options, hybrid=hybrid, hybrid_changes=hybrid_changes,
                 feedback=latest_feedback, visits=query_feedback.visits, priorities=query_feedback.priorities))

@@ -215,7 +215,7 @@ def canonicalize(db):
         alias = mapping.get(record.get('evidence_pixel_sha256'))
         if alias is not None:
             record['evidence_pixel_sha256'] = alias
-            db.execute('UPDATE observations SET quality=? WHERE id=?',
+            db.execute('UPDATE main.observations SET quality=? WHERE id=?',
                        (json.dumps(record, separators=(',', ':')), row['id']))
 
 
