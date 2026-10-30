@@ -127,7 +127,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         if grouped:
                             image=next(image for i,_,image in batch if i==index)
                             collector.collect_records(db,identifier,index,image,
-                                sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']),seconds=cue.start)
+                                sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']),seconds=cue.start,
+                                frame_owner=batch)
                         pending_bytes+=sum(sum(len(v) for v in row if isinstance(v,(str,bytes)))
                             +(config.data['storage']['max_crop_bytes']+32768 if grouped else 0) for row in pending[start:])
                         supplemental_bytes=collector.pending_bytes() if grouped else 0

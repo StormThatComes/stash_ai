@@ -77,31 +77,58 @@ class ViTPoseLarge:
                 raise ValueError('ViTPose requires finite, non-empty person boxes.')
             boxes[:,2:] -= boxes[:,:2]
             jobs.extend((frame, index, box) for index,box in enumerate(boxes))
-        with torch.inference_mode():
-            for start in range(0,len(jobs),self.batch_size):
-                batch = jobs[start:start+self.batch_size]
-                owners = list(dict.fromkeys(frame for frame,_,_ in batch))
-                images = [frames[frame][0] for frame in owners]
-                boxes = [np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
-                inputs = self.processor(images=images[0] if len(images)==1 else images,
-                    boxes=boxes,return_tensors='pt').to(self.device)
-                dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
-                outputs = self.model(**inputs,dataset_index=dataset_index)
-                decoded = self.processor.post_process_pose_estimation(outputs,boxes=boxes,threshold=None)
-                if len(decoded)!=len(owners) or any(len(rows)!=len(b) for rows,b in zip(decoded,boxes)):
-                    raise ValueError('ViTPose returned an invalid person count.')
-                people = [person for rows in decoded for person in rows]
-                # One transfer per field for the entire people batch.
-                xy = torch.stack([p['keypoints'] for p in people]).detach().cpu().numpy()
-                confidence = torch.stack([p['scores'] for p in people]).detach().cpu().numpy()
-                labels = torch.stack([p['labels'] for p in people]).detach().cpu().numpy()
-                if (xy.shape!=(len(batch),17,2) or confidence.shape!=(len(batch),17) or labels.shape!=(len(batch),17)
-                        or not np.all(np.sort(labels,axis=1)==np.arange(17))
-                        or not np.isfinite(xy).all() or not np.isfinite(confidence).all()):
-                    raise ValueError('ViTPose returned malformed/non-finite COCO17 geometry.')
-                for offset,(frame,index,_) in enumerate(batch):
-                    order = np.argsort(labels[offset])
-                    result[frame][0][index] = xy[offset,order]
-                    result[frame][1][index] = np.clip(confidence[offset,order],0.,1.)
-                del inputs, outputs, decoded
+        from concurrent.futures import ThreadPoolExecutor
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        overlap = str(self.device).split(':')[0] in ('cuda','mps','xpu')
+        def apply(batch, decoded):
+            xy,confidence,labels=decoded
+            for offset,(frame,index,_) in enumerate(batch):
+                order=np.argsort(labels[offset])
+                result[frame][0][index]=xy[offset,order]
+                result[frame][1][index]=np.clip(confidence[offset,order],0.,1.)
+        # At most one decode runs alongside the next inference. Only CPU-owned
+        # heatmaps cross threads; the model and all device transfers stay here.
+        pending=None
+        with (ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-pose-decode') if overlap and jobs else nullcontext(None)) as decoder:
+            with torch.inference_mode():
+                for start in range(0,len(jobs),self.batch_size):
+                    batch = jobs[start:start+self.batch_size]
+                    owners = list(dict.fromkeys(frame for frame,_,_ in batch))
+                    images = [frames[frame][0] for frame in owners]
+                    boxes = [np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
+                    inputs = self.processor(images=images[0] if len(images)==1 else images,
+                        boxes=boxes,return_tensors='pt').to(self.device)
+                    dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
+                    outputs = self.model(**inputs,dataset_index=dataset_index)
+                    if decoder is None:
+                        apply(batch,self._decode(outputs,boxes,len(batch)))
+                    else:
+                        cpu = SimpleNamespace(heatmaps=outputs.heatmaps.detach().cpu())
+                        if pending is not None:
+                            previous,future=pending
+                            apply(previous,future.result())
+                        pending=batch,decoder.submit(self._decode,cpu,boxes,len(batch))
+                    del inputs, outputs
+                if pending is not None:
+                    batch,future=pending
+                    apply(batch,future.result())
         return result
+
+
+    def _decode(self, outputs, boxes, count):
+        import numpy as np
+        import torch
+        with torch.inference_mode():
+            decoded = self.processor.post_process_pose_estimation(outputs,boxes=boxes,threshold=None)
+            if len(decoded)!=len(boxes) or any(len(rows)!=len(b) for rows,b in zip(decoded,boxes)):
+                raise ValueError('ViTPose returned an invalid person count.')
+            people = [person for rows in decoded for person in rows]
+            xy = torch.stack([p['keypoints'] for p in people]).detach().cpu().numpy()
+            confidence = torch.stack([p['scores'] for p in people]).detach().cpu().numpy()
+            labels = torch.stack([p['labels'] for p in people]).detach().cpu().numpy()
+            if (xy.shape!=(count,17,2) or confidence.shape!=(count,17) or labels.shape!=(count,17)
+                    or not np.all(np.sort(labels,axis=1)==np.arange(17))
+                    or not np.isfinite(xy).all() or not np.isfinite(confidence).all()):
+                raise ValueError('ViTPose returned malformed/non-finite COCO17 geometry.')
+            return xy,confidence,labels

@@ -105,7 +105,7 @@ class SapiensIDFaces(YuNetDetector):
         if get_ident() != self.owner:
             raise RuntimeError('SapiensID inference must remain on its owning thread.')
 
-    def detect(self, image, faces=None, *, force_pose=False, _defer=None):
+    def detect(self, image, faces=None, *, force_pose=False, _defer=None, _result=None):
         """Detect faces/people; visual audits can inspect pose even without faces."""
         self._owner()
         if faces is None and not self.has_detector:
@@ -120,12 +120,7 @@ class SapiensIDFaces(YuNetDetector):
         people = []
         if force_pose or faces or self.config.data['sapiensid']['collection']['enabled']:
             settings = self.config.data['sapiensid']
-            # Explicitly select the one-to-many head: iou remains effective on
-            # YOLO26 instead of being silently ignored by NMS-free inference.
-            results = self.pose.predict(source=image, device=self.device, verbose=False, nms=True,
-                                        conf=settings['pose']['score_threshold'],
-                                        iou=settings['pose']['nms_threshold'],
-                                        max_det=settings['pose']['max_people_per_frame'])
+            results = self._predict_pose(image) if _result is None else [_result]
             if len(results) != 1:
                 raise ValueError('SapiensID pose detector returned an invalid frame count.')
             result = results[0]
@@ -183,25 +178,53 @@ class SapiensIDFaces(YuNetDetector):
             people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score)))
         return people
 
+    def _predict_pose(self, source):
+        settings = self.config.data['sapiensid']['pose']
+        from .profiling import count
+        count('person_detector_batches')
+        count('person_detector_frames', len(source) if isinstance(source,list) else 1)
+        # Explicit one-to-many head preserves the configured NMS contract.
+        return self.pose.predict(source=source, device=self.device, verbose=False, nms=True,
+            conf=settings['score_threshold'], iou=settings['nms_threshold'],
+            max_det=settings['max_people_per_frame'])
+
     def detect_many(self, frames):
         self._owner()
         if self._prepared_frames:
             raise RuntimeError('Consume prepared pose frames before preparing another batch.')
-        if self.pose_refiner is None or not callable(getattr(self.pose_refiner, 'predict_many', None)):
-            for image, faces in frames:
-                self.detect(image, faces=faces)
-                self._prepared_frames[id(image)] = image, faces, self.frame_people
-            return
-        deferred = []
-        for image, faces in frames:
-            self.detect(image, faces=faces, _defer=deferred)
-        predictions = self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
-        if len(predictions) != len(deferred):
-            raise ValueError('ViTPose returned an invalid frame count.')
-        prepared = {}
-        for (image,faces,bounds,scores), (points,confidence) in zip(deferred,predictions):
-            prepared[id(image)] = image, faces, self._people(bounds,scores,points,confidence)
-        self._prepared_frames = prepared
+        frames=list(frames)
+        if len({id(image) for image,_ in frames})!=len(frames):
+            raise ValueError('Pose batch must contain distinct frame objects.')
+        resolved=[];groups={}
+        for image,faces in frames:
+            if faces is None:
+                if not self.has_detector:
+                    raise ValueError('Supplemental collection requires retained face detections.')
+                faces=super().detect(image)
+            resolved.append((image,faces))
+            if faces or self.config.data['sapiensid']['collection']['enabled']:
+                # Equal shapes preserve YOLO's single-frame rectangular padding.
+                groups.setdefault(image.size,[]).append(image)
+        detections={};maximum=self.config.data['sapiensid']['pose']['batch_size']
+        for images in groups.values():
+            for start in range(0,len(images),maximum):
+                batch=images[start:start+maximum]
+                outputs=self._predict_pose(batch)
+                if len(outputs)!=len(batch):
+                    raise ValueError('SapiensID pose detector returned an invalid frame count.')
+                detections.update((id(image),result) for image,result in zip(batch,outputs))
+        batched=self.pose_refiner is not None and callable(getattr(self.pose_refiner,'predict_many',None))
+        deferred=[];prepared={}
+        for image,faces in resolved:
+            self.detect(image,faces=faces,_result=detections.get(id(image)),_defer=deferred if batched else None)
+            if not batched:prepared[id(image)]=image,faces,self.frame_people
+        if batched:
+            predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
+            if len(predictions)!=len(deferred):
+                raise ValueError('ViTPose returned an invalid frame count.')
+            for (image,faces,bounds,scores),(points,confidence) in zip(deferred,predictions):
+                prepared[id(image)]=image,faces,self._people(bounds,scores,points,confidence)
+        self._prepared_frames=prepared
 
     def _activate(self, image, faces, people):
         matches = associate(faces, people)
