@@ -3,11 +3,17 @@ from .body_solver import analyse as hints
 from .merge_report_policy import patched,proposal
 
 
-def analyse(db,config,identities,scope,namespace):
+def analyse(db,config,identities,scope,namespace,*,verify=True):
     from .merge_goals import resolve,evaluate
     goals=resolve(db,config,[list(identities)],scope=scope,by_performer=False)
     measured=hints(db,config,goals)
     result=dict(route='independent_person',current=measured['evidence'],attempts=[],recommendations=[])
+    if not verify:
+        result.update(verification_scope='measured_only', proposals=[
+            dict(proposal(config,changes),strategy='measured_person_proposal',
+                 verification=dict(replay_verified=False, shared_component=dict(people=list(identities),outcome='unverified')))
+            for changes in [{},*measured['proposals']]])
+        return result
     variants={};seen=set()
     from .config import digest
     for changes in [{},*measured['proposals']]:

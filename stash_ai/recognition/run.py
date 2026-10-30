@@ -140,6 +140,7 @@ def _execute(args, config, *, services=None):
     counts = Counter()
     rejection_totals={kind:Counter() for kind in ('face','body','person_evidence_unavailable')}
     references = {}
+    publication_debt = None
     from .sprite_cache import scope as sprite_scope
     with sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
@@ -359,6 +360,17 @@ def _execute(args, config, *, services=None):
                     outcome = 'partial'
                 ui.finish()
                 report.console.finish_rendering()
+                from .publication_queue import debt
+                publication_debt = report.optional('recognition_publication_snapshot',debt,
+                    database.connection,scope,model_namespace,identifiers)
+                if publication_debt is not None:
+                    publication_debt['selected_scene_count'] = len(identifiers)
+                    publication_debt['rebuild_scene_count'] = len(getattr(database,'last_rebuild_selection',()))
+                if publication_debt and (publication_debt['pending_selected'] or publication_debt['pending_outside_selection']):
+                    report.optional('recognition_publication_debt',report.write,
+                        'Recognition publication pending: selected='+str(publication_debt['pending_selected'])+
+                        ' outside_selection='+str(publication_debt['pending_outside_selection'])+
+                        '; inspect with recognition sync-identities')
                 report.optional('recognition_summary', report.write, f'Recognition {outcome}: ' +
                                 ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
                                 ''.join(' | '+kind+': '+' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items()))
@@ -381,6 +393,7 @@ def _execute(args, config, *, services=None):
                 def finish_history():
                     summary.update(counts=dict(counts), mutations=dict(report.counts),
                                    rejections={kind:dict(reasons) for kind,reasons in rejection_totals.items()})
+                    if publication_debt is not None:summary['publication_debt'] = publication_debt
                     from .profiling import pipeline_snapshot
                     timings = pipeline_snapshot()
                     if timings is not None:

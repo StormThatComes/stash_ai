@@ -168,8 +168,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.document() if runtime else None)),
-                      resume=resume,winner=winner_writer) if checkpoint else None
+    from .solver_progress import heartbeat
+    with heartbeat('initialization', progress, 'Validate solver checkpoint'):
+        journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.document() if runtime else None)),
+                          resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
     from .merge_solver_diagnostics import diagnostic_record, latest_decisions
@@ -203,8 +205,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     outcome_ids = goal_index().outcome_ids | feasibility.addresses
     proofs = []
     hybrid = {}
-    options = (measured_options(db, config, measurement_goals, proofs, hybrid=hybrid)
-               if scans else {})
+    from .solver_progress import heartbeat
+    with heartbeat('initialization', progress, 'Measure retained evidence'):
+        options = (measured_options(db, config, measurement_goals, proofs, hybrid=hybrid)
+                   if scans else {})
     if not scans:
         hybrid.update(enabled=False, options={}, proposals=[])
     from .merge_exclusion_feedback import analyse as exclusion_feedback

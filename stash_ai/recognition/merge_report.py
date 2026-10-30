@@ -81,6 +81,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
             performer_ids=[left['performer'], right['performer']],
             current_configuration={key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
             paths=[], recommendations=[], hybrid=hybrid, independent_person=independent_person,
+            verification_scope='production_replay' if simulate else 'frozen_catalogue_only', replay_trials=0,
             analysis_basis='production_frozen_catalogue_counterfactual',
             guarantees_full_rebuild_merge=False,
             limitations=[
@@ -100,6 +101,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
             if simulate:
                 from .replay_simulation import merge_impact
                 result['simulation'] = merge_impact(config, result, db)
+                result['replay_trials'] = len(result['simulation']['trials'])
             return result
         grouping = config.data['clustering']
         groups = _groups(db, left['scope'], model_namespace, grouping,
@@ -124,9 +126,9 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         from .body_identity import enabled as body_enabled
         if body_enabled(config):
             from .body_merge_report import analyse as body_analyse
-            result['paths'].append(body_analyse(db,config,identities,left['scope'],model_namespace))
+            result['paths'].append(body_analyse(db,config,identities,left['scope'],model_namespace,verify=False))
         for path in result['paths']:
-            for item in path['recommendations']:
+            for item in [*path['recommendations'],*(path.get('proposals',[]) if simulate else [])]:
                 component = item['verification']['shared_component']
                 result['recommendations'].append(dict(item, route=path['route'],
                     merged_identity_ids=list(component['people']),
@@ -154,6 +156,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         if simulate:
             from .replay_simulation import merge_impact
             result['simulation'] = merge_impact(config, result, db)
+            result['replay_trials'] = len(result['simulation']['trials'])
         return result
 
 

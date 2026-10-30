@@ -35,6 +35,9 @@ def goal_rows(db,config,person):
         row.update(evidence_kind='person',reference_authority=strong,
             goal_role='reference' if eligible and strong else 'uncertain',
             sample_role='anchor' if eligible and strong else 'auxiliary' if eligible else 'other',body_state='ready')
+        from .person_anchor import anchor_gate
+        gate = anchor_gate(row['quality'],config.data['sapiensid']['identities'])
+        row.update(body_role=row['sample_role'], body_reason=gate['reason'])
         rows.append(row)
     return rows
 

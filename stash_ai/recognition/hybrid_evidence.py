@@ -170,7 +170,7 @@ def plan(db,config,identities,*,focus=None):
     limits=config.data['sapiensid']['execution']
     lookup=Lookup([owned[p] for p in sorted(owned)],limits['reference_bytes'])
     candidates=used=0; nominations=[]
-    with tracking(lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin']),'Nominate hybrid pairs',unit='pair',total=len(owned)*(len(owned)-1)//2) as pairs:
+    with tracking(lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin']),'Nominate hybrid pairs',unit='nominated pair') as pairs:
         for a,b,face_mean,person_mean in pairs:
             # A tiny overnomination tolerance protects threshold-edge witnesses
             # from centroid reduction rounding. Exact witness gates decide.
@@ -230,7 +230,7 @@ def plan(db,config,identities,*,focus=None):
     eligible={p:d for d in decisions if not d['blockers'] for p in d['people']}
     internal={p:min(edges[tuple(sorted((p,q)))] for q in d['people'] if q!=p)
               for p,d in eligible.items()}
-    with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='pair',total=len(owned)*(len(owned)-1)//2) as comparisons:
+    with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='nominated pair') as comparisons:
         for a,b,face_mean,person_mean in comparisons:
             # Known face contradiction is distinct from unknown body evidence.
             witness=proofs.get(tuple(sorted((a,b))))

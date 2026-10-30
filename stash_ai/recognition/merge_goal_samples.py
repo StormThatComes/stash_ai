@@ -17,10 +17,10 @@ def freeze(db, config, rows, diagnostics):
     from .pose_policy import is_anchor, query_allows
     body = defaultdict(dict)
     if diagnostics['sapiensid_enabled'] and available(db):
-        for oid, contract, status in db.execute(
-                'SELECT observation,contract,status FROM person_evidence '
+        for oid, contract, status, metadata in db.execute(
+                'SELECT observation,contract,status,metadata FROM person_evidence '
                 'WHERE observation IN (SELECT value FROM json_each(?))', (encoded([r['id'] for r in rows]),)):
-            body[oid][contract] = status
+            body[oid][contract] = (status, metadata)
     for row in rows:
         eligible = row['status'] == 'complete' and row['rejected'] is None
         if eligible and row['reference_authority'] and is_anchor(row['quality'], config.data['clustering']):
@@ -30,9 +30,15 @@ def freeze(db, config, rows, diagnostics):
         else:
             role = 'other'
         records = body[row['id']]
-        state = (records.get(diagnostics['sapiensid_contract'], 'incompatible' if records else 'missing')
+        record = records.get(diagnostics['sapiensid_contract'])
+        state = ((record[0] if record else 'incompatible' if records else 'missing')
                  if diagnostics['sapiensid_enabled'] else 'disabled')
-        row.update(sample_role=role, body_state=state)
+        from .person_anchor import anchor_gate
+        gate = (anchor_gate(record[1], config.data['sapiensid']['identities'], collection=config.data['sapiensid']['collection'])
+                if state == 'ready' else dict(eligible=False, reason=state))
+        body_role = 'anchor' if role == 'anchor' and gate['eligible'] else 'auxiliary' if eligible and state == 'ready' else 'other'
+        row.update(sample_role=role, body_state=state, body_role=body_role,
+                   body_reason=gate['reason'] or (None if role == 'anchor' else 'face_reference_ineligible'))
 
 
 def target(group):
@@ -93,6 +99,12 @@ def attach(goals, result, observations, predicted):
             requested_ids=list(dict.fromkeys(i for m in source['members'] for i in m['requested_ids'])),
             performer_ids=list(dict.fromkeys(m['performer_id'] for m in source['members'] if m['performer_id'] is not None)),
             target_identity=destination, target_ties=tied, face=face, sapiensid=body)
+        group['sample_assignment']['sapiensid_by_body_eligibility'] = dict(
+            roles='input_body_reference_eligibility',
+            reasons=dict(Counter(r.get('body_reason') for r in rows if r.get('body_reason'))),
+            **{role: assignment([r for r in rows if r.get('body_role', r['sample_role']) == role
+                                 and r['body_state'] == 'ready'], observations, predicted, destination, owners)
+               for role in ROLES})
     return result
 
 
@@ -127,4 +139,9 @@ def lines(group):
         result.append(f"    SapiensID {role}: ready={states['ready']}/{total} {counts(item)} "
                       f"unavailable={states['unavailable']} no_evidence={states['missing']} "
                       f"incompatible={states['incompatible']}")
+    actual = data.get('sapiensid_by_body_eligibility')
+    if actual:
+        result.append('    Body reference eligibility (input config): '+
+                      ' '.join(f"{role}={actual[role]['total']}" for role in ROLES)+
+                      ' reasons='+compact(actual['reasons']))
     return result

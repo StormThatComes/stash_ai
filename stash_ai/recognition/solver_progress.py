@@ -1,5 +1,5 @@
 """Bounded, best-effort worker telemetry; only the coordinator writes output."""
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from queue import Full
 from threading import Event, Lock, Thread
 import os
@@ -78,6 +78,38 @@ class LiveProgress(AbstractContextManager):
         self.stop.set()
         self.thread.join()
         self.publish()
+
+
+@contextmanager
+def heartbeat(name, callback, label='Initialize trial'):
+    """Give serial/native work the same liveness contract as spawned trials."""
+    if callback is None or not getattr(callback, 'telemetry_enabled', True):
+        yield None
+        return
+    if isinstance(callback, LiveProgress):
+        yield callback  # A worker already owns its periodic publisher.
+        return
+    class Output:
+        def put_nowait(self, event):
+            trial, snapshot = event
+            callback(trial, 'stage: ' + snapshot['stage'], snapshot)
+    class SerialProgress(LiveProgress):
+        def __call__(self, name, stage, snapshot):
+            super().__call__(name, stage, snapshot)
+            self.publish()  # Preserve short stage/error locations between ticks.
+    live = SerialProgress(name, Output())
+    live.snapshot['stage'] = label
+    with live:
+        yield live
+
+
+def startup(args):
+    if getattr(args, 'progress_style', 'off') == 'off':
+        return nullcontext()
+    def report(name, stage, item):
+        import sys
+        print('Merge report initialization: '+worker_text(item, time.monotonic()), file=sys.stderr, flush=True)
+    return heartbeat('initialization', report, 'Read snapshot and resolve goals')
 
 
 def worker_text(snapshot, now):

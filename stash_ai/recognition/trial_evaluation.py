@@ -23,18 +23,24 @@ def settings_for_replay(settings, runtime):
 def evaluate(name, settings, *, seed, source, scope, namespace, installation, scans,
              observations, rebuild, inspect_trial=None, progress=None, copy_inputs=copy_history):
     from .progress import observe_updates
-    from .solver_progress import ReplayProgress
-    reporter = ReplayProgress(name, progress) if progress and getattr(progress, 'telemetry_enabled', True) else None
-    with observe_updates(reporter.update) if reporter else nullcontext():
-        return _evaluate(name, settings, seed=seed, source=source, scope=scope,
-            namespace=namespace, installation=installation, scans=scans,
-            observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,
-            copy_inputs=copy_inputs)
+    from .solver_progress import ReplayProgress, heartbeat
+    from .trial_metrics import Metrics
+    metrics = Metrics(settings.data['execution'].get('profile_rebuild', False))
+    with heartbeat(name, progress) as live:
+        reporter = ReplayProgress(name, live) if live else None
+        with observe_updates(reporter.update) if reporter else nullcontext():
+            result = _evaluate(name, settings, seed=seed, source=source, scope=scope,
+                namespace=namespace, installation=installation, scans=scans,
+                observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,
+                copy_inputs=copy_inputs, metrics=metrics)
+    result['trial_profile'] = metrics.snapshot()
+    return result
 
 
 def _evaluate(name, settings, *, seed, source, scope, namespace, installation, scans,
-              observations, rebuild, inspect_trial, copy_inputs):
+              observations, rebuild, inspect_trial, copy_inputs, metrics):
     from .progress import observe_stages, stage
+    stage = metrics.stage
     active_stage = 'Prepare replay'
     def stage_update(label):
         nonlocal active_stage
