@@ -34,7 +34,7 @@ def fixture(root, case):
     if case == 'quality':
         data['clustering'].update(min_anchor_face_pixels=100,min_auxiliary_face_pixels=100)
     config = replace(config,data=data)
-    count = 6 if case == 'body_modes' else 3
+    count = 8 if case == 'body_modes' else 3
     n = 4 if case == 'disjoint' else 2
     people = [str(uuid.uuid5(uuid.NAMESPACE_URL,f'solver-{i}')) for i in range(n)]
     with FaceDatabase(config.database) as state:
@@ -59,10 +59,12 @@ def fixture(root, case):
                     scan,matching_policy(config),p,'accepted',json.dumps(dict(observation=oid,reason='candidate_group'))))
                 if data['sapiensid']['enabled'] and case != 'missing_body':
                     body = np.zeros(4096,dtype='<f4')
-                    offset = 2 if case == 'body_modes' and cue>=3 else offset
+                    offset = 2 if case == 'body_modes' and cue>=4 else offset
                     body[offset] = 1 if i%2 == 0 else .96
                     if i%2:body[offset+1] = .28
-                    save(db,oid,contract(config),{},body)
+                    metadata=dict(person=dict(bounds=[0,0,512,512],score=1.,keypoints=[[100.,100.]]*17),
+                        quality=dict(keypoints=17,sharpness=100.,width=512,height=512,overlap=0.,pixel_digest=oid))
+                    save(db,oid,contract(config),metadata,body)
         db.commit()
         groups = [people[i:i+2] for i in range(0,n,2)]
         goals = resolve(db,config,groups,by_performer=False)

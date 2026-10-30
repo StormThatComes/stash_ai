@@ -55,11 +55,11 @@ def test_outside_limits_precede_goal_improvement(field):
     goal = goals([member('a'), member('b')])
     baseline = status(goal, assignments(goal))
     solved = status(goal, dict.fromkeys(assignments(goal), 'merged'))
-    outside = dict(coverage_lost=0, split_pairs=0, newly_joined_pairs=0)
+    outside = dict(coverage_lost=0, split_pairs=0, newly_joined_pairs=0, new_outsider_observations=0)
     limits = validate({field: 0})
     apply(baseline, outside, baseline, limits)
     if field == 'new_outsider_observations':
-        solved['groups'][0]['outsider_observations'] += 1
+        outside['new_outsider_observations'] = 1
     else:
         outside[field] = 1
     apply(solved, outside, baseline, limits)

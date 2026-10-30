@@ -128,6 +128,8 @@ def expansion_candidates(config, changes, feedback):
 
 def repair_candidates(config, changes, sources, safe):
     """Use witnesses and multiple routes back towards a completed disjoint state."""
+    from .merge_solver_domains import registry
+    domains = registry(config)
     positive, negative = [], []
     for source in sources:
         query = source.get('query', {})
@@ -155,8 +157,8 @@ def repair_candidates(config, changes, sources, safe):
                     continue
                 if type(start) is bool or start is None or end is None:
                     value = end
-                elif key.endswith('support'):
-                    value = int(round(start + (end-start)*fraction))
+                elif key in domains and domains[key].kind is int:
+                    value = domains[key].project(start + (end-start)*fraction)
                 else:
                     value = round(start + (end-start)*fraction, 6)
                 joint[key] = value

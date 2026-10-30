@@ -4,7 +4,7 @@ import uuid
 import numpy as np
 import pytest
 
-from stash_ai.recognition.body_parameters import LOCAL,GLOBAL,PARAMETERS
+from stash_ai.recognition.body_parameters import LOCAL,GLOBAL,PARAMETERS,QUALITY
 from stash_ai.recognition.person_anchor import PIXEL_PARAMETER
 from stash_ai.recognition.body_solver import analyse
 from stash_ai.recognition.database import FaceDatabase,encoded
@@ -52,6 +52,8 @@ def test_disabled_routes_and_input_portrait_settings_are_not_solver_dimensions(t
     assert not set(GLOBAL)&registry(c).keys()
     assert not any('.collection.' in k or k.startswith('portraits.') for k in registry(c))
     c.data['sapiensid']['identities']['enabled']=False
+    assert PARAMETERS&registry(c).keys()==set(QUALITY)
+    c.data['sapiensid']['enabled']=False
     assert not PARAMETERS&registry(c).keys()
 
 

@@ -9,7 +9,7 @@ import math
 from .config import digest
 from .database import encoded
 from .hybrid_evidence import scores
-from .independent_evidence import Votes
+from .independent_evidence import Votes, body_vote
 from .merge_report_policy import parameter, _floor
 from .merge_solver_hybrid import boundaries, PREFIX
 
@@ -224,7 +224,7 @@ class QueryFeedback:
                 self.entries.append(entry)
                 self.face_votes.setdefault((pass_id, c['identity']), Votes()).add(row)
                 if c['person'] is not None and not c['missing_original_core']:
-                    self.votes.setdefault((pass_id, c['identity']), Votes()).add(row)
+                    self.votes.setdefault((pass_id, c['identity']), Votes()).add(body_vote(row))
             self.used += retained_cost
         return measure
 

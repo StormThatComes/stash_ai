@@ -13,11 +13,21 @@ def validate(limits):
 def apply(status, outside, baseline_status, limits):
     if not limits:
         return
-    values = dict(outside, new_outsider_observations=max(0,
-        sum(g['outsider_observations'] for g in status['groups'])-
-        sum(g['outsider_observations'] for g in baseline_status['groups'])))
+    if 'new_outsider_observations' in limits and 'new_outsider_observations' not in outside:
+        raise ValueError('New outsider limits require observation-level baseline differences.')
+    values = outside
     violations = [dict(reason='outside_impact_limit', metric=k, actual=values[k], maximum=v)
                   for k, v in limits.items() if values[k] > v]
     status.update(outside_preserved=not violations, outside_limits=dict(limits), outside_violations=violations)
     status['admissible'] &= not violations
     status['fully_solved'] &= not violations
+
+
+def outsiders(status, predicted, goal_ids):
+    """Stable (goal set, observation) links, independent of destination UUIDs."""
+    destinations={}
+    for group in status['groups']:
+        for person in group['resulting_identities']:
+            destinations.setdefault(person,[]).append(group['index'])
+    return {(index,oid) for oid,person in predicted.items() if oid not in goal_ids and person is not None
+            for index in destinations.get(person,())}

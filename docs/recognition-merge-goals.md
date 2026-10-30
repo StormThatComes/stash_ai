@@ -180,6 +180,7 @@ Optional solver-only bounds `--max-outside-coverage-loss`,
 `--max-new-outsider-observations` accept nonnegative counts relative to the
 baseline replay. A candidate exceeding a bound cannot outrank one satisfying
 the bounds, even when it improves consolidation. Unspecified bounds are disabled.
+New outsiders are counted as new (goal set, observation) links, so replacing one outsider with another still consumes the limit.
 These measure collateral partition changes, not verified recognition errors.
 
 Use **`--goal-policy strict`** for the previous objective: every original observation
