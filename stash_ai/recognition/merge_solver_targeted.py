@@ -165,12 +165,28 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
                  prefix+'cohesion_threshold':lower(prefix+'cohesion_threshold',p['minimum']),
                  prefix+'min_support':min(parameter(config.data,prefix+'min_support'),min(p['support']))}
         rivals = [r['score'] for r in bodies.get('nearest_competitors',[]) if r['identity'] in (a,b)]
-        rivals += [r['score'] for r in bodies.get('pairs',[]) if r.get('relation') != 'within_set' and set(r['people']) & {a,b}]
+        from .competitor_eligibility import body as eligible_rival
+        rivals += [r['score'] for r in bodies.get('pairs',[]) if eligible_rival(r) and r.get('relation') != 'within_set' and set(r['people']) & {a,b}]
         if rivals and max(rivals) > p['score']:continue
         if rivals:patch[prefix+'ambiguity_margin'] = lower(prefix+'ambiguity_margin',p['score']-max(rivals))
         bridge(index, 'body', patch, a, b, p['blockers'])
 
     query = feedback.get('query', {})
+    for q in query.get('local_body', []):
+        oid = q['observation']; index = by_observation.get(oid)
+        destinations = {membership.get(w) for w in q['witnesses']} - {None}
+        if index is None or len(destinations) != 1 or q['gap'] < 0:
+            continue
+        destination = next(iter(destinations))
+        if owners.get(destination) != {index} or membership.get(oid) == destination:
+            continue
+        prefix = 'sapiensid.identities.'
+        patch = {prefix+'match_threshold': lower(prefix+'match_threshold', q['mean']),
+                 prefix+'cohesion_threshold': lower(prefix+'cohesion_threshold', q['minimum']),
+                 prefix+'ambiguity_margin': lower(prefix+'ambiguity_margin', q['gap']),
+                 prefix+q['support_gate']: min(parameter(config.data, prefix+q['support_gate']), q['support'])}
+        add(index, 'local_body', combine(patch, quality[index]), observations=[oid]+q['witnesses'],
+            fragments=[destination], blockers=['local_body_thresholds'], gain=2)
     # Hybrid observers cannot run without a body bank. Reuse the existing
     # retained-face fallback measurements and keep their set/performer address.
     for q in query.get('face_routes', []):

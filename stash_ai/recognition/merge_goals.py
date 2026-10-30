@@ -11,8 +11,11 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     from .pose_policy import is_anchor
     from .merge_goal_samples import freeze as freeze_samples
     from .person_signal import contract
+    physical = policy == 'identity-physical'
+    if physical:
+        policy = 'identity'
     if policy not in ('identity', 'strict'):
-        raise ValueError('Goal policy must be identity or strict.')
+        raise ValueError('Goal policy must be identity, identity-physical or strict.')
     if not sets or any(not group for group in sets):
         raise ValueError('Merge goals require nonempty sets.')
     groups, owners = [], {}
@@ -78,6 +81,10 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
                 selector='performer' if by_performer else 'identity', sample_diagnostics=diagnostics,
                 goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),
                 groups=groups, status='goals_resolved', recommendations=[])
+    if physical:
+        result['goal_policy']['continuity'] = 'face_or_body'
+        from .physical_goal import freeze as freeze_physical
+        freeze_physical(db, config, result)
     if exclusions:
         result['scene_exclusions'] = exclusions
         freeze_targets(db, config, result)
@@ -198,6 +205,7 @@ def assess(goals, observations, retained, predicted):
     from collections import Counter
     groups, owners = [], {}
     goal_ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    goal_ids.update(oid for values in goals.get('physical_alternatives', {}).values() for oid in values)
     for group in goals['groups']:
         members, counts, complete_owners = [], Counter(), Counter()
         destination_fractions = Counter()

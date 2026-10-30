@@ -116,7 +116,8 @@ def analyse(db, config, goals):
                     positive.append(entry)
             # Match production competitor semantics: missing body evidence can
             # still compete through a strong face; known face contradictions do not.
-            if same_set or nominated and proof is not None and 'face_contradiction' in proof['blockers']:
+            from .competitor_eligibility import hybrid as eligible_rival
+            if same_set or not eligible_rival(proof, face_mean, settings['face_floor']):
                 continue
             score = competitor_score(left, right, body_mean)
             if score is None and face_mean is not None and face_mean >= config.data['recognition']['match_threshold']:

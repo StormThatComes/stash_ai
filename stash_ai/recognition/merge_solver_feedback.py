@@ -97,6 +97,8 @@ class QueryFeedback:
         self.entries, self.negatives, self.votes = [], [], {}
         self.face_votes = {}
         self.decisions = []
+        self.local_body = []
+        self.local_body_comparisons = 0
         self.negative_keys = set()
         self.sampled = set()
         self.sampling = []
@@ -264,7 +266,7 @@ class QueryFeedback:
                                 priority=self.priorities.get(oid, 0)) for oid, routes in sorted(alternatives.items())]
         focused = [r for r in positive_routes if r['priority'] > 0] or positive_routes
         hints = separating_proposals(config, positives, self.negatives, routes=[r['routes'] for r in focused])
-        result = dict(queries=self.entries, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
+        result = dict(queries=self.entries, local_body=self.local_body, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
             truncated=bool(self.truncation_reasons), truncation_reasons=sorted(self.truncation_reasons),
             skipped_query_visits=self.skipped_query_visits,
             separation_intervals=hints['intervals'], joint_constraints=hints['joint_constraints'],

@@ -46,6 +46,13 @@ def ownership(goals, observations, predicted):
                 if row['id'] in observations and destination is not None:
                     raw_owners[destination].add(index)
         evidence = group['identity_evidence']
+        if goals.get('goal_policy', {}).get('continuity') == 'face_or_body':
+            for scene in evidence['scenes'].values():
+                for unit in scene['membership_units']:
+                    for row in unit['observations']:
+                        destination = predicted.get(row['id'])
+                        if row['id'] in observations and destination is not None:
+                            raw_owners[destination].add(index)
         core = evidence['core_units']
         total_counts, _ = votes(core, observations, predicted)
         from .merge_goal_index import current

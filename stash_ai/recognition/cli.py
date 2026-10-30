@@ -212,8 +212,8 @@ def parser():
     merge_report.add_argument('--yaml-mode', choices=('full', 'diff'), default='full',
         help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
-    merge_report.add_argument('--goal-policy', choices=('identity','strict'), default='identity',
-        help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; strict requires every original observation. Applies to solver and set evaluation.')
+    merge_report.add_argument('--goal-policy', choices=('identity','identity-physical','strict'), default='identity',
+        help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; identity-physical also accepts a frozen linked body as the same physical vote; strict requires every original observation. Applies to solver and set evaluation.')
     merge_report.add_argument('--exclude-performer-scene', action='append', type=performer_scene,
         metavar='PERFORMER_ID:SCENE_ID',
         help='Declare that a performer from a goal set must not appear in this scene; repeatable. '
