@@ -29,6 +29,7 @@ CREATE TABLE observations (id TEXT PRIMARY KEY, scan TEXT NOT NULL REFERENCES sc
  geometry TEXT NOT NULL, quality TEXT NOT NULL, rejected TEXT,
  dimensions INTEGER NOT NULL, embedding BLOB, crop BLOB);
 CREATE INDEX observations_scan ON observations(scan,cue,id);
+CREATE INDEX scans_latest ON scans(scope,namespace,scene);
 CREATE TABLE people (id TEXT PRIMARY KEY, scope TEXT NOT NULL, namespace TEXT NOT NULL,
  created REAL NOT NULL, performer TEXT, token TEXT NOT NULL UNIQUE);
 CREATE TABLE members (observation TEXT PRIMARY KEY REFERENCES observations(id),
@@ -238,6 +239,7 @@ class FaceDatabase(AbstractContextManager):
         self.installation
         # Additive access paths: old valid state needs no evidence migration.
         with db:
+            db.execute('CREATE INDEX IF NOT EXISTS scans_latest ON scans(scope,namespace,scene)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_scan_policy ON candidates(scan,policy,person,status)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
             # Scoped model-link isolation resolves performer IDs for each selected

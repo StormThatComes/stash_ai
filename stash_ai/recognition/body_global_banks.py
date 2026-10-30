@@ -41,14 +41,25 @@ def _banks(db,config,scope,namespace):
     for row in db.execute('SELECT DISTINCT m.person'+source+'WHERE '+where,args):
         owners.setdefault(canonical(db,row[0]),[]).append(row[0])
     used=size(owners);reserve(0);output={}
-    # Fetch quality for one identity at a time, never its crop/embedding blobs.
-    for person,aliases in owners.items():
-        rows=[];working=0
-        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
-            'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
-            (*args,encoded(aliases))):
-            if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
-            row=dict(raw);working+=size(row);reserve(working);rows.append(row)
+    # Bounded owner batches eliminate a metadata query for every identity.
+    def owner_rows():
+        people=list(owners)
+        for start in range(0,len(people),32):
+            batch=people[start:start+32]
+            aliases={alias:person for person in batch for alias in owners[person]}
+            groups={person:[] for person in batch};working=0
+            for raw in db.execute('SELECT m.person AS owner,b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
+                'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
+                (*args,encoded(list(aliases)))):
+                if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
+                row=dict(raw);person=aliases[row.pop('owner')]
+                working+=size(row);reserve(working);groups[person].append(row)
+            for person in batch:
+                rows=groups.pop(person)
+                yield person,rows
+                working-=sum(size(r) for r in rows)
+                reserve(working)
+    for person,rows in owner_rows():
         witnesses=independent(rows,settings)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
         if not selected and rows:selected=rows[:1]
@@ -60,13 +71,8 @@ def _banks(db,config,scope,namespace):
                             faces=[],face_ids=[],cues=set(),witnesses=witnesses,provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
         used+=size(output[person])+size(person)+128;reserve(0)
 
-    def body(identifier):
-        raw=db.execute('SELECT b.id,b.scan,b.cue,b.quality,length(b.embedding) AS bytes FROM body_observations b '
-            'JOIN scans s ON s.id=b.scan WHERE b.id=? AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL AND '+current_scan(),
-            (identifier,encoded(compatible_contracts(config)))).fetchone()
-        if raw is None or raw['bytes'] is None:return None
-        if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
-        return dict(id=raw['id'],scan=raw['scan'],cue=raw['cue'],quality=raw['quality'])
+    def bodies(identifiers):
+        yield from metadata_rows(db,identifiers,body=True,contracts=compatible_contracts(config),reserve=reserve)
 
     # Preserve proof multiplicity for future replays, while identical cores
     # share metadata storage and the exact-score cache.
@@ -93,8 +99,7 @@ def _banks(db,config,scope,namespace):
                 if signatures[target][signature]:bank['cores'].append(signatures[target][signature])
                 used+=16;reserve(0);continue
             core=[]
-            for identifier in ids:
-                row=body(identifier)
+            for row in bodies(ids):
                 if row is None:bank['missing_original']=True;continue
                 used+=size(row)+16;reserve(0);core.append(row)
             if core:bank['cores'].append(core)
@@ -103,42 +108,74 @@ def _banks(db,config,scope,namespace):
 
     from .reference_roles import strict_sql
     from .pose_policy import anchor_sql
+    selected_owners=encoded(list(output))
+    for raw in db.execute('SELECT m.person,o.id FROM observations o JOIN members m ON m.observation=o.id '
+        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
+        'AND o.rejected IS NULL AND '+strict_sql()+' AND '+
+        anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(selected_owners,)):
+        original_faces[raw['person']].add(raw['id'])
+    # Linked unassigned faces retain their veto authority as before.
+    for raw in db.execute('SELECT m.person,b.face FROM body_observations b '
+        'JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
+        'JOIN observations o ON o.id=b.face WHERE m.person IN (SELECT value FROM json_each(?)) '
+        'AND b.rejected IS NULL AND o.rejected IS NULL AND '+current_scan(),(selected_owners,)):
+        original_faces[raw['person']].add(raw['face'])
+    used+=size(original_faces);reserve(0)
+    def cue(person,scan,index):
+        nonlocal used
+        cues=output[person]['cues'];value=(scan,index)
+        if value not in cues:
+            used+=size(value)+64;reserve(0);cues.add(value)
     for person,bank in output.items():
-        face_ids=set(original_faces[person])
-        face_ids.update(r[0] for r in db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
-            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+strict_sql()+' AND '+
-            anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(person,)))
-        # Unassigned but measured faces linked to body cores retain veto power.
-        face_ids.update(r[0] for r in db.execute('SELECT b.face FROM body_observations b '
-            'JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
-            'JOIN observations o ON o.id=b.face WHERE m.person=? AND b.rejected IS NULL '
-            'AND o.rejected IS NULL AND '+current_scan(),(person,)))
-        for identifier in sorted(face_ids):
-            raw=db.execute('SELECT o.id,o.dimensions FROM observations o JOIN scans s ON s.id=o.scan '
-                'WHERE o.id=? AND o.rejected IS NULL AND '+current_scan(),(identifier,)).fetchone()
+        face_ids=original_faces[person]
+        for raw in metadata_rows(db,sorted(face_ids),body=False,reserve=reserve):
             if raw is None:bank['missing_original']=True;continue
             row=dict(raw);used+=size(row)+64;reserve(0)
-            bank['faces'].append(row);bank['face_ids'].append(identifier)
+            bank['faces'].append(row);bank['face_ids'].append(row['id'])
         # Original cores still supply independent support after consolidation.
         extra=[]
-        for identifier in sorted(confirmation_witnesses[person]):
-            row=body(identifier)
+        for row in bodies(sorted(confirmation_witnesses[person])):
             if row is None:bank['missing_original']=True
             else:extra.append(row);used+=size(row)+16;reserve(0)
         bank['witnesses']=independent(bank['witnesses']+extra,settings)
         bank['support']=len(bank['witnesses'])
-        cues=bank['cues']
-        def cue(scan,index):
-            nonlocal used
-            value=(scan,index)
-            if value not in cues:
-                used+=size(value)+64;reserve(0);cues.add(value)
         for core in bank['cores']:
-            for row in core:cue(row['scan'],row['cue'])
-        for row in db.execute('SELECT b.scan,b.cue FROM body_observations b JOIN body_members m ON m.observation=b.id '
-            'JOIN scans s ON s.id=b.scan WHERE m.person=? AND m.status=\'accepted\' AND '+current_scan(),(person,)):
-            cue(row['scan'],row['cue'])
-        for row in db.execute('SELECT o.scan,o.cue FROM observations o JOIN members m ON m.observation=o.id '
-            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+current_scan(),(person,)):
-            cue(row['scan'],row['cue'])
+            for row in core:cue(person,row['scan'],row['cue'])
+    for row in db.execute('SELECT m.person,b.scan,b.cue FROM body_observations b JOIN body_members m ON m.observation=b.id '
+        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
+        "AND m.status='accepted' AND "+current_scan(),(selected_owners,)):
+        cue(row['person'],row['scan'],row['cue'])
+    for row in db.execute('SELECT m.person,o.scan,o.cue FROM observations o JOIN members m ON m.observation=o.id '
+        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
+        'AND o.rejected IS NULL AND '+current_scan(),(selected_owners,)):
+        cue(row['person'],row['scan'],row['cue'])
     return output
+
+
+def metadata_rows(db, identifiers, *, body, contracts=(), reserve=lambda _:None):
+    """Ordered bounded keyed reads; no embedding or crop crosses into Python."""
+    from itertools import islice
+    iterator=iter(identifiers)
+    while batch:=list(islice(iterator,256)):
+        if body:
+            query=('SELECT b.id,b.scan,b.cue,b.quality,length(b.embedding) AS bytes FROM body_observations b '
+                'JOIN scans s ON s.id=b.scan WHERE b.id IN (SELECT value FROM json_each(?)) '
+                'AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL AND '+current_scan())
+            args=(encoded(batch),encoded(contracts))
+        else:
+            query=('SELECT o.id,o.dimensions FROM observations o JOIN scans s ON s.id=o.scan '
+                'WHERE o.id IN (SELECT value FROM json_each(?)) AND o.rejected IS NULL AND '+current_scan())
+            args=(encoded(batch),)
+        rows={};working=size(batch)
+        reserve(working)
+        for raw in db.execute(query,args):
+            row=dict(raw)
+            if body:
+                amount=row.pop('bytes')
+                if amount is None:continue
+                if amount!=4096*4:raise ValueError('Invalid retained person embedding.')
+            working+=size(row)+128;reserve(working);rows[row['id']]=row
+        for identifier in batch:
+            yield rows.get(identifier)
+            # The caller may retain the yielded metadata in its own bank.
+            reserve(working)

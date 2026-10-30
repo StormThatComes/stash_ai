@@ -26,7 +26,10 @@ def report(db,config,scope,namespace,*,focus=None):
     from .body_cache import matching_settings
     from .memory_size import size
     cache=current();generation=database_key(db)
-    policy_key=digest([matching_settings(config), sorted(focus.items()) if isinstance(focus,dict) else sorted(focus or ())])
+    labels = {} if focus is None else dict(focus) if isinstance(focus,dict) else {p:0 for p in focus}
+    groups = {}
+    normalized = [(p, groups.setdefault(label,len(groups))) for p,label in sorted(labels.items())]
+    policy_key=digest([matching_settings(config), normalized])
     key=('body-global-report',generation,scope,namespace,policy_key)
     found=cache.get(key) if generation is not None else MISSING
     if found is MISSING:

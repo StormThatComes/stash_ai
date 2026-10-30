@@ -101,7 +101,8 @@ def prepared_replay(db, config, scope, ns, installation, reuse_history, progress
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
-            prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None):
+            prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None,
+            compact_trial_reports=False):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -138,6 +139,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         if not inputs['complete_scope']:
             result['limitations'].append('Excluded scenes were not replayed. Recommendations cover only selection; '
                 'a run including excluded or recollected scenes requires revalidation.')
+        if compact_trial_reports:
+            result['trial_report_encoding'] = 'baseline-identities-delta-v1'
         if not scans:
             result['stop_reason'] = 'no_compatible_scans'
             return result
@@ -181,6 +184,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             if pool: pool.ready.pop(name, None)
                             if baseline is None:baseline=restored_baseline
                             if context is not None:context['baseline_predictions']=baseline
+                            if context is not None and name == 'baseline':
+                                context['baseline_body_identities'] = item.get('independent_person', {}).get('identities', [])
                             if item.get('failed'):
                                 result.setdefault('failed_trials', {})[name] = item
                                 if progress:progress(name, 'failed', item)
@@ -234,6 +239,11 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         if baseline is None:
                             baseline = predictions
                         if context is not None:context['baseline_predictions']=baseline
+                        if name == 'baseline' and context is not None:
+                            context['baseline_body_identities'] = bodies.get('identities', [])
+                        if name != 'baseline' and compact_trial_reports:
+                            from .trial_report_compaction import compact
+                            bodies = compact(bodies, result['trials']['baseline']['independent_person'].get('identities', []))
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
                             versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
                         if runtime and runtime.profile:

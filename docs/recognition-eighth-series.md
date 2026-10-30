@@ -79,3 +79,19 @@ Independent lookahead readers install the same views. Ordinary live runs retain
 their copying path. Initial snapshot import suspends trusted destination triggers
 transactionally and restores them before publication. Source fingerprints are
 memoized only for the lifetime of a prepared, read-only snapshot.
+
+## Catalogue and report costs
+
+Body metadata is read in bounded owner/witness batches without loading vectors
+or crops. Face ownership and cue lookups use catalogue-wide SQL passes; missing
+original witnesses still block merges. A `scans(scope, namespace, scene)` index
+lets current-head lookups traverse insertion order without a temporary sort and
+is added when opening existing databases.
+
+Pair reports share one scoped numerical/catalogue cache. Equivalent focus label
+partitions reuse one body plan; callers receive independent report copies.
+Intermediate solver body reports may replace `identities` with explicitly marked
+`baseline-identities-delta-v1` data (`removed`, `changed`, and final count). The
+baseline and selected winner keep complete lists. Deltas are lossless and used
+only when smaller, including worker transport and checkpoint records. Ordinary
+non-solver replay output retains complete lists.

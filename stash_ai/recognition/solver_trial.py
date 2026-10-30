@@ -30,6 +30,7 @@ class Request:
     shared_directory: str | None = None
     shared_bytes: int = 0
     baseline_predictions: dict | None = None
+    baseline_body_identities: list | None = None
 
 
 # Only these small, changing fields travel through the process task queue.
@@ -105,4 +106,7 @@ def evaluate(request, *, progress=None):
         result['prediction_delta'] = {oid: person for oid, person in predictions.items()
                                       if request.baseline_predictions.get(oid) != person}
         result['prediction_encoding'] = 'baseline-delta-v1'
+    if request.baseline_body_identities is not None:
+        from .trial_report_compaction import compact
+        result['independent_person'] = compact(result['independent_person'], request.baseline_body_identities)
     return result
