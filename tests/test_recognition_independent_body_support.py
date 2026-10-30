@@ -67,7 +67,9 @@ def duplicate_hybrid(p):
             for i,row in enumerate(db.execute('SELECT o.* FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY cue',(owner,)).fetchall()):
                 ang=([0,20,20][i] if index==0 else math.degrees(math.acos(.9)) if index==1 else 0)
                 v=np.zeros(4096,dtype='<f4');v[:2]=[math.cos(math.radians(ang)),math.sin(math.radians(ang))]
-                save(db,row['id'],contract(c),ANCHOR_METADATA,v)
+                metadata=(dict(ANCHOR_METADATA,quality=dict(ANCHOR_METADATA['quality'],pixel_digest='a'*64))
+                          if index==0 and i==0 else ANCHOR_METADATA)
+                save(db,row['id'],contract(c),metadata,v)
                 if index==0 and i==0:base=dict(row);db.execute("UPDATE observations SET quality=json_set(quality,'$.evidence_pixel_sha256',?) WHERE id=?",('a'*64,row['id']))
         db.execute('DELETE FROM members WHERE person=?',(people[2],));db.execute("UPDATE candidates SET person=NULL,status='withheld' WHERE person=?",(people[2],));db.commit()
         selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')];before=recover(state,selected,c)
@@ -75,7 +77,7 @@ def duplicate_hybrid(p):
         base=dict(db.execute('SELECT * FROM observations WHERE id=?',(base['id'],)).fetchone())
         for i in range(100):
             row=dict(base,id=str(uuid.uuid4()),cue=i+3,seconds=float(i+3))
-            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',tuple(row.values()));db.execute('INSERT INTO members VALUES (?,?)',(row['id'],people[0]));db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),row['scan'],matching_policy(c),people[0],'accepted',encoded(dict(observation=row['id'],reason='candidate_group'))));save(db,row['id'],contract(c),ANCHOR_METADATA,v)
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',tuple(row.values()));db.execute('INSERT INTO members VALUES (?,?)',(row['id'],people[0]));db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),row['scan'],matching_policy(c),people[0],'accepted',encoded(dict(observation=row['id'],reason='candidate_group'))));save(db,row['id'],contract(c),dict(ANCHOR_METADATA,quality=dict(ANCHOR_METADATA['quality'],pixel_digest='a'*64)),v)
         db.execute('UPDATE scans SET total=103,cursor=103 WHERE id=?',(base['scan'],));db.commit()
         after=recover(state,selected,c)
         return dict(before=before,after=after,independent_owner_crops=3,repeated_crops=100)

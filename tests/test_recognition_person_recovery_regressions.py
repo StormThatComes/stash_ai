@@ -51,7 +51,7 @@ def test_retention_change_backfills_crops_without_inference(tmp_path,initial_bud
     finally:collector.close()
 
 
-@pytest.mark.parametrize('people,body_rejected,unavailable',[(0,0,3),(1,3,0)])
+@pytest.mark.parametrize('people,body_rejected,unavailable',[(0,0,3),(1,3,3)])
 def test_run_reports_body_rejections_and_unavailable_person_evidence(tmp_path,monkeypatch,people,body_rejected,unavailable):
     from dataclasses import replace
     from stash_ai.recognition.config import plain

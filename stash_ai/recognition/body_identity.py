@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v5-shared-quality',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v6-physical-support',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -50,19 +50,29 @@ def anchor(row,settings):
 
 def independent(rows,settings):
     """At most one witness per scan/cue; repeated pixels cannot add support."""
-    chosen=[];cues=set();pixels=set();hashes=[]
+    from .independent_evidence import body_vote,representatives,unit
+    candidates=[];votes=[];hashes=[];pixels={};seen=set()
     for row in sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id'])):
+        if row['id'] in seen:continue
+        seen.add(row['id'])
         q=quality(row)
-        cue=row['scan'],row['cue']
-        if cue in cues:continue
-        if q.get('pixel_digest') in pixels:continue
+        vote=body_vote(row);physical=unit(vote)
         hashed=q.get('appearance_hash')
         hashed=int(hashed,16) if hashed else None
-        if hashed is not None and any((hashed^other).bit_count()<settings['min_appearance_distance'] for other in hashes):continue
-        chosen.append(row);cues.add(cue)
-        if q.get('pixel_digest'):pixels.add(q['pixel_digest'])
-        if hashed is not None:hashes.append(hashed)
-    return chosen
+        fingerprint=pixels.get(physical)
+        if fingerprint is None and hashed is not None:
+            fingerprint=next((key for other,key in hashes
+                if (hashed^other).bit_count()<settings['min_appearance_distance']),None)
+        if fingerprint is None:
+            fingerprint=encoded(physical)
+            if hashed is not None:hashes.append((hashed,fingerprint))
+        pixels[physical]=fingerprint
+        # Retain every cue edge of an appearance. A greedy representative can
+        # consume the sole cue of a different, otherwise independent crop.
+        votes.append(dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}})))
+        candidates.append(row)
+    chosen={r['id'] for r in representatives(votes)}
+    return [r for r in candidates if r['id'] in chosen]
 
 
 def copresent(first,second):

@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 55
+MATCHING_FORMAT = 56
 
 
 def vector(row):
@@ -240,6 +240,7 @@ def matching_policy(config):
     return policy_digest(config, f'matching-v{MATCHING_FORMAT}-assignment-guards-v1', lambda: {
         **({'assignment_guards': 4} if config.data['sapiensid']['enabled'] else {}),
         **({'hybrid': {'contract': contract(config),
+                      'collection_quality':config.data['sapiensid']['collection'],
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
         **({'body_anchor_quality':{k:config.data['sapiensid']['identities'][k] for k in
               ('anchor_min_person_pixels','anchor_min_keypoints','anchor_min_sharpness')}}

@@ -19,7 +19,7 @@ def body_vector(row):
 def _rows(db, config, scope, namespace, owners):
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                   compatibility=fallback_sql(db,config,namespace))
-    sql=('SELECT m.person AS owner,o.id,o.scan,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,e.embedding,e.metadata AS person_metadata '
+    sql=("SELECT 'person' AS evidence_kind,m.person AS owner,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,e.embedding,e.metadata AS person_metadata "
         'FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
         'JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
         "WHERE m.person IN (SELECT value FROM json_each(?)) AND s.scope=? AND s.namespace=? AND s.status='complete' "
@@ -28,7 +28,8 @@ def _rows(db, config, scope, namespace, owners):
     args=(contract(config),encoded(list(owners)),scope,namespace)
     from .person_anchor import anchor_gate
     rows=db.execute(sql,args)
-    return (row for row in rows if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible'])
+    return (row for row in rows if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
+        collection=config.data['sapiensid']['collection'])['eligible'])
 
 
 def _select(records,config):
@@ -80,6 +81,7 @@ def body_rows(db,config,scope,namespace,owner):
 
 
 class BodyRows(list):
+    support=0
     modes=()
     witnesses=()
     unsupported_modes=False

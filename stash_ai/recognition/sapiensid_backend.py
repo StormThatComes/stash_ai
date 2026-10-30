@@ -64,21 +64,7 @@ def associate(faces, people):
     return [indices[0] if len(indices) == 1 and usage[indices[0]] == 1 else None for indices in choices]
 
 
-def adjust_pose(points):
-    """Match upstream image-left/right canonicalization; keep missing pairs."""
-    points = [list(p) for p in points]
-    for left, right in zip((1,3,5,7,9,11,13,15), (2,4,6,8,10,12,14,16)):
-        a, b = points[left], points[right]
-        av, bv = a != [-1., -1.], b != [-1., -1.]
-        if (av and bv and a[0] < b[0]) or (av and not bv and a[0] < .5) or (bv and not av and b[0] > .5):
-            points[left], points[right] = b, a
-    # Upstream drops nose/eye outliers when both ears and shoulders are known.
-    if all(points[i] != [-1., -1.] for i in (3,4,5,6)):
-        lo, hi = min(points[i][0] for i in (3,4,5,6)), max(points[i][0] for i in (3,4,5,6))
-        for i in (0,1,2):
-            if points[i] != [-1., -1.] and not lo <= points[i][0] <= hi:
-                points[i] = [-1., -1.]
-    return points
+from .person_geometry import adjust_pose, body_points
 
 
 class SapiensIDFaces(YuNetDetector):
@@ -180,13 +166,7 @@ class SapiensIDFaces(YuNetDetector):
         import numpy as np
         self._owner()
         left, top, right, bottom = person['bounds']
-        side = max(right-left, bottom-top)
-        padx, pady = (side-(right-left))//2, (side-(bottom-top))//2
-        # Canonicalization uses the normalized square coordinate system.
-        normalized = [[(x-left+padx)/side, (y-top+pady)/side] if x >= 0 else [-1.,-1.]
-                      for x,y in person['keypoints']]
-        body = adjust_pose(normalized)
-        points = [[x*side-padx, y*side-pady] if x >= 0 else [-1.,-1.] for x,y in body]
+        points = body_points(person)
         points.extend([[x-left, y-top] for x,y in face.landmarks] if face is not None else [[-1.,-1.]]*5)
         # Face/person detectors can disagree at the crop boundary even after a
         # unique association. Omit out-of-crop measurements, never clamp them

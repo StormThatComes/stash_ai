@@ -29,7 +29,7 @@ def unsupported_mode(p):
         meta=dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,512,512],score=1,keypoints=[[1,1]]*17))
         db.execute('UPDATE person_evidence SET embedding=?,metadata=?',(good.tobytes(),encoded(meta)))
         last=db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY cue DESC LIMIT 1',(people[0],)).fetchone()[0]
-        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(poor.tobytes(),encoded(dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,1,1],score=0,keypoints=[]))),last));db.commit()
+        db.execute('UPDATE person_evidence SET embedding=?,metadata=? WHERE observation=?',(poor.tobytes(),encoded(dict(quality=dict(keypoints=17,sharpness=100),person=dict(bounds=[0,0,512,512],score=0,keypoints=[[1,1]]*17))),last));db.commit()
         ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
         bank=catalogue(db,c,'scope',ns);r=report(db,c,'scope',ns)
         return dict(outlier=last,selected=[list(x.person_observations) for x in bank],mode_counts=[len(x.body_modes) for x in bank],decisions=r['decisions'],pairs=r['pairs'])

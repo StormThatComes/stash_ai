@@ -23,10 +23,12 @@ def quality(image,person,people,settings):
         a,b,c,d=other['bounds']
         intersection=max(0,min(right,c)-max(left,a))*max(0,min(bottom,d)-max(top,b))
         overlap=max(overlap,intersection/((right-left)*(bottom-top)))
-    points=sum(x>=0 and y>=0 for x,y in person['keypoints'])
+    from .person_geometry import used_keypoints
+    detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
+    points=used_keypoints(person)
     border=sum((left==0,top==0,right==image.width,bottom==image.height))
     measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,sharpness=sharpness,
-                  keypoints=points,overlap=overlap,border_edges=border)
+                  keypoints=points,detected_keypoints=detected,overlap=overlap,border_edges=border)
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
             'person_keypoints' if points<settings['min_keypoints'] else
