@@ -21,6 +21,7 @@ class FrozenSeeds:
         settings=self.settings;ranked=[]
         for person,modes in self.modes.items():
             allowed=not copresent([row],self.seeds[person]) and guard.allows(row,self.seeds[person],person)
+            if not allowed:continue  # Certified contradiction is not an unknown rival.
             choices=[]
             for mode in modes:
                 mean,minimum=self.scores.compare([row],mode)

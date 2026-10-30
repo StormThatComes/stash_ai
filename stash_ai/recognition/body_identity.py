@@ -30,7 +30,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v7-global-appearances',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v8-frozen-competition',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -234,6 +234,24 @@ def scene_plan(db,scan,config):
                 groups[index].append(row)
             else:decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',reason='body_group_ambiguous')
         else:groups.append([row])
+    # Later groups must compete with earlier assignments. Freeze all original
+    # groups before pruning, so removing a query cannot improve another vote.
+    retained=[]
+    for index,group in enumerate(groups):
+        keep=[]
+        for row in group:
+            rivals=[other for j,other in enumerate(groups) if j!=index
+                    and not copresent([row],other) and guard.allows(row,other)]
+            if rivals:
+                own=scores.compare([row],group)[0]
+                runner=max(scores.compare([row],other)[0] for other in rivals)
+                if own-runner<settings['ambiguity_margin']:
+                    decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',
+                        reason='body_group_competing_identity',score=own,runner=runner)
+                    continue
+            keep.append(row)
+        if keep:retained.append(keep)
+    groups=retained
     from .body_origins import physical_key, origins_for_scene,labels_for_groups
     origins_by_key=origins_for_scene(db,record)
     labels=labels_for_groups(db,record,groups,origins_by_key,settings)
@@ -313,6 +331,8 @@ def rebuild(database,selected,config,result):
         if plans:
             from .body_global import reconcile
             reconcile(database,selected,config)
+            from .body_recovery import recover
+            recover(database,selected,config)
         cache_stamp(db,selected,config)
     return results(db,selected,result)
 

@@ -39,7 +39,8 @@ def test_face_veto(tmp_path):
             f=face(db,item['scan'],n,who if n<3 else None,1 if n<3 else -1)
             db.execute('UPDATE body_observations SET face=? WHERE id=?',(f,oid))
         _,_,d=scene_plan(db,item['scan'],c)
-        assert d[ids[-1]]['status']=='withheld'
+        assert d[ids[-1]]['status']=='provisional'
+        assert d[ids[-1]]['person']!=who
 
 
 def test_global_face_presence(tmp_path):
