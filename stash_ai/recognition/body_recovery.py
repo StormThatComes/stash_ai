@@ -38,7 +38,7 @@ def recover(database,selected,config):
                 banks.setdefault(row['person'],[]).append(row)
                 if row['status']=='accepted':confirmed.add(row['person'])
             elif row['status']=='withheld' and proof.get('reason') in reasons and not anchor(row,settings):queries.append(row)
-        scores=Scores(config);guard=FaceGuard(db,config)
+        scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         for row in queries:
             ranked=[]
             for person,bank in banks.items():
@@ -51,7 +51,7 @@ def recover(database,selected,config):
                     and mean-runner>=settings['ambiguity_margin']):
                 decisions[row['id']].update(person=person,status='accepted',role='auxiliary',
                     reason='body_confirmed_core_attachment',score=mean,minimum=minimum,runner=runner)
-        resolve_claims(rows,decisions,config)
+        resolve_claims(rows,decisions,config,scores=scores)
         for row in queries:
             proof=decisions[row['id']]
             db.execute('UPDATE body_members SET person=?,status=?,role=?,proof=? WHERE observation=?',

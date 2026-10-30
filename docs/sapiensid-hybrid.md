@@ -420,7 +420,7 @@ checked exactly. Original-core, co-presence and face-contradiction vetoes remain
 Reference selection happens before embedding loading. The planner keeps bank
 metadata and a bounded vector cache in RAM; float64 means are stored in a disposable
 SQLite index in the system temporary directory. Allow roughly 33 KiB of temporary
-disk space per identity (about 318 MiB for 10,000 identities). The index is removed
+disk space per appearance (about 318 MiB for 10,000 appearances). The index is removed
 on success, failure or interruption. No source database writes or inference are
 needed for reports. Repeated core checks reuse scores within the frozen pass.
 
@@ -534,3 +534,34 @@ groups, score reporting and inconclusive bounds still use exact witness scores.
 This also accelerates construction of a single frozen face-owner appearance.
 The 1415-distinct-vector regression uses fewer than three comparisons per sample
 instead of exceeding one million, with the same final assignments.
+
+
+Independent body support uses body crop fingerprints, including face-associated
+projections; face crop hashes and face aliases do not supply body votes. Perceptual
+deduplication reduces support without removing original witnesses from veto checks.
+Anchor keypoint counts reflect the normalized pose points actually used by the
+encoder. Collection rejection remains effective on the compatibility projection.
+
+Scene body groups are rechecked against all frozen competing cores before they
+receive support or stable labels. A dense appearance cannot conceal a later core
+by raising a mixed group's mean. After global confirmation, weak scene observations
+may attach in a separate frozen pass; these attachments never train reference banks.
+Face-owned global banks expose individual appearances for nomination and competition,
+while complete original cores still control merge acceptance.
+
+Disabling a body route retires its aliases only when all involved scenes are selected.
+Original face authority is restored before replay. Retained anchor evidence from an
+incompatible body contract blocks global merges and identifies scenes to recollect.
+
+Face vetoes and simultaneous face claims share the scene comparison budget with body
+scores. Identical features may reuse a bounded cached score; distinct comparisons
+remain charged, and streamed checks observe cancellation. Completed body cues repair
+missing face projections from retained features before loading a model or decoding.
+Absent/ambiguous associations and rejected bodies stay unavailable. Optional crop
+backfill may still decode frames when retained images are requested.
+
+Normal publication revalidates scene decisions and the publication queue revision
+before writes and acknowledgement. Changed assignments retain synchronization debt.
+A guard or ownership failure before HTTP dispatch is retryable; an uncertain outcome
+after dispatch still requires reconciliation. Synchronization inventory includes
+current accepted body-only identities, without counting provisional body cores.

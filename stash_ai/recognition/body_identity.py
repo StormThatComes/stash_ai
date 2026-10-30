@@ -114,9 +114,25 @@ class Scores:
         return state['vectors']
 
     def _charge(self):
+        from stash_ai.runtime.cancellation import current
+        token=current()
+        if token is not None:token.check()
         if self.count>=self.limit:
             raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
         self.count+=1
+
+    def face_similarity(self,first,second):
+        from stash_ai.runtime.cancellation import current
+        token=current()
+        if token is not None:token.check()
+        from hashlib import sha256
+        key=('face',sha256(first.tobytes()).digest(),sha256(second.tobytes()).digest())
+        score=self.cache.get(key)
+        if score is None:
+            self._charge();score=float(np.dot(first,second));self.cache[key]=score
+            if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
+        else:self.cache.move_to_end(key)
+        return score
 
     def certifies(self,row,rows,threshold):
         """Prove every cosine clears a threshold; never approximate rival scores.
@@ -190,8 +206,8 @@ def scene_plan(db,scan,config):
             if row['face_embedding'] is not None and row['face_rejected'] is None else None)
         rows.append(row)
     from .body_guards import FaceGuard,resolve_claims
-    guard=FaceGuard(db,config)
-    scores=Scores(config);seeds={};decisions={}
+    scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
+    seeds={};decisions={}
     for row in rows:
         if row['face_person'] is None:continue
         person=canonical(db,row['face_person'])
@@ -288,7 +304,7 @@ def scene_plan(db,scan,config):
         good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2]) and guard.allows(row,best[2])
         decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
             reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
-    resolve_claims(rows,decisions,config)
+    resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
     return record,rows,decisions
