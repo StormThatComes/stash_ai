@@ -226,6 +226,51 @@ YAML configurations and **different new output directories**. Compare
 actual landmark positions and 112px aligned crops on same-person and
 different-person cues, not only face detection benchmark scores.
 
+## Full-cue face and pose detection audit
+
+Use `recognition audit-detection` to tune the detectors visually on **every VTT
+cue of one scene**, including cues without faces, without people, or without
+any detections:
+
+```powershell
+python .\stash_ai.py recognition audit-detection --scene-id 123 --face-config facial_recognition.yml --output-dir recognition_detection_audit/scene-123-run01
+```
+
+The new output directory contains `scene-123_cue-000000.png`, one PNG per cue
+in original VTT order (zero-based), and `manifest.json`. Each PNG preserves the
+whole cue at its original size and overlays **all returned face and person
+boxes**, five face landmarks and measured COCO17 pose points. Colors and point
+labels match the identity/person audits: yellow boxes, magenta pose points,
+cyan eyes, red nose and green mouth corners. `F0`/`P0` label detection indices
+and scores. A cue with no detections is still exported, with unchanged pixels.
+The manifest records timestamps, original sprite rectangles, cue dimensions,
+geometry, scores, face/person associations, counters, source fingerprint and
+the applied detector settings.
+
+The command uses `models.detector` and `sapiensid.pose` from the current YAML,
+including confidence, NMS, result-count and keypoint thresholds. **Both
+detectors always run**, even if `sapiensid.enabled` or independent collection
+is disabled. The usual pose runtime dependencies from
+`requirements-sapiensid.txt` and the configured pose weights are required;
+weights follow the existing `models.download_missing` policy. Face and body
+recognition encoders are not loaded. `--device cpu` is an optional override.
+
+For complete coverage, this action **ignores `execution.max_cues`** and reports
+that override in the manifest. It applies no later face/person quality,
+FaceOcc visibility, anchor or identity filters: rejected candidates must remain
+visible for inspection. Detections suppressed by the detector's score/NMS/count
+thresholds cannot be drawn; missing or rejected pose points are omitted.
+To compare configurations, rerun with another YAML and a **new output folder**.
+`--progress-style off` disables cue progress and ETA.
+
+The action reads fresh VTT/sprite inputs, performs no video sampling, and makes
+no recognition database or Stash changes. Persistent HTTP caching is disabled
+for this export. PNGs are processed one cue at a time and are private local
+files (0700 directory / 0600 files on POSIX). Existing output directories are
+refused. Interrupted/failed exports can leave partial PNGs; `manifest.json` is
+written only after all cues succeed. The suggested `recognition_detection_audit/`
+parent is gitignored.
+
 ## Read-only five-landmark alignment audit
 
 Use the opt-in `recognition audit-alignment` action to inspect detector landmarks
