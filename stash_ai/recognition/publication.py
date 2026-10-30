@@ -1,6 +1,7 @@
 """SQLite intent-before-dispatch and reconciliation without uncertain retries."""
 import json
 import uuid
+from contextlib import contextmanager
 
 from stash_ai.runtime.mutations import write
 from .diagnostics import message as safe_error
@@ -33,6 +34,15 @@ def legacy_rejected_link(row, client, performer):
 
 class PendingRecognition(RuntimeError):
     pass
+
+
+@contextmanager
+def before_dispatch():
+    """A failed read/precondition before HTTP cannot leave an uncertain write."""
+    try:yield
+    except BaseException as error:
+        error.write_outcome='failed'
+        raise
 
 
 def operation_id(scope, scene, person, kind):
@@ -97,7 +107,8 @@ def ensure_person(database, client, report, scope, scene, person,*,guard=None):
             raise PendingRecognition('Earlier performer creation is unresolved; no blind create retry.')
         name = 'AI Person ' + person.replace('-', '')[:12]
         def create():
-            if guard:guard()
+            with before_dispatch():
+                if guard:guard()
             acknowledgement = checked_id(client.create_person(name, row['token']))
             confirmed = checked_id(client.performer(acknowledgement['id']), acknowledgement['id'])
             if not owns(confirmed, row['token']):
@@ -142,7 +153,8 @@ def publish_person(database, client, report, scope, scene, person, *, merge_coun
             raise PendingRecognition('Earlier additive scene link is unresolved; no blind retry.')
         precondition['legacy_validation_failure'] = 'BulkUpdateIds.values rejected with HTTP 400'
     def link():
-        if guard:guard()
+        with before_dispatch():
+            if guard:guard()
         return client.add_scene_person(scene,performer)
     perform(database, client, report, scope=scope, scene=scene, person=person, kind='link', target=performer,
             payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT, 'managed': True, 'active': True}, precondition=precondition,

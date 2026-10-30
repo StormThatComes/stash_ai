@@ -199,22 +199,34 @@ def adopt(db,scope,namespace,config,entry):
 def validate(db,scope,namespace,entry,config=None):
     from .publication import PendingRecognition
     queued=current(db,scope,namespace,entry['scene'])
-    if queued is None or queued['revision']!=entry['revision']:
+    if (queued or {}).get('revision')!=entry['revision']:
         raise PendingRecognition('Recognition publication request changed; refresh synchronization plan.')
-    if config is not None and (queued['policy']!=matching_policy(config) or queued.get('body')!=body_policy(config)):
+    frozen=queued or entry
+    if config is not None and (frozen.get('policy')!=matching_policy(config) or frozen.get('body')!=body_policy(config)):
         raise PendingRecognition('Recognition publication policy changed; rebuild this scene first.')
     item,people,signature=snapshot(db,scope,namespace,entry['scene'],config)
     if signature!=entry['signature'] or people!=entry['people'] or item['scan']!=entry['scan']:
         raise PendingRecognition('Recognition scene assignments changed; refresh synchronization plan.')
 
 
-def inventory(db,scope,namespace):
-    active='''FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan
+def inventory(db,scope,namespace,config=None):
+    active="""SELECT m.person FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan
         WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
-        AND '''+current_scan()
-    count=db.execute('SELECT COUNT(DISTINCT m.person) '+active,(scope,namespace)).fetchone()[0]
-    unused=db.execute('SELECT p.id,p.performer FROM people p WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL '
-        'AND NOT EXISTS (SELECT 1 '+active+' AND m.person=p.id) ORDER BY p.created,p.id',
-        (scope,namespace,scope,namespace)).fetchall()
+        AND """+current_scan()
+    parameters=[scope,namespace]
+    from .body_identity import available,enabled
+    if available(db) and (config is None or enabled(config)):
+        active+=" UNION SELECT m.person FROM body_members m JOIN body_observations b ON b.id=m.observation " \
+            "JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.status='complete' " \
+            "AND m.status='accepted' AND m.person IS NOT NULL AND b.rejected IS NULL AND b.embedding IS NOT NULL AND "+current_scan()
+        parameters.extend((scope,namespace))
+        if config is not None:
+            expected=body_policy(config)
+            active+=' AND b.contract=? AND m.policy=?';parameters.extend((expected['contract'],expected['policy']))
+    count=db.execute('SELECT COUNT(DISTINCT person) FROM ('+active+')',parameters).fetchone()[0]
+    unused=db.execute('WITH active AS ('+active+') SELECT p.id,p.performer FROM people p '
+        'WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL '
+        'AND NOT EXISTS (SELECT 1 FROM active WHERE person=p.id) ORDER BY p.created,p.id',
+        [*parameters,scope,namespace]).fetchall()
     return dict(identities_with_latest_memberships=count,
         retained_profiles_without_latest_memberships=[dict(r) for r in unused])

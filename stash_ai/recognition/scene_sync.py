@@ -1,7 +1,7 @@
 """Reversible selected-scene associations; profiles and manual metadata survive."""
 import json
 
-from .publication import PendingRecognition, operation_id, perform
+from .publication import PendingRecognition, operation_id, perform, before_dispatch
 from .stash import checked_id, checked_token, owns
 from .database import encoded
 from .progress import tracking
@@ -80,10 +80,11 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
             if previous and previous['status'] in ('pending', 'unknown'):
                 raise PendingRecognition('Earlier scene unlink is unresolved; no blind retry.')
             def remove():
-                if guard:guard()
-                # Refresh both ownership and association immediately before dispatch.
-                if not owns(client.performer(row['target']), row['token']):
-                    raise PendingRecognition('Concurrent performer ownership edit preserved.')
+                with before_dispatch():
+                    if guard:guard()
+                    if not owns(client.performer(row['target']), row['token']):
+                        raise PendingRecognition('Concurrent performer ownership edit preserved.')
+                    if guard:guard()
                 acknowledgement = client.remove_scene_person(scene, row['target'])
                 checked_id(acknowledgement, scene)
                 if row['target'] in {checked_id(p)['id'] for p in acknowledgement['performers']}:
@@ -165,13 +166,15 @@ def remove_other_model_links(database, client, report, scope, scene, wanted, nam
                 raise PendingRecognition('Earlier other-model unlink is unresolved; no blind retry.')
 
             def remove():
-                if guard:guard()
-                refreshed = client.performer(performer)
-                if any(not owns(refreshed, row['token']) for row in bindings):
-                    raise PendingRecognition('Other-model performer ownership changed before unlink.')
-                associated = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
-                if performer not in associated:
-                    raise PendingRecognition('Other-model link changed before unlink; retry with a fresh run.')
+                with before_dispatch():
+                    if guard:guard()
+                    refreshed = client.performer(performer)
+                    if any(not owns(refreshed, row['token']) for row in bindings):
+                        raise PendingRecognition('Other-model performer ownership changed before unlink.')
+                    associated = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
+                    if performer not in associated:
+                        raise PendingRecognition('Other-model link changed before unlink; retry with a fresh run.')
+                    if guard:guard()
                 acknowledged = client.remove_scene_person(scene, performer)
                 checked_id(acknowledged, scene)
                 if performer in {checked_id(p)['id'] for p in acknowledged['performers']}:
