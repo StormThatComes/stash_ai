@@ -91,7 +91,7 @@ def member_result(member, observations, predicted):
 def apply(goals, status, observations, predicted):
     """Keep member/strict diagnostics; preserve the declared person as a set."""
     from .merge_goal_sets import assess_set, set_destinations, ownership
-    status.update(goal_policy=dict(POLICY), strict_disjoint=status['disjoint'],
+    status.update(goal_policy=dict(goals.get('goal_policy', POLICY)), strict_disjoint=status['disjoint'],
                   strict_conflicts=status['conflicts'], strict_admissible=status['admissible'],
                   strict_fully_solved=status['fully_solved'])
     owners, raw_owners = ownership(goals, observations, predicted)

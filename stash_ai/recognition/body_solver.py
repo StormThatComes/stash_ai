@@ -82,7 +82,8 @@ def analyse(db,config,goals,*,frozen_goals=None):
         patch={prefix+'match_threshold':min(settings['match_threshold'],_floor(pair['score'])),
                prefix+'cohesion_threshold':min(settings['cohesion_threshold'],_floor(pair['minimum'])),
                prefix+'min_support':min(settings['min_support'],min(pair['support']))}
-        rivals=[p['score'] for p in evidence['pairs'] if set(p['people']) & {a,b} and
+        from .competitor_eligibility import body as eligible_rival
+        rivals=[p['score'] for p in evidence['pairs'] if eligible_rival(p) and set(p['people']) & {a,b} and
                 any(x not in owners or owners.get(x)!=owners[a] for x in p['people'])]
         rivals.extend(p['score'] for p in evidence.get('nearest_competitors',()) if p['identity'] in (a,b))
         if rivals and pair['score']>=max(rivals):

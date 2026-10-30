@@ -375,7 +375,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
             # Keep detailed hints only for parents that can still be expanded.
             for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
-                        {'baseline'} - {bidirectional.safe['name'] if bidirectional.safe else 'baseline'} -
+                        {'baseline', best} - set(robustness) -
+                        set(sorted(ranks,key=ranks.get,reverse=True)[:2]) - {bidirectional.safe['name'] if bidirectional.safe else 'baseline'} -
                         set(sorted(ranks,key=ranking,reverse=True)[:2]) - set(pending_search) -
                         {v[3] for v in pending_search.values()}):
                 del feedback[old]

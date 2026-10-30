@@ -234,10 +234,10 @@ def plan(db,config,identities,*,focus=None):
         for a,b,face_mean,person_mean in comparisons:
             # Known face contradiction is distinct from unknown body evidence.
             witness=proofs.get(tuple(sorted((a,b))))
-            if witness is not None and 'face_contradiction' in witness['blockers']:continue
+            from .competitor_eligibility import hybrid as eligible_rival
+            if not eligible_rival(witness, face_mean, settings['face_floor']):continue
             # A mean below the complete-link floor proves at least one veto,
             # including pairs screened out of positive nomination.
-            if face_mean is not None and face_mean+1e-6<settings['face_floor']:continue
             from .hybrid_modes import competitor_score
             score=competitor_score(owned[a],owned[b],person_mean)
             if score is None and face_mean is not None and face_mean>=face_threshold:score=1.

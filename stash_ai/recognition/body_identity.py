@@ -31,7 +31,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v9-complete-vetoes',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v10-compatible-rivals',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -303,11 +303,14 @@ def scene_plan(db,scan,config):
                 and scores.certifies(row,banks[0][1],max(settings['match_threshold'],settings['cohesion_threshold']))):
             decisions[row['id']]=dict(person=banks[0][0],status='accepted',role='auxiliary',reason='body_core_attachment')
             continue
-        ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks],key=lambda x:(-x[0][0],x[1]))
+        ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks
+            if not copresent([row],g) and guard.allows(row,g)],key=lambda x:(-x[0][0],x[1]))
         best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
-        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2]) and guard.allows(row,best[2])
+        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin']
         decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
             reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+    from .local_body_hints import observe
+    observe(rows, groups, seeds, scores, guard, config)
     resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)

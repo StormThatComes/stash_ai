@@ -29,3 +29,18 @@ transaction before analysis. Writers can then commit even in SQLite rollback
 journal mode. Goals, bindings and analysis all use the same detached snapshot.
 Report fingerprints use the complete scoped replay input contract, including
 reference roles and identity aliases.
+
+## Body matching and goals
+
+Hard co-presence/face contradictions are removed before attachment and rival
+ranking. Weak or unknown competitors remain eligible. The solver uses the same
+hard-rival policy and observes local body scores, complete-link minima, support
+and margins within a separate diagnostic budget. These hints only propose trials.
+
+`recognition report-merge --performer-set 900,901 --solve --goal-policy identity-physical`
+opts into face/body continuity. Only already accepted, compatible body links to
+the same retained owner become alternative addresses of a frozen physical vote.
+Both addresses assigned consistently still contribute one vote; conflicting
+addresses contribute none. `identity` remains the default, and `strict` continues
+to require every original sample. JSON records `continuity: face_or_body`; strict
+sample diagnostics remain visible beside the identity objective.
