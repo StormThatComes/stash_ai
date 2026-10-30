@@ -2,6 +2,7 @@ import json,math,uuid
 from dataclasses import replace
 from unittest.mock import patch
 import numpy as np
+import pytest
 from stash_ai.recognition.database import FaceDatabase,encoded
 from tests.test_recognition_body_identity import configuration,scene
 
@@ -44,22 +45,23 @@ def local_contradicted_seed(p):
         db.commit();rebuild(state,[item],c,{item['scan']:[]})
         return [dict(r) for r in db.execute('SELECT status,role,json_extract(proof,\'$.reason\') AS reason,COUNT(*) AS n FROM body_members GROUP BY status,role,reason')]
 
-def future_local_rival(p):
+def future_local_rival(p,angle=25,repetitions=3):
     from stash_ai.recognition.body_identity import scene_plan
     c=configuration(p)
     def vec(d):return [math.cos(math.radians(d)),math.sin(math.radians(d))]
     with FaceDatabase(c.database) as state:
         db=state.connection;out={}
-        for s,angles in [('early_query',[0]*3+[25]*3+[50]*3),('late_query',[0]*3+[50]*3+[25]*3)]:
+        for s,angles in [('early_query',[0]*3+[angle]*repetitions+[angle*2]*3),('late_query',[0]*3+[angle*2]*3+[angle]*repetitions)]:
             item,ids=scene(db,c,s,vectors=[vec(d) for d in angles]);db.commit()
             _,_,decisions=scene_plan(db,item['scan'],c)
-            out[s]=[decisions[oid]['status'] for oid,angle in zip(ids,angles) if angle==25]
-        return dict(similarity_to_both=math.cos(math.radians(25)),decisions=out)
+            out[s]=[decisions[oid]['status'] for oid,value in zip(ids,angles) if value==angle]
+        return dict(similarity_to_both=math.cos(math.radians(angle)),decisions=out)
 
 
-def test_later_local_rivals_revalidate_earlier_queries(tmp_path):
-    result=future_local_rival(tmp_path)
-    assert all(states==['withheld']*3 for states in result['decisions'].values())
+@pytest.mark.parametrize('angle,repetitions',[(25,3),(29,40)])
+def test_later_local_rivals_revalidate_earlier_queries(tmp_path,angle,repetitions):
+    result=future_local_rival(tmp_path,angle,repetitions)
+    assert all(states==['withheld']*repetitions for states in result['decisions'].values())
 
 
 def test_confirmed_global_cores_recover_weak_queries_without_training(tmp_path):
