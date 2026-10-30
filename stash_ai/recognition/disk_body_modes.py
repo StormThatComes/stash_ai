@@ -1,4 +1,5 @@
 """Complete hybrid witnesses on disk, with bounded vector working storage."""
+from .resource_errors import ResourceLimit
 from pathlib import Path
 import pickle
 import sqlite3
@@ -56,7 +57,7 @@ class ComparisonBudget:
 
     def score(self,left,right):
         if self.count>=self.limit:
-            raise ValueError('Body appearance construction exceeds sapiensid.execution.max_witness_comparisons.')
+            raise ResourceLimit('Body appearance construction exceeds sapiensid.execution.max_witness_comparisons.')
         result=float(np.dot(left,right));self.count+=1
         self.progress.advance()
         return result
@@ -121,7 +122,7 @@ class Records:
             else:charge+=2048
             charge+=len(row['quality'])
             if charge+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('SapiensID reference_bytes budget exceeded by mode vote metadata.')
+                raise ResourceLimit('SapiensID reference_bytes budget exceeded by mode vote metadata.')
         if any(len(v)<minimum for v in votes):return (),0
         return tuple(Matrix(self.path/(str(i)+'.bin'),n,self.directory,self.path/(str(i)+'.weights'))
                      for i,n in enumerate(counts)),len(support)

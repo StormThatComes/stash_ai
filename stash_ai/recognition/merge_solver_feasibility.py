@@ -141,9 +141,8 @@ class Feasibility:
 
 def resource_limit(exc):
     """Only known resource guards may turn an early probe into an unknown result."""
-    return isinstance(exc, ValueError) and 'exceed' in str(exc).lower() and any(key in str(exc) for key in (
-        'reference_bytes', 'plan_bytes', 'max_candidate_pairs', 'max_witness_comparisons',
-        'rebuild_memory_bytes', 'configured person budget', 'configured budget'))
+    from .resource_errors import ResourceLimit
+    return isinstance(exc, ResourceLimit)
 
 
 def lines(report):

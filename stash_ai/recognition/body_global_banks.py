@@ -1,4 +1,5 @@
 """Metadata-only global banks. Embeddings are read lazily by candidate checks."""
+from .resource_errors import ResourceLimit
 import json
 
 from .body_identity import independent,policy
@@ -16,7 +17,7 @@ def banks(db,config,scope,namespace):
     limit=config.data['sapiensid']['execution']['reference_bytes'];used=0
     def reserve(extra):
         if used+extra>limit:
-            raise ValueError('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
+            raise ResourceLimit('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
     where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL "
            "AND m.status IN ('accepted','provisional') AND m.role='anchor' AND "+current_scan())
     args=(scope,namespace,encoded(compatible_contracts(config)))

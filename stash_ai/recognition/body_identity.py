@@ -1,4 +1,5 @@
 """Scene-local person identities, with frozen face seeds and independent body anchors."""
+from .resource_errors import ResourceLimit
 import json
 import time
 import uuid
@@ -118,7 +119,7 @@ class Scores:
         token=current()
         if token is not None:token.check()
         if self.count>=self.limit:
-            raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
+            raise ResourceLimit('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
         self.count+=1
 
     def face_similarity(self,first,second):
@@ -202,7 +203,7 @@ def scene_plan(db,scan,config):
             (scan,expected)):
         row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
-            raise ValueError('Person scene references exceed sapiensid.execution.reference_bytes.')
+            raise ResourceLimit('Person scene references exceed sapiensid.execution.reference_bytes.')
         row['_vector']=vector(row)
         from .clustering import vector as face_vector
         row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
@@ -327,7 +328,7 @@ def rebuild(database,selected,config,result):
                 scan,rows,decisions=scene_plan(db,item['scan'],config)
                 plan_bytes+=len(encoded(decisions))+len(rows)*128
                 if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
-                    raise ValueError('Person scene plan exceeds sapiensid.execution.plan_bytes.')
+                    raise ResourceLimit('Person scene plan exceeds sapiensid.execution.plan_bytes.')
                 plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
     from .publication_queue import enqueue
     with db:

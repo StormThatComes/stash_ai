@@ -4,6 +4,7 @@ Only bounded raw exemplars live in Python; membership/order metadata lives in
 the private RAM replay. Cue times still decide independent support and physical
 co-presence. This priority is an appearance ordering, never a new timeline.
 """
+from .resource_errors import ResourceLimit
 from .independent_evidence import Votes
 from .clustering import vector
 from .pose_policy import is_anchor,query_sql
@@ -60,7 +61,7 @@ def _prepare_serial(db,selected,config):
                     slot=best_cohort(slots,row,sample,coverage_threshold(grouping))
                     if slot is None:
                         if len(slots)>=grouping['max_people_per_lookup']:
-                            raise ValueError('Local appearance cohorts exceed configured person budget.')
+                            raise ResourceLimit('Local appearance cohorts exceed configured person budget.')
                         slot=len(slots);slots.append(_Cluster('other',row['id']));anchors.append(Votes())
                     cohort=slots[slot];before=len(cohort.examples);cohort.add(row,sample,maximum=witness_limit(grouping))
                     usage.add_counts((len(cohort.examples)-before)*sample.nbytes,len(cohort.examples)-before,

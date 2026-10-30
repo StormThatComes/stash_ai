@@ -1,4 +1,5 @@
 """Full production retuning on a consistent, read-only retained VTT snapshot."""
+from .resource_errors import ResourceLimit
 from collections import Counter, defaultdict
 from contextlib import closing, nullcontext, contextmanager
 from dataclasses import replace
@@ -52,7 +53,7 @@ def prepared_history(db, config, scope, ns, installation):
             seed.commit()
             size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
             if size > config.data['execution']['rebuild_memory_bytes']:
-                raise ValueError('Retained replay snapshot exceeds execution.rebuild_memory_bytes.')
+                raise ResourceLimit('Retained replay snapshot exceeds execution.rebuild_memory_bytes.')
             seed.execute('PRAGMA query_only=ON')
             yield seed
 
@@ -154,7 +155,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             if pool and name != 'baseline':
                                 evaluated = pool.ready.pop(name)
                                 if evaluated.get('failed'):
-                                    error = ValueError(evaluated['error'])
+                                    error = ResourceLimit(evaluated['error'])
                                     error.replay_stage = evaluated['stage']
                                     error.worker_elapsed_seconds = evaluated['elapsed_seconds']
                                     for note in evaluated.get('diagnostics', ()):

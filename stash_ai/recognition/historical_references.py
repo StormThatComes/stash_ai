@@ -4,6 +4,7 @@ No historical observations or candidates are copied into replay. Frozen global
 label/role repairs commit atomically with selected memberships. Strict checkpoints
 remain independent of this late reconciliation stage.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass,field
 import hashlib
 
@@ -117,7 +118,7 @@ def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=Tru
         ' ORDER BY p.created,p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', args)
     for identifier, records in groupby(rows, key=lambda row: row['owner']):
         if len(groups)>=config.data['clustering']['max_people_per_lookup']:
-            raise ValueError('Historical identity lookup exceeds configured person budget.')
+            raise ResourceLimit('Historical identity lookup exceeds configured person budget.')
         first = next(records)
         from itertools import chain
         selected_samples=select(chain((first,), records),config.data['clustering']['max_samples_per_person'])
@@ -357,7 +358,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     for view in history.views:
         usage.add(view.examples,kind='Historical view')
     if len(history.groups)+len(groups)>grouping['max_people_per_lookup']:
-        raise ValueError('Selected and historical identities exceed configured person budget.')
+        raise ResourceLimit('Selected and historical identities exceed configured person budget.')
     from .reference_registry import resolve
     proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early,excluded_views=excluded_views)
     refresh_verified(database.connection,selected,config,scope,namespace,history,usage)

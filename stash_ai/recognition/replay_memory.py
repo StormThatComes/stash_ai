@@ -1,5 +1,6 @@
 """Disposable RAM replay and explicitly enabled, fail-fast next-scene lookahead."""
-from concurrent.futures import ThreadPoolExecutor
+from .resource_errors import ResourceLimit
+from concurrent.futures import ThreadPoolExecutor, Future
 from contextlib import contextmanager
 from contextvars import ContextVar
 import sqlite3
@@ -8,6 +9,7 @@ import uuid
 from stash_ai.runtime.cancellation import Cancellation, use
 from stash_ai.runtime.cleanup import closing, cleanup
 from .profiling import count
+from .memory_size import Reservation
 
 _active = ContextVar('recognition_replay_lookahead', default=None)
 MISSING = object()
@@ -26,7 +28,7 @@ def memory_replay(config):
             yield db, uri
         except sqlite3.OperationalError as error:
             if getattr(error,'sqlite_errorcode',None) == sqlite3.SQLITE_FULL:
-                raise ValueError('RAM replay exceeds execution.rebuild_memory_bytes; increase its capacity.') from error
+                raise ResourceLimit('RAM replay exceeds execution.rebuild_memory_bytes; increase its capacity.') from error
             raise
 
 
@@ -39,8 +41,8 @@ class Lookahead:
     """One immutable next scene on an isolated reader, without fixed scene caps.
 
     Once enabled, each selected scene must be prepared successfully or the
-    rebuild fails. No extra per-scene RAM fraction or observation cap applies;
-    each scene is prepared in full and memory allocation failures propagate.
+    rebuild fails. Both current and pending vectors reserve the shared working
+    budget before allocation; no fixed scene or observation cap applies.
     The coordinator never consumes prepared membership or decisions from a worker.
     """
     def __init__(self, uri, config):
@@ -49,6 +51,13 @@ class Lookahead:
         self.executor = self.pending = self.scan = None
         self.prepared = {}
         self.cancel = Cancellation()
+        limit = config.data['execution']['rebuild_memory_bytes']
+        self.prepared_budget = Reservation(limit)
+        self.pending_budget = Reservation(limit)
+
+    def release_prepared(self):
+        self.prepared.clear()
+        self.prepared_budget.set(0)
 
     def __enter__(self):
         self.context = _active.set(self)
@@ -79,13 +88,22 @@ class Lookahead:
             return
         if self.pending is not None:
             raise RuntimeError('Replay lookahead has an unconsumed scene.')
+        self.scan=scan
+        try:
+            with closing(sqlite3.connect(self.uri,uri=True),name='close prefetch admission reader') as db:
+                required=db.execute('SELECT COALESCE(SUM(2*COALESCE(length(embedding),0)+1024),0) '
+                    'FROM observations WHERE scan=? AND rejected IS NULL',(scan,)).fetchone()[0]
+            self.pending_budget.set(required)
+        except sqlite3.Error as error:
+            self.pending=Future()
+            self.pending.set_exception(error)
+            return
         if self.executor is None:
             self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-replay-input')
-        self.scan=scan
         self.pending=self.executor.submit(self._prepare,scan)
 
     def take(self, scan):
-        self.prepared.clear()
+        self.release_prepared()
         if not self.enabled:
             return
         if self.pending is None:
@@ -94,6 +112,7 @@ class Lookahead:
             raise RuntimeError('Replay lookahead order changed.')
         try:
             self.prepared=self.pending.result()
+            self.prepared_budget,self.pending_budget=self.pending_budget,self.prepared_budget
         except Exception as error:
             # Enabled lookahead is an explicit execution contract. Report
             # SQLite lock/IO errors, worker failures and MemoryError rather
@@ -107,7 +126,8 @@ class Lookahead:
         cleanup([('cancel replay lookahead',self.cancel.cancel),
                  ('close replay lookahead worker',lambda: self.executor.shutdown(wait=True,cancel_futures=True)
                   if self.executor is not None else None),
-                 ('release replay lookahead vectors',self.prepared.clear)])
+                 ('release replay lookahead vectors',self.release_prepared),
+                 ('release pending replay vectors',lambda: self.pending_budget.set(0))])
 
 
 def prepared_vector(row):
@@ -127,4 +147,4 @@ def prepared_vector(row):
 def release_vectors():
     active=_active.get()
     if active is not None:
-        active.prepared.clear()
+        active.release_prepared()

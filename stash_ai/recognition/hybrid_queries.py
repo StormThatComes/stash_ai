@@ -4,6 +4,7 @@ Recovered rows are attachments only. All current strict identities compete,
 including identities lacking person evidence. Original cores never acquire new
 merge votes or train references through this route.
 """
+from .resource_errors import ResourceLimit
 from collections import defaultdict
 import numpy as np
 from .database import encoded
@@ -95,7 +96,7 @@ def _recover(database, selected, config, *, births=()):
               {k:row[k] for k in ('scan','seconds','quality')})
         used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
         if used>config.data['sapiensid']['execution']['plan_bytes']:
-            raise ValueError('SapiensID query plan_bytes budget exceeded.')
+            raise ResourceLimit('SapiensID query plan_bytes budget exceeded.')
         claim_rows.append(dict(row,person=owner))
         claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],vote))
     # Resolve against every new claim and existing accepted face in each cue,

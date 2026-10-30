@@ -1,4 +1,5 @@
 """The local cohort algorithm over shared arrays, with no worker SQLite copy."""
+from .resource_errors import ResourceLimit
 import numpy as np
 from .independent_evidence import Votes
 from .pose_policy import is_anchor
@@ -27,7 +28,7 @@ def priorities(values, settings):
         slot=best_cohort(slots,row,sample,coverage_threshold(grouping))
         if slot is None:
             if len(slots)>=grouping['max_people_per_lookup']:
-                raise ValueError('Local appearance cohorts exceed configured person budget.')
+                raise ResourceLimit('Local appearance cohorts exceed configured person budget.')
             slot=len(slots);slots.append(_Cluster('other',row['id']))
         cohort=slots[slot];before=len(cohort.examples)
         cohort.add(row,sample,maximum=witness_limit(grouping))

@@ -1,4 +1,5 @@
 """Independent body selection; face quality/ownership remain admission gates."""
+from .resource_errors import ResourceLimit
 from .person_signal import contract
 from .clustering import reference_admission
 from .reference_roles import strict_sql
@@ -70,7 +71,7 @@ def catalogue_rows(db,config,scope,namespace,owners):
                 used+=sum(2*len(r['embedding'])+len(r['quality'])+len(r['person_metadata'])+1024 for r in selected)
                 used+=sum(len(i)+64 for i in selected.witnesses)
                 if used+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
-                    raise ValueError('SapiensID reference_bytes budget exceeded by selected witnesses.')
+                    raise ResourceLimit('SapiensID reference_bytes budget exceeded by selected witnesses.')
                 result[owner]=selected;keep=bool(selected.modes)
             finally:spool.close(keep=keep)
     return result

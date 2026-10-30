@@ -5,6 +5,7 @@ Neither this module nor its prototypes may establish an identity or vote for an
 identity merge. Retained geometry supplies only a signed five-landmark yaw proxy;
 no physical head-angle interpretation, model inference or schema migration.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass, field
 import json
 from .run_cache import metadata
@@ -304,7 +305,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
         for slot in supported_cohorts(slots,cover,minimum,maximum,complete=complete):
             sample, identifier = slot.medoid()
             if used + sample.nbytes > remaining_bytes:
-                raise ValueError('Confirmed view prototypes exceed clustering.max_reference_bytes; '
+                raise ResourceLimit('Confirmed view prototypes exceed clustering.max_reference_bytes; '
                                  'increase its value or lower max_view_prototypes_per_person.')
             used += sample.nbytes
             output.append(ViewPrototype(
@@ -321,6 +322,6 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
             if complete:
                 scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
             if complete and used+scratch>remaining_bytes:
-                raise ValueError('Confirmed view evidence exceeds clustering.max_reference_bytes.')
+                raise ResourceLimit('Confirmed view evidence exceeds clustering.max_reference_bytes.')
     emit(person)
     return tuple(output)

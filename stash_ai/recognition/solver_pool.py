@@ -52,8 +52,10 @@ class Trials(AbstractContextManager):
         from pathlib import Path
         from .solver_shared import Arrays
         self.shared_directory = str(Path(context['seed_path']).parent/'numerical')
-        Arrays.prepare(self.shared_directory)
         self.shared_bytes = min(execution.memory_bytes // 16, 1024**3)
+        if not Arrays.prepare(self.shared_directory):
+            self.shared_directory = None
+            self.shared_bytes = 0
 
     def __enter__(self):
         return self

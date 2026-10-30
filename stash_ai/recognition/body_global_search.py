@@ -1,4 +1,5 @@
 """Bounded centroid nomination with exact retained-witness acceptance and rivals."""
+from .resource_errors import ResourceLimit
 from collections import OrderedDict
 from contextlib import ExitStack
 from pathlib import Path
@@ -65,7 +66,7 @@ class Evidence:
     def charge(self,count,kind):
         charged=self.stats['body_witness_comparisons']+self.stats['face_witness_comparisons']+count
         if charged>self.limit:
-            raise ValueError(f'Global body witness comparisons {charged} exceed '
+            raise ResourceLimit(f'Global body witness comparisons {charged} exceed '
                 f'sapiensid.execution.max_witness_comparisons={self.limit}; '
                 f"candidate pairs={self.stats['candidate_pairs']}.")
         self.stats[kind+'_witness_comparisons']+=count
@@ -94,7 +95,7 @@ class Search:
             self.block=min(64,max(1,(limit-metadata-4*1024**2)//(8*4096*12)))
             working=6*self.block*4096*8+4*1024**2
             if metadata+working+1024**2>limit:
-                raise ValueError('Global body lookup exceeds sapiensid.execution.reference_bytes.')
+                raise ResourceLimit('Global body lookup exceeds sapiensid.execution.reference_bytes.')
             cache_bytes=min(16*1024**2,(limit-metadata-working-1024**2)//2)
             self.reservation=Reservation(limit)
             self.reservation.set(metadata+working+cache_bytes+1024**2)
@@ -108,10 +109,18 @@ class Search:
             self.index.execute('PRAGMA mmap_size=0')
             self.index.execute('CREATE TABLE means (ordinal INTEGER PRIMARY KEY,vector BLOB NOT NULL)')
             self.entries=[];self.owner_modes={}
+            retained=self.stats['reference_working_bytes']
             from .body_global_modes import references as appearance_references
             with tracking(self.identities,'Index global person means',unit='identity') as people:
                 for owner,person in enumerate(people):
+                    # Bank rows already belong to the reservation. Admit all
+                    # temporary mode lists and their output before construction.
+                    temporary=1024+512*len(self.bank[person]['cores'][0]) if self.bank[person]['faces'] else 1024
+                    self.reservation.set(retained+temporary)
                     modes=appearance_references(self.bank[person],self.config,self.evidence)
+                    extra=512+sum(512+16*len(refs) for refs in modes)
+                    self.reservation.set(retained+temporary+extra)
+                    retained+=extra
                     self.owner_modes[person]=len(modes)
                     for refs in modes:
                         ordinal=len(self.entries);self.entries.append((owner,refs))
@@ -119,10 +128,9 @@ class Search:
                         for row in refs:mean+=self.evidence.feature(row)
                         if refs:mean/=len(refs)
                         self.index.execute('INSERT INTO means VALUES (?,?)',(ordinal,mean.tobytes()))
-            extra=size(self.entries)+size(self.owner_modes)+len(self.entries)*8
-            self.stats['reference_working_bytes']+=extra
-            if self.stats['reference_working_bytes']>limit:
-                raise ValueError('Global body appearances exceed sapiensid.execution.reference_bytes.')
+                    del modes
+                    self.reservation.set(retained)
+            self.stats['reference_working_bytes']=retained
             self.reservation.set(self.stats['reference_working_bytes'])
             self.mode_owners=np.asarray([owner for owner,_ in self.entries],dtype='int64')
             self.stats['appearance_centroids']=len(self.entries)
@@ -167,11 +175,11 @@ class Search:
                 if pair in seen:continue
                 seen.add(pair)
                 if len(seen)*256>self.config.data['sapiensid']['execution']['plan_bytes']:
-                    raise ValueError('Global body nominations exceed sapiensid.execution.plan_bytes.')
+                    raise ResourceLimit('Global body nominations exceed sapiensid.execution.plan_bytes.')
                 self.stats['candidate_pairs']+=1
                 limit=self.config.data['sapiensid']['execution']['max_candidate_pairs']
                 if self.stats['candidate_pairs']>limit:
-                    raise ValueError(f"Global body candidate pairs {self.stats['candidate_pairs']} exceed "
+                    raise ResourceLimit(f"Global body candidate pairs {self.stats['candidate_pairs']} exceed "
                         f'sapiensid.execution.max_candidate_pairs={limit}; identities={len(self.identities)}.')
                 yield pair
 

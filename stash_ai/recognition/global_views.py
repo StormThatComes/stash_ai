@@ -4,6 +4,7 @@ View-only members never train the catalogue. Identity consolidation requires
 complete frozen strong components from independently supported cohorts; the
 frozen nomination graph is not recomputed after a merge, preventing chaining.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass, replace
 from collections import deque
 import time
@@ -88,7 +89,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
             if complete:
                 scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum,maximum=witness_limit(grouping))
             if complete and usage.bytes+scratch>usage.limit:
-                raise ValueError('Global view evidence exceeds clustering.max_reference_bytes.')
+                raise ResourceLimit('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()
     return tuple(result)
 

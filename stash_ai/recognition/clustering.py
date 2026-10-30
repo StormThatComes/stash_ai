@@ -1,4 +1,5 @@
 """Scoped, conservative incremental matching against retained face identities."""
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass
 import hashlib
 import json
@@ -89,7 +90,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
                       'ORDER BY created,id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
-        raise ValueError('Face identity lookup exceeds configured person budget.')
+        raise ResourceLimit('Face identity lookup exceeds configured person budget.')
     result = []
     from itertools import islice
     iterator = iter(rows)
@@ -357,7 +358,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                     person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
                 else:
                     if len(groups) >= grouping['max_people_per_lookup']:
-                        raise ValueError('Selected-scene face groups exceed the configured budget.')
+                        raise ResourceLimit('Selected-scene face groups exceed the configured budget.')
                     person = str(uuid.uuid5(uuid.UUID(database.installation),
                                            encoded([record['scope'], record['namespace'], observation['id']])))
                     usage.add([query], people=1, kind='Selected')

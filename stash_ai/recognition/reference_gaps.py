@@ -1,4 +1,5 @@
 """Superseded evidence can defer birth, but cannot positively identify a face."""
+from .resource_errors import ResourceLimit
 from .clustering import Group,vector
 from .database import encoded
 
@@ -29,7 +30,7 @@ def capture(db,selected,config,scope,namespace,usage):
             usage.add(vectors,kind='Unavailable reference witnesses')
             output.append(Group(person,tuple(vectors),True,tuple(ids)))
         if len(output)>config.data['clustering']['max_people_per_lookup']:
-            raise ValueError('Unavailable identity lookup exceeds configured person budget.')
+            raise ResourceLimit('Unavailable identity lookup exceeds configured person budget.')
     return tuple(output)
 
 

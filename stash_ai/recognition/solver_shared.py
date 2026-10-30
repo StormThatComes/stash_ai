@@ -4,6 +4,7 @@ Only numeric evidence is cached. No membership, thresholds or mutable decisions.
 Atomic publication and a SQLite reservation ledger bound total published bytes.
 """
 from contextlib import contextmanager
+from contextlib import suppress
 from contextvars import ContextVar
 import hashlib
 import json
@@ -29,34 +30,56 @@ def key(kind, arrays, extra=()):
 class Arrays:
     def __init__(self, directory, limit):
         self.directory, self.limit = Path(directory), limit
-        self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
+        self.db = None
+        self.disabled = False
+        try:
+            self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
+        except sqlite3.Error:
+            self.failed()
+
+    def failed(self):
+        from .profiling import count
+        count('shared_numeric_errors')
+        self.disabled = True
 
     @classmethod
     def prepare(cls, directory):
         directory = Path(directory)
-        directory.mkdir(exist_ok=True)
-        with sqlite3.connect(directory/'ledger.sqlite') as db:
-            db.execute('CREATE TABLE IF NOT EXISTS entries (key TEXT PRIMARY KEY, bytes INTEGER NOT NULL)')
+        try:
+            directory.mkdir(exist_ok=True)
+            with sqlite3.connect(directory/'ledger.sqlite') as db:
+                db.execute('CREATE TABLE IF NOT EXISTS entries (key TEXT PRIMARY KEY, bytes INTEGER NOT NULL)')
+            return True
+        except (OSError, sqlite3.Error):
+            from .profiling import count
+            count('shared_numeric_errors')
+            return False
 
     def get(self, signature):
-        if signature is None:
+        if signature is None or self.disabled:
             return None
         path = self.directory/(signature+'.npy')
-        if not path.exists():
-            return None
         import numpy as np
         from .profiling import count
-        value = np.load(path, mmap_mode='r', allow_pickle=False)
+        try:
+            value = np.load(path, mmap_mode='r', allow_pickle=False)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, EOFError):
+            self.failed()
+            return None
         count('shared_numeric_hits')
         return value
 
     def put(self, signature, value):
-        if signature is None or value.dtype.hasobject or value.nbytes + 512 > self.limit:
+        if self.disabled or signature is None or value.dtype.hasobject or value.nbytes + 512 > self.limit:
             return value
         # Avoid serializing every reader through the ledger on hits.
         found = self.get(signature)
         if found is not None:
             return found
+        if self.disabled:
+            return value
         reserved = False
         try:
             self.db.execute('BEGIN IMMEDIATE')
@@ -66,12 +89,15 @@ class Arrays:
                 self.db.execute('INSERT INTO entries VALUES (?,?)', (signature, value.nbytes+512))
                 reserved = True
             self.db.commit()
-        except sqlite3.OperationalError:
-            self.db.rollback()
+        except sqlite3.Error:
+            with suppress(sqlite3.Error):
+                self.db.rollback()
+            self.failed()
             return value  # Cache contention changes cost only.
         if not reserved:
             return value
         filename = None
+        published = False
         try:
             import numpy as np
             from .profiling import count
@@ -79,19 +105,26 @@ class Arrays:
             with os.fdopen(fd, 'wb') as stream:
                 np.save(stream, value, allow_pickle=False)
             os.replace(filename, self.directory/(signature+'.npy'))
+            published = True
             filename = None
             count('shared_numeric_written_bytes', value.nbytes)
-            return self.get(signature)
-        except BaseException:
-            with self.db:
-                self.db.execute('DELETE FROM entries WHERE key=?', (signature,))
-            raise
+            found = self.get(signature)
+            return value if found is None else found
+        except (OSError, ValueError):
+            self.failed()
+            return value
         finally:
+            if not published or self.disabled:
+                with suppress(sqlite3.Error):
+                    with self.db:
+                        self.db.execute('DELETE FROM entries WHERE key=?', (signature,))
             if filename is not None:
-                Path(filename).unlink(missing_ok=True)
+                with suppress(OSError):
+                    Path(filename).unlink(missing_ok=True)
 
     def close(self):
-        self.db.close()
+        if self.db is not None:
+            self.db.close()
 
 
 def current():

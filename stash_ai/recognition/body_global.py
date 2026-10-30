@@ -1,4 +1,5 @@
 """Frozen, complete-component person consolidation; missing faces are not contradictions."""
+from .resource_errors import ResourceLimit
 import json
 import time
 
@@ -45,7 +46,7 @@ def plan(db,config,bank,*,focus=None):
     def reserve(extra=0):
         nonlocal plan_bytes
         plan_bytes+=extra
-        if plan_bytes>limit:raise ValueError('Global body plan exceeds sapiensid.execution.plan_bytes.')
+        if plan_bytes>limit:raise ResourceLimit('Global body plan exceeds sapiensid.execution.plan_bytes.')
         reservation.set(plan_bytes)
     reserve()
     try:
@@ -92,7 +93,7 @@ def plan(db,config,bank,*,focus=None):
                 reserve(size(decision));result['decisions'].append(decision)
             result['search']=dict(search.stats)
         reserve(size(result['nearest_competitors'])+size(result['search']))
-        if len(encoded(result))>limit:raise ValueError('Global body proof exceeds sapiensid.execution.plan_bytes.')
+        if len(encoded(result))>limit:raise ResourceLimit('Global body proof exceeds sapiensid.execution.plan_bytes.')
         return result
     finally:
         reservation.set(0)
@@ -143,7 +144,7 @@ def reconcile(database,selected,config):
         proof=dict(decision,complete_body_witnesses=True,body_witness_format=2,provisional_confirmation=provisional,route='body_global',scenes=sorted(scenes,key=int),contract=contract(config),policy=policy(config))
         proof_bytes+=len(encoded(proof))*(len(rows)-1)
         if proof_bytes>config.data['sapiensid']['execution']['plan_bytes']:
-            raise ValueError('Body alias proofs exceed sapiensid.execution.plan_bytes.')
+            raise ResourceLimit('Body alias proofs exceed sapiensid.execution.plan_bytes.')
         for source in (r['id'] for r in rows[1:]):
             db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
             db.execute("UPDATE body_members SET person=?,role='auxiliary',proof=json_set(proof,'$.global_merge',json(?)) WHERE person=?",

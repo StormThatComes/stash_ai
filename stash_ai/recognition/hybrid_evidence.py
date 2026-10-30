@@ -4,6 +4,7 @@ Cosines from different encoders are never averaged together. One physical
 scene/timestamp supplies at most one vote; attachment-only samples never train
 this catalogue. Unknown evidence is not a negative match.
 """
+from .resource_errors import ResourceLimit
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -61,7 +62,7 @@ def _catalogue(db, config, scope, namespace):
                     raise ValueError('Invalid retained SapiensID feature: '+row['id'])
                 used+=value.nbytes
                 if used>config.data['sapiensid']['execution']['reference_bytes']:
-                    raise ValueError('SapiensID reference_bytes budget exceeded.')
+                    raise ResourceLimit('SapiensID reference_bytes budget exceeded.')
                 vectors.append(value);votes.add(row);body_ids.append(row['id'])
             missing=tuple(i for i in ids if i not in ready)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
@@ -178,15 +179,15 @@ def plan(db,config,identities,*,focus=None):
                 continue
             candidates+=1
             if candidates>limits['max_candidate_pairs']:
-                raise ValueError('SapiensID max_candidate_pairs budget exceeded; no hybrid plan applied.')
+                raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded; no hybrid plan applied.')
             nominations.append((a,b))
             if len(nominations)*256>limits['plan_bytes']:
-                raise ValueError('SapiensID plan_bytes budget exceeded by nominations.')
+                raise ResourceLimit('SapiensID plan_bytes budget exceeded by nominations.')
     from .hybrid_jobs import proofs as exact_proofs
     for a,b,proof in exact_proofs(db,owned,nominations,config):
         used+=len(encoded(proof).encode())
         if used+len(nominations)*256>limits['plan_bytes']:
-            raise ValueError('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
+            raise ResourceLimit('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
         proofs[a,b]=proof
         if not proof['blockers']:edges[a,b]=proof['person']['mean']
     adjacency={p:set() for p in owned}

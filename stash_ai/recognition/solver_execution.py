@@ -1,4 +1,5 @@
 """Solver-wide admission limits, independent of recognition policy/YAML."""
+from .resource_errors import ResourceLimit
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -74,7 +75,7 @@ def chunks(items, cost, *, target, maximum):
     for item in items:
         amount = cost(item)
         if type(amount) is not int or amount < 0 or amount > maximum:
-            raise ValueError('Work item exceeds the admitted job budget.')
+            raise ResourceLimit('Work item exceeds the admitted job budget.')
         if batch and used + amount > min(target, maximum):
             yield batch
             batch, used = [], 0

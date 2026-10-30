@@ -5,6 +5,7 @@ textured RGB pixels (strict residual bounds), and an almost identical embedding.
 Aliases always refer to the original representative, never a transitive chain.
 Only the private replay's compact metadata is changed.
 """
+from .resource_errors import ResourceLimit
 import json
 from contextvars import ContextVar
 from collections import OrderedDict
@@ -102,7 +103,7 @@ def _aliases(db,scope=None,namespace=None,*,budget=67108864):
                 candidates.close()
                 if alias is None:
                     used+=len(raw)+len(row['embedding'])+1024
-                    if used>budget:raise ValueError('Pixel witness index exceeds recognition evidence budget.')
+                    if used>budget:raise ResourceLimit('Pixel witness index exceeds recognition evidence budget.')
                     scratch.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?,?)',
                         (bucket, fingerprint, raw, row['embedding'], record.get('evidence_aspect')))
                 elif alias != fingerprint:
@@ -178,7 +179,7 @@ def _aliases_cached(db,scope=None,namespace=None,*,budget=67108864,persist=False
     try:
         for a,b in _aliases(db,scope,namespace,budget=budget*3//4):
             if a not in mapping:used+=len(a)+len(b)+256
-            if used>budget*3//4:raise ValueError('Pixel alias map exceeds recognition evidence budget.')
+            if used>budget*3//4:raise ResourceLimit('Pixel alias map exceeds recognition evidence budget.')
             mapping[a]=b
     finally:_pixel_proofs.reset(token)
     if cached and persist and _writable.get() and not db.execute('PRAGMA query_only').fetchone()[0]:

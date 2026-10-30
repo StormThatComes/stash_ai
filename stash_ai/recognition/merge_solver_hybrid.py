@@ -1,4 +1,5 @@
 """Measured hybrid search hints; only a full production replay certifies them."""
+from .resource_errors import ResourceLimit
 
 from .database import encoded
 from .hybrid_evidence import catalogue, pair, scores
@@ -68,7 +69,7 @@ def analyse(db, config, goals):
     reservation = Reservation(limits['plan_bytes'])
     def reserve(required):
         if required > limits['plan_bytes']:
-            raise ValueError('SapiensID plan_bytes budget exceeded by solver evidence.')
+            raise ResourceLimit('SapiensID plan_bytes budget exceeded by solver evidence.')
         reservation.set(required)
     lookup = Lookup(bank, limits['reference_bytes'])
     nearest, positive = {}, []
@@ -84,7 +85,7 @@ def analyse(db, config, goals):
             if target_pair or nominated:
                 result['candidate_pairs'] += 1
                 if result['candidate_pairs'] > limits['max_candidate_pairs']:
-                    raise ValueError('SapiensID max_candidate_pairs budget exceeded by solver evidence.')
+                    raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded by solver evidence.')
             present = _cooccurs(db, a, b, config) if target_pair else False
             proof = (pair(left, right, settings, copresent=present,
                           reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
@@ -100,7 +101,7 @@ def analyse(db, config, goals):
                     mode_boundary_evidence=alternate)
                 proof_bytes += len(encoded(entry).encode()) * 2 + 1024
                 if proof_bytes > limits['plan_bytes']:
-                    raise ValueError('SapiensID plan_bytes budget exceeded by solver evidence.')
+                    raise ResourceLimit('SapiensID plan_bytes budget exceeded by solver evidence.')
                 result['pairs'].append(entry)
                 for measured in (proof, alternate):
                     if measured is None:

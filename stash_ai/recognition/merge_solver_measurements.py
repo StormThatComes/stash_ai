@@ -1,4 +1,5 @@
 """Bounded face measurements; cache only immutable numerical inputs."""
+from .resource_errors import ResourceLimit
 import math
 
 
@@ -10,7 +11,7 @@ def reference_stats(left, right, *, max_bytes=4194304):
         raise ValueError('Reference statistics require nonempty banks.')
     dimensions = len(left[0])
     if max_bytes < 8*(2*dimensions+1):
-        raise ValueError('Face measurement working budget is too small for one pair.')
+        raise ResourceLimit('Face measurement working budget is too small for one pair.')
     cache = current()
     a, b = immutable_samples(left), immutable_samples(right)
     key = ('solver-face-stats', max_bytes, a, b) if a is not None and b is not None else None
