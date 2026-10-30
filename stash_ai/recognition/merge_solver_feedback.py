@@ -90,6 +90,8 @@ class QueryFeedback:
         self.goals = goals
         self.selected = ()
         self.sets = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+        self.sets.update((oid,self.sets[source]) for source,values in goals.get('physical_alternatives',{}).items()
+                         if source in self.sets for oid in values)
         self.visits, self.priorities = {}, {}
         self.reset()
 
@@ -99,6 +101,9 @@ class QueryFeedback:
         self.decisions = []
         self.local_body = []
         self.local_body_comparisons = 0
+        from .local_body_hints import Budget
+        self.local_budget = Budget(self.goals)
+        self.witness_comparisons = 0
         self.negative_keys = set()
         self.sampled = set()
         self.sampling = []
@@ -114,7 +119,8 @@ class QueryFeedback:
         self.passes += 1
         pass_id = self.passes
         settings = config.data['sapiensid']['matching']
-        limits = config.data['sapiensid']['execution']
+        from .solver_measurement_budget import LIMITS
+        limits = {k:min(v,config.data['sapiensid']['execution'][k]) for k,v in LIMITS.items()}
         from .merge_solver_diagnostics import fair_queries
         bank_count = max(1, sum(i.person not in births for i,_,_,_ in banks))
         quota = max(0, (limits['max_candidate_pairs']-self.comparisons)//bank_count)
@@ -129,6 +135,8 @@ class QueryFeedback:
         from .merge_goal_identity import destination_owners
         membership = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                 '(SELECT value FROM json_each(?))', (encoded(sorted(self.sets)),)))
+        from .body_reports import members as body_members
+        membership.update((oid,person) for oid,person in body_members(db,config).items() if oid in self.sets)
         owners = destination_owners(self.goals, membership)
 
         def measure(row, face, body):
@@ -150,8 +158,13 @@ class QueryFeedback:
                     limited('max_candidate_pairs')
                     return
                 self.comparisons += 1
-                f = scores(face, faces)
                 modes = identity.body_modes if bodies is identity.persons else ()
+                cost = len(face)*len(faces) + (sum(len(mode) for mode in (modes or (bodies,)))*len(body) if body is not None else 0)
+                if self.witness_comparisons+cost > limits['max_witness_comparisons']:
+                    limited('max_witness_comparisons')
+                    return
+                self.witness_comparisons += cost
+                f = scores(face, faces)
                 measures = [scores(body, mode) for mode in (modes or (bodies,))
                             if body is not None and len(mode)]
                 b = max(measures, key=lambda m: (m['minimum'], m['mean']), default=None)
@@ -267,6 +280,7 @@ class QueryFeedback:
         focused = [r for r in positive_routes if r['priority'] > 0] or positive_routes
         hints = separating_proposals(config, positives, self.negatives, routes=[r['routes'] for r in focused])
         result = dict(queries=self.entries, local_body=self.local_body, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
+            witness_comparisons=self.witness_comparisons, local_body_coverage=self.local_budget.report(),
             truncated=bool(self.truncation_reasons), truncation_reasons=sorted(self.truncation_reasons),
             skipped_query_visits=self.skipped_query_visits,
             separation_intervals=hints['intervals'], joint_constraints=hints['joint_constraints'],

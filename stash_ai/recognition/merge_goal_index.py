@@ -10,8 +10,8 @@ _evaluation = ContextVar('merge_goal_evaluation', default=None)
 
 class GoalIndex:
     def __init__(self, goals):
-        self.observation_ids = frozenset(r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations'])
-        self.observation_ids |= frozenset(oid for values in goals.get('physical_alternatives', {}).values() for oid in values)
+        from .physical_goal import addresses
+        self.observation_ids = frozenset(addresses(goals))
         self.observation_ids |= frozenset(r['id'] for g in goals['groups']
             for m in g['members'] + g.get('excluded_members', []) for r in m.get('excluded_observations', ()))
         self.outcome_ids = self.observation_ids | frozenset(oid for e in goals.get('scene_exclusions', ())
