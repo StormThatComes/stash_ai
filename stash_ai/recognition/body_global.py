@@ -64,7 +64,8 @@ def plan(db,config,bank,*,focus=None):
     def reserve(extra=0):
         nonlocal plan_bytes
         plan_bytes+=extra
-        if plan_bytes>limit:raise ResourceLimit('Global body plan exceeds sapiensid.execution.plan_bytes.')
+        if plan_bytes>limit:raise ResourceLimit('Global body plan exceeds sapiensid.execution.plan_bytes.',
+            budget='sapiensid.execution.plan_bytes',limit=limit,requested=plan_bytes)
         reservation.set(plan_bytes)
     reserve()
     try:

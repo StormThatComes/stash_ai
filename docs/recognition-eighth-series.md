@@ -35,3 +35,18 @@ Same-identity simulation distinguishes a reproduced merge from replay splitting
 or incomplete replay. Query measurements account for actual witness-pair work
 under a separate ceiling. Local body hints reserve work across goal sets/scenes,
 rotate oversubscribed scenes between trials and expose per-scene coverage.
+
+## End-to-end observability
+
+`--profile-report` aliases `--profile-solver` and also works without `--solve`.
+The JSON `report_performance` covers snapshot preparation, goal resolution,
+fingerprinting and analysis up to output serialization. A final structured
+`Merge report performance:` line on stderr includes serialization and atomic
+publication; it reports its scope explicitly because a file cannot contain the
+completed duration of its own publication. Profiling emits this final line even
+with `--progress-style off`; otherwise that option remains silent.
+
+Plain pair reports show stage-aware liveness without adding text to JSON stdout.
+Failed trials retain partial stage/CPU/RSS profiles, plus typed resource budget,
+limit and requested values where available. Feasibility failure counters include
+only feasibility-phase attempts, while the solver retains all failed trials.
