@@ -296,7 +296,8 @@ def test_offline_missing_assets_do_not_fetch_or_create_destination(upstream, tmp
     assert not (tmp_path/'custom/pose').exists()
 
 
-def test_pose_only_path_does_not_download_source_or_identity_weights(upstream, monkeypatch):
+@pytest.mark.parametrize('backend', ['yolo', 'vitpose_plus_large', 'sapiens'])
+def test_pose_only_path_does_not_download_source_or_identity_weights(upstream, monkeypatch, backend):
     import sys
     loaded = []
 
@@ -307,7 +308,15 @@ def test_pose_only_path_does_not_download_source_or_identity_weights(upstream, m
         return 'pose model'
 
     monkeypatch.setitem(sys.modules, 'ultralytics', SimpleNamespace(YOLO=yolo, __version__='8.4.189'))
-    assert load_pose(upstream.config) == 'pose model'
+    from stash_ai.recognition import person_detector
+    calls = []
+    def detection_only(model):
+        calls.append(model)
+        return 'detection only'
+    monkeypatch.setattr(person_detector, 'detection_only', detection_only)
+    upstream.config.data['sapiensid']['pose']['backend'] = backend
+    assert load_pose(upstream.config) == ('pose model' if backend == 'yolo' else 'detection only')
+    assert calls == ([] if backend == 'yolo' else ['pose model'])
     assert [url for url, _ in upstream.calls] == [registry.POSE_URL]
     assert not loaded[0].exists()  # Library receives verified bytes in a temporary file.
 

@@ -145,6 +145,78 @@ on CPU, set `STASH_AI_VITPOSE_SMOKE=1` and run
 `python -m pytest -q tests/test_recognition_vitpose_smoke.py` (downloads ~1.8 GB,
 including YOLO; no SapiensID identity checkpoint is needed).
 
+### Sapiens Pose keypoints
+
+`sapiensid.pose.backend: sapiens` selects Meta's **Sapiens v1 Pose** as another
+top-down pose estimator. It is separate from the SapiensID identity encoder and
+from Sapiens2. Install the existing `requirements-sapiensid.txt` alongside your
+CPU/GPU requirements; no MMPose/MMCV installation is needed.
+
+```yaml
+models:
+  download_missing: true
+sapiensid:
+  enabled: true
+  pose:
+    backend: sapiens
+    sapiens_variant: "0.3b"
+    sapiens_batch_size: 1
+    sapiens_directory: ""
+```
+
+| `sapiens_variant` | Public Meta model | Download size |
+| --- | --- | --- |
+| `0.3b` (default) | [Sapiens Pose 0.3B](https://huggingface.co/facebook/sapiens-pose-0.3b-torchscript) | 1.32 GB |
+| `0.6b` | [Sapiens Pose 0.6B](https://huggingface.co/facebook/sapiens-pose-0.6b-torchscript) | 2.65 GB |
+| `1b` | [Sapiens Pose 1B](https://huggingface.co/facebook/sapiens-pose-1b-torchscript) | 4.68 GB |
+
+Only the selected variant is downloaded, at a pinned revision, with size and
+SHA256 verification before loading. The public Goliath TorchScript exports do
+not require a Hugging Face token. Files are cached under
+`models.directory/sapiens_pose/<variant>/<revision>/`. `sapiens_directory`
+overrides the directory relative to the YAML and must contain the selected
+model's original `.pt2` filename. `models.download_missing: false` requires an
+existing verified file. A corrupt or different checkpoint is rejected rather
+than overwritten. The upstream weights have a separate CC BY-NC 4.0 license;
+see [third-party notices](../THIRD_PARTY_NOTICES.md).
+
+YOLO supplies person boxes with its pose head disabled. Sapiens alone supplies
+keypoints for those boxes, including people without a detected face. The model
+predicts 308 Goliath landmarks; the adapter selects and reorders the matching
+17 COCO body points (including wrists at Goliath indices 62 and 41). The other
+landmarks are not retained. SapiensID still receives these 17 points plus the
+five landmarks from the face detector; existing association, missing-point
+filtering and audit overlays apply.
+
+Crops use 1.25 padding, the 768×1024 target aspect ratio, RGB training
+normalization, and UDP affine sampling/DARK subpixel heatmap decoding. Inference
+uses FP32 on `models.device`, without flip augmentation or compilation.
+`sapiens_batch_size` bounds people per Sapiens inference, including across cues;
+`pose.batch_size` continues to bound YOLO frame batches. Start with one person
+per Sapiens batch: the 1K input and larger variants require substantially more
+memory and compute than YOLO. GPU throughput and VRAM requirements depend on
+the variant and other loaded models; no fixed capacity is assumed.
+
+Heatmap maxima are clipped to [0,1] and are not calibrated probabilities.
+Tune `pose.keypoint_score_threshold` independently for this backend. Changing
+backend or variant changes the person/body evidence contract; run recognition
+again on the selected scenes before solving. Changing Sapiens paths or batch
+limits leaves evidence reusable. Existing YOLO/ViTPose contracts are preserved.
+
+The regular tests cover geometry, channel mapping, batching, downloads, missing
+faces, and a small real TorchScript model. The optional full pretrained CPU test
+also runs YOLO detection, face association, 22-point SapiensID preparation and
+audit export:
+
+```sh
+STASH_AI_SAPIENS_POSE_SMOKE=1 python -m pytest -q tests/test_recognition_sapiens_pose_smoke.py
+```
+
+This downloads the 0.3B model and YOLO, without the SapiensID identity encoder.
+`STASH_AI_SAPIENS_POSE_DIRECTORY` can point the smoke test at cached weights.
+Integration tests do not establish an accuracy improvement on rear-view VTT
+thumbnails; compare those scenes with `recognition audit-detection`.
+
 ### Shared geometry and existing YOLO configurations
 
 After a unique face/person association, landmarks outside the actual person
