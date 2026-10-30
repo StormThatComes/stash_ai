@@ -35,6 +35,50 @@ finished results, cancels queued work and signals running workers cooperatively.
 Unexpected worker exceptions propagate. Resource-limited trials are reported as
 failed and never become winners. Only the coordinator writes the winning YAML.
 
+## Console progress
+
+The console first prints the effective CPU/trial limits, scheduling mode and
+trial budget. Baseline runs before the parallel trials. `trial-N: start` describes
+the submitted configuration; a spawned worker may still be starting up.
+
+Every five seconds while waiting, the coordinator prints pool counts and one
+status line per pending trial. For example (illustrative values):
+
+```text
+Merge solver workers: pool running=1 queued/starting=0 ready=1 retired=0 limit=2 elapsed=65s scheduling=batch waiting_for=trial-1
+Merge solver trial-1: status pid=1234 elapsed=60s stage=Match selected scene stage_elapsed=12s last_update=1s ago scene=7 | Rebuild selected identities=6/33 scene | Match face observations=128/400 item | last_completed=1s ago
+Merge solver trial-2: status result ready; awaiting application
+```
+
+- `running` counts trials whose worker has reported its start. `queued/starting`
+  means a worker start has not yet been observed, including process startup.
+- `ready` counts finished/restored results waiting for application. `retired`
+  counts parallel results handed to the coordinator, excluding baseline.
+- Worker lines show PID, trial and stage durations, scene when available, and
+  up to two current work counters. Unknown totals are shown as `?`; there is no
+  fabricated overall trial percentage or ETA.
+- `last_update` is the age of the last observed stage/work update;
+  `last_completed` is the age of the last observed increase in completed work.
+  Periodic worker telemetry does **not** reset those ages. A long age can mean
+  blocking SQL/native work or a phase without counters; it does not diagnose a
+  deadlock. `last_report` separately shows how recently the worker reporting
+  thread sent its snapshot, without claiming computational progress.
+  Counters are sampled and may lag very short bursts of work.
+- `ready evaluation=finished` (or `failed`) is printed once as soon as the
+  coordinator collects a result, even if batch ordering delays its application.
+  `waiting_for=trial-N` identifies that ordering dependency. The existing
+  `complete` line and set details appear after application, with trial duration,
+  completed-trial count (including baseline), and the best applied result.
+
+Preparation, prediction collection and solver feedback are named stages too.
+Worker snapshots use a bounded, nonblocking channel and are retried once a second;
+slow output cannot create an unbounded telemetry backlog. Only the coordinator
+writes console messages to stderr, so JSON stdout stays clean. Scheduling,
+checkpoint order and winner selection do not consume telemetry; batch order
+stays unchanged and async search still depends on completion timing.
+`--progress-style off` disables the telemetry channel and worker reporting
+threads. `--profile-solver` is not required for live progress.
+
 Each trial preserves full production replay, chronological identity updates,
 competitors, exclusions and original-core guards. Parallel ablations are separate
 experiments, never automatically combined. More trials per second do not imply a

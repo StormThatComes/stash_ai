@@ -31,7 +31,7 @@ class Request:
     shared_bytes: int = 0
 
 
-def evaluate(request):
+def evaluate(request, *, progress=None):
     from .trial_evaluation import evaluate as replay_trial
     from .solver_feedback import collect
     from .merge_solver_feedback import QueryFeedback
@@ -60,7 +60,7 @@ def evaluate(request):
                 result = replay_trial(request.name, config, seed=seed, source=None,
                     scope=request.scope, namespace=request.namespace, installation=request.installation,
                     scans=request.scans, observations=request.observations, rebuild=rebuild_selected,
-                    inspect_trial=inspect)
+                    inspect_trial=inspect, progress=progress)
             except Exception as exc:
                 if not resource_limit(exc):
                     raise

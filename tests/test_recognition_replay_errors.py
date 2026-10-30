@@ -35,7 +35,9 @@ def test_replay_error_identifies_stage_even_when_not_printed(tmp_path, monkeypat
     assert str(tmp_path) not in note
     if with_progress:
         assert 'stage: Confirm cross-scene provisional identities' in events
-        assert 'stage: Build early verified appearance views' not in events
+        # Worker snapshots are unthrottled locally; console delivery is throttled
+        # by the solver/coordinator, so a short stage is not lost before a stall.
+        assert 'stage: Build early verified appearance views' in events
         assert 'complete' not in events
     assert config.database.read_bytes() == before
 

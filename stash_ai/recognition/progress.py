@@ -10,6 +10,17 @@ from stash_ai.runtime.console import status, activity, current_report, phase, sk
 
 _work_rows = ContextVar('recognition_work_rows', default=())
 _stage_observer = ContextVar('recognition_stage_observer', default=None)
+_update_observer = ContextVar('recognition_update_observer', default=None)
+
+
+@contextmanager
+def observe_updates(callback):
+    """Observe stages and completed work without installing a console in workers."""
+    token = _update_observer.set(callback)
+    try:
+        yield
+    finally:
+        _update_observer.reset(token)
 
 
 @contextmanager
@@ -117,6 +128,19 @@ def heartbeat_line(row, fields, *, verbose=False):
 
 @contextmanager
 def stage(label, **values):
+    observer = _update_observer.get()
+    if observer is not None:
+        observer('stage', dict(label=label, **values))
+    try:
+        with _stage(label, **values):
+            yield
+    finally:
+        if observer is not None:
+            observer('stage_end', {})
+
+
+@contextmanager
+def _stage(label, **values):
     """Name a rebuild substage even while SQL/native work has no measurable total."""
     observer = _stage_observer.get()
     if observer is not None:
@@ -148,6 +172,8 @@ class WorkProgress:
         self.position = (1 if transient else 0) if position is None else position
         self.started = self.last_render = time.monotonic()
         self.postfix = {}
+        self.observer = _update_observer.get()
+        self.last_observed = self.started
 
     def __enter__(self):
         console = getattr(self.report, 'console', None)
@@ -182,9 +208,13 @@ class WorkProgress:
         self._render(force=self.n == self.total)
 
     def _render(self, *, force=False):
+        now = time.monotonic()
+        if self.observer is not None and (force or now - self.last_observed >= .25):
+            self.last_observed = now
+            self.observer('work', dict(row=id(self), label=self.label, completed=self.n,
+                total=self.total, unit=self.unit, position=self.position))
         if not self.enabled:
             return
-        now = time.monotonic()
         if not force and now - self.last_render < .25:
             return
         elapsed, observed = now - self.started, self.n - self.initial
@@ -209,6 +239,8 @@ class WorkProgress:
         try:
             self._render(force=True)
         finally:
+            if self.observer is not None:
+                self.observer('work_end', dict(row=id(self)))
             if self.bar is not None:
                 self.bar.close()
             status(self.report, **{self.key + suffix: None for suffix in ('', '_eta', '_rate', '_label', '_counts')})
@@ -225,13 +257,14 @@ def work(label, total=None, *, unit='item', position=1, initial=0, **values):
     console = getattr(report, 'console', None)
     if callable(total):
         # Counting is optional telemetry, never another BLOB materialization.
-        if console is None or console.style == 'off':
+        if (console is None or console.style == 'off') and _update_observer.get() is None:
             total = None
         else:
             try:
                 total = total()
             except Exception:
-                report.counts['recognition_progress_total_failures'] += 1
+                if report is not None:
+                    report.counts['recognition_progress_total_failures'] += 1
                 total = None
     with activity(report, label, **values), WorkProgress(
             report, label, total, unit=unit, key='work' if position == 0 else 'detail',
@@ -265,7 +298,7 @@ def tracking(iterable, label, *, total=None, unit='item', position=1, **values):
     """Close rows deterministically, including early return, failure and Ctrl+C."""
     report = current_report()
     console = getattr(report, 'console', None)
-    if console is None or console.style == 'off':
+    if (console is None or console.style == 'off') and _update_observer.get() is None:
         yield iterable
         return
     if total is None and hasattr(iterable, '__len__'):
