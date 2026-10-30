@@ -49,20 +49,13 @@ class AtomicFile:
 
 
 def fingerprint(config,goals,db,settings):
-    """Conservative compatibility: every retained table, config, goals and code."""
-    source=hashlib.sha256()
-    for row in db.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
-        table,schema=row
-        source.update(digest([table,schema]).encode())
-        quoted='"'+table.replace('"','""')+'"'
-        for record in db.execute('SELECT * FROM '+quoted+' ORDER BY rowid'):
-            for value in record:
-                content=value if isinstance(value,bytes) else json.dumps(value,allow_nan=False).encode()
-                source.update(str(len(content)).encode()+b':'+content)
+    """Replay inputs, policy, goals, code and search settings define compatibility."""
+    from .replay_signature import fingerprint as source_fingerprint
+    source=source_fingerprint(db,goals['scope'],goals['namespace'])
     code=hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob('*.py')):
         code.update(path.name.encode());code.update(path.read_bytes())
-    return dict(format=1,source=source.hexdigest(),code=code.hexdigest(),
+    return dict(format=2,source=source,code=code.hexdigest(),
                 configuration=digest(plain(config.data)),goals=digest(goals),settings=settings,
                 database=str(config.database.resolve()),config_path=str(config.source_path))
 

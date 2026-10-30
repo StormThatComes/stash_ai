@@ -67,8 +67,10 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
         counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
         try:
             from .publication_queue import current,acknowledge
-            from .publication_queue import snapshot,validate,body_policy
-            captured,desired,signature=snapshot(db,scope,namespace,scene,config)
+            from .publication_queue import validate,body_policy
+            from .publication_snapshot import Snapshot
+            snapshot_reader=Snapshot(db,scope,namespace,scene,config)
+            captured,desired,signature=snapshot_reader.read()
             if captured['scan']!=scan or desired!=accepted:
                 raise ValueError('Rebuilt recognition results disagree with current scene decisions.')
             queued=current(db,scope,namespace,scene)
@@ -76,7 +78,7 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             entry=dict(captured,people=desired,signature=signature,revision=revision,
                        policy=matching_policy(config),body=body_policy(config))
             def check():
-                validate(db,scope,namespace,entry,config=config)
+                validate(db,scope,namespace,entry,config=config,snapshot_reader=snapshot_reader)
                 if guard is not None:guard(item)
             check()
             from .publication_batch import ensure_people,publish_people

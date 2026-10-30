@@ -48,7 +48,9 @@ def execute(args,config,*,services=None):
                         try:
                             from .scene_sync import reconcile_unlinks,reconcile_legacy_merges
                             with database.connection:adopt(database.connection,scope,model_namespace,config,entry)
-                            validate(database.connection,scope,model_namespace,entry,config=config)
+                            from .publication_snapshot import Snapshot
+                            snapshot_reader=Snapshot(database.connection,scope,model_namespace,entry['scene'],config)
+                            validate(database.connection,scope,model_namespace,entry,config=config,snapshot_reader=snapshot_reader)
                             reconcile_legacy_merges(database,client,scope,[entry['scene']])
                             reconcile_unlinks(database,client,scope,entry['scene'])
                         except Exception as error:
@@ -58,7 +60,7 @@ def execute(args,config,*,services=None):
                             progress.advance(failed=counts['people_failed']);continue
                         item=dict(scene=entry['scene'],scan=entry['scan'])
                         groups={item['scan']:[dict(person=p,status='accepted',observations=0) for p in entry['people']]}
-                        def guard(_item):validate(database.connection,scope,model_namespace,entry,config=config)
+                        def guard(_item):validate(database.connection,scope,model_namespace,entry,config=config,snapshot_reader=snapshot_reader)
                         _publish_selection(database,client,report,config,scope,model_namespace,[item],groups,{},counts,
                                            api_key,run,progress,guard=guard)
                 if counts['scenes_blocked'] or counts['people_failed']:outcome='partial'

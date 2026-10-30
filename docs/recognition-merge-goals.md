@@ -852,3 +852,18 @@ speedup on a real library. In the recorded comparison both modes fully solved
 five cases; the missing-body case remained partial. TPE did not improve the first
 solution count on these fixtures, so it remains opt-in. See
 `benchmarks/results/merge_solver_comparison.json` for measured counts and timing.
+
+
+Checkpoint input signatures cover all retained scan versions in the selected
+recognizer scope, face/body measurements, membership and role history, original
+ownership, aliases, referenced pixel thumbnails and current-scan heads. Portrait
+crops, run/publication journals and evidence from other scopes are excluded.
+Configuration, goals, solver settings and implementation code remain part of the
+compatibility signature; checkpoints from earlier code require a fresh solve.
+
+Optional shared numerical cache failures fall back to the computed exact result
+and increment `shared_numeric_errors`. Typed resource-limit failures remain
+failed trials, including across process boundaries; invalid evidence is not
+classified by matching words in an exception message. Enabled prefetch reserves
+both current and pending scene vectors under the shared working budget before
+allocating them.

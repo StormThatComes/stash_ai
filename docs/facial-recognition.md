@@ -2686,3 +2686,12 @@ when zero); the existing JPEG owner can overlap preparation for the next target.
 All original observations remain eligible for ranking, including after a crop fails.
 
 For the stacked recovery and throughput changes, see [recognition-sixth-series.md](recognition-sixth-series.md).
+
+
+Publication validates a frozen scene certificate before each guarded action.
+Repeated checks reuse its vector digest only while audited scene generations,
+current scan, identity ownership/tokens and body addresses still match. Profile
+binding and publication journal writes do not rescan every embedding. Evidence
+changes, writes through another database connection or executable schema changes
+require fresh validation; a certificate is never advanced after a changed or
+rolled-back generation.
