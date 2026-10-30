@@ -69,9 +69,9 @@ def test_support_counts_cues_and_deduplicates_pixels_regardless_of_seconds(tmp_p
     rows=[dict(id=str(i),scan=s,cue=cue,seconds=0,quality=encoded({'quality':{'pixel_digest':pixels}}))
           for i,(s,cue,pixels) in enumerate([('s',0,'a'),('s',0,'b'),('s',1,'c'),
                                             ('s',2,'a'),('t',0,'d')])]
-    assert [r['id'] for r in independent(rows,p)]==['0','2','4']
+    assert [r['id'] for r in independent(rows,p)]==['1','2','3','4']
     for i,row in enumerate(rows):row['seconds']=100-i*10
-    assert [r['id'] for r in independent(reversed(rows),p)]==['0','2','4']
+    assert [r['id'] for r in independent(reversed(rows),p)]==['1','2','3','4']
 
 
 def test_perceptual_deduplication_remains_separate_from_cue_support(tmp_path):

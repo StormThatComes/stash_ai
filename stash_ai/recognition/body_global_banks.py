@@ -36,7 +36,8 @@ def banks(db,config,scope,namespace):
         witnesses=independent(rows,settings)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
         if not selected and rows:selected=rows[:1]
-        core=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in witnesses]
+        # Deduplication controls support, never an outlier's veto authority.
+        core=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows]
         by_id={r['id']:r for r in core}
         refs=[by_id[r['id']] for r in selected]
         output[person]=dict(refs=refs,cores=[core],missing_original=False,support=len(witnesses),
@@ -63,8 +64,8 @@ def banks(db,config,scope,namespace):
         if proof.get('provisional_confirmation'):
             confirmation_witnesses[target].update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
         for owner,ids in proof.get('cores',{}).items():
-            if not proof.get('complete_body_witnesses'):
-                # Before complete proofs, only the capped core was persisted.
+            if proof.get('body_witness_format',0)<2:
+                # Earlier proofs retained a capped or independence-filtered core.
                 # Original anchor roles remain in attachment decision payloads.
                 extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b '
                     'JOIN body_members m ON m.observation=b.id WHERE b.contract IN (SELECT value FROM json_each(?)) '

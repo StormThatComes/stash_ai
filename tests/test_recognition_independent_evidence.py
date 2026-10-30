@@ -136,7 +136,7 @@ def test_alias_scope_matches_replay_without_writing_source(tmp_path):
     finally:db.close()
 
 
-def test_hybrid_body_votes_use_verified_compression_aliases(tmp_path):
+def test_face_compression_aliases_do_not_deduplicate_body_votes(tmp_path):
     from tests.test_recognition_merge_report import seeded
     from tests.test_recognition_hybrid_recovery import enable
     from stash_ai.recognition.database import FaceDatabase
@@ -153,5 +153,5 @@ def test_hybrid_body_votes_use_verified_compression_aliases(tmp_path):
         db.commit();before=db.total_changes
         ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
         identities=catalogue(db,config,'scope',ns)
-        assert all(len(i.independent)==1 for i in identities)
+        assert all(len(i.independent)==3 for i in identities)
         assert db.total_changes==before

@@ -28,6 +28,7 @@ class Identity:
     guard_person_observations: tuple = ()
     guard_face_missing: tuple = ()
     query_cores: tuple = ()
+    query_core_modes: tuple = ()
     body_modes: tuple = ()
     body_witness_observations: tuple = ()
     unsupported_body_modes: bool = False

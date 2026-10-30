@@ -21,18 +21,19 @@ def _recover(database, selected, config, *, births=()):
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     identities=catalogue(db,config,scope,namespace)
     settings=config.data['sapiensid']['matching']
-    banks=[]
+    banks=[];core_modes={}
     for identity in identities:
         cores=[(identity.observations,identity.faces,identity.persons)]+list(identity.query_cores)
         for ids,faces,bodies in cores:
             if len(faces):banks.append((identity,Group(identity.person,list(faces),True,ids),bodies,faces))
+        core_modes.update((id(core[2]),modes) for core,modes in zip(identity.query_cores,identity.query_core_modes))
     groups=[group for _,group,_,_ in banks]
     from .hybrid_query_index import QueryIndex
     index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
     from .hybrid_query_observer import query_observer, query_decision
     observe=query_observer(db,banks,config,births,selected)
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
-    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
+    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,e.metadata AS person_metadata,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
         " LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? AND e.status='ready' "
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
@@ -61,7 +62,7 @@ def _recover(database, selected, config, *, births=()):
             face_choices.append((f['mean'],identity.person,admissible,group))
             if body is None:continue
             from .hybrid_modes import query_score
-            modes=identity.body_modes if bodies is identity.persons else ()
+            modes=identity.body_modes if bodies is identity.persons else core_modes.get(id(bodies),())
             measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
@@ -89,7 +90,9 @@ def _recover(database, selected, config, *, births=()):
                    reference_role='attachment',reference_selected=False,
                    body_mode=query_modes.get((owner,id(group))) if signal=='face_and_body' else None,
                    independent_query_support=None)
-        vote={k:row[k] for k in ('scan','seconds','quality')}
+        from .independent_evidence import body_vote
+        vote=(body_vote(row) if signal=='face_and_body' else
+              {k:row[k] for k in ('scan','seconds','quality')})
         used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
         if used>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID query plan_bytes budget exceeded.')

@@ -8,12 +8,26 @@ from .run_cache import metadata
 
 
 def stamp(row):
-    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person':
+    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person' and 'cue' in row.keys():
         return row['scan'],('cue',row['cue'])
     return row['scan'],row['seconds']
 
 
 def unit(row):
+    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person':
+        # Body pixels have their own namespace. A face crop (or its alias)
+        # neither confirms nor deduplicates the person encoder's input.
+        try:
+            projection='person_metadata' in row.keys()
+            raw=row['person_metadata'] if projection else row['quality'] if 'quality' in row.keys() else '{}'
+            record=metadata(raw) if isinstance(raw,str) else raw
+            value=record.get('quality',{}).get('pixel_digest')
+            # Solver goals historically flattened a *typed body* fingerprint.
+            # Projection rows must never fall back to their face's quality.
+            if not projection and not value:value=record.get('evidence_pixel_sha256')
+            if isinstance(value,str) and value:return 'person_pixels',value
+        except (ValueError,TypeError,AttributeError):pass
+        return ('person',*stamp(row))
     if 'quality' in row.keys():
         try:
             record = metadata(row['quality'])
@@ -26,8 +40,14 @@ def unit(row):
                 return row['scan'], 'pixels', value
         except (ValueError, TypeError, AttributeError):
             pass
-    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person':return row['scan'],'cue',row['cue']
     return row['scan'], 'time', row['seconds']
+
+
+def body_vote(row):
+    """Project a body observation or a face-associated body onto physical votes."""
+    result={k:row[k] for k in ('id','scan','cue','seconds','quality','person_metadata') if k in row.keys()}
+    result['evidence_kind']='person'
+    return result
 
 
 class Votes:

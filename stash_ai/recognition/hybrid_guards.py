@@ -29,7 +29,7 @@ def retain(db,config,scope,namespace,identities):
         for pair in proof['proofs']:
             for observations in pair['observations']+pair.get('guard_observations',[]):
                 guards[root].update(observations)
-            body_groups=pair.get('person_observations') or pair['observations']
+            body_groups=pair.get('body_witness_observations') or pair.get('person_observations') or pair['observations']
             for face_ids,person_ids in zip(pair['observations'],body_groups):
                 core_ids[root].add((tuple(face_ids),tuple(person_ids)))
             for observations in pair.get('body_witness_observations',body_groups)+pair.get('guard_person_observations',pair.get('guard_observations',[])):
@@ -54,9 +54,9 @@ def retain(db,config,scope,namespace,identities):
         faces=[];persons=[];missing=[];face_missing=[]
         face_map=dict(zip(identity.observations,identity.faces))
         body_map=dict(zip(identity.person_observations,identity.persons))
-        wanted=sorted(set(ids)|set(body_ids))
+        wanted=sorted(set(ids)|set(body_ids)|set(identity.person_observations))
         retained={row['id']:row for row in db.execute(
-            'SELECT o.id,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding,e.metadata AS person_metadata FROM observations o '
+            'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding,e.metadata AS person_metadata FROM observations o '
             'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
             'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
             "WHERE o.id IN (SELECT value FROM json_each(?)) AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
@@ -79,21 +79,32 @@ def retain(db,config,scope,namespace,identities):
                 persons.append(person);used+=2*person.nbytes
                 # Original evidence keeps veto power even below today's size
                 # floor, but cannot become an anchor for query recovery.
-                if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible']:
+                if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
+                        collection=config.data['sapiensid']['collection'])['eligible']:
                     body_map[identifier]=person
             if used>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')
-        cores=[]
+        cores=[];core_modes=[]
         for face_ids,person_ids in sorted(core_ids[identity.person]):
             if not face_ids or any(i not in face_map for i in face_ids):continue
             # Keep original endpoint provenance; never pool unrelated cores.
-            admitted=[body_map[i] for i in person_ids if i in body_map]
+            from .independent_evidence import body_vote,Votes
+            from .hybrid_modes import body_modes
+            admitted=[i for i in person_ids if i in body_map and i in retained]
+            votes=Votes()
+            records=[]
+            for identifier in admitted:
+                row=body_vote(retained[identifier]);votes.add(row)
+                records.append(dict(row,embedding=body_map[identifier].tobytes()))
+            modes=(body_modes(records,config) if len(votes)>=config.data['sapiensid']['matching']['min_support']
+                   and not any(i in missing for i in person_ids) else ())
             cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),
-                          np.asarray(admitted) if admitted and not any(i in missing for i in person_ids) else np.empty((0,4096))))
-        used+=sum(f.nbytes+b.nbytes for _,f,b in cores)
+                          np.asarray([body_map[i] for i in admitted]) if modes else np.empty((0,4096))))
+            core_modes.append(modes)
+        used+=sum(f.nbytes+b.nbytes for _,f,b in cores)+sum(m.nbytes for modes in core_modes for m in modes)
         if used>config.data['sapiensid']['execution']['reference_bytes']:
             raise ValueError('SapiensID reference_bytes budget exceeded by query cores.')
-        result.append(replace(identity,guard_face_missing=tuple(face_missing),query_cores=tuple(cores),guard_observations=tuple(ids),guard_missing=tuple(missing),
+        result.append(replace(identity,guard_face_missing=tuple(face_missing),query_cores=tuple(cores),query_core_modes=tuple(core_modes),guard_observations=tuple(ids),guard_missing=tuple(missing),
             guard_faces=np.asarray(faces) if faces else None,guard_persons=np.asarray(persons) if persons else None,
             guard_person_observations=tuple(body_ids)))
     return tuple(result)
