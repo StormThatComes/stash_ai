@@ -44,3 +44,20 @@ Both addresses assigned consistently still contribute one vote; conflicting
 addresses contribute none. `identity` remains the default, and `strict` continues
 to require every original sample. JSON records `continuity: face_or_body`; strict
 sample diagnostics remain visible beside the identity objective.
+
+## Replay input cost and admission
+
+A report's scoped immutable disk snapshot is reused by its solver rather than
+copied again. `execution.replay_snapshot_bytes` (64 GiB by default) controls disk
+snapshot pages separately from `rebuild_memory_bytes`. Snapshot statistics are
+computed once, not by three table scans on every trial.
+
+Private trials keep only address/foreign-key skeletons for shared evidence;
+quality, geometry, vectors and images are read through immutable indexed views.
+Bulk preparation restores all dependency triggers and generations atomically.
+Scoped history relations are filtered by SQL instead of whole-table Python scans.
+
+When a source is available, solver admission uses conservative input-derived
+reference bounds while retaining both private SQLite RAM ceilings (trial history
+and inner production replay). The estimate is admission accounting, not a hard
+process RSS limit. Explicit production reference and page limits still apply.

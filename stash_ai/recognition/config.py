@@ -57,7 +57,7 @@ def defaults():
                       'sprite_cache_bytes': 1073741824, 'media_cache_bytes': 1073741824, 'portrait_ranking_cache_bytes': 16777216, 'prefetch_scene_depth': 3,
                       'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
-                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592},
+                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592, 'replay_snapshot_bytes': 68719476736},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
     }
@@ -235,7 +235,7 @@ def validate(data):
                       'scan_cpu_workers': (1,32), 'scan_queue_bytes': (65536,4294967296), 'recognizer_batch_size': (1,32),
                       'sprite_cache_bytes': (0,68719476736), 'media_cache_bytes': (0,68719476736), 'portrait_ranking_cache_bytes': (0,68719476736), 'prefetch_scene_depth': (1,16),
                       'rebuild_cache_bytes': (0,68719476736), 'rebuild_matrix_cache_bytes': (0,68719476736),
-                      'rebuild_checkpoint_scenes': (0,1000000), 'rebuild_checkpoint_bytes': (1048576,8589934592), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'rebuild_memory_bytes': (1048576, 1099511627776), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
+                      'rebuild_checkpoint_scenes': (0,1000000), 'rebuild_checkpoint_bytes': (1048576,8589934592), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'rebuild_memory_bytes': (1048576, 1099511627776), 'replay_snapshot_bytes': (1048576, 1099511627776), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
     }
     for section, fields in integers.items():

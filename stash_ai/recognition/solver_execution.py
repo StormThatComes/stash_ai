@@ -17,12 +17,13 @@ class Execution:
     trial_bytes: int
     profile: bool = False
     scheduling: str = 'batch'
+    shared_input_bytes: int = 0
 
     def document(self):
         return asdict(self)
 
 
-def plan(config, options=None):
+def plan(config, options=None, *, source=None, scope=None, namespace=None):
     options = dict(options or {})
     allowed = {'cpus', 'trials', 'memory_bytes', 'profile', 'scheduling'}
     if options.keys() - allowed:
@@ -36,11 +37,31 @@ def plan(config, options=None):
     cpus = min(requested, available)
     trials = min(trials, cpus)
     settings = config.data['execution']
-    # Include both replay databases and separate reference/plan ceilings.
+    # Trial history and the inner production scene replay both have hard RAM
+    # page ceilings. Immutable source evidence lives on shared disk separately.
     # This is admission accounting, not a promise about total process RSS.
     person = config.data['sapiensid']['execution']
-    trial_bytes = (2 * settings['rebuild_memory_bytes'] + config.data['clustering']['max_reference_bytes']
-                   + person['reference_bytes'] + person['plan_bytes'] + settings['rebuild_queue_bytes'])
+    shared = 0
+    face_bound = config.data['clustering']['max_reference_bytes']
+    body_bound = person['reference_bytes']
+    if source is not None:
+        rows = 0
+        for table in ('observations', 'body_observations'):
+            if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                amount, count = source.execute(f'SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(quality)+length(geometry)),0),COUNT(*) '
+                    f'FROM {table} WHERE scan IN (SELECT id FROM scans WHERE scope=? AND namespace=?)', (scope, namespace)).fetchone()
+                shared += amount; rows += count
+        if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_evidence'").fetchone():
+            amount, count = source.execute('SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(metadata)),0),COUNT(*) '
+                'FROM person_evidence WHERE observation IN (SELECT o.id FROM observations o JOIN scans s ON s.id=o.scan '
+                'WHERE s.scope=? AND s.namespace=?)', (scope, namespace)).fetchone()
+            shared += amount; rows += count
+        # Bound materialized vectors, metadata and Python wrappers conservatively.
+        evidence_bound = 16*shared + 4096*rows + 4*1024**2
+        face_bound = min(face_bound, evidence_bound)
+        body_bound = min(body_bound, evidence_bound)
+    trial_bytes = (2 * settings['rebuild_memory_bytes'] + face_bound + body_bound
+                   + person['plan_bytes'] + settings['rebuild_queue_bytes'])
     memory = options.get('memory_bytes', trial_bytes * trials)
     if type(memory) is not int or memory < trial_bytes:
         raise ValueError(f'Solver memory_bytes must admit one trial ({trial_bytes} bytes).')
@@ -51,7 +72,7 @@ def plan(config, options=None):
         raise ValueError('Solver profile must be boolean; scheduling must be batch or async.')
     # Reserve one coordinator CPU inside each trial's allocation when possible.
     inner = max(1, cpus // trials - 1)
-    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling)
+    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared)
 
 
 def current():
