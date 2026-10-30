@@ -50,7 +50,21 @@ def test_inconclusive_certificate_cannot_hide_original_outlier_or_threshold_edge
     with FaceDatabase(config.database) as state:
         item,ids=scene(state.connection,config,vectors=vectors)
         _,_,result=scene_plan(state.connection,item['scan'],config)
-        assert result[ids[-1]]['status']=='withheld'
+        with patch.object(Scores,'certifies',return_value=False):
+            exact=scene_plan(state.connection,item['scan'],config)[2]
+        assert result==exact
+        # A failed complete-link edge seeds a separate provisional core so it
+        # remains visible to later competition; it cannot join the first core.
+        outlier=result[ids[-1]]
+        assert outlier['status']=='provisional'
+        assert outlier['person'] is not None and outlier['person']!=result[ids[0]]['person']
+        assert outlier['independent_support']==1
+        from stash_ai.recognition.body_identity import rebuild
+        from stash_ai.recognition.publication_queue import snapshot
+        state.connection.commit()
+        published=rebuild(state,[item],config,{item['scan']:[]})
+        assert all(group['status']=='withheld' for group in published[item['scan']])
+        assert snapshot(state.connection,'scope','ns',item['scene'],config)[1]==[]
     scores=Scores(config)
     sample=dict(id='a',quality='{}',_vector=np.array([1,0],dtype='float32'))
     query=dict(id='b',quality='{}',_vector=np.array([.85,math.sqrt(1-.85**2)],dtype='float32'))
