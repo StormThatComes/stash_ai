@@ -159,7 +159,10 @@ def _recover(database, selected, config, *, births=()):
 
 def recover(database, selected, config, *, births=()):
     from .evidence_pixels import alias_scope
-    with alias_scope(database.connection):
+    if not selected:return 0
+    context=database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
+    if context is None:raise ValueError('Missing selected recognition scan.')
+    with alias_scope(database.connection,*context,budget=config.data['clustering']['max_reference_bytes']):
         return _recover(database, selected, config, births=births)
 
 

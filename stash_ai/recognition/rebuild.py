@@ -398,11 +398,11 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
-    if selected and config.data['sapiensid']['enabled']:
-        first=database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
-        if first is not None:
-            from .incomplete_rivals import require_complete
-            require_complete(database.connection,*first)
+    first=(database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',
+           (selected[0]['scan'],)).fetchone() if selected else None)
+    if first is not None and config.data['sapiensid']['enabled']:
+        from .incomplete_rivals import require_complete
+        require_complete(database.connection,*first)
     from .rebuild_transaction import atomic
     with atomic(database), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
@@ -410,7 +410,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
         selected=expand(database.connection,selected,config)
         while True:
             excluded=set()
-            with alias_scope(database.connection,budget=config.data['clustering']['max_reference_bytes'],persist=True):
+            with alias_scope(database.connection,*(first or (None,None)),budget=config.data['clustering']['max_reference_bytes'],persist=True):
                 for attempt in range(2):
                     try:
                         from .hybrid_merge import rebuild as hybrid_rebuild

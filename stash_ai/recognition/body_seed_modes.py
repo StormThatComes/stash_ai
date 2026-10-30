@@ -9,6 +9,8 @@ class FrozenSeeds:
         for person,rows in seeds.items():
             modes=[]
             for row in rows:
+                if len(modes)==1 and scores.certifies(row,modes[0],threshold):
+                    modes[0].append(row);continue
                 compatible=[m for m in modes if scores.compare([row],m)[1]>=threshold]
                 if len(compatible)==1:compatible[0].append(row)
                 else:modes.append([row])
