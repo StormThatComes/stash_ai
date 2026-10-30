@@ -120,6 +120,23 @@ def test_offline_and_relative_asset_directory(tmp_path, monkeypatch):
     assert vitpose_pose.assets(config) == directory
 
 
+@pytest.mark.parametrize('missing_module', ['scipy.linalg', 'scipy.ndimage'])
+def test_missing_scipy_fails_before_downloading_models(tmp_path, monkeypatch, missing_module):
+    import builtins
+    original_import = builtins.__import__
+    def without_scipy(name, *args, **kwargs):
+        if name == missing_module:
+            raise ModuleNotFoundError(f"No module named '{name}'", name=name)
+        return original_import(name, *args, **kwargs)
+    def unexpected_download(_):
+        pytest.fail('Missing dependencies must be reported before model downloads')
+    monkeypatch.setattr(builtins, '__import__', without_scipy)
+    monkeypatch.setattr(vitpose_pose, 'assets', unexpected_download)
+    with pytest.raises(RuntimeError, match='requires SciPy.*install requirements-sapiensid.txt') as caught:
+        vitpose_pose.load(configuration(tmp_path), 'cpu')
+    assert isinstance(caught.value.__cause__, ModuleNotFoundError)
+
+
 def test_refiner_batches_coco_expert_and_preserves_labels_and_image_coordinates():
     torch = pytest.importorskip('torch')
     from transformers import BatchFeature

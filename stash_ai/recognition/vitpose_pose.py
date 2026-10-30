@@ -23,6 +23,14 @@ def assets(config):
 
 
 def load(config, device):
+    # Transformers imports these conditionally, then uses them unconditionally
+    # during affine crops/heatmap decoding. Check before downloading any assets.
+    try:
+        import scipy.linalg
+        import scipy.ndimage
+    except ImportError as error:
+        raise RuntimeError('ViTPose++ Large requires SciPy for image preprocessing and pose decoding; '
+                           'install requirements-sapiensid.txt in the CPU/GPU environment.') from error
     try:
         from transformers import VitPoseConfig, VitPoseImageProcessor, VitPoseForPoseEstimation
     except ImportError as error:
