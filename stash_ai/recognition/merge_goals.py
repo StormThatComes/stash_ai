@@ -101,7 +101,8 @@ def execute(args, config):
     from .merge_solver_checkpoint import winner_file
     writer=winner_file(args.yaml_output,resume=resume) if args.solve else None
     sets = args.performer_set or [args.performer_id or args.identity_id]
-    with closing(_open_readonly(config.database)) as db:
+    from .report_snapshot import snapshot
+    with snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
                          policy=getattr(args, 'goal_policy', 'identity'),
                          scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
@@ -324,32 +325,9 @@ def unmet_conditions(status):
 
 
 def fingerprint(db, config, scope):
-    """Hash retained numerical inputs and bindings without materializing a second corpus."""
-    import hashlib
-    from .config import digest
-    from .scan_heads import predicate as current_scan
-    value = hashlib.sha256()
-    for sql in (
-        'SELECT s.* FROM scans s WHERE s.scope=? AND s.namespace=? ORDER BY s.id',
-        'SELECT s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND '+current_scan()+' ORDER BY s.id',
-        'SELECT o.id,o.scan,o.quality,o.rejected,o.embedding,m.person FROM observations o JOIN scans s ON s.id=o.scan LEFT JOIN members m ON m.observation=o.id WHERE s.scope=? AND s.namespace=? ORDER BY o.id',
-        'SELECT id,created,performer FROM people WHERE scope=? AND namespace=? ORDER BY id'):
-        for row in db.execute(sql, (scope, namespace(config))):
-            value.update(digest([v.hex() if isinstance(v, bytes) else v for v in row]).encode())
-    from .person_signal import available
-    if available(db):
-        for row in db.execute('SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '
-                'JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan '
-                'WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract',(scope,namespace(config))):
-            value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
-    from .body_identity import available as bodies_available
-    if bodies_available(db):
-        for sql in (
-            'SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.quality,b.rejected,b.embedding,m.person,m.role,m.status,m.policy,m.proof FROM body_observations b JOIN scans s ON s.id=b.scan LEFT JOIN body_members m ON m.observation=b.id WHERE s.scope=? AND s.namespace=? ORDER BY b.id',
-            'SELECT c.* FROM body_cues c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=? ORDER BY c.scan,c.contract,c.cue'):
-            for row in db.execute(sql,(scope,namespace(config))):
-                value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
-    return value.hexdigest()
+    """Use the same complete scoped input contract as replay checkpoints."""
+    from .replay_signature import fingerprint as replay_fingerprint
+    return replay_fingerprint(db, scope, namespace(config))
 
 
 def goal_diagnostics(status):

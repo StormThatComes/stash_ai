@@ -76,10 +76,16 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
         if current is not None:
             options['clustering.'+key] = [current/2, current] if 'pose' not in key else [current, min(1.,current+.1)]
     from .merge_solver_hybrid import analyse
-    analysis = analyse(db, config, goals)
+    from .solver_measurement_budget import settings as diagnostic_settings, measure
+    diagnostic = diagnostic_settings(config)
+    diagnostic_coverage = {'hybrid': {}, 'body': {}}
+    analysis = measure(lambda: analyse(db, diagnostic, goals),
+        dict(enabled=False, options={}, proposals=[], pairs=[]), diagnostic_coverage['hybrid'])
     analysis['face_measurement_coverage'] = coverage
     from .body_solver import analyse as body_analyse
-    bodies=body_analyse(db,config,goals,frozen_goals=frozen_goals)
+    bodies=measure(lambda: body_analyse(db,diagnostic,goals,frozen_goals=frozen_goals),
+        dict(evidence=dict(enabled=False,pairs=[]), options={},proposals=[],quality=[]), diagnostic_coverage['body'])
+    analysis['measurement_coverage'] = diagnostic_coverage
     analysis['independent_person']=bodies['evidence']
     analysis['options'].update(bodies['options'])
     analysis['proposals']=bodies['proposals']+analysis['proposals']
@@ -541,7 +547,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if progress:progress(name, stage, item)
     trial_progress.telemetry_enabled = progress is not None
     def trial_error(name, settings, exc, stage):
-        if name == 'baseline' or not resource_limit(exc) or (not runtime and origins.get(name, {}).get('search_phase') != 'feasibility'):
+        if name == 'baseline' or not resource_limit(exc):
             return None
         query_feedback.reset()
         if probe_state is not None and not (runtime and runtime.trials > 1):
