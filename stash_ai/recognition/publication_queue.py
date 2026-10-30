@@ -17,6 +17,23 @@ from .scan_heads import predicate as current_scan
 PREFIX='identity-publication:'
 
 
+def debt(db,scope,namespace,selected=(),*,limit=50):
+    """Cheap, bounded inventory of durable requests; no evidence reads or HTTP."""
+    chosen=set(selected);inside=outside=0;examples=[]
+    for row in db.execute('SELECT value FROM metadata WHERE key LIKE ? ORDER BY key',(PREFIX+'%',)):
+        value=json.loads(row[0])
+        if value.get('scope')!=scope or value.get('namespace')!=namespace:continue
+        scene=value.get('scene')
+        if scene in chosen:inside+=1
+        else:
+            outside+=1
+            if len(examples)<limit:examples.append(scene)
+    return dict(pending_selected=inside,pending_outside_selection=outside,
+                outside_scene_ids=sorted(examples,key=int),truncated=outside>len(examples),
+                next_step='recognition sync-identities' if inside+outside else None,
+                source='durable_publication_queue')
+
+
 def key(scope,namespace,scene):
     return PREFIX+digest([scope,namespace,scene])
 

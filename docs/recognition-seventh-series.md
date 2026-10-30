@@ -111,3 +111,30 @@ Validation: 70 existing scan/collection/run/ViTPose tests; three new tests exerc
 exact Detect/Pose box parity on real Torch modules, cross-frame ViTPose mapping,
 and durable scan checkpoints after queued cues. No GPU throughput claim is made;
 production GPU benchmarking remains dependent on the deployment hardware.
+
+## PR7 — reporting and observability (6, 11, 27, 28, 29, 30)
+
+Solver initialization, serial baseline and serial trials emit periodic liveness
+snapshots, including blocking native/SQLite work. Heartbeats preserve the actual
+last-update and last-completion times. `--progress-style off` remains silent.
+`--profile-solver` includes replay input preparation, trial metadata preparation,
+rebuild, prediction collection, feedback, coordinator scoring and journal timing;
+RSS is explicitly a process lifetime high water mark, not per-trial allocation.
+
+Pair reports without `--simulate` do not run production replays. Face routes keep
+their frozen-catalogue checks; body proposals are separately marked measured and
+unverified. `--simulate` verifies the combined proposals in one replay invocation,
+with one baseline and each unique configuration once. JSON exposes verification
+scope and replay count. This is an intentional cost/verification contract change.
+
+Hybrid progress counts nominated pairs with an unknown total instead of dividing
+by all theoretical pairs. Global body progress counts completed matrix tiles with
+the exact active-tile total. Input body reference eligibility and rejection
+reasons are reported separately from legacy counts grouped by face roles.
+Recognition summaries expose durable publication debt inside/outside the explicit
+selection, a bounded scene example list and the `sync-identities` next step.
+Publication scope remains explicit; observability never adds HTTP writes.
+
+Regression checks include short and blocked stages, unchanged completion clocks,
+no replay in plain body reports, no duplicate simulation baseline, body quality
+roles, read-only bounded publication debt, and complete trial-stage profiles.

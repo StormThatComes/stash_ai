@@ -65,7 +65,7 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
                     excluded.append(item)
                     continue
             kept.append(item)
-            item['observations'] = [{k:r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state','evidence_kind')} for r in rows]
+            item['observations'] = [{k:r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state','evidence_kind','body_role','body_reason')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
             set_rows.extend(rows)
@@ -109,11 +109,15 @@ def execute(args, config):
     writer=winner_file(args.yaml_output,resume=resume) if args.solve else None
     sets = args.performer_set or [args.performer_id or args.identity_id]
     from .report_snapshot import snapshot
-    with snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None) as db:
-        result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
-                         policy=getattr(args, 'goal_policy', 'identity'),
-                         scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
-        result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
+    from contextlib import ExitStack
+    from .solver_progress import startup
+    with ExitStack() as snapshots:
+        with startup(args):
+            db = snapshots.enter_context(snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None))
+            result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
+                             policy=getattr(args, 'goal_policy', 'identity'),
+                             scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
+            result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
             from .merge_goal_output import group_summary_lines

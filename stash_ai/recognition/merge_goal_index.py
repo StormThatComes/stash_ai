@@ -67,11 +67,19 @@ def solver_scope(function):
     def wrapped(config, goals, *args, **kwargs):
         from .run_cache import scope
         from .solver_execution import plan, scope as execution_scope
-        execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
-                         scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
+        from .solver_progress import heartbeat
+        from .trial_metrics import Metrics
+        metrics = Metrics(bool((kwargs.get('execution') or {}).get('profile')))
+        with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):
+            execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
+                             scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
         from .solver_journal_events import journal_scope
-        with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
-            return function(config, goals, *args, **kwargs)
+        with metrics.stage('Solve and finalize journal'):
+            with journal_scope(), execution_scope(execution), scope(config), prepared(goals):
+                result = function(config, goals, *args, **kwargs)
+        if metrics.enabled:
+            result['performance'] = metrics.snapshot()
+        return result
     return wrapped
 
 

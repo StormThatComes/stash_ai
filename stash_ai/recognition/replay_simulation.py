@@ -85,6 +85,16 @@ def replay(config, variants, **kwargs):
         return _replay(config,variants,**kwargs)
 
 
+@contextmanager
+def prepared_replay(db, config, scope, ns, installation, reuse_history, progress):
+    from contextlib import ExitStack
+    from .solver_progress import heartbeat
+    with ExitStack() as stack:
+        with heartbeat('initialization', progress, 'Prepare immutable replay inputs'):
+            seed = stack.enter_context(prepared_history(db, config, scope, ns, installation)) if reuse_history else None
+        yield seed
+
+
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
             prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None):
@@ -132,10 +142,14 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
-        with (prepared_history(db, config, scope, ns, installation) if reuse_history else nullcontext(None)) as seed:
+        preparation_started = time.perf_counter()
+        with prepared_replay(db, config, scope, ns, installation, reuse_history, progress) as seed:
             from .solver_execution import current as solver_execution
             from .solver_pool import Trials
             runtime = solver_execution()
+            if runtime and runtime.profile:
+                result['performance'] = dict(input_preparation_seconds=time.perf_counter()-preparation_started,
+                                             consume_seconds=0.,journal_seconds=0.)
             context = dict(seed_path=seed.execute('PRAGMA database_list').fetchone()[2],
                 installation=installation, scans=scans, observations=observations) if parallel_request else None
             manager = Trials(runtime, parallel_request, context, journal, progress) if parallel_request else nullcontext(None)
@@ -216,16 +230,25 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
                             versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
                         if runtime and runtime.profile:
-                            item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started), rebuild=rebuild_metrics)
+                            item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started),
+                                rebuild=rebuild_metrics, trial=evaluated.get('trial_profile'))
+                            item['performance']['result_wait_seconds'] = max(0.,time.perf_counter()-evaluated.get('finished_monotonic_seconds',time.perf_counter()))
                         if runtime:
                             item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds') if k in evaluated}
                         if consume is not None:
+                            consume_started = time.perf_counter()
                             item.update(consume(name, observations, retained, predictions))
+                            if runtime and runtime.profile:
+                                result['performance']['consume_seconds'] += time.perf_counter()-consume_started
                         if evidence is not None:
                             item['decision_evidence'] = evidence
                         item['completed_wall_seconds'] = time.perf_counter()-wall_started
                         result['trials'][name] = item
-                        if record_trial:record_trial(name,settings,item,inputs)
+                        if record_trial:
+                            journal_started = time.perf_counter()
+                            record_trial(name,settings,item,inputs)
+                            if runtime and runtime.profile:
+                                result['performance']['journal_seconds'] += time.perf_counter()-journal_started
                         if progress:
                             progress(name, 'complete', item)
                 except KeyboardInterrupt:
@@ -241,7 +264,7 @@ def merge_impact(config, report, source):
     retained_totals = dict(source.execute('SELECT person,COUNT(*) FROM members GROUP BY person'))
     from .body_reports import members as body_members
     for person,count in Counter(body_members(source,config).values()).items():retained_totals[person]=retained_totals.get(person,0)+count
-    variants, names = {}, {}
+    variants, names = {}, {(): 'baseline'}
     for index, item in enumerate(report['recommendations']):
         changes = {r['parameter']: r['proposed'] for r in item['changes']}
         key = tuple(sorted(changes.items()))

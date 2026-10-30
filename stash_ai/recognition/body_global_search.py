@@ -162,17 +162,21 @@ class Search:
                 'SELECT vector FROM means WHERE ordinal>=? AND ordinal<? ORDER BY ordinal',(start,start+block))])
         from .parallel_numeric import matrix_tiles
         def inputs():
-            with tracking(range(0,count,block),'Compare global person means',unit='block') as starts:
-                for i in starts:
-                    left=read(i);left.flags.writeable=False
-                    for j in range(i,count,block):
-                        if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
-                        right=left if j==i else read(j)
-                        right.flags.writeable=False
-                        yield (i,j), ((left,right),)
-        for (i,j),(values,) in matrix_tiles(inputs(),kind='body_centroids'):
-            self.stats['centroid_pairs']+=(values.shape[0]*(values.shape[0]-1)//2 if i==j else values.size)
-            yield i,j,values
+            for i in range(0,count,block):
+                left=read(i);left.flags.writeable=False
+                for j in range(i,count,block):
+                    if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
+                    right=left if j==i else read(j)
+                    right.flags.writeable=False
+                    yield (i,j), ((left,right),)
+        blocks=(count+block-1)//block
+        inactive=(sum(not active[i:i+block].any() for i in range(0,count,block)) if active is not None else 0)
+        total=blocks*(blocks+1)//2-inactive*(inactive+1)//2
+        with tracking(matrix_tiles(inputs(),kind='body_centroids'), 'Compare global person means',
+                      unit='tile',total=total) as tiles:
+            for (i,j),(values,) in tiles:
+                self.stats['centroid_pairs']+=(values.shape[0]*(values.shape[0]-1)//2 if i==j else values.size)
+                yield i,j,values
 
     def nominations(self,focus):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']

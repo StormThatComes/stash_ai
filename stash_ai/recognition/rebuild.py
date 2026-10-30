@@ -426,6 +426,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
             expanded=expand(database.connection,selected,config)
             if len(expanded)==len(selected):
                 from .body_identity import rebuild as rebuild_bodies
+                database.last_rebuild_selection = [dict(item) for item in selected]
                 return rebuild_bodies(database,selected,config,result)
             selected=expanded
 
