@@ -14,7 +14,7 @@ from stash_ai.recognition.merge_goals import evaluate
 def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling, sampler):
     config, goals = fixture(tmp_path/'input', 'disjoint')
     checkpoint = tmp_path/'checkpoint.json'
-    execution = dict(cpus=4, trials=2, scheduling=scheduling, profile=True)
+    execution = dict(cpus=4, trials=2, scheduling=scheduling, profile=True, memory_bytes=128*1024**3)
     original = config.database.read_bytes()
     def interrupt(name, stage, item):
         if name == 'trial-2' and stage == 'complete':

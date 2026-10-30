@@ -1,10 +1,33 @@
 """Fingerprint the scoped retained inputs consumed by replay, without images."""
 import hashlib
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from .database import encoded
+
+_immutable = ContextVar('recognition_immutable_fingerprints', default=())
+
+
+@contextmanager
+def immutable_scope(db):
+    token = _immutable.set((*_immutable.get(), (db, {})))
+    try:
+        yield
+    finally:
+        _immutable.reset(token)
 
 
 def fingerprint(db, scope, namespace):
+    for connection, cache in reversed(_immutable.get()):
+        if connection is db:
+            key = (scope, namespace)
+            if key not in cache:
+                cache[key] = _fingerprint(db, scope, namespace)
+            return cache[key]
+    return _fingerprint(db, scope, namespace)
+
+
+def _fingerprint(db, scope, namespace):
     # Match copy_history: every version of a scoped scan can affect origin
     # precedence, current-head admission or an external historical rival.
     scan='SELECT id FROM scans WHERE scope=? AND namespace=?'

@@ -58,7 +58,9 @@ def prepared_history(db, config, scope, ns, installation):
             seed.executescript(SCHEMA)
             seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
             try:
-                copy_history(db, seed, [], scope, ns)
+                from .snapshot_import import bulk
+                with bulk(seed):
+                    copy_history(db, seed, [], scope, ns, commit=False)
             except sqlite3.OperationalError as error:
                 if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
                     raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error
@@ -74,7 +76,9 @@ def prepared_history(db, config, scope, ns, installation):
             seed.execute('PRAGMA query_only=ON')
             token = _prepared_sources.set((*_prepared_sources.get(), (seed, (scope, ns, installation))))
             try:
-                yield seed
+                from .replay_signature import immutable_scope
+                with immutable_scope(seed):
+                    yield seed
             finally:
                 _prepared_sources.reset(token)
 

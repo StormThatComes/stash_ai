@@ -63,3 +63,19 @@ Workers retain content-addressed numerical entries and the immutable goal index
 between trials. Membership, plans and database-dependent entries are discarded;
 a changed seed, goal object, execution contract or cache budget resets reuse.
 Targeted numerical, cache and parallel solver tests pass (33 tests).
+
+## Replay memory and preparation
+
+Automatic worker admission uses 80% of available RAM, including exposed cgroup
+limits. Configured ceilings are conservative rather than allocations: if even
+one ceiling exceeds available RAM, a serial trial is still allowed and that
+condition is explicitly reported. An explicit memory budget remains strict.
+Volatile available-memory readings do not invalidate a checkpoint when its
+effective worker plan stays the same.
+
+Inner solver replays now read embedding bytes from the immutable seed through
+indexed views, keeping quality, membership and other mutable metadata private.
+Independent lookahead readers install the same views. Ordinary live runs retain
+their copying path. Initial snapshot import suspends trusted destination triggers
+transactionally and restores them before publication. Source fingerprints are
+memoized only for the lifetime of a prepared, read-only snapshot.

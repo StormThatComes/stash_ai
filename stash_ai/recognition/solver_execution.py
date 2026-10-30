@@ -4,6 +4,7 @@ from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 import os
+from .available_memory import available as available_memory
 
 _active = ContextVar('solver_execution', default=None)
 
@@ -18,9 +19,19 @@ class Execution:
     profile: bool = False
     scheduling: str = 'batch'
     shared_input_bytes: int = 0
+    available_memory_bytes: int | None = None
+    memory_admission: str = 'explicit'
 
     def document(self):
         return asdict(self)
+
+    def signature(self):
+        result = self.document()
+        result.pop('available_memory_bytes')
+        if self.memory_admission.startswith('automatic'):
+            result.pop('memory_bytes')
+            result['memory_admission'] = 'automatic'
+        return result
 
 
 def plan(config, options=None, *, source=None, scope=None, namespace=None):
@@ -62,17 +73,22 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
         body_bound = min(body_bound, evidence_bound)
     trial_bytes = (2 * settings['rebuild_memory_bytes'] + face_bound + body_bound
                    + person['plan_bytes'] + settings['rebuild_queue_bytes'])
-    memory = options.get('memory_bytes', trial_bytes * trials)
-    if type(memory) is not int or memory < trial_bytes:
+    available_ram = available_memory() if 'memory_bytes' not in options else None
+    automatic = 'memory_bytes' not in options
+    memory = options.get('memory_bytes', max(1, available_ram*4//5) if available_ram is not None else trial_bytes*trials)
+    if type(memory) is not int or memory < 1 or (not automatic and memory < trial_bytes):
         raise ValueError(f'Solver memory_bytes must admit one trial ({trial_bytes} bytes).')
-    trials = min(trials, memory // trial_bytes)
+    # Configured ceilings are not allocations. Always allow a serial trial in
+    # automatic mode, but never multiply a ceiling exceeding available RAM.
+    trials = min(trials, max(1, memory // trial_bytes))
+    admission = ('automatic_serial_ceiling_exceeds_available' if memory < trial_bytes else 'automatic_available_memory') if automatic and available_ram is not None else ('automatic_memory_unavailable' if automatic else 'explicit')
     profile = options.get('profile', False)
     scheduling = options.get('scheduling', 'batch')
     if type(profile) is not bool or scheduling not in ('batch', 'async'):
         raise ValueError('Solver profile must be boolean; scheduling must be batch or async.')
     # Reserve one coordinator CPU inside each trial's allocation when possible.
     inner = max(1, cpus // trials - 1)
-    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared)
+    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared, available_ram, admission)
 
 
 def current():
