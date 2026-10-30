@@ -30,7 +30,8 @@ def defaults():
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
-                  nms_threshold=.7,max_people_per_frame=100),
+                  nms_threshold=.7,max_people_per_frame=100,backend='yolo',
+                  vitpose_directory='',batch_size=4),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,
                        max_candidate_pairs=100000,max_witness_comparisons=1000000),
@@ -40,6 +41,10 @@ def defaults():
 
 def validate(settings):
     from .config import _number
+    pose = settings['pose']
+    if pose['backend'] not in ('yolo', 'vitpose_plus_large'):
+        raise ValueError('sapiensid.pose.backend must be yolo or vitpose_plus_large.')
+    _number(pose['batch_size'], 'sapiensid.pose.batch_size', 1, 16, integer=True)
     collection=settings['collection']
     if type(collection['enabled']) is not bool:
         raise ValueError('sapiensid.collection.enabled must be boolean.')
@@ -102,7 +107,8 @@ def validate(settings):
             raise ValueError(f'sapiensid.{section}.{key} must be a positive integer.')
     if settings['execution']['batch_size']>16:
         raise ValueError('sapiensid.execution.batch_size must be in [1,16].')
-    for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
+    for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path'),
+                        ('pose','vitpose_directory')):
         value=settings[section][key]
         if not isinstance(value,str) or '\x00' in value or value and not value.strip():
             raise ValueError(f'sapiensid.{section}.{key} requires a local path.')
@@ -118,9 +124,14 @@ def contract(config,*,legacy_boundaries=False):
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
-        pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'})
+        pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items()
+              if k not in ('path','backend','vitpose_directory','batch_size')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
         evidence['pose_inference'] = POSE_INFERENCE
+    # Historical run snapshots predate this selector and always used YOLO.
+    if s['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
+        from .vitpose_registry import contract as vitpose_contract
+        evidence['pose_refiner'] = vitpose_contract()
     if variant=='wb4m' and model['sha256']==WB4M_SHA256:
         # Keep the historical format identifiable for conservative legacy rivals.
         evidence['format']='sapiensid-wb4m-person-v2' if legacy_boundaries else 'sapiensid-wb4m-person-v3'

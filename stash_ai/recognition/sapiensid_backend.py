@@ -12,6 +12,8 @@ CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
 
 def input_contract(config):
+    if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
+        return 'sapiensid-v1-vitpose-plus-large-coco17-face-anchor-square384-v1'
     checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
     if checksum == LEGACY_POSE_SHA256:
         return 'sapiensid-v1-yolov8-pose-face-anchor-square384-v3'
@@ -20,7 +22,7 @@ def input_contract(config):
 
 def identity_contract(config):
     settings = config.data['sapiensid']
-    return {'contract': input_contract(config), 'source_revision': UPSTREAM_COMMIT,
+    result = {'contract': input_contract(config), 'source_revision': UPSTREAM_COMMIT,
             'model_variant': settings['model']['variant'],
             'model_sha256': MODELS[settings['model']['variant']]['sha256'],
             'model_yaml_sha256': settings['model']['model_yaml_sha256'],
@@ -30,13 +32,17 @@ def identity_contract(config):
             'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
             'person_nms_threshold': settings['pose']['nms_threshold'],
             'max_people_per_frame': settings['pose']['max_people_per_frame']}
+    if settings['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
+        from .vitpose_registry import contract as vitpose_contract
+        result['pose_refiner'] = vitpose_contract()
+    return result
 
 
 def association_choices(faces, people):
     """Require unique face -> person and person -> face head-region membership.
 
     Person boxes alone overlap too often to establish ownership. At least one
-    measured YOLO nose/eye must fall inside the face box. Ambiguity is withheld;
+    measured pose nose/eye must fall inside the face box. Ambiguity is withheld;
     neither detector confidence nor ordering breaks a cross-person tie.
     """
     choices = []
@@ -71,7 +77,7 @@ class SapiensIDFaces(YuNetDetector):
     dimensions = EMBEDDING_DIMENSIONS
 
     def __init__(self, config, paths, *, load_identity=True, load_detector=True):
-        self.encoder = self.pose = None
+        self.encoder = self.pose = self.pose_refiner = None
         self._person_frame = None
         self.owner = get_ident()
         try:
@@ -86,6 +92,9 @@ class SapiensIDFaces(YuNetDetector):
                 self.encoder = load_encoder(config)
             self.device = str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
             self.pose = load_pose(config)
+            if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
+                from .vitpose_pose import load
+                self.pose_refiner = load(config, self.device)
             self.provenance['recognizer'] = identity_contract(config)
         except BaseException:
             self.close()
@@ -116,25 +125,42 @@ class SapiensIDFaces(YuNetDetector):
             import numpy as np
             boxes = result.boxes.xyxy.detach().cpu().numpy()
             scores = result.boxes.conf.detach().cpu().numpy()
-            points = result.keypoints.xy.detach().cpu().numpy()
-            confidences = result.keypoints.conf.detach().cpu().numpy()
-            if (boxes.shape != (len(scores), 4) or points.shape != (len(scores), 17, 2) or
-                    confidences.shape != (len(scores), 17) or any(not np.isfinite(a).all() for a in (boxes,scores,points,confidences)) or
-                    np.any((scores < 0) | (scores > 1)) or np.any((confidences < 0) | (confidences > 1))):
+            if (scores.ndim != 1 or boxes.shape != (len(scores), 4)
+                    or any(not np.isfinite(a).all() for a in (boxes, scores))
+                    or np.any((scores < 0) | (scores > 1))):
                 raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
             if len(boxes) > settings['pose']['max_people_per_frame']:
                 raise ValueError('SapiensID pose detector exceeded the configured result count.')
-            for box, score, kps, confidence in zip(boxes, scores, points, confidences):
+            selected, bounds = [], []
+            for index, (box, score) in enumerate(zip(boxes, scores)):
                 if score <= settings['pose']['score_threshold']:
                     continue
                 left, top = max(0, math.floor(box[0])), max(0, math.floor(box[1]))
                 right, bottom = min(image.width, math.ceil(box[2])), min(image.height, math.ceil(box[3]))
                 if left >= right or top >= bottom:
                     raise ValueError('SapiensID pose detector returned an empty person box.')
+                selected.append(index)
+                bounds.append([left, top, right, bottom])
+            if self.pose_refiner is not None:
+                points, confidences = self.pose_refiner.predict(image, bounds)
+            else:
+                points = result.keypoints.xy.detach().cpu().numpy()
+                confidences = result.keypoints.conf.detach().cpu().numpy()
+                if (points.shape != (len(scores), 17, 2) or confidences.shape != (len(scores), 17)
+                        or any(not np.isfinite(a).all() for a in (points, confidences))
+                        or np.any((confidences < 0) | (confidences > 1))):
+                    raise ValueError('SapiensID pose detector returned malformed COCO17 geometry.')
+                points, confidences = points[selected], confidences[selected]
+            if (points.shape != (len(bounds), 17, 2) or confidences.shape != (len(bounds), 17)
+                    or any(not np.isfinite(a).all() for a in (points, confidences))
+                    or np.any((confidences < 0) | (confidences > 1))):
+                raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
+            for box, index, kps, confidence in zip(bounds, selected, points, confidences):
+                left, top, right, bottom = box
                 usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
                 usable &= (kps[:,0] >= left) & (kps[:,0] < right) & (kps[:,1] >= top) & (kps[:,1] < bottom)
                 kps[~usable] = -1
-                people.append({'bounds': [left,top,right,bottom], 'keypoints': kps.tolist(), 'score': float(score)})
+                people.append({'bounds': box, 'keypoints': kps.tolist(), 'score': float(scores[index])})
         matches = associate(faces, people)
         self.frame_people, self.face_matches = people, matches
         self._person_frame = image, {tuple(face.row): people[index] if index is not None else None
@@ -219,6 +245,7 @@ class SapiensIDFaces(YuNetDetector):
         self._owner()
         self._person_frame = None
         self.pose = None
+        self.pose_refiner = None
         try:
             if self.encoder is not None:
                 self.encoder.close()

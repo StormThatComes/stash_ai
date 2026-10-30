@@ -83,6 +83,15 @@ def test_no_compatible_scans_skip_measurements(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('case', CASES)
 def test_full_replay_matches_dense_uncached_and_uncompiled_path(tmp_path, monkeypatch, case):
+    from stash_ai.recognition.merge_solver_search import BeamSearch
+    observe = BeamSearch.observe
+    def equal_cost(self, *args, **kwargs):
+        # This compares numerical paths, not adaptive wall-clock scheduling.
+        # A slow CI trial (>1s) can otherwise reorder later proposals in just
+        # one run, even when cached and dense computations are identical.
+        kwargs['elapsed'] = .01
+        return observe(self, *args, **kwargs)
+    monkeypatch.setattr(BeamSearch, 'observe', equal_cost)
     config, goal = fixture(tmp_path, case)
     with _open_readonly(config.database) as db:
         optimized = solve(config, goal, db, maximum=8)
