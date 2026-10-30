@@ -306,7 +306,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             context['seed_path'], goals['scope'], goals['namespace'], context['installation'],
             context['scans'], context['observations'], goals, feasibility, initial_changes, excluded,
             bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime,
-            baseline_predictions=context.get('baseline_predictions'))
+            baseline_predictions=context.get('baseline_predictions'),
+            baseline_body_identities=context.get('baseline_body_identities'))
     def accept(settings, evaluated):
         adopt(settings, evaluated['feedback'])
         for key, amount in evaluated['sampling_visits_delta'].items():
@@ -574,7 +575,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
             restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error,
             parallel_request=request if runtime and runtime.trials > 1 else None,
-            parallel_accept=accept, journal=journal)
+            parallel_accept=accept, journal=journal, compact_trial_reports=True)
     def finish(*, interrupted=False):
         if interrupted:result['interrupted'] = True
         # Ctrl-C can land after consume ranks a trial but before replay records it.
@@ -584,6 +585,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 parent=origins[name]['search_parent']
                 robustness.setdefault(parent,[]).append(ranks[name][:-2]>=ranks[parent][:-2])
         best = max(result['trials'], key=ranking, default=None)
+        if best is not None:
+            from .trial_report_compaction import expand
+            trial = result['trials'][best]
+            trial['independent_person'] = expand(trial['independent_person'],
+                result['trials']['baseline']['independent_person'].get('identities', []))
         for name, patch in patches.items():
             if name in result['trials']:
                 result['trials'][name].update(patch)

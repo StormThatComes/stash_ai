@@ -60,6 +60,12 @@ def _usage(config, groups):
 
 def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate=False):
     """Compare UUIDs or Stash IDs in one read-only snapshot without changing assignments."""
+    from .run_cache import scope as cache_scope
+    with cache_scope(config):
+        return _build(config,left_id,right_id,scope=scope,by_performer=by_performer,simulate=simulate)
+
+
+def _build(config, left_id, right_id, *, scope=None, by_performer=False, simulate=False):
     model_namespace = namespace(config)
     from .report_snapshot import snapshot
     with snapshot(config, left_id, scope=scope, by_performer=by_performer,
