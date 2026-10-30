@@ -38,3 +38,27 @@ def test_complete_measurements_match_serial_including_weakest_ties(monkeypatch):
         assert actual == expected
         assert [v for _, _, v in measured_pairs(pairs, max_bytes=32768)] == actual
         assert pool.records['face_measurements']['computed'] == len(pairs)*2
+
+
+def test_trial_cancellation_reaches_inner_workers(monkeypatch):
+    from threading import Event, Timer
+    from stash_ai.runtime.cancellation import Cancellation, Cancelled, use, current
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus', lambda: 16)
+    outer = Cancellation()
+    started = Event()
+    def work(_):
+        started.set()
+        while not outer.event.wait(.01):
+            current().check()
+        current().check()
+    timer = Timer(.05, outer.cancel)
+    timer.start()
+    try:
+        with use(outer), compute_scope(configured(rebuild_workers=2)) as pool:
+            import pytest
+            with pytest.raises(Cancelled):
+                list(pool.ordered(work, [Work(0, 'cancel', None, 4096)]))
+        assert started.is_set()
+    finally:
+        outer.cancel()
+        timer.join()

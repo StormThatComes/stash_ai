@@ -50,3 +50,19 @@ def test_trial_journal_tracks_inflight_configuration(tmp_path):
     assert resumed.document['tasks']['trial-1']['status'] == 'running'
     with pytest.raises(ValueError, match='configuration changed'):
         resumed.task('trial-1', patched(config, {'recognition.match_threshold': .9}), 'queued')
+
+
+def test_raw_result_checks_configuration_and_checksum(tmp_path):
+    import pytest
+    from stash_ai.recognition.merge_solver_checkpoint import Journal
+    from stash_ai.recognition.merge_report_policy import patched
+    config, _ = fixture(tmp_path/'input', 'face')
+    journal = Journal(tmp_path/'journal.json', {'test': 1})
+    journal.save_raw_result('trial-1', config, {'result': 3})
+    assert journal.raw_result('trial-1', config) == {'result': 3}
+    with pytest.raises(ValueError, match='configuration changed'):
+        journal.raw_result('trial-1', patched(config, {'recognition.match_threshold': .9}))
+    entry = journal.document['raw_results']['trial-1']
+    (journal.directory/entry['file']).write_text('{}')
+    with pytest.raises(ValueError, match='Corrupt'):
+        journal.raw_result('trial-1', config)

@@ -156,6 +156,9 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 if evaluated.get('failed'):
                                     error = ValueError(evaluated['error'])
                                     error.replay_stage = evaluated['stage']
+                                    error.worker_elapsed_seconds = evaluated['elapsed_seconds']
+                                    for note in evaluated.get('diagnostics', ()):
+                                        error.add_note(note)
                                     raise error
                                 if parallel_accept:
                                     parallel_accept(settings, evaluated)
@@ -174,7 +177,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             failure = trial_error(name, settings, exc, getattr(exc, 'replay_stage', active_stage)) if trial_error else None
                             if failure is None:
                                 raise
-                            failure.update(failed=True, elapsed_seconds=time.perf_counter()-started)
+                            failure.update(failed=True, elapsed_seconds=getattr(exc, 'worker_elapsed_seconds', time.perf_counter()-started))
                             result.setdefault('failed_trials', {})[name] = failure
                             if record_trial:record_trial(name, settings, failure, inputs)
                             if progress:progress(name, 'failed', failure)

@@ -286,7 +286,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime)
     def accept(settings, evaluated):
         adopt(settings, evaluated['feedback'])
-        query_feedback.visits = dict(latest_feedback['query'].get('sampling_visits', {}))
+        for key, amount in evaluated['sampling_visits_delta'].items():
+            query_feedback.visits[key] = query_feedback.visits.get(key, 0) + amount
+        latest_feedback['query']['sampling_visits'] = dict(query_feedback.visits)
         query_feedback.priorities = dict(latest_feedback.get('targets', {}).get('priorities', {}))
     retire = lambda name: None
     pending_search = {}
@@ -512,7 +514,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
     def trial_error(name, settings, exc, stage):
-        if not resource_limit(exc) or (not runtime and origins.get(name, {}).get('search_phase') != 'feasibility'):
+        if name == 'baseline' or not resource_limit(exc) or (not runtime and origins.get(name, {}).get('search_phase') != 'feasibility'):
             return None
         query_feedback.reset()
         if probe_state is not None and not (runtime and runtime.trials > 1):

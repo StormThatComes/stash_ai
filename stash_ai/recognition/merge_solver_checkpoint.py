@@ -118,10 +118,12 @@ class Journal:
             sha256=sha(content.encode()), configuration=digest(plain(settings.data)))
         self.file.write(json.dumps(self.document, allow_nan=False))
 
-    def raw_result(self, name):
+    def raw_result(self, name, settings=None):
         row = self.document.get('raw_results', {}).get(name)
         if row is None:
             return None
+        if settings is not None and row['configuration'] != digest(plain(settings.data)):
+            raise ValueError('Checkpoint raw result configuration changed.')
         # Paths are coordinator-generated basenames, never arbitrary destinations.
         if Path(row['file']).name != row['file']:
             raise ValueError('Invalid checkpoint result path.')

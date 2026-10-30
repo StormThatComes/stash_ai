@@ -47,3 +47,9 @@ def test_numeric_cache_never_reuses_decisions_or_partial_files(tmp_path):
         assert np.array_equal(first, numerical('scores', (array,), unexpected, extra=('float64',)))
         other = numerical('scores', (array,), lambda: array*3, extra=('different-rule',))
         assert other[0] == 3
+
+
+def test_empty_banks_have_a_stable_content_key():
+    import numpy as np
+    from stash_ai.recognition.solver_shared import key
+    assert key('empty', (np.empty((0, 128), dtype='float64'),)) == key('empty', (np.empty((0, 128), dtype='float64'),))

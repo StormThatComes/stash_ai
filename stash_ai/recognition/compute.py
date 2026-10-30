@@ -8,7 +8,7 @@ import os
 import threading
 import time
 
-from stash_ai.runtime.cancellation import Cancellation, use
+from stash_ai.runtime.cancellation import Cancellation, use, current as current_cancellation
 from stash_ai.runtime.cleanup import cleanup
 from stash_ai.runtime import shutdown
 
@@ -37,6 +37,18 @@ def available_cpus():
     return max(1, getattr(os, 'process_cpu_count', os.cpu_count)() or 1)
 
 
+class LinkedCancellation(Cancellation):
+    """Inner numerical work observes both local shutdown and trial cancellation."""
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+
+    def check(self):
+        super().check()
+        if self.parent is not None:
+            self.parent.check()
+
+
 class Compute:
     def __init__(self, config):
         settings = config.data['execution']
@@ -56,7 +68,7 @@ class Compute:
         self.resources = plan(config)
         self.limit = self.resources.queue
         self.owner = threading.get_ident()
-        self.cancel = Cancellation()
+        self.cancel = LinkedCancellation(current_cancellation())
         self.executor = self.native = self.process_executor = self.process_event = None
         self.process_blocks = 0
         self.shared_inputs = {}
@@ -188,6 +200,7 @@ class Compute:
         start = time.perf_counter()
         try:
             while not future.done():
+                self.cancel.check()
                 self.publish('ordered CPU result')
                 wait((future,), timeout=.25)
             result = future.result()

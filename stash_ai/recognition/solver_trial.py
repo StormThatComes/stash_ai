@@ -69,6 +69,8 @@ def evaluate(request):
                     stage=getattr(exc, 'replay_stage', 'Prepare replay'),
                     elapsed_seconds=time.perf_counter()-started)
     result['feedback'] = collected
+    result['sampling_visits_delta'] = {key: count-request.visits.get(key, 0)
+        for key, count in observer.visits.items() if count != request.visits.get(key, 0)}
     result['elapsed_seconds'] = time.perf_counter()-started
     result['cpu_seconds'] = time.process_time()-cpu
     result['worker_pid'] = os.getpid()
