@@ -302,6 +302,13 @@ sapiensid:
     # Minimum scene-local body score lead over a competing identity/group.
     anchor_min_keypoints: 6
     # Minimum usable pose keypoints for a scene-local body anchor.
+    anchor_keypoint_rules:
+      # Additional regional gates for both body and face-associated body anchors; COCO17 names.
+      all: []
+      # Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].
+      any: []
+      # At least one rule must pass if nonempty: [{group: left_leg, min: 2}, {group: right_leg, min: 2}].
+      # A rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.
     anchor_min_person_pixels: null
     # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor.
     anchor_min_sharpness: 25.0

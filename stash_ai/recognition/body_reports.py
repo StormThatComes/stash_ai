@@ -37,7 +37,7 @@ def goal_rows(db,config,person):
             sample_role='anchor' if eligible and strong else 'auxiliary' if eligible else 'other',body_state='ready')
         from .person_anchor import anchor_gate
         gate = anchor_gate(row['quality'],config.data['sapiensid']['identities'])
-        row.update(body_role=row['sample_role'], body_reason=gate['reason'])
+        row.update(body_role=row['sample_role'], body_reason=gate['reason'],body_anchor_gate=gate)
         rows.append(row)
     return rows
 
@@ -97,6 +97,7 @@ def export_members(db,config,person,directory,*,policies=None):
             quality=quality,geometry=geometry,retained_rejection=row['rejected'],image=image,admission=admission,
             assignment=dict(role=row['role'],status=row['assignment_status']),decision=json.loads(row['proof']),
             anchor_pixel_gate=pixel_gate(row['quality'],config.data['sapiensid']['identities']),
+            anchor_gate=admission['anchor_gate'],
             policy_matches_current=row['policy']==policy(config),
             current_anchor_eligible=(row['assignment_status']=='accepted' and row['role']=='anchor' and
                 row['policy']==policy(config) and row['contract']==contract(config) and row['rejected'] is None)))

@@ -18,7 +18,8 @@ from .person_anchor import pixel_gate,anchor_gate
 def defaults():
     return dict(enabled=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 min_support=3,attach_min_support=2,min_appearance_distance=4,
-                anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None)
+                anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
+                anchor_keypoint_rules=dict(all=[],any=[]))
 
 
 def enabled(config):
@@ -310,6 +311,13 @@ def scene_plan(db,scan,config):
         good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin']
         decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
             reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+        rules=settings.get('anchor_keypoint_rules',{})
+        if not good and (rules.get('all') or rules.get('any')):
+            regional=anchor_gate(row['quality'],settings)['keypoint_rules']
+            if not regional['eligible']:
+                decisions[row['id']]['anchor_keypoint_rules']=regional
+                if decisions[row['id']]['reason']=='body_anchor_quality':
+                    decisions[row['id']]['reason']=regional['reason']
     from .local_body_hints import observe
     observe(rows, groups, seeds, scores, guard, config)
     resolve_claims(rows,decisions,config,scores=scores)

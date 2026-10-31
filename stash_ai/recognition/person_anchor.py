@@ -33,6 +33,9 @@ def pixel_gate(metadata,settings):
 def anchor_gate(metadata,settings,*,collection=None):
     """Measured pose and sharpness must qualify every body reference route."""
     gate=pixel_gate(metadata,settings)
+    from .pose_anchor_rules import evaluate
+    rules=settings.get('anchor_keypoint_rules', {})
+    regional=evaluate(rules,None)
     try:
         record=json.loads(metadata) if isinstance(metadata,str) else metadata
         quality=record.get('quality') or {}
@@ -40,9 +43,11 @@ def anchor_gate(metadata,settings,*,collection=None):
         valid=lambda value:type(value) in (int,float) and math.isfinite(value) and value>=0
         person=record.get('person') or {}
         if 'keypoints' in person:
-            from .person_geometry import used_keypoints
-            effective=used_keypoints(person)
+            from .person_geometry import body_points
+            anatomical=body_points(person,anatomical=regional['enabled'])
+            effective=sum(min(point)>=0 for point in anatomical)
             points=min(points,effective) if valid(points) else effective
+            regional=evaluate(rules,anatomical)
         reason=record.get('identity_rejection') or gate['reason']
         if reason is None and collection is not None:
             # Older face projections discarded collection rejection reasons.
@@ -55,8 +60,10 @@ def anchor_gate(metadata,settings,*,collection=None):
         if reason is None:
             reason=('body_anchor_keypoints_missing' if not valid(points) else
                     'body_anchor_keypoints' if points<settings['anchor_min_keypoints'] else
+                    regional['reason'] if not regional['eligible'] else
                     'body_anchor_sharpness_missing' if not valid(sharpness) else
                     'body_anchor_sharpness' if sharpness<settings['anchor_min_sharpness'] else None)
-    except (ValueError,TypeError,AttributeError,KeyError):
+    except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
         points=sharpness=None;reason='body_anchor_quality_missing'
-    return dict(gate,keypoints=points,sharpness=sharpness,eligible=reason is None,reason=reason)
+    return dict(gate,keypoints=points,sharpness=sharpness,keypoint_rules=regional,
+                eligible=reason is None,reason=reason)

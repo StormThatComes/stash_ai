@@ -24,9 +24,9 @@ def analyse(db,config,identities,scope,namespace,*,verify=True):
     simulation=evaluate(config,goals,db,variants)
     for name,trial in simulation.get('trials',{}).items():
         settings=config if name=='baseline' else variants[name]
-        from .threshold_tuning import BODY_PARAMETERS
+        from .body_parameters import active
         from .merge_report_policy import parameter
-        changes={p:parameter(settings.data,p) for p in BODY_PARAMETERS if parameter(settings.data,p)!=parameter(config.data,p)}
+        changes={p:parameter(settings.data,p) for p in active(config) if parameter(settings.data,p)!=parameter(config.data,p)}
         outcome=trial['goal_result'];group=outcome['groups'][0]
         item=dict(proposal(config,changes),strategy='production_person_replay',
             verification=dict(replay_verified=True,goal_result=outcome,

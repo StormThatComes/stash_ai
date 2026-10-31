@@ -157,11 +157,29 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
             bool(person) if 'person' in metadata else None, True, '==')], source=source,
             note='Face-associated evidence inherits face admission. Independent collection quality floors are not required here.'))
     identity = config.data['sapiensid']['identities']
+    from .person_anchor import anchor_gate
+    gate = anchor_gate(metadata, identity)
     floor = identity['anchor_min_person_pixels']
     checks = [check('sapiensid.identities.anchor_min_person_pixels', pixels(metadata), floor, enabled=floor is not None)]
-    if independent:
-        checks.extend(check('sapiensid.identities.'+key, quality.get(field), identity[key])
-                      for key, field in (('anchor_min_keypoints', 'keypoints'), ('anchor_min_sharpness', 'sharpness')))
+    checks.extend(check('sapiensid.identities.'+key, gate.get(field), identity[key])
+                  for key, field in (('anchor_min_keypoints', 'keypoints'), ('anchor_min_sharpness', 'sharpness')))
     groups.append(group('person_anchor_quality', checks,
         note='Current quality gates only. Face authority, complete evidence, support and matching are separate requirements.'))
-    return dict(evidence_kind='person', route='independent' if independent else 'face_associated', groups=groups)
+    regional = gate['keypoint_rules']
+    for mode in ('all', 'any'):
+        rows = regional[mode]
+        if not rows:
+            continue
+        checks = [dict(check(row['parameter'], row['measured'], row['minimum'], enabled=row['minimum'] > 0),
+                       label=row['label'], points=row['points'], present=row['present']) for row in rows]
+        summary = group('person_anchor_keypoints_'+mode, checks,
+            note=('Every rule must pass.' if mode == 'all' else 'At least one rule must pass; other failed alternatives do not reject the anchor.')+
+                 ' Counts use surviving pose points with anatomical left/right labels; min=0 adds no requirement.')
+        passed = all(row['passed'] for row in rows) if mode == 'all' else any(row['passed'] for row in rows)
+        if passed:
+            summary['status'] = 'pass'
+        elif mode == 'any':
+            summary['status'] = 'unknown' if any(row['measured'] is None for row in rows) else 'fail'
+        groups.append(summary)
+    return dict(evidence_kind='person', route='independent' if independent else 'face_associated',
+                groups=groups, anchor_gate=gate)

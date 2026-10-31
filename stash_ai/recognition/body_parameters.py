@@ -16,5 +16,7 @@ def active(config):
     # Null is an explicit opt-out, like the optional face admission gates.
     pixel=(PIXEL_PARAMETER,) if settings['enabled'] and settings['identities']['anchor_min_person_pixels'] is not None else ()
     if not settings['enabled']:return ()
-    if not enabled(config):return QUALITY+pixel
-    return tuple(k for k in LOCAL if k!=PIXEL_PARAMETER)+pixel+(GLOBAL if settings['global_matching']['enabled'] else ())
+    from .pose_anchor_rules import parameters
+    regional=tuple(parameters(settings['identities']))
+    if not enabled(config):return QUALITY+pixel+regional
+    return tuple(k for k in LOCAL if k!=PIXEL_PARAMETER)+pixel+regional+(GLOBAL if settings['global_matching']['enabled'] else ())

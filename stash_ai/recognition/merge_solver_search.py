@@ -104,7 +104,7 @@ def hybrid_neighbours(config, changes, options, measured):
     from .body_parameters import active,QUALITY
     from .body_identity import enabled as independent_bodies
     body_keys=[k for k in options if k in active(config)]
-    quality_keys=[k for k in body_keys if k in QUALITY and not independent_bodies(config)]
+    quality_keys=[k for k in body_keys if (k in QUALITY or '.anchor_keypoint_rules.' in k) and not independent_bodies(config)]
     body_keys=[k for k in body_keys if k not in quality_keys]
     coordinates = interleave(coordinate(k) for k in body_keys+[PREFIX+gate for gate in GATES]+quality_keys)
     # Long pair-proposal lists cannot defer the initial single-gate probes.

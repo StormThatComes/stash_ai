@@ -6,7 +6,7 @@ from .merge_solver_domains import registry, normalize, UNIT, SUPPORT
 def admission(config):
     domains = registry(config)
     keys = [k for k in domains if k.startswith('clustering.min_') or k == 'clustering.max_anchor_pose_deviation'
-            or k.startswith('sapiensid.identities.anchor_min_')]
+            or k.startswith(('sapiensid.identities.anchor_min_', 'sapiensid.identities.anchor_keypoint_rules.'))]
     values = {k: (max(parameter(config.data, k), domains[k].high) if domains[k].relax > 0
                   else min(parameter(config.data, k), domains[k].low))
               for k in keys if parameter(config.data, k) is not None}
@@ -21,7 +21,7 @@ def profiles(config):
     from .person_signal import same_contract
     domains = registry(config)
     keys = [k for k in UNIT+SUPPORT+active(config) if k in domains
-            and '.anchor_min_' not in k]
+            and '.anchor_min_' not in k and '.anchor_keypoint_rules.' not in k]
     matching = {k: domains[k].low for k in keys}
     matching['clustering.same_scene_match_bonus'] = max(config.data['clustering']['same_scene_match_bonus'],
                                                        domains['clustering.same_scene_match_bonus'].high)
