@@ -29,7 +29,9 @@ PARAMETERS = BODY_PARAMETERS | frozenset({
 def configurations(config, grid, maximum):
     if type(maximum) is not int or not 1 <= maximum <= 1024:
         raise ValueError('max_trials must be an integer from 1 to 1024, including baseline.')
-    if not isinstance(grid, dict) or not grid or set(grid)-PARAMETERS:
+    from .pose_anchor_rules import parameters as regional_parameters
+    supported=PARAMETERS | regional_parameters(config.data['sapiensid']['identities']).keys()
+    if not isinstance(grid, dict) or not grid or set(grid)-supported:
         raise ValueError('Grid must contain supported recognition/clustering/sapiensid threshold parameters.')
     from .person_anchor import PIXEL_PARAMETER
     if any(not isinstance(v, list) or not v or any(

@@ -14,15 +14,15 @@ def _floor(value):
 
 def parameter(data, path):
     for key in path.split('.'):
-        data = data[key]
+        data = data[int(key)] if isinstance(data, (list, tuple)) else data[key]
     return data
 
 
 def assign(data, path, value):
     keys = path.split('.')
     for key in keys[:-1]:
-        data = data.setdefault(key, {})
-    data[keys[-1]] = value
+        data = data[int(key)] if isinstance(data, list) else data.setdefault(key, {})
+    data[int(keys[-1]) if isinstance(data, list) else keys[-1]] = value
 
 
 def patched(config, changes):
@@ -36,11 +36,16 @@ def patched(config, changes):
 
 def proposal(config, changes):
     import yaml
+    from .pose_anchor_rules import PARAMETER as regional
     patch, details = {}, []
     for path, value in sorted(changes.items()):
         current = parameter(config.data, path)
         if current == value:
             continue
+        if path.startswith(regional+'.') and not any(row['parameter'].startswith(regional+'.') for row in details):
+            # A YAML list is replaced as a whole. Preserve every selector and
+            # untouched sibling when emitting a patch for an indexed minimum.
+            assign(patch, regional, plain(parameter(config.data, regional)))
         assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
                             direction='disable' if value is None else 'enable' if type(value) is bool or current is None else

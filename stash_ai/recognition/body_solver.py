@@ -42,18 +42,27 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
         measured=anchor_gate(row['quality'],config.data['sapiensid']['identities'],
             collection=config.data['sapiensid']['collection'])
         patch={}
-        for field,key in (('keypoints','sapiensid.identities.anchor_min_keypoints'),
-                          ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER)):
+        values=[(measured.get(field),key) for field,key in
+                (('keypoints','sapiensid.identities.anchor_min_keypoints'),
+                 ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER))]
+        regional=measured['keypoint_rules']
+        values.extend((rule['measured'],rule['parameter']) for mode in ('all','any') for rule in regional[mode])
+        for value,key in values:
             if key not in options:continue
-            value=measured.get(field);domain=domains[key]
+            domain=domains[key]
             if type(value) not in (int,float) or not domain.low<=value<=domain.high:continue
-            values=([int(value),int(value)+1] if domain.kind is int else sides(value,upper=domain.high))
-            options[key].extend(domain.project(v) for v in values)
+            boundaries=([int(value),int(value)+1] if domain.kind is int else sides(value,upper=domain.high))
+            options[key].extend(domain.project(v) for v in boundaries)
             if value<parameter(config.data,key):
                 admitted=domain.project(int(value) if domain.kind is int else value)
                 joint[key]=min(joint.get(key,admitted),admitted)
                 patch[key]=admitted
-        if patch and frozen_goals is not None:measurements.append(dict(observation=row['id'],patch=patch))
+        if frozen_goals is not None and (patch or regional['enabled']):
+            measurement=dict(observation=row['id'],patch=patch)
+            if regional['enabled']:
+                measurement.update(keypoint_rules=regional,
+                    blockers=[] if regional['eligible'] else [regional['reason']])
+            measurements.append(measurement)
         if any(len(values)>256 for values in options.values()):options=compact(config,{},options)
     return compact(config,{},options),([joint] if joint else []),measurements
 

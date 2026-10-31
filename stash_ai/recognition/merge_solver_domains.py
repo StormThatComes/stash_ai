@@ -62,6 +62,10 @@ def registry(config):
         'sapiensid.global_matching.min_support':Domain(int,1,config.data['sapiensid']['global_matching']['max_references']),
     }
     result.update((key,special.get(key,Domain())) for key in active(config))
+    if config.data['sapiensid']['enabled']:
+        from .pose_anchor_rules import parameters
+        result.update((key,Domain(int,0,maximum)) for key,maximum in
+                      parameters(config.data['sapiensid']['identities']).items())
     return result
 
 

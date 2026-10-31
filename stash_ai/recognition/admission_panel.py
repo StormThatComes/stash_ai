@@ -38,7 +38,8 @@ def export(image, admission, directory, name, *, observation, role, rejection):
              (f'Retained rejection: {rejection or "none"}. Exact values and gate boundaries: companion JSON.', '#475467')]
     for group in admission['groups']:
         lines.append(('', '#101828'))
-        lines.append((group['stage'].replace('_', ' ').upper()+' | '+SOURCES[group['configuration_source']], '#101828'))
+        lines.append((group['stage'].replace('_', ' ').upper()+' | '+group['status'].upper()+
+                      ' | '+SOURCES[group['configuration_source']], '#101828'))
         for row in group['checks']:
             state = row['status']
             text = (f'[{state.upper()}] {row["parameter"]}: {_value(row["measured"])} '
@@ -46,6 +47,8 @@ def export(image, admission, directory, name, *, observation, role, rejection):
             if state == 'disabled':
                 configured = 'null' if row['threshold'] is None else _value(row['threshold'])
                 text = f'[DISABLED] {row["parameter"]} = {configured} (sample: {_value(row["measured"])})'
+            if row.get('label'):
+                text = f'{row["label"]} | '+text
             lines.append((text, COLORS[state]))
         if group.get('context'):
             lines.append(('Frame context only: '+', '.join(f'{k}={v}' for k,v in group['context'].items()), '#475467'))

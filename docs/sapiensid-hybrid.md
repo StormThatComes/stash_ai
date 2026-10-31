@@ -696,6 +696,84 @@ The face-associated collector measures the same source crop quality as independe
 collection, even when independent body identities are disabled. Changing these
 thresholds invalidates matching decisions, not retained embeddings.
 
+### Regional body anchor keypoints
+
+`sapiensid.identities.anchor_keypoint_rules` adds regional requirements **alongside**
+the global `anchor_min_keypoints` floor. The default `{all: [], any: []}` preserves
+existing admission. Rules apply to both independent body anchors and face-associated
+body references, including when `identities.enabled` is false. Face anchor authority
+itself is unchanged; a weak body sample can still be an attachment query.
+
+```yaml
+sapiensid:
+  identities:
+    anchor_min_keypoints: 6
+    anchor_keypoint_rules:
+      all:
+        - {group: shoulders, min: 1}
+        - {group: hips, min: 1}
+        - {points: [left_elbow, right_elbow, left_wrist, right_wrist], min: 2}
+      any:
+        - {group: left_leg, min: 2}
+        - {group: right_leg, min: 2}
+```
+
+Every `all` rule and at least one `any` rule must pass. An empty list adds no
+requirement. The example requires a shoulder, a hip, two elbow/wrist points and
+two points on at least one leg; it is illustrative, not a calibrated default.
+Each rule accepts exactly one `group` or a nonempty `points` list, plus `min`.
+The minimum is an integer from zero to the number of distinct selected points;
+zero adds no requirement (and makes an `any` alternative pass). Unknown names,
+duplicate custom points, extra keys and impossible minima fail configuration
+validation before recognition starts.
+
+| Group | COCO17 points | Maximum |
+| --- | --- | ---: |
+| `eyes` | left/right eye | 2 |
+| `head_without_eyes` | nose, left/right ear | 3 |
+| `head` | nose, both eyes, both ears | 5 |
+| `shoulders` | left/right shoulder | 2 |
+| `hips` | left/right hip | 2 |
+| `torso` | shoulders and hips | 4 |
+| `left_torso`, `right_torso` | shoulder and hip on that side | 2 each |
+| `left_arm`, `right_arm` | shoulder, elbow, wrist on that side | 3 each |
+| `arms` | both arms | 6 |
+| `left_leg`, `right_leg` | hip, knee, ankle on that side | 3 each |
+| `legs` | both legs | 6 |
+| `body` | all points except nose, eyes and ears | 12 |
+
+Custom point names are `nose` and `left_`/`right_` followed by `eye`, `ear`,
+`shoulder`, `elbow`, `wrist`, `hip`, `knee` or `ankle`. These are pose landmarks,
+not the additional five face-detector landmarks. All supported pose backends use
+this COCO17 vocabulary; dense Sapiens points do not add extra rule points.
+Groups may overlap, but each physical point counts only once in the global total.
+No head/eye requirement is added by default, so back views remain eligible.
+
+Left/right means the detector's anatomical label, even after SapiensID swaps
+paired points into image-side order. Counts include only points surviving the
+confidence, crop-boundary and encoder head-outlier filters. No missing point is
+invented. Existing coordinates suffice for offline rule changes; this does not
+change the embedding/collection contract. Legacy rows with only a scalar count
+cannot satisfy positive regional minima: reports mark their regional measurement
+unknown, and they need recollection to provide the missing geometry (or an
+explicitly relaxed rule). Matching and body reference caches include these rules.
+
+Identity report threshold JSON/PNG companions show each selection and its measured
+count/minimum, plus separate `all`/`any` results. A failed alternative does not fail
+a passing `any` group. `anchor_gate.keypoint_rules` also exposes selected/present
+point names; failed regional gates use `body_anchor_keypoint_rules` or
+`body_anchor_keypoint_rules_missing` when geometry is unavailable.
+
+The solver can tune **only existing minima**, using integer domains `0..group_size`;
+it never invents/reorders rules or changes their selectors or `all`/`any` logic.
+For example, the first `all` threshold is
+`sapiensid.identities.anchor_keypoint_rules.all.0.min` (zero-based index). The same
+path works in an explicit `tune` grid. A zero proposal disables that requirement.
+Measured hints and full production replay use the same filtered points as admission.
+Missing geometry is reported explicitly and cannot provide a measured threshold hint.
+YAML diffs include the complete regional rule lists, preserving untouched siblings
+and selectors, because merging a YAML list replaces it as a whole.
+
 Pose points with sufficient confidence at x=0 or y=0 are valid inside the person
 box. Right/bottom edges remain exclusive and low-confidence points remain missing.
 The person input contract is revised for every model variant (including the legacy

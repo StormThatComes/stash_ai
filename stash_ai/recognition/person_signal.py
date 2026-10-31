@@ -65,6 +65,8 @@ def validate(settings):
     _number(collection['min_sharpness'],'sapiensid.collection.min_sharpness',0,1000000)
     _number(collection['max_overlap'],'sapiensid.collection.max_overlap',0,1)
     identity=settings['identities']
+    from .pose_anchor_rules import validate as validate_anchor_rules
+    validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
     for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):

@@ -27,7 +27,7 @@ GATES.update({
     'independent_support':('sapiensid.global_matching.min_support','sapiensid.identities.min_appearance_distance'),
     'body_ambiguity':('sapiensid.global_matching.ambiguity_margin',),
 })
-HARD = {'missing_person_evidence','missing_original_core_evidence','invalid_alignment',
+HARD = {'body_anchor_keypoint_rules_missing','missing_person_evidence','missing_original_core_evidence','invalid_alignment',
         'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness','body_anchor_pixels_missing'}
 
 
@@ -112,14 +112,16 @@ def latest_decisions(db, observation_ids):
             proof=json.loads(row['proof'])
             result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
                 reason=proof.get('reason'),evidence_kind='person',measurements={k:v for k,v in proof.items()
-                    if type(v) in (int,float,bool)}))
+                    if type(v) in (int,float,bool)},
+                **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))
     return result
 
 
 def diagnostic_record(settings, decisions, queries, hybrid, quality):
     trace, active = [], Counter()
     def add(stage, reason, observation=None, **detail):
-        parameters = GATES.get(reason, ())
+        parameters = tuple(dict.fromkeys((*GATES.get(reason, ()),
+            *detail.get('keypoint_rules', {}).get('failed_parameters', ()))))
         active.update(parameters)
         trace.append(dict(stage=stage, reason=reason, observation=observation,
             parameters=list(parameters), requires_evidence=reason in HARD, **detail))
@@ -127,7 +129,8 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
     terminal = {r['observation']:r for r in decisions}
     for row in terminal.values():
         if row['status'] != 'accepted':
-            add('assignment', row['reason'], row['observation'])
+            add('assignment', row['reason'], row['observation'],
+                **({'keypoint_rules':row['keypoint_rules']} if 'keypoint_rules' in row else {}))
     for row in queries.get('decisions', ()):
         add('hybrid_query.'+row['stage'], row['reason'], row['observation'], details=row.get('details', {}))
     for q in queries.get('queries', ()):
@@ -144,7 +147,8 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
     for q in quality:
         active.update(q.get('patch', {}).keys())
         for reason in q.get('blockers', ()):
-            add('quality',reason,q['observation'])
+            add('quality',reason,q['observation'], **({'keypoint_rules':q['keypoint_rules']}
+                if reason.startswith('body_anchor_keypoint_rules') and 'keypoint_rules' in q else {}))
         if q.get('missing_measurements'):
             add('quality','missing_measurements',q['observation'], fields=q['missing_measurements'])
     return dict(configuration_sha256=digest(plain(settings.data)),
