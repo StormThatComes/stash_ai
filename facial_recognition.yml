@@ -344,9 +344,13 @@ sapiensid:
   pose:
     # Person/pose detector used to prepare SapiensID inputs.
     backend: yolo
-    # yolo, vitpose_plus_large or sapiens; the latter two use YOLO only for person boxes.
+    # Keypoints: yolo, vitpose_plus_large or sapiens; the latter two use a separate box detector.
+    detector: yolo
+    # Person boxes: yolo, dfine_l or dfine_x; D-FINE requires ViTPose or Sapiens above.
+    dfine_directory: ""
+    # D-FINE asset folder; empty uses models.directory/<detector>/<pinned revision>.
     batch_size: 4
-    # Maximum frames per YOLO batch and people per ViTPose batch (1..16).
+    # Maximum frames per person-detector batch and people per ViTPose batch (1..16).
     vitpose_directory: ""
     # ViTPose asset folder; empty uses models.directory/vitpose_plus_large/<pinned revision>.
     sapiens_variant: "0.3b"
@@ -360,13 +364,13 @@ sapiensid:
     max_people_per_frame: 100
     # Maximum body detections per thumbnail, independent of the face detection limit.
     nms_threshold: 0.70
-    # Body-box IoU threshold for duplicate suppression, including YOLO26's one-to-many head.
+    # Body-box IoU threshold for duplicate suppression in YOLO and D-FINE.
     path: recognition_models/sapiensid_v1/yolo26m-pose.pt
-    # YOLO checkpoint path; also supplies person boxes for ViTPose and Sapiens Pose.
+    # YOLO checkpoint path; unused when detector is dfine_l or dfine_x.
     score_threshold: 0.50
     # Minimum person detection confidence (0..1).
     sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
-    # Expected pose checkpoint SHA256; custom hashes require a matching local file.
+    # Expected YOLO checkpoint SHA256; unused with D-FINE; custom hashes require a local file.
 
   storage:
     # Stored body images.

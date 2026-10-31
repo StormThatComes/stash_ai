@@ -8,8 +8,8 @@ matplotlib>=3.8,<4
 # Explicit NMS-head selection for YOLO26; older releases may ignore predict(nms=True).
 ultralytics>=8.4.189,<9
 packaging>=23.0
-# Optional ViTPose++ Large backend; uses the existing CPU/CUDA torch build.
-transformers>=4.49,<6
+# Optional ViTPose++ Large and D-FINE; use the existing CPU/CUDA torch build.
+transformers>=4.53,<6
 safetensors>=0.4.1
 # ViTPose affine crops and heatmap postprocessing require SciPy.
 scipy>=1.10,<2
