@@ -12,6 +12,8 @@ CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
 
 def input_contract(config):
+    if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'sapiens':
+        return 'sapiensid-v1-sapiens-pose-coco17-face-anchor-square384-v1'
     if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         return 'sapiensid-v1-vitpose-plus-large-coco17-face-anchor-square384-v1'
     checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
@@ -35,6 +37,9 @@ def identity_contract(config):
     if settings['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract
         result['pose_refiner'] = vitpose_contract()
+    elif settings['pose'].get('backend', 'yolo') == 'sapiens':
+        from .sapiens_pose_registry import contract as sapiens_contract
+        result['pose_refiner'] = sapiens_contract(settings['pose']['sapiens_variant'])
     return result
 
 
@@ -95,6 +100,9 @@ class SapiensIDFaces(YuNetDetector):
             self.pose = load_pose(config)
             if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
                 from .vitpose_pose import load
+                self.pose_refiner = load(config, self.device)
+            elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'sapiens':
+                from .sapiens_pose import load
                 self.pose_refiner = load(config, self.device)
             self.provenance['recognizer'] = identity_contract(config)
         except BaseException:
@@ -221,7 +229,7 @@ class SapiensIDFaces(YuNetDetector):
         if batched:
             predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
             if len(predictions)!=len(deferred):
-                raise ValueError('ViTPose returned an invalid frame count.')
+                raise ValueError('Pose refiner returned an invalid frame count.')
             for (image,faces,bounds,scores),(points,confidence) in zip(deferred,predictions):
                 prepared[id(image)]=image,faces,self._people(bounds,scores,points,confidence)
         self._prepared_frames=prepared

@@ -21,6 +21,9 @@ Model weights are not committed to this repository.
 | YuNet face detector | [opencv/face_detection_yunet](https://huggingface.co/opencv/face_detection_yunet) | MIT | `3cc26e7f1014a5ee5d74a42acee58bafc9d0a310` |
 | SFace face embeddings | [opencv/face_recognition_sface](https://huggingface.co/opencv/face_recognition_sface) | Apache-2.0 | `3d7082438a6e4551e840c9b2bb60b71e8da4b524` |
 | AuraFace recognition (`glintr100.onnx` only) | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) | [Apache-2.0 repository notice](https://huggingface.co/fal/AuraFace-v1/blob/af6d057c9b0ec4071d4c49c80e3539258798b609/LICENSE.md) and model card | `af6d057c9b0ec4071d4c49c80e3539258798b609` |
+| Sapiens v1 Pose 0.3B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.3b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.3b-torchscript) | [CC BY-NC 4.0](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/LICENSE) | `796d82b26775444bbeb38a8202f8f9783370603f` |
+| Sapiens v1 Pose 0.6B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.6b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.6b-torchscript) | CC BY-NC 4.0 | `fe8cabd29460bea0c046c35f4df10bdc1814061e` |
+| Sapiens v1 Pose 1B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-1b-torchscript](https://huggingface.co/facebook/sapiens-pose-1b-torchscript) | CC BY-NC 4.0 | `9d36f8117f8ad25cb23ada28bf2f7a3b62aaed68` |
 
 The upstream license information above describes the referenced model
 repositories and should be rechecked before redistributing model assets.
@@ -37,6 +40,11 @@ The upstream Space declares Apache-2.0. That source file is not
 vendored in this repository; its upstream license applies.
 
 ## Other third-party software
+
+Sapiens Pose integration follows Meta's published [Goliath landmark mapping](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/pose/configs/_base_/datasets/goliath.py)
+and [training preprocessing configuration](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/pose/configs/sapiens_pose/goliath/sapiens_0.3b-210e_goliath-1024x768.py).
+The adapter implements the affine geometry and heatmap decoding in this project;
+the upstream Python training/inference packages are not downloaded or imported.
 
 Python packages listed in `requirements*.txt` and Stash itself are
 separate projects with their own licenses. For example,

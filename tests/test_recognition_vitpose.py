@@ -189,11 +189,17 @@ def test_invalid_refiner_output_is_rejected(failure):
         refiner.predict(None, [[0, 0, 100, 100]])
 
 
-def test_rear_view_refines_without_face_and_ignores_yolo_keypoints(tmp_path, monkeypatch):
+@pytest.mark.parametrize('selected_backend', ['vitpose_plus_large', 'sapiens'])
+def test_rear_view_refines_without_face_and_ignores_yolo_keypoints(tmp_path, monkeypatch, selected_backend):
     torch = pytest.importorskip('torch')
     from stash_ai.recognition import sapiensid_backend as backend
     from stash_ai.recognition.sapiensid_v1 import prepare_person_input
     config = configuration(tmp_path)
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    data = plain(config.data)
+    data['sapiensid']['pose']['backend'] = selected_backend
+    config = replace(config, data=data)
     # No YOLO keypoints at all: only its person boxes are needed by this backend.
     result = SimpleNamespace(boxes=SimpleNamespace(
         xyxy=torch.tensor([[10., 20., 90., 140.], [0., 0., 50., 50.]]), conf=torch.tensor([.99, .1])))
@@ -205,7 +211,11 @@ def test_rear_view_refines_without_face_and_ignores_yolo_keypoints(tmp_path, mon
         scores[:, :5] = .1  # Rear view: no usable facial pose points.
         points[0, 16] = [90, 100]  # Exclusive crop boundary must be omitted too.
         return points, scores
-    monkeypatch.setattr(vitpose_pose, 'load', lambda *args: SimpleNamespace(predict=predict))
+    from stash_ai.recognition import sapiens_pose
+    selected = sapiens_pose if selected_backend == 'sapiens' else vitpose_pose
+    other = vitpose_pose if selected_backend == 'sapiens' else sapiens_pose
+    monkeypatch.setattr(selected, 'load', lambda *args: SimpleNamespace(predict=predict))
+    monkeypatch.setattr(other, 'load', lambda *args: pytest.fail('unselected backend loaded'))
     detector = backend.SapiensIDFaces(config, {}, load_identity=False, load_detector=False)
     try:
         with Image.new('RGB', (160, 180)) as image:

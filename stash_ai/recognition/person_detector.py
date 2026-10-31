@@ -5,7 +5,7 @@ def detection_only(model):
     from ultralytics.nn.modules.head import Detect, Pose
     head = model.model.model[-1]
     if not isinstance(head, Pose):
-        raise ValueError('ViTPose requires a supported YOLO person detection head.')
+        raise ValueError('Top-down pose requires a supported YOLO person detection head.')
     # Pose/Pose26 extend Detect; the box/class branches and decoding state are
     # identical. Switch to its base implementation before predictor creation.
     # No new checkpoint, random weights or private forward monkey-patch.
