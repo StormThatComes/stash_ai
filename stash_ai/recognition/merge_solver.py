@@ -543,10 +543,6 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         elif stage == 'failed':
             retire(name)
         if stage == 'start':
-            if name == 'baseline' and progress:
-                detail = (f'cpus={runtime.cpus} trials={runtime.trials} inner_workers={runtime.inner_workers} '
-                          f'scheduling={runtime.scheduling} memory_admission={runtime.memory_admission}' if runtime else 'trials=1 scheduling=serial')
-                progress('execution', 'plan', dict(text=f'{detail} max_trials={maximum}; baseline runs first'))
             probe_state = (deepcopy(dict(options=options, hybrid=hybrid, hybrid_changes=hybrid_changes,
                 feedback=latest_feedback, visits=query_feedback.visits, priorities=query_feedback.priorities))
                 if origins.get(name, {}).get('search_phase') == 'feasibility' else None)

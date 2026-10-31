@@ -18,12 +18,18 @@ def test_automatic_admission_reserves_headroom_and_limits_parallelism(tmp_path, 
     monkeypatch.setattr(execution.os, 'process_cpu_count', lambda:16)
     ceiling = execution.plan(config).trial_bytes
     monkeypatch.setattr(execution, 'available_memory', lambda:ceiling*3)
-    admitted = execution.plan(config, dict(cpus=8,trials=8))
+    with pytest.raises(ValueError, match='resources admit only 2'):
+        execution.plan(config, dict(cpus=8,trials=8))
+    admitted = execution.plan(config, dict(cpus=8,trials=2))
     assert admitted.trials == 2 and admitted.memory_bytes == ceiling*3*4//5
     monkeypatch.setattr(execution, 'available_memory', lambda:1024)
-    admitted = execution.plan(config, dict(cpus=8,trials=8))
+    with pytest.raises(ValueError, match='resources admit only 1'):
+        execution.plan(config, dict(cpus=8,trials=8))
+    admitted = execution.plan(config, dict(cpus=8,trials=1))
     assert admitted.trials == 1 and admitted.memory_admission == 'automatic_serial_ceiling_exceeds_available'
-    assert execution.plan(config, dict(cpus=8,trials=8,memory_bytes=ceiling*4)).trials == 4
+    with pytest.raises(ValueError, match='resources admit only 4'):
+        execution.plan(config, dict(cpus=8,trials=8,memory_bytes=ceiling*4))
+    assert execution.plan(config, dict(cpus=8,trials=4,memory_bytes=ceiling*4)).trials == 4
 
 
 def test_inner_replay_shares_vectors_and_lookahead_sees_private_metadata(tmp_path):

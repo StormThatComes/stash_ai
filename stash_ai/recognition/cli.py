@@ -233,7 +233,7 @@ def parser():
     merge_report.add_argument('--max-new-outsider-observations', type=int,
         help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
     merge_report.add_argument('--solver-cpus', type=int, help='Joint CPU budget, 1..16; enables bounded solver execution.')
-    merge_report.add_argument('--solver-trials', type=int, default=1, help='Maximum simultaneous trials (default: 1); limited by CPU/RAM admission.')
+    merge_report.add_argument('--solver-trials', type=int, default=1, help='Requested simultaneous trial capacity (default: 1); errors if CPU/RAM admission would reduce it.')
     merge_report.add_argument('--solver-memory-gib', type=int, help='Total trial memory admission budget in GiB; not a hard RSS limit.')
     merge_report.add_argument('--solver-scheduling', choices=('batch', 'async'), default='batch', help='Deterministic batches or completion-driven search; both support checkpoint resume.')
     merge_report.add_argument('--profile-solver', '--profile-report', dest='profile_solver', action='store_true',

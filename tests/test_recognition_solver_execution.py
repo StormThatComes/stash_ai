@@ -15,7 +15,9 @@ def test_joint_cpu_and_memory_admission(tmp_path, monkeypatch):
     config, _ = fixture(tmp_path, 'face')
     first = plan(config, dict(cpus=16, trials=4))
     assert first.trials == 4 and first.inner_workers == 3
-    limited = plan(config, dict(cpus=16, trials=4, memory_bytes=first.trial_bytes*2))
+    with pytest.raises(ValueError, match='Cannot start 4 simultaneous solver trials'):
+        plan(config, dict(cpus=16, trials=4, memory_bytes=first.trial_bytes*2))
+    limited = plan(config, dict(cpus=16, trials=2, memory_bytes=first.trial_bytes*2))
     assert limited.trials == 2 and limited.inner_workers == 7
     with scope(limited):
         pool = Compute(config)

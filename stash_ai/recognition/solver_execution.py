@@ -21,6 +21,9 @@ class Execution:
     shared_input_bytes: int = 0
     available_memory_bytes: int | None = None
     memory_admission: str = 'explicit'
+    requested_cpus: int | None = None
+    requested_trials: int = 1
+    available_cpus: int | None = None
 
     def document(self):
         return asdict(self)
@@ -28,6 +31,8 @@ class Execution:
     def signature(self):
         result = self.document()
         result.pop('available_memory_bytes')
+        for key in ('requested_cpus', 'requested_trials', 'available_cpus'):
+            result.pop(key)  # Diagnostics; only the effective plan affects replay.
         if self.memory_admission.startswith('automatic'):
             result.pop('memory_bytes')
             result['memory_admission'] = 'automatic'
@@ -41,12 +46,11 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
         raise ValueError('Unknown solver execution option.')
     available = max(1, getattr(os, 'process_cpu_count', os.cpu_count)() or 1)
     requested = options.get('cpus', min(16, available))
-    trials = options.get('trials', 1)
+    requested_trials = trials = options.get('trials', 1)
     for name, value, high in (('cpus', requested, 16), ('trials', trials, 16)):
         if type(value) is not int or not 1 <= value <= high:
             raise ValueError(f'Solver {name} must be an integer in 1..{high}.')
     cpus = min(requested, available)
-    trials = min(trials, cpus)
     settings = config.data['execution']
     # Trial history and the inner production scene replay both have hard RAM
     # page ceilings. Immutable source evidence lives on shared disk separately.
@@ -76,11 +80,30 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
     available_ram = available_memory() if 'memory_bytes' not in options else None
     automatic = 'memory_bytes' not in options
     memory = options.get('memory_bytes', max(1, available_ram*4//5) if available_ram is not None else trial_bytes*trials)
-    if type(memory) is not int or memory < 1 or (not automatic and memory < trial_bytes):
-        raise ValueError(f'Solver memory_bytes must admit one trial ({trial_bytes} bytes).')
+    if type(memory) is not int or memory < 1:
+        raise ValueError('Solver memory_bytes must be a positive integer.')
     # Configured ceilings are not allocations. Always allow a serial trial in
     # automatic mode, but never multiply a ceiling exceeding available RAM.
-    trials = min(trials, max(1, memory // trial_bytes))
+    memory_trials = max(1 if automatic else 0, memory // trial_bytes)
+    admitted = min(trials, cpus, memory_trials)
+    if admitted < requested_trials:
+        reasons = []
+        if cpus < requested_trials:
+            reasons.append(f'CPU: budget={requested}, available={available}, effective={cpus}; '
+                           f'at least {requested_trials} CPUs are required (one per trial)')
+        if memory_trials < requested_trials:
+            origin = (f'automatic: 80% of {available_ram / 1024**3:.2f} GiB available'
+                      if automatic and available_ram is not None else 'explicit')
+            reasons.append(f'RAM: budget={memory / 1024**3:.2f} GiB ({origin}), '
+                           f'budget_bytes={memory}, '
+                           f'per_trial={trial_bytes / 1024**3:.2f} GiB, '
+                           f'required={trial_bytes * requested_trials / 1024**3:.2f} GiB '
+                           f'({trial_bytes * requested_trials} bytes); permits {memory_trials} trials '
+                           'under the configured replay-memory ceilings (not measured RSS)')
+        raise ValueError(f'Cannot start {requested_trials} simultaneous solver trials: '
+                         f'resources admit only {admitted}. ' + '; '.join(reasons) + '. '
+                         'Adjust --solver-trials, --solver-cpus or --solver-memory-gib '
+                         'to fit the available resources.')
     admission = ('automatic_serial_ceiling_exceeds_available' if memory < trial_bytes else 'automatic_available_memory') if automatic and available_ram is not None else ('automatic_memory_unavailable' if automatic else 'explicit')
     profile = options.get('profile', False)
     scheduling = options.get('scheduling', 'batch')
@@ -88,7 +111,58 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
         raise ValueError('Solver profile must be boolean; scheduling must be batch or async.')
     # Reserve one coordinator CPU inside each trial's allocation when possible.
     inner = max(1, cpus // trials - 1)
-    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared, available_ram, admission)
+    return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared, available_ram, admission,
+                     requested, requested_trials, available)
+
+
+def cli_options(args):
+    """Keep the legacy serial execution unless a solver option was requested."""
+    cpus = getattr(args, 'solver_cpus', None)
+    trials = getattr(args, 'solver_trials', 1)
+    memory = getattr(args, 'solver_memory_gib', None)
+    profile = getattr(args, 'profile_solver', False)
+    scheduling = getattr(args, 'solver_scheduling', 'batch')
+    if cpus is None and trials == 1 and memory is None and not profile and scheduling == 'batch':
+        return None
+    options = dict(trials=trials, profile=profile, scheduling=scheduling)
+    if cpus is not None:options['cpus'] = cpus
+    if memory is not None:options['memory_bytes'] = memory * 1024**3
+    return options
+
+
+def request_text(options, *, maximum):
+    """Available before opening or copying the report snapshot."""
+    settings = options or {}
+    trials = settings.get('trials', 1)
+    memory = settings.get('memory_bytes')
+    detail = (f"cpus={settings.get('cpus', 'auto' if options is not None else 'configured_rebuild')} "
+              f"trials={trials} scheduling={settings.get('scheduling', 'batch') if options is not None else 'serial'} "
+              f"memory_gib={memory / 1024**3 if memory is not None else 'auto'} max_trials={maximum}; "
+              'preparing report inputs; effective admission follows; baseline runs alone before candidate trials')
+    if trials == 1:
+        detail += '; use --solver-trials N for simultaneous candidate trials'
+    return detail
+
+
+def plan_text(execution, *, maximum):
+    if execution is None:
+        return (f'trials=1 scheduling=serial max_trials={maximum}; baseline runs alone before candidate trials; '
+                'use --solver-trials N for simultaneous candidate trials')
+    memory_limit = max(1, execution.memory_bytes // execution.trial_bytes)
+    limits = []
+    if execution.trials < execution.requested_trials:
+        if execution.cpus == execution.trials:limits.append('cpu')
+        if memory_limit == execution.trials:limits.append('memory')
+    detail = (f'cpus={execution.cpus} trials={execution.trials} requested_trials={execution.requested_trials} '
+              f'inner_workers={execution.inner_workers} scheduling={execution.scheduling} '
+              f'memory_admission={execution.memory_admission} '
+              f'memory_budget_gib={execution.memory_bytes / 1024**3:.2f} '
+              f'trial_memory_gib={execution.trial_bytes / 1024**3:.2f} '
+              f'limited_by={",".join(limits) or "none"} max_trials={maximum}; '
+              'baseline runs alone before candidate trials; trial memory is admission accounting, not measured RSS')
+    if execution.requested_trials == 1:
+        detail += '; use --solver-trials N for simultaneous candidate trials'
+    return detail
 
 
 def current():

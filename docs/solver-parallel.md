@@ -4,8 +4,11 @@ The solver keeps recognition thresholds and retained-input contracts unchanged.
 Execution options have a joint CPU ceiling (1–16), a trial count and an optional
 memory admission ceiling. Each trial reserves two rebuild database ceilings,
 reference/plan ceilings and its numerical queue. This conservative admission
-estimate is not a hard operating-system RSS limit. Lower memory admission reduces
-concurrency; it never silently removes references or competitors.
+estimate is not a hard operating-system RSS limit. If CPU or memory admission
+cannot accommodate the requested trial count, the command fails before baseline
+or candidate trials instead of silently reducing concurrency. The error reports
+the requested/admissible counts and every insufficient resource, including CPU
+budget/availability or RAM budget, per-trial estimate and required total.
 
 Run `python -m benchmarks.benchmark_solver_parallel --max-trials 16` for repeated
 1/2/4/8/16-CPU comparisons. These synthetic fixtures measure search behavior, not
@@ -26,6 +29,10 @@ solver execution limits BLAS to one native thread and allocates inner workers
 from the joint CPU ceiling. Baseline may use the whole CPU allocation. Trial
 workers use threads for local cohorts to avoid nested process pools.
 
+`--solver-cpus 16` alone still runs one trial. Add `--solver-trials 4` to
+request up to four simultaneous candidate trials. Preparation and baseline
+must finish before these trials can start; neither phase is a parallel search.
+
 `--solver-scheduling batch` generates bounded batches and applies results in
 submission order. `async` refills on completed results; its trajectory depends on
 completion timing. The journal records dispatch/retirement order so either mode
@@ -37,9 +44,26 @@ failed and never become winners. Only the coordinator writes the winning YAML.
 
 ## Console progress
 
-The console first prints the effective CPU/trial limits, scheduling mode and
-trial budget. Baseline runs before the parallel trials. `trial-N: start` describes
-the submitted configuration; a spawned worker may still be starting up.
+Before copying the report snapshot, the console prints `execution: request`
+with the requested CPU/trial limits and a reminder that baseline runs alone.
+After resource planning, `execution: plan` prints the admitted limits, before
+checkpoint validation, diagnostic measurements and replay preparation. Previously
+this plan was hidden until all those stages completed.
+
+An admitted plan preserves `requested_trials`. Insufficient resources produce
+an error with a nonzero exit code, including with `--progress-style off`.
+No baseline, candidate trial, checkpoint or result export is started by an
+admission failure. Automatic memory admission uses 80% of available RAM.
+The per-trial amount is conservative admission accounting based on configured
+ceilings, not measured RSS: raising `execution.rebuild_memory_bytes` can reduce
+admissible parallelism. For example, the default two 8 GiB replay ceilings plus
+references and queues admit only one trial with 24 GiB available RAM: requesting
+four now fails and explains this limit. An explicit
+`--solver-memory-gib` replaces automatic admission and must be chosen to fit
+the machine; it does not allocate or enforce an operating-system RAM limit.
+
+`trial-N: start` describes the submitted configuration; a spawned worker may
+still be starting up. `--progress-style off` hides both startup and worker lines.
 
 Every five seconds while waiting, the coordinator prints pool counts and one
 status line per pending trial. For example (illustrative values):
