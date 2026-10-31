@@ -204,6 +204,14 @@ def test_parallel_cli_keeps_json_clean_and_reports_ready_and_completion(tmp_path
     if style == 'off':
         assert captured.err == ''
     else:
+        request = captured.err.index('execution: request cpus=4 trials=2')
+        preparation = captured.err.index('stage=Prepare report inputs')
+        admitted = captured.err.index('execution: plan cpus=')
+        measurements = captured.err.index('stage: Measure retained evidence')
+        assert request < preparation < admitted < measurements
+        assert captured.err.count('execution: plan ') == 1
+        assert 'trials=2 requested_trials=2' in captured.err
+        assert 'limited_by=none' in captured.err
         assert 'execution: plan cpus=' in captured.err
         assert 'workers: pool running=' in captured.err
         assert 'trial-1: ready evaluation=finished' in captured.err

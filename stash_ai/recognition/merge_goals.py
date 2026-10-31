@@ -111,6 +111,14 @@ def execute(args, config):
         raise FileExistsError('Outputs must be distinct new files.')
     from .merge_solver_checkpoint import winner_file
     writer=winner_file(args.yaml_output,resume=resume) if args.solve else None
+    execution = None
+    if args.solve:
+        from .solver_execution import cli_options, request_text
+        execution = cli_options(args)
+        if args.progress_style != 'off':
+            import sys
+            print('Merge solver execution: request ' + request_text(execution, maximum=args.max_trials),
+                  file=sys.stderr, flush=True)
     sets = args.performer_set or [args.performer_id or args.identity_id]
     from .report_snapshot import snapshot
     from contextlib import ExitStack
@@ -178,14 +186,6 @@ def execute(args, config):
                     elif stage == 'failed':
                         print(f"  Trial incomplete: {item['reason']}; stage={item['stage']}; "
                               f"elapsed={item['elapsed_seconds']:.1f}s; {item['error']}", file=sys.stderr, flush=True)
-            execution = None
-            if (getattr(args, 'solver_cpus', None) is not None or getattr(args, 'solver_trials', 1) != 1
-                    or getattr(args, 'solver_memory_gib', None) is not None or getattr(args, 'profile_solver', False)
-                    or getattr(args, 'solver_scheduling', 'batch') != 'batch'):
-                execution = dict(trials=getattr(args, 'solver_trials', 1),
-                    profile=getattr(args, 'profile_solver', False), scheduling=getattr(args, 'solver_scheduling', 'batch'))
-                if args.solver_cpus is not None: execution['cpus'] = args.solver_cpus
-                if args.solver_memory_gib is not None: execution['memory_bytes'] = args.solver_memory_gib * 1024**3
             with report_phase('Solve merge goals',quiet=True):
                 result.update(solve(config, result, db, maximum=args.max_trials,
                                      progress=progress if args.progress_style != 'off' else None,

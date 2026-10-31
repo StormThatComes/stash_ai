@@ -26,6 +26,10 @@ solver execution limits BLAS to one native thread and allocates inner workers
 from the joint CPU ceiling. Baseline may use the whole CPU allocation. Trial
 workers use threads for local cohorts to avoid nested process pools.
 
+`--solver-cpus 16` alone still runs one trial. Add `--solver-trials 4` to
+request up to four simultaneous candidate trials. Preparation and baseline
+must finish before these trials can start; neither phase is a parallel search.
+
 `--solver-scheduling batch` generates bounded batches and applies results in
 submission order. `async` refills on completed results; its trajectory depends on
 completion timing. The journal records dispatch/retirement order so either mode
@@ -37,9 +41,24 @@ failed and never become winners. Only the coordinator writes the winning YAML.
 
 ## Console progress
 
-The console first prints the effective CPU/trial limits, scheduling mode and
-trial budget. Baseline runs before the parallel trials. `trial-N: start` describes
-the submitted configuration; a spawned worker may still be starting up.
+Before copying the report snapshot, the console prints `execution: request`
+with the requested CPU/trial limits and a reminder that baseline runs alone.
+After resource planning, `execution: plan` prints the admitted limits, before
+checkpoint validation, diagnostic measurements and replay preparation. Previously
+this plan was hidden until all those stages completed.
+
+Compare `trials` with `requested_trials`. A reduction reports
+`limited_by=cpu`, `memory`, or both, together with `memory_budget_gib` and
+`trial_memory_gib`. Automatic memory admission uses 80% of available RAM.
+The per-trial amount is conservative admission accounting based on configured
+ceilings, not measured RSS: raising `execution.rebuild_memory_bytes` can reduce
+parallelism. For example, the default two 8 GiB replay ceilings plus references
+and queues admit only one trial with 24 GiB available RAM. An explicit
+`--solver-memory-gib` replaces automatic admission and must be chosen to fit
+the machine; it does not allocate or enforce an operating-system RAM limit.
+
+`trial-N: start` describes the submitted configuration; a spawned worker may
+still be starting up. `--progress-style off` hides both startup and worker lines.
 
 Every five seconds while waiting, the coordinator prints pool counts and one
 status line per pending trial. For example (illustrative values):

@@ -71,7 +71,7 @@ def solver_scope(function):
     @wraps(function)
     def wrapped(config, goals, *args, **kwargs):
         from .run_cache import scope
-        from .solver_execution import plan, scope as execution_scope
+        from .solver_execution import plan, plan_text, scope as execution_scope
         from .solver_progress import heartbeat
         from .trial_metrics import Metrics
         metrics = Metrics(bool((kwargs.get('execution') or {}).get('profile')))
@@ -88,6 +88,8 @@ def solver_scope(function):
             with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):
                 execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
                                  scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
+            if progress.telemetry_enabled:
+                progress('execution', 'plan', dict(text=plan_text(execution, maximum=kwargs.get('maximum', 500))))
             from .solver_journal_events import journal_scope
             from contextlib import ExitStack
             with metrics.stage('Solve and finalize journal'):
