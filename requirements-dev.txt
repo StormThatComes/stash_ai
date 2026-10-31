@@ -7,7 +7,7 @@ urllib3>=2.0.0
 tqdm>=4.66.0
 
 # The CI JoyTag smoke check executes the pinned upstream HF architecture on CPU.
-transformers>=4.36.2
+transformers>=4.53,<6
 einops>=0.7.0
 safetensors>=0.4.1
 huggingface_hub>=0.26,<2

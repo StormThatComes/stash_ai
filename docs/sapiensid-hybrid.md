@@ -106,7 +106,7 @@ affine crops and heatmap decoding. If an existing installation reports
 `requirements-sapiensid.txt` in the active CPU/GPU environment and restart the
 process. Missing SciPy is now reported before ViTPose assets are downloaded.
 
-YOLO still detects person boxes using the existing `pose.path`, `sha256`,
+By default, YOLO detects person boxes using the existing `pose.path`, `sha256`,
 `score_threshold`, `nms_threshold` and `max_people_per_frame` settings. ViTPose++
 Large replaces its keypoints for **every** accepted person, including people
 without a detected face. The COCO expert (`dataset_index=0`) returns 17 points
@@ -180,7 +180,7 @@ existing verified file. A corrupt or different checkpoint is rejected rather
 than overwritten. The upstream weights have a separate CC BY-NC 4.0 license;
 see [third-party notices](../THIRD_PARTY_NOTICES.md).
 
-YOLO supplies person boxes with its pose head disabled. Sapiens alone supplies
+By default, YOLO supplies person boxes with its pose head disabled. Sapiens alone supplies
 keypoints for those boxes, including people without a detected face. The model
 predicts 308 Goliath landmarks; the adapter selects and reorders the matching
 17 COCO body points (including wrists at Goliath indices 62 and 41). The other
@@ -192,7 +192,7 @@ Crops use 1.25 padding, the 768×1024 target aspect ratio, RGB training
 normalization, and UDP affine sampling/DARK subpixel heatmap decoding. Inference
 uses FP32 on `models.device`, without flip augmentation or compilation.
 `sapiens_batch_size` bounds people per Sapiens inference, including across cues;
-`pose.batch_size` continues to bound YOLO frame batches. Start with one person
+`pose.batch_size` continues to bound person-detector frame batches. Start with one person
 per Sapiens batch: the 1K input and larger variants require substantially more
 memory and compute than YOLO. GPU throughput and VRAM requirements depend on
 the variant and other loaded models; no fixed capacity is assumed.
@@ -216,6 +216,60 @@ This downloads the 0.3B model and YOLO, without the SapiensID identity encoder.
 `STASH_AI_SAPIENS_POSE_DIRECTORY` can point the smoke test at cached weights.
 Integration tests do not establish an accuracy improvement on rear-view VTT
 thumbnails; compare those scenes with `recognition audit-detection`.
+
+### D-FINE person detectors for Sapiens / ViTPose
+
+`pose.detector` selects person boxes independently of `pose.backend`, which
+selects keypoints. The default `detector: yolo` preserves existing behavior.
+To replace YOLO entirely while retaining Sapiens Pose:
+
+```yaml
+sapiensid:
+  enabled: true
+  pose:
+    backend: sapiens             # or vitpose_plus_large
+    detector: dfine_l            # dfine_l or dfine_x
+    batch_size: 4                # frames per detector batch; reduce for less VRAM
+    dfine_directory: ""         # optional local folder containing all three files
+```
+
+| Selector | Pinned Transformers checkpoint | Weight download |
+| --- | --- | --- |
+| `dfine_l` | [D-FINE-L Objects365 -> COCO E25](https://huggingface.co/ustc-community/dfine-large-obj2coco-e25/tree/c89de47153e338c07cddc81fc21a776b97cbf75e) | 126 MB |
+| `dfine_x` | [D-FINE-X Objects365 -> COCO](https://huggingface.co/ustc-community/dfine-xlarge-obj2coco/tree/15f18d917eaddcedf9e3ffb082adcfb97a0b2d4d) | 252 MB |
+
+Install the updated `requirements-sapiensid.txt` (Transformers >=4.53).
+First use downloads `config.json`, `preprocessor_config.json` and
+`model.safetensors` into `models.directory/<detector>/<revision>/`.
+Every file is checked against a pinned size and SHA256, including cached files.
+`dfine_directory` overrides this directory relative to the YAML; with
+`models.download_missing: false`, all three matching files must already exist.
+Only the selected variant is loaded, in FP32 on `models.device`; there is no
+remote Python code, pickle loading or separate backbone download.
+
+D-FINE uses RGB frames resized to 640x640 and returns boxes in original image
+coordinates. Only COCO person scores are considered. `pose.score_threshold`
+filters people, `nms_threshold` suppresses duplicate person boxes, and
+`max_people_per_frame` caps the remaining results. NMS is explicitly applied
+after D-FINE's end-to-end predictions to keep this application's configured
+duplicate-suppression behavior. Other object classes do not consume the limit.
+Scores need calibration on your scenes; they are not interchangeable with YOLO.
+
+In this mode no YOLO model is downloaded, loaded or executed; `pose.path` and
+`pose.sha256` are unused. `backend: yolo` with a D-FINE detector is rejected,
+because D-FINE supplies no keypoints. Sapiens/ViTPose supplies the 17 body points
+used by recognition, independent body collection and both detection/alignment
+audits. The existing crop-boundary filtering remains in place.
+
+Switching detector/variant changes the person/body evidence contract; rerun
+recognition on the selected scenes before solving/merging. Existing YOLO
+contracts remain valid. Local paths and batch sizes do not change evidence.
+Compare bounding-box coverage on your VTT frames with `audit-detection`; these
+integration tests do not establish a quality advantage over YOLO.
+
+The opt-in pretrained CPU smoke covers both variants (about 378 MB total):
+`STASH_AI_DFINE_SMOKE=1 python -m pytest -q tests/test_recognition_dfine_smoke.py`.
+Set `STASH_AI_DFINE_MODEL_DIRECTORY` to reuse the parent model cache directory.
 
 ### Shared geometry and existing YOLO configurations
 

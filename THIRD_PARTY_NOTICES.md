@@ -21,6 +21,8 @@ Model weights are not committed to this repository.
 | YuNet face detector | [opencv/face_detection_yunet](https://huggingface.co/opencv/face_detection_yunet) | MIT | `3cc26e7f1014a5ee5d74a42acee58bafc9d0a310` |
 | SFace face embeddings | [opencv/face_recognition_sface](https://huggingface.co/opencv/face_recognition_sface) | Apache-2.0 | `3d7082438a6e4551e840c9b2bb60b71e8da4b524` |
 | AuraFace recognition (`glintr100.onnx` only) | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) | [Apache-2.0 repository notice](https://huggingface.co/fal/AuraFace-v1/blob/af6d057c9b0ec4071d4c49c80e3539258798b609/LICENSE.md) and model card | `af6d057c9b0ec4071d4c49c80e3539258798b609` |
+| D-FINE-L (Objects365 -> COCO, E25) | [USTC community / dfine-large-obj2coco-e25](https://huggingface.co/ustc-community/dfine-large-obj2coco-e25) | Apache-2.0 model card; see Objects365 note below | `c89de47153e338c07cddc81fc21a776b97cbf75e` |
+| D-FINE-X (Objects365 -> COCO) | [USTC community / dfine-xlarge-obj2coco](https://huggingface.co/ustc-community/dfine-xlarge-obj2coco) | Apache-2.0 model card; see Objects365 note below | `15f18d917eaddcedf9e3ffb082adcfb97a0b2d4d` |
 | Sapiens v1 Pose 0.3B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.3b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.3b-torchscript) | [CC BY-NC 4.0](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/LICENSE) | `796d82b26775444bbeb38a8202f8f9783370603f` |
 | Sapiens v1 Pose 0.6B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.6b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.6b-torchscript) | CC BY-NC 4.0 | `fe8cabd29460bea0c046c35f4df10bdc1814061e` |
 | Sapiens v1 Pose 1B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-1b-torchscript](https://huggingface.co/facebook/sapiens-pose-1b-torchscript) | CC BY-NC 4.0 | `9d36f8117f8ad25cb23ada28bf2f7a3b62aaed68` |
@@ -30,6 +32,11 @@ repositories and should be rechecked before redistributing model assets.
 In particular, the DINOv3 License imposes separate terms on the
 DanbooruTagQuery model. Publishing this project's GPL-licensed code
 does **not** grant permissions beyond those upstream terms.
+
+D-FINE uses Transformers' converted safetensors checkpoints. The model cards
+declare Apache-2.0; the [D-FINE upstream notice](https://github.com/Peterande/D-FINE)
+also states that Objects365-pretrained weights may be subject to the dataset's
+terms and should not be assumed commercially cleared by the code license.
 
 ## JoyTag architecture loader
 

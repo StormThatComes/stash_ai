@@ -12,6 +12,9 @@ CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
 
 def input_contract(config):
+    pose = config.data['sapiensid']['pose']
+    if pose.get('detector', 'yolo') != 'yolo':
+        return f"sapiensid-v1-{pose['detector']}-{pose['backend']}-coco17-face-anchor-square384-v1"
     if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'sapiens':
         return 'sapiensid-v1-sapiens-pose-coco17-face-anchor-square384-v1'
     if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
@@ -34,6 +37,11 @@ def identity_contract(config):
             'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
             'person_nms_threshold': settings['pose']['nms_threshold'],
             'max_people_per_frame': settings['pose']['max_people_per_frame']}
+    if settings['pose'].get('detector', 'yolo') != 'yolo':
+        from .dfine_registry import contract as detector_contract
+        result['person_detector'] = detector_contract(settings['pose']['detector'])
+        result.pop('pose_sha256')
+        result.pop('pose_inference')
     if settings['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract
         result['pose_refiner'] = vitpose_contract()
@@ -191,7 +199,7 @@ class SapiensIDFaces(YuNetDetector):
         from .profiling import count
         count('person_detector_batches')
         count('person_detector_frames', len(source) if isinstance(source,list) else 1)
-        # Explicit one-to-many head preserves the configured NMS contract.
+        # YOLO selects its one-to-many head; D-FINE applies person-only NMS.
         return self.pose.predict(source=source, device=self.device, verbose=False, nms=True,
             conf=settings['score_threshold'], iou=settings['nms_threshold'],
             max_det=settings['max_people_per_frame'])
