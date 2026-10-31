@@ -67,9 +67,11 @@ Targeted numerical, cache and parallel solver tests pass (33 tests).
 ## Replay memory and preparation
 
 Automatic worker admission uses 80% of available RAM, including exposed cgroup
-limits. Configured ceilings are conservative rather than allocations: if even
-one ceiling exceeds available RAM, a serial trial is still allowed and that
-condition is explicitly reported. An explicit memory budget remains strict.
+limits. Configured ceilings are conservative rather than allocations: when one
+trial is requested, it is still allowed if its ceiling exceeds available RAM,
+and that condition is explicitly reported. Requests for parallel trials now fail
+with CPU/RAM admission details if fewer workers can be admitted; they are never
+silently reduced to a serial run. An explicit memory budget remains strict.
 Volatile available-memory readings do not invalidate a checkpoint when its
 effective worker plan stays the same.
 

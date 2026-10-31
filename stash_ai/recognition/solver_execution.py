@@ -51,7 +51,6 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
         if type(value) is not int or not 1 <= value <= high:
             raise ValueError(f'Solver {name} must be an integer in 1..{high}.')
     cpus = min(requested, available)
-    trials = min(trials, cpus)
     settings = config.data['execution']
     # Trial history and the inner production scene replay both have hard RAM
     # page ceilings. Immutable source evidence lives on shared disk separately.
@@ -81,11 +80,30 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
     available_ram = available_memory() if 'memory_bytes' not in options else None
     automatic = 'memory_bytes' not in options
     memory = options.get('memory_bytes', max(1, available_ram*4//5) if available_ram is not None else trial_bytes*trials)
-    if type(memory) is not int or memory < 1 or (not automatic and memory < trial_bytes):
-        raise ValueError(f'Solver memory_bytes must admit one trial ({trial_bytes} bytes).')
+    if type(memory) is not int or memory < 1:
+        raise ValueError('Solver memory_bytes must be a positive integer.')
     # Configured ceilings are not allocations. Always allow a serial trial in
     # automatic mode, but never multiply a ceiling exceeding available RAM.
-    trials = min(trials, max(1, memory // trial_bytes))
+    memory_trials = max(1 if automatic else 0, memory // trial_bytes)
+    admitted = min(trials, cpus, memory_trials)
+    if admitted < requested_trials:
+        reasons = []
+        if cpus < requested_trials:
+            reasons.append(f'CPU: budget={requested}, available={available}, effective={cpus}; '
+                           f'at least {requested_trials} CPUs are required (one per trial)')
+        if memory_trials < requested_trials:
+            origin = (f'automatic: 80% of {available_ram / 1024**3:.2f} GiB available'
+                      if automatic and available_ram is not None else 'explicit')
+            reasons.append(f'RAM: budget={memory / 1024**3:.2f} GiB ({origin}), '
+                           f'budget_bytes={memory}, '
+                           f'per_trial={trial_bytes / 1024**3:.2f} GiB, '
+                           f'required={trial_bytes * requested_trials / 1024**3:.2f} GiB '
+                           f'({trial_bytes * requested_trials} bytes); permits {memory_trials} trials '
+                           'under the configured replay-memory ceilings (not measured RSS)')
+        raise ValueError(f'Cannot start {requested_trials} simultaneous solver trials: '
+                         f'resources admit only {admitted}. ' + '; '.join(reasons) + '. '
+                         'Adjust --solver-trials, --solver-cpus or --solver-memory-gib '
+                         'to fit the available resources.')
     admission = ('automatic_serial_ceiling_exceeds_available' if memory < trial_bytes else 'automatic_available_memory') if automatic and available_ram is not None else ('automatic_memory_unavailable' if automatic else 'explicit')
     profile = options.get('profile', False)
     scheduling = options.get('scheduling', 'batch')

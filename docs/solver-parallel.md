@@ -4,8 +4,11 @@ The solver keeps recognition thresholds and retained-input contracts unchanged.
 Execution options have a joint CPU ceiling (1–16), a trial count and an optional
 memory admission ceiling. Each trial reserves two rebuild database ceilings,
 reference/plan ceilings and its numerical queue. This conservative admission
-estimate is not a hard operating-system RSS limit. Lower memory admission reduces
-concurrency; it never silently removes references or competitors.
+estimate is not a hard operating-system RSS limit. If CPU or memory admission
+cannot accommodate the requested trial count, the command fails before baseline
+or candidate trials instead of silently reducing concurrency. The error reports
+the requested/admissible counts and every insufficient resource, including CPU
+budget/availability or RAM budget, per-trial estimate and required total.
 
 Run `python -m benchmarks.benchmark_solver_parallel --max-trials 16` for repeated
 1/2/4/8/16-CPU comparisons. These synthetic fixtures measure search behavior, not
@@ -47,13 +50,15 @@ After resource planning, `execution: plan` prints the admitted limits, before
 checkpoint validation, diagnostic measurements and replay preparation. Previously
 this plan was hidden until all those stages completed.
 
-Compare `trials` with `requested_trials`. A reduction reports
-`limited_by=cpu`, `memory`, or both, together with `memory_budget_gib` and
-`trial_memory_gib`. Automatic memory admission uses 80% of available RAM.
+An admitted plan preserves `requested_trials`. Insufficient resources produce
+an error with a nonzero exit code, including with `--progress-style off`.
+No baseline, candidate trial, checkpoint or result export is started by an
+admission failure. Automatic memory admission uses 80% of available RAM.
 The per-trial amount is conservative admission accounting based on configured
 ceilings, not measured RSS: raising `execution.rebuild_memory_bytes` can reduce
-parallelism. For example, the default two 8 GiB replay ceilings plus references
-and queues admit only one trial with 24 GiB available RAM. An explicit
+admissible parallelism. For example, the default two 8 GiB replay ceilings plus
+references and queues admit only one trial with 24 GiB available RAM: requesting
+four now fails and explains this limit. An explicit
 `--solver-memory-gib` replaces automatic admission and must be chosen to fit
 the machine; it does not allocate or enforce an operating-system RAM limit.
 
