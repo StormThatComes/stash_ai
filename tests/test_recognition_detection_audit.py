@@ -13,7 +13,6 @@ from stash_ai.recognition import detection_audit
 from stash_ai.recognition.cli import main, parser
 from stash_ai.recognition.config import plain
 from stash_ai.recognition.media import SpriteInput
-from stash_ai.recognition.person_audit import BOX_COLOR, FACE_COLORS, POSE_COLOR
 from tests.helpers.recognition import FACE, Stash, textured_image
 from tests.test_recognition_alignment_audit import config
 
@@ -123,6 +122,9 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     assert not case.cfg.data['sapiensid']['collection']['enabled']
     manifest = json.loads((case.destination / 'manifest.json').read_text())
     assert manifest['kind'] == 'recognition_detection_audit'
+    assert manifest['format'] == 2
+    assert manifest['annotations']['person_colors'] == [[128, 0, 128], [0, 128, 0], [0, 0, 255]]
+    assert manifest['annotations']['overflow_color'] == [255, 0, 0]
     assert manifest['execution'] == dict(max_cues=0, force_pose=True, embeddings=False)
     assert manifest['configuration']['configured_max_cues'] == 1
     assert manifest['configuration']['detection']['min_face_pixels'] == 150
@@ -136,17 +138,19 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     assert len(list(case.destination.glob('*.png'))) == 3
     first, faceless, empty = scene['frames']
     assert first['faces'][0]['person_index'] == 0
+    assert first['faces'][0]['annotation_color'] == first['people'][0]['annotation_color'] == [128, 0, 128]
+    assert faceless['people'][0]['annotation_color'] == [128, 0, 128]  # palette resets per cue
     assert first['faces'][0]['landmarks'] == [list(p) for p in FACE.landmarks]
     assert first['people'][0]['drawn_indices'] == [0, 1]
     assert not faceless['faces'] and len(faceless['people']) == 1
     assert not empty['faces'] and not empty['people']
     with Image.open(case.destination / first['file']) as image:
         assert image.size == (160, 160)
-        assert image.getpixel((32, 40)) == POSE_COLOR
-        assert image.getpixel((49, 60)) == FACE_COLORS[0]
-        assert image.getpixel((80, 84)) == FACE_COLORS[2]  # face drawn above pose
-        assert image.getpixel((4, 120)) == POSE_COLOR
-        assert image.getpixel((16, 120)) == BOX_COLOR
+        assert image.getpixel((32, 40)) == (128, 0, 128)
+        assert image.getpixel((49, 60)) == (128, 0, 128)
+        assert image.getpixel((80, 84)) == (128, 0, 128)  # face drawn above pose
+        assert image.getpixel((4, 120)) == (128, 0, 128)
+        assert image.getpixel((16, 120)) == (128, 0, 128)
     with Image.open(case.destination / empty['file']) as image, textured_image() as original:
         assert image.tobytes() == original.tobytes()
     if os.name == 'posix':
@@ -193,46 +197,67 @@ def test_failure_closes_resources_and_does_not_claim_complete_export(tmp_path, m
     assert case.stash.writes == []
 
 
-def test_full_cue_crop_contains_all_faces_and_people_in_source_coordinates(tmp_path, monkeypatch):
+@pytest.mark.parametrize('person_count,matches', [
+    (2, [1, 0]), (5, [4, 3, 2, 1, 0]), (2, [None, 1, 0, None]), (0, [None] * 5),
+])
+def test_full_cue_crop_contains_all_faces_and_people_in_source_coordinates(tmp_path, monkeypatch,
+                                                                          person_count, matches):
     from io import BytesIO
     from tests.helpers.recognition import MediaClient
     from stash_ai.recognition.models import checked_detection
     case = setup(tmp_path, monkeypatch)
     client = MediaClient(count=1)
+    width = 160 * (person_count + matches.count(None))
     client.data[client.url + 'vtt/1.vtt'] = (
-        b'WEBVTT\n\n00:00:02.000 --> 00:00:03.000\nsprite.jpg#xywh=17,23,320,160\n')
-    with Image.new('RGB', (350, 200), (10, 20, 30)) as sheet:
+        f'WEBVTT\n\n00:00:02.000 --> 00:00:03.000\nsprite.jpg#xywh=17,23,{width},160\n'.encode())
+    with Image.new('RGB', (width + 30, 200), (10, 20, 30)) as sheet:
         output = BytesIO()
         sheet.save(output, 'PNG')
         client.data[client.url + 'sprite/1.jpg'] = output.getvalue()
-    shifted = list(FACE.row)
-    for index in (0, 4, 6, 8, 10, 12):
-        shifted[index] += 160
-    other_face = checked_detection(shifted)
-    other_person = dict(bounds=[164, 4, 316, 156], score=.97,
-                        keypoints=[[240, 84], [192, 40]] + [[-1, -1]] * 15)
+    people = [dict(bounds=[160*i+4, 4, 160*i+156, 156], score=.97,
+                   keypoints=[[160*i+80, 84], [160*i+32, 40]] + [[-1, -1]] * 15)
+              for i in range(person_count)]
+    faces, slots = [], []
+    next_slot = person_count
+    for match in matches:
+        slot = match
+        if slot is None:
+            slot = next_slot
+            next_slot += 1
+        slots.append(slot)
+        shifted = list(FACE.row)
+        for index in (0, 4, 6, 8, 10, 12):
+            shifted[index] += 160 * slot
+        faces.append(checked_detection(shifted))
 
     def detect(image, *, force_pose):
-        assert force_pose and image.size == (320, 160)
-        case.detector.frame_people = [PERSON, other_person]
+        assert force_pose and image.size == (width, 160)
+        case.detector.frame_people = people
         # Deliberately reverse face order; associations must follow returned order.
-        case.detector.face_matches = [1, 0]
-        return [other_face, FACE]
+        case.detector.face_matches = matches
+        return faces
 
     case.detector.detect = detect
     case.destination.mkdir()
     with SpriteInput(client, client.scene, case.cfg) as source:
         result = detection_audit.audit_scene(source, case.detector, '1', case.destination)
     frame = result['frames'][0]
-    assert frame['source_rect'] == [17, 23, 320, 160]
-    assert frame['source_dimensions'] == [320, 160]
-    assert [f['person_index'] for f in frame['faces']] == [1, 0]
-    assert len(frame['people']) == len(frame['faces']) == 2
+    assert frame['source_rect'] == [17, 23, width, 160]
+    assert frame['source_dimensions'] == [width, 160]
+    assert [f['person_index'] for f in frame['faces']] == matches
+    assert len(frame['people']) == person_count and len(frame['faces']) == len(matches)
+    colors = [(128, 0, 128), (0, 128, 0), (0, 0, 255), (255, 0, 0), (255, 0, 0)]
     with Image.open(case.destination / frame['file']) as image:
-        assert image.size == (320, 160)
-        assert image.getpixel((49, 60)) == image.getpixel((209, 60)) == FACE_COLORS[0]
-        assert image.getpixel((32, 40)) == image.getpixel((192, 40)) == POSE_COLOR
-        assert image.getpixel((319, 159)) == (10, 20, 30)
+        assert image.size == (width, 160)
+        for slot, person in enumerate(frame['people']):
+            assert person['annotation_color'] == list(colors[slot])
+            assert image.getpixel((160*slot+32, 40)) == colors[slot]
+            assert image.getpixel((160*slot+4, 120)) == colors[slot]
+        for face, slot in zip(frame['faces'], slots):
+            assert face['annotation_color'] == list(colors[slot])
+            assert image.getpixel((160*slot+49, 60)) == colors[slot]
+            assert image.getpixel((160*slot+16, 120)) == colors[slot]
+        assert image.getpixel((width-1, 159)) == (10, 20, 30)
 
 
 @pytest.mark.parametrize('empty', [True, False])

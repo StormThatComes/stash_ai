@@ -267,14 +267,21 @@ python .\stash_ai.py recognition audit-detection --scene-id 123 --face-config fa
 The new output directory contains `scene-123_cue-000000.png`, one PNG per cue
 in original VTT order (zero-based), and `manifest.json`. Each PNG preserves the
 whole cue at its original size and overlays **all returned face and person
-boxes**, five face landmarks and measured COCO17 pose points. Face boxes and
-`F0` labels are yellow; person/pose boxes and `P0` labels are magenta. These
-labels show detection indices and scores. Landmark colors and point labels
-match the identity/person audits: magenta pose points, cyan eyes, red nose and
-green mouth corners. A cue with no detections is still exported, with unchanged pixels.
+boxes**, five face landmarks and measured COCO17 pose points. Each person's
+boxes, points and labels use one color: **purple, green, blue**, then **red for
+every additional person**, in person detection order. Associated faces share
+their person's color, regardless of face detection order. Faces without an
+associated person take subsequent color slots; with no bodies, face order alone
+determines colors. Colors reset for each cue and do not track identity across
+cues. `F0` and `P0` labels still show face/person detection indices and scores;
+point labels retain their landmark indices. Other identity/person audits retain
+their existing landmark colors. A cue with no detections is still exported,
+with unchanged pixels.
 The manifest records timestamps, original sprite rectangles, cue dimensions,
 geometry, scores, face/person associations, counters, source fingerprint and
-the applied detector settings.
+the applied detector settings. Detection audit manifest format 2 stores the RGB
+palette in `annotations` and each detection's RGB `annotation_color`, replacing
+the format 1 global face/person/landmark color fields.
 
 The command uses `models.detector` and `sapiensid.pose` from the current YAML,
 including confidence, NMS, result-count and keypoint thresholds. **Both

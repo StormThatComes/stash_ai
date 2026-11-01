@@ -7,7 +7,7 @@ FACE_COLORS = ((0, 240, 255), (0, 240, 255), (255, 80, 80),
                (150, 255, 80), (150, 255, 80))
 
 
-def _draw(image, bounds, points, *, face_only=False, labels=True, box_color=BOX_COLOR):
+def _draw(image, bounds, points, *, face_only=False, labels=True, box_color=BOX_COLOR, point_color=None):
     from PIL import ImageDraw
     painter = ImageDraw.Draw(image)
     left, top, right, bottom = bounds
@@ -21,7 +21,9 @@ def _draw(image, bounds, points, *, face_only=False, labels=True, box_color=BOX_
         if not (math.isfinite(x) and math.isfinite(y) and
                 0 <= x < image.width and 0 <= y < image.height):
             continue
-        color = FACE_COLORS[index] if face_only else POSE_COLOR if index < 17 else FACE_COLORS[index-17]
+        color = point_color
+        if color is None:
+            color = FACE_COLORS[index] if face_only else POSE_COLOR if index < 17 else FACE_COLORS[index-17]
         painter.ellipse((x-2, y-2, x+2, y+2), fill=color)
         if labels:
             label = str(index)
