@@ -1,5 +1,33 @@
 # Facial recognition
 
+Auto portraits use strict, configurable fallback tiers:
+
+```yaml
+portraits:
+  kind: auto
+  auto_precedence: [face+pose, face, pose]
+```
+
+`face+pose` selects a face crop whose observation has usable, associated SapiensID
+person evidence for the current model/pose contract. It does not combine different
+observations or change the face crop framing. `face` selects remaining eligible
+faces, and `pose` uses accepted retained person crops. List all three exactly once,
+in the desired order (for example `[pose, face+pose, face]`). Older YAML files use
+the default above. Explicit `kind: face` and `kind: person` ignore this order.
+
+Each tier exhausts its usable candidates, including retained-pixel fallbacks,
+before the next tier is tried. Quality scores rank candidates within a tier;
+quality shortfalls alone cannot let a lower tier win. Identity checks,
+`anchor_only`, crop/encoding limits and manual-image protection still apply.
+With SapiensID disabled or no current paired evidence, `face+pose` is empty.
+Decoded video faces belong to `face`: a VTT hint's pose does not prove a pose in
+different video pixels. The `face+pose` tier therefore uses VTT/retained face
+pixels even with `source: video`, without running new pose inference.
+
+Changing the order invalidates portrait caches only. Apply it to existing images
+with `python stash_ai.py recognition portraits`; no identity rebuild is needed.
+Portrait metadata records the winning `selection_category`.
+
 Set `portraits.anchor_only: true` to require the actual portrait face to pass
 the current clustering anchor pose and visibility rules, in addition to its
 identity check. The default is false. `portraits.max_pose_deviation` and portrait

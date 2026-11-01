@@ -165,6 +165,8 @@ portraits:
   # Portrait selection and framing; quality targets rank candidates, not recognition admission.
   anchor_only: false
   # Require face anchor quality or an accepted body anchor for portrait candidates.
+  auto_precedence: [face+pose, face, pose]
+  # Auto only: try each tier in order; list all three exactly once. face+pose uses paired SapiensID evidence.
   aspect_ratio: null
   # Crop width/height for faces and bodies; null keeps natural shape; body crops try to preserve the head.
   enabled: true
@@ -174,7 +176,7 @@ portraits:
   jpeg_quality: 90
   # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_bytes.
   kind: auto
-  # auto prefers a good face, then an accepted body crop; face/person forces the crop kind.
+  # auto follows auto_precedence; face/person forces the crop kind.
   margin: 0.35
   # Padding per side as a fraction of the face width/height.
   max_candidates: 8

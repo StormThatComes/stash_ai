@@ -23,7 +23,8 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
     previous_policy = dict(metadata.get('policy', {}))
     current_policy = plain(policy)
     for field in ('weights', 'min_face_pixels', 'min_sharpness', 'max_pose_deviation',
-                  'min_exposure', 'max_exposure', 'max_clipped_fraction', 'min_visible_face_fraction','anchor_only'):
+                  'min_exposure', 'max_exposure', 'max_clipped_fraction', 'min_visible_face_fraction','anchor_only',
+                  'auto_precedence'):
         previous_policy.pop(field, None)
         current_policy.pop(field, None)
     if previous_policy != current_policy:
@@ -31,7 +32,7 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
     if 'identity_embedding' not in metadata:
         return None
     metadata.update(policy_sha=policy_sha, policy=plain(policy), shortlist=selection,
-                    performer=target['performer'], reused_from=old['id'])
+                    performer=target['performer'], reused_from=old['id'],selection_category='face')
     from .portrait_availability import fit_cached_bytes
     try:
         data, sha = fit_cached_bytes(old['image'], old['digest'], config, metadata)
