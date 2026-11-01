@@ -122,8 +122,8 @@ def execute(args, config, *, services=None, detector_factory=None):
                         coordinates='cue-local source pixels; face boxes are xywh, person bounds are xyxy'),
                     limitations=[
                         'Both detectors run on every cue, even when sapiensid/independent collection is disabled.',
-                        'Configured score/NMS/result-count and pose-keypoint thresholds apply. Suppressed detections are unavailable.',
-                        'All returned detections are drawn, without face/person quality, visibility, anchor or identity filtering.',
+                        'Configured score/NMS/result-count and pose-keypoint thresholds apply, including PMPose presence/visibility. Suppressed detections are unavailable.',
+                        'All returned detections are drawn, without face/person quality, anchor or identity filtering.',
                         'Missing/low-confidence/out-of-bounds keypoints are omitted, never inferred.',
                         'PNG pixels come from VTT sprites, not decoded video. No resizing or identity inference is performed.',
                     ],

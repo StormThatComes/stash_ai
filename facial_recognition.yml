@@ -353,9 +353,9 @@ sapiensid:
   pose:
     # Person/pose detector used to prepare SapiensID inputs.
     backend: yolo
-    # Keypoints: yolo, vitpose_plus_large or sapiens; the latter two use a separate box detector.
+    # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
     detector: yolo
-    # Person boxes: yolo, dfine_l or dfine_x; D-FINE requires ViTPose or Sapiens above.
+    # Person boxes: yolo, dfine_l or dfine_x; D-FINE requires ViTPose, Sapiens or PMPose above.
     dfine_directory: ""
     # D-FINE asset folder; empty uses models.directory/<detector>/<pinned revision>.
     batch_size: 4
@@ -368,8 +368,16 @@ sapiensid:
     # Maximum people per Sapiens Pose batch (1..16); separate from detector/ViTPose batching.
     sapiens_directory: ""
     # Sapiens Pose weights folder; empty uses models.directory/sapiens_pose/<variant>/<revision>.
+    pmpose_directory: ""
+    # PMPose-B 1.0.0 weights folder; empty uses models.directory/pmpose_b/<pinned revision>.
+    pmpose_batch_size: 1
+    # Maximum people per PMPose batch (1..16); inference also averages horizontally flipped crops.
+    pmpose_presence_threshold: 0.50
+    # Minimum probability of a PMPose point lying in the crop; 0 disables this filter.
+    pmpose_visibility_threshold: 0.0
+    # Minimum PMPose visibility probability; 0 retains occluded points. Try 0.5 for visible points only.
     keypoint_score_threshold: 0.50
-    # Minimum pose keypoint score; ViTPose/Sapiens heatmap scores need separate calibration.
+    # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
     max_people_per_frame: 100
     # Maximum body detections per thumbnail, independent of the face detection limit.
     nms_threshold: 0.70

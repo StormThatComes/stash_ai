@@ -19,6 +19,8 @@ def input_contract(config):
         return 'sapiensid-v1-sapiens-pose-coco17-face-anchor-square384-v1'
     if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         return 'sapiensid-v1-vitpose-plus-large-coco17-face-anchor-square384-v1'
+    if pose.get('backend', 'yolo') == 'pmpose':
+        return 'sapiensid-v1-pmpose-b-coco17-face-anchor-square384-v1'
     checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
     if checksum == LEGACY_POSE_SHA256:
         return 'sapiensid-v1-yolov8-pose-face-anchor-square384-v3'
@@ -48,6 +50,9 @@ def identity_contract(config):
     elif settings['pose'].get('backend', 'yolo') == 'sapiens':
         from .sapiens_pose_registry import contract as sapiens_contract
         result['pose_refiner'] = sapiens_contract(settings['pose']['sapiens_variant'])
+    elif settings['pose'].get('backend', 'yolo') == 'pmpose':
+        from .pmpose_registry import contract as pmpose_contract
+        result['pose_refiner'] = pmpose_contract(settings['pose'])
     return result
 
 
@@ -112,6 +117,9 @@ class SapiensIDFaces(YuNetDetector):
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'sapiens':
                 from .sapiens_pose import load
                 self.pose_refiner = load(config, self.device)
+            elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'pmpose':
+                from .pmpose_pose import load
+                self.pose_refiner = load(config, self.device)
             self.provenance['recognizer'] = identity_contract(config)
         except BaseException:
             self.close()
@@ -163,7 +171,7 @@ class SapiensIDFaces(YuNetDetector):
                 if _defer is not None:
                     _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))
                     return faces
-                points, confidences = self.pose_refiner.predict(image, bounds)
+                prediction = self.pose_refiner.predict(image, bounds)
             else:
                 points = result.keypoints.xy.detach().cpu().numpy()
                 confidences = result.keypoints.conf.detach().cpu().numpy()
@@ -172,26 +180,43 @@ class SapiensIDFaces(YuNetDetector):
                         or np.any((confidences < 0) | (confidences > 1))):
                     raise ValueError('SapiensID pose detector returned malformed COCO17 geometry.')
                 points, confidences = points[selected], confidences[selected]
-            people = self._people(bounds, [float(scores[i]) for i in selected], points, confidences)
+                prediction = points, confidences
+            people = self._people(bounds, [float(scores[i]) for i in selected], *prediction)
         if _defer is not None:
             _defer.append((image, faces, [], []))
             return faces
         return self._activate(image, faces, people)
 
-    def _people(self, bounds, scores, points, confidences):
+    def _people(self, bounds, scores, points, confidences, probabilities=None):
         import numpy as np
+        settings = self.config.data['sapiensid']['pose']
         if (points.shape != (len(bounds),17,2) or confidences.shape != (len(bounds),17)
                 or any(not np.isfinite(a).all() for a in (points,confidences))
                 or np.any((confidences<0)|(confidences>1))):
             raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
+        if settings.get('backend') == 'pmpose':
+            if (not isinstance(probabilities, dict) or set(probabilities) != {'presence', 'visibility'} or
+                    any(not isinstance(v, np.ndarray) or v.shape != (len(bounds), 17)
+                        or not np.isfinite(v).all() or np.any((v < 0) | (v > 1))
+                        for v in probabilities.values())):
+                raise ValueError('PMPose requires separate finite presence and visibility probabilities.')
         people = []
-        for box, score, raw, confidence in zip(bounds, scores, points, confidences):
+        for index, (box, score, raw, confidence) in enumerate(zip(bounds, scores, points, confidences)):
             left, top, right, bottom = box
             kps = raw.copy()
-            usable = (confidence > self.config.data['sapiensid']['pose']['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
+            usable = (confidence > settings['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
             usable &= (kps[:,0]>=left)&(kps[:,0]<right)&(kps[:,1]>=top)&(kps[:,1]<bottom)
+            details = {}
+            if settings.get('backend') == 'pmpose':
+                details = dict(keypoint_scores=confidence.tolist(), keypoint_score_kind='expected_oks')
+                for key in ('presence', 'visibility'):
+                    values = probabilities[key][index]
+                    details['keypoint_' + key] = values.tolist()
+                    threshold = settings['pmpose_' + key + '_threshold']
+                    if threshold > 0:
+                        usable &= values > threshold
             kps[~usable] = -1
-            people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score)))
+            people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score),**details))
         return people
 
     def _predict_pose(self, source):
@@ -238,8 +263,8 @@ class SapiensIDFaces(YuNetDetector):
             predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
             if len(predictions)!=len(deferred):
                 raise ValueError('Pose refiner returned an invalid frame count.')
-            for (image,faces,bounds,scores),(points,confidence) in zip(deferred,predictions):
-                prepared[id(image)]=image,faces,self._people(bounds,scores,points,confidence)
+            for (image,faces,bounds,scores),prediction in zip(deferred,predictions):
+                prepared[id(image)]=image,faces,self._people(bounds,scores,*prediction)
         self._prepared_frames=prepared
 
     def _activate(self, image, faces, people):

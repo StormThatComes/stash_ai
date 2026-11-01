@@ -38,7 +38,7 @@ def test_box_only_detector_requires_top_down_pose(detector):
     data['sapiensid']['pose']['detector'] = detector
     with pytest.raises(ValueError, match='requires pose.backend'):
         validate(data)
-    for backend in ('sapiens', 'vitpose_plus_large'):
+    for backend in ('sapiens', 'vitpose_plus_large', 'pmpose'):
         data['sapiensid']['pose']['backend'] = backend
         validate(data)
 
@@ -247,10 +247,10 @@ def test_real_processor_rgb_and_bounded_mixed_size_batches():
     assert detector.predict([], conf=.5, iou=.7, max_det=100) == []
 
 
-@pytest.mark.parametrize('selected', ['sapiens', 'vitpose_plus_large'])
+@pytest.mark.parametrize('selected', ['sapiens', 'vitpose_plus_large', 'pmpose'])
 def test_dfine_replaces_yolo_in_single_and_batched_pose_pipeline(tmp_path, monkeypatch, selected):
     torch = pytest.importorskip('torch')
-    from stash_ai.recognition import sapiensid_backend, sapiensid_assets, sapiens_pose, vitpose_pose
+    from stash_ai.recognition import sapiensid_backend, sapiensid_assets, sapiens_pose, vitpose_pose, pmpose_pose
     config = configuration(tmp_path, backend=selected)
     config.data['sapiensid']['collection']['enabled'] = True
     monkeypatch.setattr(sapiensid_assets, 'pose_asset', lambda _: pytest.fail('YOLO asset was requested'))
@@ -267,13 +267,17 @@ def test_dfine_replaces_yolo_in_single_and_batched_pose_pipeline(tmp_path, monke
     class Refiner:
         def predict(self, image, bounds):
             seen.append(bounds)
-            return np.full((len(bounds), 17, 2), 30., dtype=np.float32), np.ones((len(bounds), 17), dtype=np.float32)
+            points = np.full((len(bounds), 17, 2), 30., dtype=np.float32)
+            scores = np.ones((len(bounds), 17), dtype=np.float32)
+            return ((points, scores, dict(presence=scores, visibility=scores))
+                    if selected == 'pmpose' else (points, scores))
         def predict_many(self, frames):
             return [self.predict(image, bounds) for image, bounds in frames]
-    chosen = sapiens_pose if selected == 'sapiens' else vitpose_pose
-    other = vitpose_pose if selected == 'sapiens' else sapiens_pose
+    chosen = {'sapiens': sapiens_pose, 'vitpose_plus_large': vitpose_pose, 'pmpose': pmpose_pose}[selected]
     monkeypatch.setattr(chosen, 'load', lambda *args: Refiner())
-    monkeypatch.setattr(other, 'load', lambda *args: pytest.fail('unselected pose loaded'))
+    for other in (sapiens_pose, vitpose_pose, pmpose_pose):
+        if other is not chosen:
+            monkeypatch.setattr(other, 'load', lambda *args: pytest.fail('unselected pose loaded'))
     detector = sapiensid_backend.SapiensIDFaces(config, {}, load_identity=False, load_detector=False)
     try:
         with Image.new('RGB', (100, 200)) as image:

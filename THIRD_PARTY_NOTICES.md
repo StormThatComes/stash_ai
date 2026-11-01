@@ -23,6 +23,7 @@ Model weights are not committed to this repository.
 | AuraFace recognition (`glintr100.onnx` only) | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) | [Apache-2.0 repository notice](https://huggingface.co/fal/AuraFace-v1/blob/af6d057c9b0ec4071d4c49c80e3539258798b609/LICENSE.md) and model card | `af6d057c9b0ec4071d4c49c80e3539258798b609` |
 | D-FINE-L (Objects365 -> COCO, E25) | [USTC community / dfine-large-obj2coco-e25](https://huggingface.co/ustc-community/dfine-large-obj2coco-e25) | Apache-2.0 model card; see Objects365 note below | `c89de47153e338c07cddc81fc21a776b97cbf75e` |
 | D-FINE-X (Objects365 -> COCO) | [USTC community / dfine-xlarge-obj2coco](https://huggingface.co/ustc-community/dfine-xlarge-obj2coco) | Apache-2.0 model card; see Objects365 note below | `15f18d917eaddcedf9e3ffb082adcfb97a0b2d4d` |
+| PMPose-B 1.0.0 | [VRG Prague / BBoxMaskPose](https://huggingface.co/vrg-prague/BBoxMaskPose) | GPL-3.0 upstream project | `cfc89052cf16655a52889f1f4e1b866e74a6c19c` |
 | Sapiens v1 Pose 0.3B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.3b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.3b-torchscript) | [CC BY-NC 4.0](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/LICENSE) | `796d82b26775444bbeb38a8202f8f9783370603f` |
 | Sapiens v1 Pose 0.6B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-0.6b-torchscript](https://huggingface.co/facebook/sapiens-pose-0.6b-torchscript) | CC BY-NC 4.0 | `fe8cabd29460bea0c046c35f4df10bdc1814061e` |
 | Sapiens v1 Pose 1B (Goliath TorchScript) | [Meta / facebook/sapiens-pose-1b-torchscript](https://huggingface.co/facebook/sapiens-pose-1b-torchscript) | CC BY-NC 4.0 | `9d36f8117f8ad25cb23ada28bf2f7a3b62aaed68` |
@@ -47,6 +48,22 @@ The upstream Space declares Apache-2.0. That source file is not
 vendored in this repository; its upstream license applies.
 
 ## Other third-party software
+
+PMPose inference adapts the architecture and geometry of
+[Miroslav Purkrabek's BBoxMaskPose / PMPose](https://github.com/MiraPurkrabek/BBoxMaskPose/tree/49a070a6f8396147323b1c4959474077dbe2ce8e),
+including its `MultiHead`, PMPose-B configuration and `OKSArgMaxHeatmap` decoder.
+Copyright (c) Miroslav Purkrabek, ProbPose / BMPv2. All rights reserved.
+The upstream project supplies [GPL-3.0](https://github.com/MiraPurkrabek/BBoxMaskPose/blob/49a070a6f8396147323b1c4959474077dbe2ce8e/LICENSE).
+The inference-only adaptation omits training, mask conditioning and the unused
+error-head forward pass, selects COCO17 and uses the project's verified loader.
+
+The ViT/FFN architecture and DARK/UDP geometry also follow OpenMMLab's
+[MMPreTrain v1.2.0](https://github.com/open-mmlab/mmpretrain/tree/v1.2.0) and
+[MMPose](https://github.com/open-mmlab/mmpose/tree/v1.3.2).
+Copyright 2018-2020 Open-MMLab. All rights reserved.
+These components are licensed under [Apache-2.0](LICENSES/Apache-2.0.txt).
+The adapted PMPose modules are local inference implementations; the upstream
+training packages are not downloaded or executed at runtime.
 
 Sapiens Pose integration follows Meta's published [Goliath landmark mapping](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/pose/configs/_base_/datasets/goliath.py)
 and [training preprocessing configuration](https://github.com/facebookresearch/sapiens/blob/2cb07227a740cf09896309ea3a3b8fa44429865c/pose/configs/sapiens_pose/goliath/sapiens_0.3b-210e_goliath-1024x768.py).

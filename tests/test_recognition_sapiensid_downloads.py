@@ -296,7 +296,7 @@ def test_offline_missing_assets_do_not_fetch_or_create_destination(upstream, tmp
     assert not (tmp_path/'custom/pose').exists()
 
 
-@pytest.mark.parametrize('backend', ['yolo', 'vitpose_plus_large', 'sapiens'])
+@pytest.mark.parametrize('backend', ['yolo', 'vitpose_plus_large', 'sapiens', 'pmpose'])
 def test_pose_only_path_does_not_download_source_or_identity_weights(upstream, monkeypatch, backend):
     import sys
     loaded = []

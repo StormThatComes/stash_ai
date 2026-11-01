@@ -145,6 +145,90 @@ on CPU, set `STASH_AI_VITPOSE_SMOKE=1` and run
 `python -m pytest -q tests/test_recognition_vitpose_smoke.py` (downloads ~1.8 GB,
 including YOLO; no SapiensID identity checkpoint is needed).
 
+### PMPose-B keypoints, presence and visibility
+
+`sapiensid.pose.backend: pmpose` selects **PMPose-B 1.0.0** as a standalone
+pose estimator. It replaces ViTPose/Sapiens keypoints and accepts person boxes
+from YOLO, D-FINE-L or D-FINE-X:
+
+```yaml
+sapiensid:
+  enabled: true
+  pose:
+    backend: pmpose
+    detector: dfine_l
+    pmpose_batch_size: 1
+    keypoint_score_threshold: 0.50
+    pmpose_presence_threshold: 0.50
+    pmpose_visibility_threshold: 0.0
+```
+
+This integration uses **boxes only**, without segmentation masks, SAM or the
+iterative BBoxMaskPose/BMPv2 pipeline. It does not inherit reported results for
+the full masked pipeline. Evaluate overlapping people and profile faces on
+your own VTT cues before replacing a working backend. Changing pose models
+alone does not guarantee that a nearby person's ankle cannot be selected.
+
+PMPose predicts three different per-point quantities:
+
+| Setting / audit field | Meaning |
+| --- | --- |
+| `keypoint_score_threshold` / `keypoint_scores` | Predicted localization quality (expected OKS), not a heatmap peak or visibility probability |
+| `pmpose_presence_threshold` / `keypoint_presence` | Probability that the landmark lies within the model crop |
+| `pmpose_visibility_threshold` / `keypoint_visibility` | Predicted visibility of the landmark |
+
+The point must exceed the configured thresholds and remain inside its original
+detector box. A zero presence/visibility threshold disables that filter.
+Visibility filtering defaults to disabled, preserving useful occluded-body
+estimates. To omit hidden points, including an eye on the far side of a profile,
+try `pmpose_visibility_threshold: 0.5` and inspect the audit; the prediction can
+still be wrong. This filter applies to all 17 points, so it can also remove
+occluded joints useful for body association. These thresholds need calibration
+on your scenes. Scores are never substituted for missing visibility outputs.
+
+Both recognition and audits use the same filtered COCO17 points. Detection
+audit JSON retains all three score arrays in COCO order and labels
+`keypoint_score_kind: expected_oks`; PNGs draw only retained points. The detector's
+person score remains separate. Face association, SapiensID's 22-point input and
+the independent body collection path keep their existing geometry rules.
+
+The first use downloads `PMPose-b-1.0.0.pth` (617,696,116 bytes) from
+[`vrg-prague/BBoxMaskPose`](https://huggingface.co/vrg-prague/BBoxMaskPose/tree/cfc89052cf16655a52889f1f4e1b866e74a6c19c/PMPose).
+SHA256 `23b0c1896a3ba5fd802a1cef635a3dad598e85960de57a29815a5bb3dd3ce5f7`
+is verified before every load, using the same open file for hashing and restricted
+`weights_only=True` deserialization. Training metadata is decoded into inert
+containers; no upstream Python or arbitrary pickle fallback is used. An
+incompatible or corrupt local checkpoint fails instead of being overwritten.
+Only the pinned B variant is supported in this initial integration.
+
+The default directory is `models.directory/pmpose_b/<revision>`.
+`pmpose_directory` overrides it relative to the configuration YAML. With
+`models.download_missing: false`, place the matching checkpoint there first.
+The inference adapter uses the existing PyTorch/NumPy/OpenCV dependencies;
+MMCV, MMEngine and MMPose are not runtime requirements. Install the usual
+CPU/GPU profile and `requirements-sapiensid.txt` for your selected detector
+and identity backend.
+
+Inference follows the pinned upstream architecture in FP32, on `models.device`,
+with 192x256 RGB crops, padding 1.25, horizontal flip averaging and DARK/UDP
+decoding of the first 17 of the checkpoint's 23 outputs. At most
+`pmpose_batch_size` people are processed per forward pass (1..16), including
+batches spanning several frames; the flipped pass runs separately. This limit
+is independent of the detector's `batch_size` and embedding batches.
+
+Selecting PMPose or changing its score/presence/visibility thresholds changes
+person and body evidence contracts; recollect affected evidence before solving.
+Paths and batch sizes do not change contracts. Existing YOLO, ViTPose and Sapiens
+contracts and the default backend remain unchanged.
+
+An opt-in pretrained CPU smoke test is available with
+`STASH_AI_PMPOSE_SMOKE=1 python -m pytest -q tests/test_recognition_pmpose_smoke.py`.
+It downloads the ~618 MB model and a pinned sample image, uses fixed person boxes
+and checks real pose inference against the upstream reference fixture plus audit
+geometry. The fixture uses MMPretrain 1.2.0 and the pinned upstream PMPose head
+and decoder with the same bbox-only input and flip averaging. Set
+`STASH_AI_PMPOSE_DIRECTORY` to reuse an existing verified checkpoint directory.
+
 ### Sapiens Pose keypoints
 
 `sapiensid.pose.backend: sapiens` selects Meta's **Sapiens v1 Pose** as another
@@ -217,7 +301,7 @@ This downloads the 0.3B model and YOLO, without the SapiensID identity encoder.
 Integration tests do not establish an accuracy improvement on rear-view VTT
 thumbnails; compare those scenes with `recognition audit-detection`.
 
-### D-FINE person detectors for Sapiens / ViTPose
+### D-FINE person detectors for Sapiens / ViTPose / PMPose
 
 `pose.detector` selects person boxes independently of `pose.backend`, which
 selects keypoints. The default `detector: yolo` preserves existing behavior.
@@ -257,7 +341,7 @@ Scores need calibration on your scenes; they are not interchangeable with YOLO.
 
 In this mode no YOLO model is downloaded, loaded or executed; `pose.path` and
 `pose.sha256` are unused. `backend: yolo` with a D-FINE detector is rejected,
-because D-FINE supplies no keypoints. Sapiens/ViTPose supplies the 17 body points
+because D-FINE supplies no keypoints. Sapiens/ViTPose/PMPose supplies the 17 body points
 used by recognition, independent body collection and both detection/alignment
 audits. The existing crop-boundary filtering remains in place.
 
