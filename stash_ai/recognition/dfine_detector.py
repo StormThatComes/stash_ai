@@ -1,9 +1,25 @@
 """D-FINE person boxes for top-down pose, without loading Ultralytics or YOLO."""
 from contextlib import ExitStack
 import json
+import logging
 from types import SimpleNamespace
 
 from . import dfine_registry as registry
+
+
+def _warning(message):
+    from stash_ai.runtime.console import current_report
+    report = current_report()
+    if report is not None:
+        report.write('Warning: ' + message)
+    else:
+        logging.getLogger(__name__).warning(message)
+
+
+class _NonFiniteDetections(ValueError):
+    def __init__(self, message, frames):
+        super().__init__(message)
+        self.frames = frames
 
 
 def assets(config):
@@ -71,37 +87,89 @@ class DFineDetector:
         with torch.inference_mode():
             for start in range(0, len(images), self.batch_size):
                 batch = images[start:start+self.batch_size]
-                with ExitStack() as stack:
-                    rgb = [image if image.mode == 'RGB' else stack.enter_context(image.convert('RGB'))
-                           for image in batch]
-                    inputs = self.processor(images=rgb, return_tensors='pt').to(self.device)
-                    outputs = self.model(**inputs)
-                result.extend(self._decode(outputs, [image.size for image in batch], conf, iou, max_det, nms))
-                del inputs, outputs
+                outputs = self._forward(batch)
+                sizes = [image.size for image in batch]
+                try:
+                    decoded = self._decode(outputs, sizes, conf, iou, max_det, nms, frame_offset=start)
+                except _NonFiniteDetections as error:
+                    _warning(f'{error} Retrying {len(error.frames)} affected frame(s) once '
+                             f'individually in FP32 on {self.device}.')
+                    decoded = []
+                    # Preserve healthy predictions and ordering. Never replace a
+                    # failed inference with empty detections in retained evidence.
+                    for index, image in enumerate(batch):
+                        if index in error.frames:
+                            single = self._forward([image])
+                        else:
+                            single = SimpleNamespace(logits=outputs.logits[index:index+1],
+                                pred_boxes=outputs.pred_boxes[index:index+1])
+                        try:
+                            decoded.extend(self._decode(single, [image.size], conf, iou, max_det, nms,
+                                                        frame_offset=start+index))
+                        except _NonFiniteDetections as retry:
+                            raise ValueError(f'{retry} Persistent after one isolated FP32 retry '
+                                             f'on {self.device}.') from retry
+                        finally:
+                            del single
+                result.extend(decoded)
+                del outputs
         return result
 
+    def _forward(self, batch):
+        import torch
+        with ExitStack() as stack:
+            rgb = [image if image.mode == 'RGB' else stack.enter_context(image.convert('RGB'))
+                   for image in batch]
+            inputs = self.processor(images=rgb, return_tensors='pt').to(self.device)
+            # model.float() alone does not protect inference from an enclosing
+            # autocast context (e.g. another vision backend sharing the caller).
+            with torch.autocast(device_type=torch.device(self.device).type, enabled=False):
+                return self.model(**inputs)
+
     @staticmethod
-    def _decode(outputs, sizes, threshold, iou, maximum, suppress):
+    def _decode(outputs, sizes, threshold, iou, maximum, suppress, *, frame_offset=0):
         import torch
         from torchvision.ops import nms
         logits = outputs.logits.detach().float().cpu()
         boxes = outputs.pred_boxes.detach().float().cpu()
         if (logits.ndim != 3 or logits.shape[0] != len(sizes) or logits.shape[2] != 80
-                or boxes.shape != (*logits.shape[:2], 4)
-                or not torch.isfinite(logits).all() or not torch.isfinite(boxes).all()
-                or (boxes[..., 2:] < 0).any()):
-            raise ValueError('D-FINE returned malformed/non-finite person detections.')
+                or boxes.shape != (*logits.shape[:2], 4)):
+            raise ValueError('D-FINE returned malformed detection tensor shapes: '
+                             f'logits={tuple(logits.shape)}, pred_boxes={tuple(boxes.shape)}; '
+                             f'expected ({len(sizes)}, queries, 80) and ({len(sizes)}, queries, 4); '
+                             f'input_frame_offset={frame_offset}.')
+        invalid_logits, invalid_boxes = ~torch.isfinite(logits), ~torch.isfinite(boxes)
+        if invalid_logits.any() or invalid_boxes.any():
+            bad_frames = (invalid_logits.any(dim=(1, 2)) | invalid_boxes.any(dim=(1, 2)))
+            details = []
+            for name, values, invalid in (('logits', logits, invalid_logits),
+                                          ('pred_boxes', boxes, invalid_boxes)):
+                if invalid.any():
+                    frame, query, component = invalid.nonzero()[0].tolist()
+                    axis = 'class' if name == 'logits' else 'cx/cy/w/h'
+                    details.append(f'{name}: count={int(invalid.sum())}, '
+                        f'input_frame={frame_offset+frame}, query={query}, {axis}={component}, '
+                        f'value={values[frame, query, component].item()}')
+            raise _NonFiniteDetections('D-FINE returned non-finite detections (NaN/Inf): '
+                + '; '.join(details) + '. Indices are zero-based.',
+                frozenset(bad_frames.nonzero().flatten().tolist()))
+        valid_geometry = (boxes[..., 2:] > 0).all(dim=-1)
+        if not valid_geometry.all():
+            frame, query = (~valid_geometry).nonzero()[0].tolist()
+            _warning(f'D-FINE discarded {int((~valid_geometry).sum())} proposal(s) with non-positive '
+                     f'width/height; input_frame={frame_offset+frame}, query={query}, '
+                     f'cx/cy/w/h={boxes[frame, query].tolist()} (first example; zero-based indices).')
         # The pinned models use independent sigmoid class scores. Select people
         # before limiting results so other COCO classes cannot consume the budget.
         scores = logits[..., registry.PERSON_LABEL].sigmoid()
         corners = torch.cat((boxes[..., :2] - boxes[..., 2:] / 2,
                              boxes[..., :2] + boxes[..., 2:] / 2), dim=-1)
         result = []
-        for raw, confidence, (width, height) in zip(corners, scores, sizes):
+        for raw, confidence, valid, (width, height) in zip(corners, scores, valid_geometry, sizes):
             box = raw * torch.tensor([width, height, width, height])
             box[:, 0::2].clamp_(0, width)
             box[:, 1::2].clamp_(0, height)
-            keep = (confidence > threshold) & (box[:, 2:] > box[:, :2]).all(dim=1)
+            keep = valid & (confidence > threshold) & (box[:, 2:] > box[:, :2]).all(dim=1)
             box, confidence = box[keep], confidence[keep]
             order = torch.argsort(confidence, descending=True, stable=True)
             box, confidence = box[order], confidence[order]

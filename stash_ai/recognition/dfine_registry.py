@@ -1,6 +1,6 @@
 """Pinned Objects365 -> COCO D-FINE person detectors; no inference imports."""
 
-INFERENCE = 'dfine-rgb640-fp32-person-before-topk-cpu-nms-v1'
+INFERENCE = 'dfine-rgb640-fp32-valid-boxes-isolated-retry-cpu-nms-v2'
 PERSON_LABEL = 0
 MODELS = {
     'dfine_l': dict(
