@@ -367,6 +367,9 @@ def test_larger_canvas_does_not_resurrect_missing_or_outside_measurements(tmp_pa
     ('no_valid_head_keypoints', 'no valid nose/eye points'),
     ('head_keypoints_outside_face', 'nose/eyes outside face'),
     ('head_keypoints_missing_or_outside', 'nose/eyes missing or outside face'),
+    ('insufficient_head_landmarks', 'partial face: need 2 head points'),
+    ('head_landmark_mismatch', 'face/pose head points disagree'),
+    ('mixed_association_failures', 'pose candidates fail different gates'),
     ('multiple_person_candidates', 'multiple poses: P0, P1'),
     ('competing_faces', 'competing faces: F1'),
 ])
@@ -376,12 +379,17 @@ def test_unmatched_reason_is_drawn_in_png_and_retained_in_manifest(tmp_path, mon
     case = setup(tmp_path, monkeypatch)
     missing = dict(PERSON, keypoints=[[-1, -1]] * 17)
     outside = dict(PERSON, keypoints=[[4, 4]] * 3 + [[-1, -1]] * 14)
+    partial = dict(PERSON, bounds=[32, 4, 156, 156])
+    few = dict(partial, keypoints=[[80, 84]] + [[-1, -1]] * 16)
     people = {
         'no_people_detected': [],
-        'face_outside_person_box': [dict(PERSON, bounds=[32, 4, 156, 156])],
+        'face_outside_person_box': [dict(PERSON, bounds=[140, 4, 156, 156])],
         'no_valid_head_keypoints': [missing],
         'head_keypoints_outside_face': [outside],
         'head_keypoints_missing_or_outside': [missing, outside],
+        'insufficient_head_landmarks': [few],
+        'head_landmark_mismatch': [partial],
+        'mixed_association_failures': [few, partial],
         'multiple_person_candidates': [PERSON, PERSON],
         'competing_faces': [PERSON],
     }[reason]
@@ -424,3 +432,29 @@ def test_unmatched_reason_is_drawn_in_png_and_retained_in_manifest(tmp_path, mon
             # Pillow's antialiased font need not contain a fully opaque glyph pixel.
             assert np.any((pixels[..., 0] > 150) & (pixels[..., 1] > 100) & (pixels[..., 2] < 60))
         assert image.getpixel((int(left), int(bottom - 10))) == (255, 0, 0)
+
+
+def test_partial_face_with_aligned_head_points_gets_yellow_matched_box(tmp_path, monkeypatch):
+    from stash_ai.recognition.sapiensid_backend import associate
+    case = setup(tmp_path, monkeypatch)
+    monkeypatch.setitem(PERSON, 'bounds', [32, 4, 156, 156])
+    monkeypatch.setitem(PERSON, 'keypoints', [[80, 84], [111, 60], [49, 60]] + [[-1, -1]] * 14)
+    original_detect = case.detector.detect
+
+    def detect(image, *, force_pose):
+        faces = original_detect(image, force_pose=force_pose)
+        case.detector.face_matches = associate(faces, case.detector.frame_people)
+        return faces
+
+    case.detector.detect = detect
+    assert run(case) == 0
+    manifest = json.loads((case.destination / 'manifest.json').read_text())
+    frame = manifest['scene']['frames'][0]
+    face = frame['faces'][0]
+    assert face['person_index'] == 0 and face['association']['reason'] is None
+    assert face['box_color'] == [255, 220, 0]
+    assert frame['people'][0]['bounds'] == [32, 4, 156, 156]
+    assert manifest['annotations']['face_person_association']['min_head_landmarks'] == 2
+    with Image.open(case.destination / frame['file']) as image:
+        left, top, _, _ = face['display_bounds']
+        assert image.getpixel((int(left), int(top + 5))) == (255, 220, 0)

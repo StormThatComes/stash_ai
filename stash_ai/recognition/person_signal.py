@@ -139,8 +139,8 @@ def validate(settings):
             raise ValueError(f'sapiensid.{section}.{key} requires a lowercase SHA256.')
 
 
-def contract(config,*,legacy_boundaries=False):
-    """Paths, matching thresholds and resource budgets do not change vectors."""
+def contract(config,*,legacy_boundaries=False,legacy_association=False):
+    """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
@@ -170,6 +170,9 @@ def contract(config,*,legacy_boundaries=False):
         evidence['format']='sapiensid-wb4m-person-v2' if legacy_boundaries else 'sapiensid-wb4m-person-v3'
     else:
         evidence.update(variant=variant,model_sha256=model['sha256'],source_revision=UPSTREAM_COMMIT)
+    if not legacy_association and not legacy_boundaries:
+        from .person_association import policy
+        evidence['face_person_association'] = policy()
     return digest(evidence)
 
 

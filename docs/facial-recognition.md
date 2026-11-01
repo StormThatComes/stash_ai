@@ -274,6 +274,17 @@ with a pose and **red** when no pose is matched (`person_index: null`), includin
 cues with no detected people. Face points and labels remain **yellow**.
 Colors reset for each cue and do not track identity across cues.
 
+Face/person matching keeps the existing contained-face path (5% of the shorter
+face side as boundary tolerance, with a valid pose nose/eye inside the face).
+A partially protruding face can also match when at least **50% of its box area**
+overlaps the person box and at least **two corresponding nose/eye landmarks**
+agree within **15% of the shorter face side**. All available compared landmarks
+must agree; missing, out-of-crop or collapsed points cannot provide extra support.
+The anatomical COCO nose/left-eye/right-eye order maps to face indices 2/1/0.
+Multiple eligible people or competing faces still prevent an association.
+The gates are automatic, shared across pose backends, and recorded in
+`annotations.face_person_association`; no YAML changes are required.
+
 Face boxes and their landmarks move together to free space near the measured
 face. Each valid landmark has a faint hollow marker at its original position
 and a thin, translucent dashed line to its translated position. Pose points
@@ -287,10 +298,13 @@ show `-> P0` for the matched person, or `-> unmatched`. Point labels retain
 their landmark indices. Unmatched faces add a second line explaining why:
 
 - `no detected pose`: no person survived detector filtering.
-- `face outside pose box`: no person box contains the face within the existing tolerance.
-- `no valid nose/eye points`: containing poses have no usable nose/eye points.
-- `nose/eyes outside face`: usable head points of containing poses miss the face box.
-- `nose/eyes missing or outside face`: different containing poses fail for those two reasons.
+- `face outside pose box`: person boxes have insufficient overlap for either matching path.
+- `no valid nose/eye points`: eligible overlapping poses have no usable nose/eye points.
+- `nose/eyes outside face`: usable head points of eligible overlapping poses miss the face box.
+- `nose/eyes missing or outside face`: different overlapping poses fail for those two reasons.
+- `partial face: need 2 head points`: fewer than two distinct corresponding landmarks support a partial box.
+- `face/pose head points disagree`: a corresponding nose/eye pair exceeds the distance tolerance.
+- `pose candidates fail different gates`: overlapping poses fail for different reasons; see JSON `pair_rejections`.
 - `multiple poses: P0, P1`: more than one person satisfies the pair gates.
 - `competing faces: F1`: another face also nominates the sole person candidate.
 
@@ -315,6 +329,7 @@ conventions are in `annotations`; each detection retains its RGB
 Each face's `association` records its reason (null when matched), candidate
 person indices and competing face indices. `annotations.association_reasons`
 maps reason codes to the PNG labels; full index lists remain in the manifest.
+When no pair passes, `association.pair_rejections` lists each person's rejection.
 The translation is only a visualization change and has
 no effect on detector thresholds, face/person matching or recognition.
 

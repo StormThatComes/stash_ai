@@ -39,6 +39,29 @@ def test_empty_pose_hash_and_explicit_pinned_hash_share_evidence_contract():
     assert (contract(config), identity_contract(config))==original
 
 
+@pytest.mark.parametrize('variant', ['wb12m', 'wb4m'])
+@pytest.mark.parametrize('backend,detector', [('yolo', 'yolo'), ('vitpose_plus_large', 'yolo'),
+    ('sapiens', 'dfine_l'), ('pmpose', 'dfine_x')])
+def test_partial_association_refreshes_evidence_and_keeps_legacy_body_competitors(variant, backend, detector):
+    from stash_ai.recognition.config import digest, plain
+    from stash_ai.recognition.body_observations import contract as body_contract, compatible_contracts
+    from stash_ai.recognition.person_association import policy
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    data = defaults()
+    data['sapiensid']['model']['variant'] = variant
+    data['sapiensid']['pose'].update(backend=backend, detector=detector)
+    config = SimpleNamespace(data=data)
+    old_person = contract(config, legacy_association=True)
+    collection = plain(data['sapiensid']['collection'])
+    collection.pop('enabled')
+    old_body = digest(['independent-person-v2-rgb-pixels', old_person, collection])
+    assert contract(config) != old_person
+    assert body_contract(config) != old_body
+    assert compatible_contracts(config)[0] == body_contract(config)
+    assert old_body in compatible_contracts(config)
+    assert identity_contract(config)['face_person_association'] == policy()
+
+
 @pytest.mark.parametrize('variant', ['', 'wb8m', 'WB12M', None, [], 12])
 def test_variant_validation_rejects_unsupported_values(variant):
     data=defaults();data['sapiensid']['model']['variant']=variant

@@ -30,7 +30,7 @@ def test_invalid_pose_options_rejected(field, value):
         validate(data)
 
 
-def test_old_yaml_and_yolo_contract_are_unchanged(tmp_path):
+def test_old_yaml_keeps_yolo_and_legacy_contract_is_recoverable(tmp_path):
     from stash_ai.recognition.config import digest
     from stash_ai.recognition.sapiensid_registry import MODELS, UPSTREAM_COMMIT, POSE_INFERENCE
     path = tmp_path / 'old.yml'
@@ -44,7 +44,8 @@ def test_old_yaml_and_yolo_contract_are_unchanged(tmp_path):
                                                  'nms_threshold', 'max_people_per_frame')},
                   pose_inference=POSE_INFERENCE, variant='wb12m',
                   model_sha256=MODELS['wb12m']['sha256'], source_revision=UPSTREAM_COMMIT)
-    assert contract(config) == digest(before)
+    assert contract(config, legacy_association=True) == digest(before)
+    assert contract(config) != digest(before)
 
 
 def test_historical_yolo_snapshot_without_new_keys_keeps_its_fingerprint():

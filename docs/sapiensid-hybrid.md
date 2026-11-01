@@ -475,6 +475,33 @@ Set `STASH_AI_DFINE_MODEL_DIRECTORY` to reuse the parent model cache directory.
 
 ### Shared geometry and existing YOLO configurations
 
+Face/person association preserves the contained-face path: allow 5% of the
+shorter face-box side as a boundary tolerance and require at least one usable
+pose nose/eye inside the face box. Faces that protrude beyond that tolerance
+can now use a landmark-supported partial-box path:
+
+- At least 50% of the face-box area must overlap the person box.
+- At least two distinct corresponding head landmarks must be usable: COCO
+  nose/left eye/right eye map to the five-point face detector's indices 2/1/0.
+- Every usable compared pair must be within 15% of the shorter face-box side.
+  One contradictory measured landmark vetoes the partial-box path. Missing
+  points, points outside their actual crop/face box and collapsed predictions
+  cannot provide the required support.
+- Reciprocal uniqueness still applies across all detections, including rejected
+  faces: no nearest-person fallback, confidence tie-breaking or eye swapping.
+
+This automatic policy applies to every detector/pose backend. It uses already
+filtered pose points and does not relax confidence, presence or visibility
+thresholds. The original person crop and face geometry are preserved.
+
+The policy is included in person/body evidence fingerprints and model
+provenance. After updating, `recognition run` recollects SapiensID evidence for
+the selected scenes, including previously cached unavailable matches and
+completed body cues, while reusing existing face detections and embeddings.
+Subsequent runs reuse the new evidence. Older body banks remain conservative
+competitors until recollected; they cannot train current cores. Offline
+rebuild/solver work does not collect the new evidence, so run recognition first.
+
 After a unique face/person association, landmarks outside the actual person
 crop are marked missing (`-1,-1`), including face-detector points and coordinates
 that round onto the excluded right/bottom edge in float32. They are not clamped

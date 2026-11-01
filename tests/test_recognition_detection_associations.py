@@ -28,7 +28,7 @@ def test_exact_boundary_tolerance_and_matched_person_zero_are_preserved():
     assert face_label(0, face, 0, details) == 'F0 0.990 -> P0'
     person['bounds'][0] = 21.01
     assert associate([face], [person]) == [None]
-    assert explain_associations([face], [person], [None])[0]['reason'] == 'face_outside_person_box'
+    assert explain_associations([face], [person], [None])[0]['reason'] == 'insufficient_head_landmarks'
 
 
 def test_crowded_labels_bound_id_lists_and_preserve_complete_json_details():
