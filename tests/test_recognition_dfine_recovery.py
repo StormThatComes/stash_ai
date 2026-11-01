@@ -1,5 +1,6 @@
 """Reject bad proposals without losing healthy detections or hiding model failures."""
 from contextlib import ExitStack
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ def output(frames=1, queries=3):
 @pytest.mark.parametrize('suppress', [False, True])
 def test_invalid_geometry_cannot_abort_or_consume_valid_result_limit(axis, value, score, suppress, caplog):
     import torch
+    caplog.set_level(logging.DEBUG, logger=dfine.__name__)
     prediction = output()
     prediction.pred_boxes[0, 0, axis] = value
     prediction.logits[0, 0, 0] = score
@@ -34,15 +36,21 @@ def test_invalid_geometry_cannot_abort_or_consume_valid_result_limit(axis, value
     assert 'input_frame=0, query=0' in caplog.text
 
 
-def test_all_invalid_frame_keeps_other_frame_and_empty_result_shape(caplog):
+@pytest.mark.parametrize('log_level', [logging.WARNING, logging.DEBUG])
+def test_all_invalid_frame_keeps_other_frame_and_empty_result_shape(caplog, log_level):
     import torch
+    caplog.set_level(log_level, logger=dfine.__name__)
     prediction = output(frames=2)
     prediction.pred_boxes[0, :, 2] = -1.
     result = dfine.DFineDetector._decode(prediction, [(100, 200), (50, 100)], .5, .7, 10, True)
     assert result[0].boxes.xyxy.shape == (0, 4)
     assert result[0].boxes.conf.shape == (0,)
     torch.testing.assert_close(result[1].boxes.xyxy, torch.tensor([[5., 10., 45., 90.]]))
-    assert len(caplog.records) == 1 and 'discarded 3' in caplog.text
+    if log_level == logging.DEBUG:
+        assert len(caplog.records) == 1 and 'discarded 3' in caplog.text
+        assert caplog.records[0].levelno == logging.DEBUG
+    else:
+        assert not caplog.records
 
 
 @pytest.mark.parametrize('tensor,component', [('logits', 0), ('logits', 79), ('pred_boxes', 2)])
@@ -158,12 +166,19 @@ def test_dfine_disables_outer_autocast_and_restores_caller_context():
         assert torch.is_autocast_enabled('cpu')
 
 
-def test_geometry_warning_uses_console_report_when_available(monkeypatch, caplog):
+@pytest.mark.parametrize('verbose', [False, True])
+def test_geometry_warning_uses_console_report_when_available(monkeypatch, caplog, verbose):
     from stash_ai.runtime import console
+    from stash_ai.runtime.report import RunReport
+    caplog.set_level(logging.DEBUG, logger=dfine.__name__)
     messages = []
-    monkeypatch.setattr(console, 'current_report', lambda: SimpleNamespace(write=messages.append))
+    report = RunReport(verbose=verbose, write=messages.append)
+    monkeypatch.setattr(console, 'current_report', lambda: report)
     prediction = output()
     prediction.pred_boxes[0, 0, 3] = -1.
     dfine.DFineDetector._decode(prediction, [(100, 200)], .5, .7, 10, True)
-    assert len(messages) == 1 and messages[0].startswith('Warning: D-FINE discarded')
+    if verbose:
+        assert len(messages) == 1 and messages[0].startswith('Warning: D-FINE discarded')
+    else:
+        assert not messages
     assert not caplog.records

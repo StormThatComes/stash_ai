@@ -7,13 +7,15 @@ from types import SimpleNamespace
 from . import dfine_registry as registry
 
 
-def _warning(message):
+def _warning(message, *, verbose_only=False):
     from stash_ai.runtime.console import current_report
     report = current_report()
     if report is not None:
-        report.write('Warning: ' + message)
+        write = report.detail if verbose_only else report.write
+        write('Warning: ' + message)
     else:
-        logging.getLogger(__name__).warning(message)
+        logger = logging.getLogger(__name__)
+        logger.log(logging.DEBUG if verbose_only else logging.WARNING, message)
 
 
 class _NonFiniteDetections(ValueError):
@@ -158,7 +160,8 @@ class DFineDetector:
             frame, query = (~valid_geometry).nonzero()[0].tolist()
             _warning(f'D-FINE discarded {int((~valid_geometry).sum())} proposal(s) with non-positive '
                      f'width/height; input_frame={frame_offset+frame}, query={query}, '
-                     f'cx/cy/w/h={boxes[frame, query].tolist()} (first example; zero-based indices).')
+                     f'cx/cy/w/h={boxes[frame, query].tolist()} (first example; zero-based indices).',
+                     verbose_only=True)
         # The pinned models use independent sigmoid class scores. Select people
         # before limiting results so other COCO classes cannot consume the budget.
         scores = logits[..., registry.PERSON_LABEL].sigmoid()
