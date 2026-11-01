@@ -23,6 +23,7 @@ CREATE TABLE person_evidence (
 
 
 def defaults():
+    from .pose_refinement_config import defaults as refinement_defaults
     from .body_observations import defaults as collection_defaults
     from .body_identity import defaults as identity_defaults
     from .body_global import defaults as global_defaults
@@ -33,7 +34,8 @@ def defaults():
                   nms_threshold=.7,max_people_per_frame=100,backend='yolo',detector='yolo',dfine_directory='',
                   vitpose_directory='',batch_size=4,
                   sapiens_variant='0.3b',sapiens_directory='',sapiens_batch_size=1,
-                  pmpose_directory='',pmpose_batch_size=1,pmpose_presence_threshold=.5,pmpose_visibility_threshold=0.),
+                  pmpose_directory='',pmpose_batch_size=1,pmpose_presence_threshold=.5,pmpose_visibility_threshold=0.,
+                  refinement=refinement_defaults()),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,
                        max_candidate_pairs=100000,max_witness_comparisons=1000000),
@@ -58,6 +60,8 @@ def validate(settings):
     _number(pose['pmpose_batch_size'], 'sapiensid.pose.pmpose_batch_size', 1, 16, integer=True)
     for key in ('pmpose_presence_threshold', 'pmpose_visibility_threshold'):
         _number(pose[key], 'sapiensid.pose.' + key, 0, 1)
+    from .pose_refinement_config import validate as validate_refinement
+    validate_refinement(pose)
     collection=settings['collection']
     if type(collection['enabled']) is not bool:
         raise ValueError('sapiensid.collection.enabled must be boolean.')
@@ -141,7 +145,7 @@ def contract(config,*,legacy_boundaries=False):
     variant=s['model']['variant'];model=MODELS[variant]
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items()
-              if k not in ('path','backend','vitpose_directory','batch_size',
+              if k not in ('refinement','path','backend','vitpose_directory','batch_size',
                            'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory',
                            'pmpose_directory','pmpose_batch_size','pmpose_presence_threshold','pmpose_visibility_threshold')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:

@@ -312,3 +312,14 @@ def test_force_pose_uses_production_thresholds_without_changing_normal_scan(monk
             assert calls[0]['device'] == 'cpu'
     finally:
         detector.close()
+
+
+def test_refinement_original_box_and_decision_survive_audit_export(tmp_path, monkeypatch):
+    case = setup(tmp_path, monkeypatch)
+    details = dict(status='refined', reason=None, detector_bounds=[30, 30, 100, 130],
+                   bounds=PERSON['bounds'], mask_score=.9, box_expanded=True)
+    monkeypatch.setitem(PERSON, 'pose_refinement', details)
+    assert run(case) == 0
+    manifest = json.loads((case.destination / 'manifest.json').read_text())
+    person = manifest['scene']['frames'][0]['people'][0]
+    assert person['pose_refinement'] == details

@@ -376,6 +376,37 @@ sapiensid:
     # Minimum probability of a PMPose point lying in the crop; 0 disables this filter.
     pmpose_visibility_threshold: 0.0
     # Minimum PMPose visibility probability; 0 retains occluded points. Try 0.5 for visible points only.
+    refinement:
+      enabled: false
+      # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
+      directory: ""
+      # Optional asset folder; empty uses models.directory/sam_pose2seg/<pinned revision>.
+      mode: all
+      # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
+      overlap_threshold: 0.20
+      # Minimum intersection / smaller-box area in overlap mode.
+      min_keypoint_score: 0.50
+      # Minimum expected OKS for head/torso points used as segmentation prompts.
+      min_presence: 0.50
+      # Minimum prompt probability of being inside the PMPose crop.
+      min_visibility: 0.50
+      # Minimum prompt visibility; separate from downstream pose visibility filtering.
+      min_prompt_points: 2
+      # Minimum reliable, nonconflicting head/torso prompts; otherwise retain the first pose.
+      max_prompt_points: 3
+      # Maximum positive prompts, ordered by visibility (1..8).
+      min_mask_score: 0.50
+      # Reject masks below SAM's predicted mask quality.
+      min_prompt_coverage: 1.0
+      # Required fraction of selected prompts inside the mask.
+      max_foreign_coverage: 0.0
+      # Maximum fraction of other people's reliable head/torso points inside the mask.
+      expand_boxes: true
+      # Union the admitted mask bounds with the original detector box; never shrink.
+      max_box_area_ratio: 2.0
+      # Reject masks whose union box exceeds this multiple of the original area.
+      max_side_expansion: 0.50
+      # Maximum extension on any side, relative to original width or height.
     keypoint_score_threshold: 0.50
     # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
     max_people_per_frame: 100

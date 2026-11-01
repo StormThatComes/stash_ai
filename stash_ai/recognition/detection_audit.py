@@ -55,6 +55,11 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                     # People first: face landmarks remain visible in overlapping head regions.
                     for person_index, person in enumerate(people):
                         color = person_colors[person_index]
+                        refinement = person.get('pose_refinement', {})
+                        if refinement.get('box_expanded'):
+                            from PIL import ImageDraw
+                            ImageDraw.Draw(annotated).rectangle(refinement['detector_bounds'],
+                                                               outline=(160, 160, 160), width=1)
                         drawn = _draw(annotated, person['bounds'], person['keypoints'],
                                       box_color=color, point_color=color)
                         record['people'].append(dict(person_index=person_index, **person,
@@ -152,6 +157,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                         'Both detectors run on every cue, even when sapiensid/independent collection is disabled.',
                         'Configured score/NMS/result-count and pose-keypoint thresholds apply, including PMPose presence/visibility. Suppressed detections are unavailable.',
                         'All returned detections are drawn, without face/person quality, anchor or identity filtering.',
+                        'With mask refinement, gray outlines show original expanded detector boxes; JSON records refinement decisions.',
                         'Missing/low-confidence/out-of-bounds keypoints are omitted, never inferred.',
                         'PNG pixels come from VTT sprites, not decoded video. No resizing or identity inference is performed.',
                         'Colors are local to each cue, not persistent identities across cues.',

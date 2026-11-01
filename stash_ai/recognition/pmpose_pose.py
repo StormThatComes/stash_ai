@@ -49,15 +49,21 @@ def load(config, device):
     with torch.serialization.safe_globals(allowed):
         load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     model = model.float().to(device).eval()
-    return PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'])
+    pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'])
+    settings = config.data['sapiensid']['pose'].get('refinement', {})
+    if settings.get('enabled', False):
+        from .sam_pose2seg import load as load_segmenter
+        from .pose_refinement import RefinedPMPose
+        return RefinedPMPose(pose, load_segmenter(config, device), settings)
+    return pose
 
 
 class PMPose:
     def __init__(self, model, *, device, batch_size):
         self.model, self.device, self.batch_size = model, device, batch_size
 
-    def predict(self, image, bounds):
-        return self.predict_many([(image, bounds)])[0]
+    def predict(self, image, bounds, masks=None):
+        return self.predict_many([(image, bounds, masks)])[0]
 
     def predict_many(self, frames):
         import numpy as np
@@ -65,7 +71,11 @@ class PMPose:
         from .pmpose_geometry import prepare, decode
         frames = list(frames)
         result, jobs = [], []
-        for frame, (image, bounds) in enumerate(frames):
+        for frame, item in enumerate(frames):
+            image, bounds = item[:2]
+            masks = item[2] if len(item) == 3 else None
+            if masks is not None and len(masks) != len(bounds):
+                raise ValueError('PMPose requires exactly one mask per person box.')
             count = len(bounds)
             result.append((np.empty((count, 17, 2), dtype=np.float32),
                            np.empty((count, 17), dtype=np.float32),
@@ -75,18 +85,19 @@ class PMPose:
             boxes = np.asarray(bounds, dtype=np.float32)
             if boxes.shape != (count, 4) or not np.isfinite(boxes).all() or np.any(boxes[:, 2:] <= boxes[:, :2]):
                 raise ValueError('PMPose requires finite, non-empty person boxes.')
-            jobs.extend((frame, index, box) for index, box in enumerate(boxes))
+            jobs.extend((frame, index, box, None if masks is None else masks[index])
+                        for index, box in enumerate(boxes))
         with torch.inference_mode():
             for start in range(0, len(jobs), self.batch_size):
                 batch = jobs[start:start + self.batch_size]
-                crops = [prepare(frames[frame][0], box) for frame, _, box in batch]
+                crops = [prepare(frames[frame][0], box, mask) for frame, _, box, mask in batch]
                 inputs = torch.from_numpy(np.stack([crop for crop, _, _ in crops])).to(self.device)
                 output = self._forward(inputs)
                 flipped = self._forward(inputs.flip(-1))
                 values = [(a + (b[:, registry.FLIP].flip(-1) if i == 0 else b[:, registry.FLIP])) * .5
                           for i, (a, b) in enumerate(zip(output, flipped))]
                 heatmaps, scores, presence, visibility = [v.cpu().numpy() for v in values]
-                for offset, (frame, index, _) in enumerate(batch):
+                for offset, (frame, index, _, _) in enumerate(batch):
                     _, center, scale = crops[offset]
                     result[frame][0][index] = decode(heatmaps[offset], center, scale)
                     result[frame][1][index] = scores[offset]

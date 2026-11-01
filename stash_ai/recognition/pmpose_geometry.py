@@ -1,4 +1,4 @@
-"""PMPose RGB crops and DARK/UDP decoding; no segmentation mask is applied.
+"""PMPose RGB crops, optional upstream mask conditioning and DARK/UDP decoding.
 
 Adapted from OpenMMLab's Apache-2.0 MMPose geometry and the PMPose fork.
 See THIRD_PARTY_NOTICES.md for sources and attribution.
@@ -8,7 +8,7 @@ import numpy as np
 from . import pmpose_registry as registry
 
 
-def prepare(image, box):
+def prepare(image, box, mask=None):
     import cv2
     box = np.asarray(box, dtype=np.float32).copy()
     box[:2] = np.maximum(box[:2], 0)
@@ -25,7 +25,16 @@ def prepare(image, box):
     matrix = np.array([[factors[0], 0, -origin[0] * factors[0]],
                        [0, factors[1], -origin[1] * factors[1]]], dtype=np.float32)
     with image.convert('RGB') as rgb:
-        crop = cv2.warpAffine(np.asarray(rgb), matrix, (width, height), flags=cv2.INTER_LINEAR)
+        pixels = np.asarray(rgb)
+        if mask is not None:
+            mask = np.asarray(mask)
+            if mask.shape != (image.height, image.width) or mask.dtype != np.bool_:
+                raise ValueError('PMPose mask must be a full-frame boolean instance mask.')
+            # Upstream MaskBackground(alpha=.25), BEFORE affine sampling and
+            # normalization. Keep 75% background context; do not black it out.
+            masked = pixels * mask[:, :, None]
+            pixels = cv2.addWeighted(pixels, .75, masked, .25, 0)
+        crop = cv2.warpAffine(pixels, matrix, (width, height), flags=cv2.INTER_LINEAR)
     crop = (crop.astype(np.float32) - np.asarray(registry.MEAN, dtype=np.float32))
     crop /= np.asarray(registry.STD, dtype=np.float32)
     return np.ascontiguousarray(crop.transpose(2, 0, 1)), center, scale
