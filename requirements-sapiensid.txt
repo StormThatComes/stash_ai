@@ -13,3 +13,5 @@ transformers>=4.53,<6
 safetensors>=0.4.1
 # ViTPose affine crops and heatmap postprocessing require SciPy.
 scipy>=1.10,<2
+# PMPose-B uses torch, numpy and opencv-python-headless from the CPU/GPU profile;
+# its inference adapter does not require the OpenMMLab training packages.

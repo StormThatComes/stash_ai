@@ -86,6 +86,20 @@ def run(case):
                                   detector_factory=lambda *_: case.detector)
 
 
+def test_pmpose_probabilities_are_retained_in_detection_manifest(tmp_path, monkeypatch):
+    case = setup(tmp_path, monkeypatch)
+    case.cfg.data['sapiensid']['pose']['backend'] = 'pmpose'
+    details = dict(keypoint_scores=[.9] * 17, keypoint_presence=[.8] * 17,
+                   keypoint_visibility=[.3] * 17, keypoint_score_kind='expected_oks')
+    for name, value in details.items():
+        monkeypatch.setitem(PERSON, name, value)
+    assert run(case) == 0
+    manifest = json.loads((case.destination / 'manifest.json').read_text())
+    person = manifest['scene']['frames'][0]['people'][0]
+    assert all(person[name] == value for name, value in details.items())
+    assert person['drawn_indices'] == [0, 1]
+
+
 @pytest.mark.parametrize('args', [[], ['--scene-id', '1'], ['--output-dir', 'out'],
                                 ['--scene-id', '0', '--output-dir', 'out']])
 def test_parser_requires_one_positive_scene_and_output(args):

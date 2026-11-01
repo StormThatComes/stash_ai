@@ -125,7 +125,7 @@ def load_pose(config):
         path = Path(temp) / 'pose.pt'
         path.write_bytes(data)
         model = YOLO(str(path), task='pose')
-    if config.data['sapiensid']['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens'):
+    if config.data['sapiensid']['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens', 'pmpose'):
         from .person_detector import detection_only
         model = detection_only(model)
     return model

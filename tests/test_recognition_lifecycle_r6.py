@@ -57,8 +57,10 @@ def test_full_yaml_retains_vitpose_asset_location(tmp_path):
     from stash_ai.recognition.config import plain
     config=replace(config,data=plain(config.data))
     config.data['sapiensid']['pose']['vitpose_directory']='custom/vitpose'
+    config.data['sapiensid']['pose']['pmpose_directory']='custom/pmpose'
     exported = yaml.safe_load(configuration_document(config,proposal(config,{}),{}))
     assert exported['sapiensid']['pose']['vitpose_directory'] == str((config.source_path.parent/'custom/vitpose').resolve())
+    assert exported['sapiensid']['pose']['pmpose_directory'] == str((config.source_path.parent/'custom/pmpose').resolve())
 
 
 def test_artifact_only_fields_do_not_change_replay_signature(tmp_path):
