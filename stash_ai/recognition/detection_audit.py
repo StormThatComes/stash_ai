@@ -6,7 +6,8 @@ from pathlib import Path
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png, _private_directory, _write_json
 from .config import plain
-from .person_audit import _draw
+from .detection_callouts import draw_leaders, layout_faces
+from .person_audit import BOX_COLOR, _draw
 
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
@@ -38,47 +39,46 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                 faces = detector.detect(image, force_pose=True)
                 people = detector.frame_people
                 person_colors = [_person_color(i) for i in range(len(people))]
-                face_colors = []
-                next_color = len(people)
-                for person_index in detector.face_matches:
-                    if person_index is None:
-                        # Unmatched faces get their own slots after detected bodies.
-                        face_colors.append(_person_color(next_color))
-                        next_color += 1
-                    else:
-                        face_colors.append(person_colors[person_index])
+                face_labels = [f'F{i} {face.score:.3f} -> ' +
+                               (f'P{match}' if match is not None else 'unmatched')
+                               for i, (face, match) in enumerate(zip(faces, detector.face_matches))]
+                layouts, output_size = layout_faces(image, faces, people, face_labels)
                 name = f'scene-{scene_id}_cue-{index:06d}.png'
                 record = dict(cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
                               source_rect=list(cue.rect), source_dimensions=list(image.size),
-                              file=name, faces=[], people=[])
-                with image.convert('RGB') as annotated:
-                    # People first: face landmarks remain visible in overlapping head regions.
-                    for person_index, person in enumerate(people):
-                        color = person_colors[person_index]
-                        refinement = person.get('pose_refinement', {})
-                        if refinement.get('box_expanded'):
-                            from PIL import ImageDraw
-                            ImageDraw.Draw(annotated).rectangle(refinement['detector_bounds'],
-                                                               outline=(160, 160, 160), width=1)
-                        drawn = _draw(annotated, person['bounds'], person['keypoints'],
-                                      box_color=color, point_color=color)
-                        record['people'].append(dict(person_index=person_index, **person,
-                            drawn_indices=drawn, annotation_color=list(color)))
+                              output_dimensions=list(output_size), file=name, faces=[], people=[])
+                from PIL import Image, ImageDraw
+                with Image.new('RGB', output_size, (24, 24, 24)) as annotated:
+                    annotated.paste(image, (0, 0))
+                    draw_leaders(annotated, faces, layouts, image.size)
+                    # Render pose over leaders, clipped to the source cue even
+                    # when overflow face annotations need a larger canvas.
+                    with annotated.crop((0, 0, *image.size)) as source_overlay:
+                        for person_index, person in enumerate(people):
+                            color = person_colors[person_index]
+                            refinement = person.get('pose_refinement', {})
+                            if refinement.get('box_expanded'):
+                                ImageDraw.Draw(source_overlay).rectangle(refinement['detector_bounds'],
+                                                                         outline=(160, 160, 160), width=1)
+                            drawn = _draw(source_overlay, person['bounds'], person['keypoints'],
+                                          box_color=color, point_color=color)
+                            record['people'].append(dict(person_index=person_index, **person,
+                                drawn_indices=drawn, annotation_color=list(color)))
+                        for person_index, person in enumerate(people):
+                            left, _, _, bottom = person['bounds']
+                            _label(source_overlay, (left, bottom), f'P{person_index} {person["score"]:.3f}',
+                                   color=person_colors[person_index])
+                        annotated.paste(source_overlay, (0, 0))
                     for face_index, face in enumerate(faces):
-                        color = face_colors[face_index]
-                        x, y, width, height = face.box
-                        drawn = _draw(annotated, (x, y, x + width, y + height), face.landmarks,
-                                      face_only=True, box_color=color, point_color=color)
+                        layout = layouts[face_index]
+                        drawn = _draw(annotated, layout['bounds'], layout['landmarks'],
+                                      face_only=True, box_color=BOX_COLOR, point_color=BOX_COLOR)
                         record['faces'].append(dict(face_index=face_index, box=list(face.box), score=face.score,
                             landmarks=[list(point) for point in face.landmarks], drawn_indices=drawn,
-                            annotation_color=list(color),
+                            annotation_color=list(BOX_COLOR), display_offset=layout['offset'],
+                            display_bounds=layout['bounds'], display_landmarks=layout['landmarks'],
                             person_index=detector.face_matches[face_index]))
-                    for person_index, person in enumerate(people):
-                        left, _, _, bottom = person['bounds']
-                        _label(annotated, (left, bottom), f'P{person_index} {person["score"]:.3f}',
-                               color=person_colors[person_index])
-                    for face_index, face in enumerate(faces):
-                        _label(annotated, face.box, f'F{face_index} {face.score:.3f}', color=face_colors[face_index])
+                        _label(annotated, layout['bounds'], face_labels[face_index], color=BOX_COLOR)
                     _png(annotated, directory / name)
                 frames.append(record)
                 counts['cues_exported'] += 1
@@ -134,7 +134,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                 with WorkProgress(report, 'Export detection audit', len(source.cues), unit='cue', key='cues') as progress:
                     result = audit_scene(source, detector, args.scene_id, directory, progress=progress)
                 manifest = dict(
-                    format=2, kind='recognition_detection_audit', cue_index_base=0,
+                    format=3, kind='recognition_detection_audit', cue_index_base=0,
                     configuration={
                         'models': plain(config.data['models']),
                         'detection': plain(config.data['detection']),
@@ -146,13 +146,21 @@ def execute(args, config, *, services=None, detector_factory=None):
                     execution=dict(max_cues=0, force_pose=True, embeddings=False),
                     annotations=dict(person_colors=[list(c) for c in PERSON_COLORS],
                         person_color_names=['purple', 'green', 'blue'], overflow_color=list(OVERFLOW_COLOR),
-                        color_assignment='Per cue, in person detection order; matched faces share person colors; '
-                                         'unmatched faces take subsequent slots; fourth and later slots are red. '
-                                         'Boxes, points and labels use each detection\'s annotation_color (RGB).',
+                        face_color=list(BOX_COLOR),
+                        color_assignment='Per cue, pose colors follow person detection order; fourth and later '
+                                         'people are red. Face boxes, points and labels are yellow.',
                         pose_point_order='COCO17 (0..16)',
                         face_point_order='five face-detector landmarks (0..4)',
-                        labels='F=index and score of face; P=index and score of person; label colors match boxes',
-                        coordinates='cue-local source pixels; face boxes are xywh, person bounds are xyxy'),
+                        labels='F=index and score of face; -> P=index of matched person or unmatched; '
+                               'P=index and score of person; label colors match boxes',
+                        face_layout='Face boxes and landmarks are translated together to free space or a right '
+                                    'gutter. Faint dashed leaders and hollow origins link valid source landmarks '
+                                    'to display landmarks. Pose is drawn above leaders.',
+                        coordinates='box/landmarks and person bounds/keypoints use cue-local source pixels; '
+                                    'face boxes are xywh, bounds are xyxy. display_offset is [dx,dy]; '
+                                    'display_bounds/display_landmarks use PNG pixels. Boxes are clipped to the '
+                                    'source before translation; omitted display landmarks are [-1,-1]. '
+                                    'The source stays unscaled at [0,0]; output_dimensions includes any gutter.'),
                     limitations=[
                         'Both detectors run on every cue, even when sapiensid/independent collection is disabled.',
                         'Configured score/NMS/result-count and pose-keypoint thresholds apply, including PMPose presence/visibility. Suppressed detections are unavailable.',

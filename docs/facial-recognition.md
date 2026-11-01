@@ -266,22 +266,35 @@ python .\stash_ai.py recognition audit-detection --scene-id 123 --face-config fa
 
 The new output directory contains `scene-123_cue-000000.png`, one PNG per cue
 in original VTT order (zero-based), and `manifest.json`. Each PNG preserves the
-whole cue at its original size and overlays **all returned face and person
-boxes**, five face landmarks and measured COCO17 pose points. Each person's
-boxes, points and labels use one color: **purple, green, blue**, then **red for
-every additional person**, in person detection order. Associated faces share
-their person's color, regardless of face detection order. Faces without an
-associated person take subsequent color slots; with no bodies, face order alone
-determines colors. Colors reset for each cue and do not track identity across
-cues. `F0` and `P0` labels still show face/person detection indices and scores;
-point labels retain their landmark indices. Other identity/person audits retain
-their existing landmark colors. A cue with no detections is still exported,
-with unchanged pixels.
+whole cue at its original scale and shows **all returned face and person
+boxes**, five face landmarks and measured COCO17 pose points. Pose boxes,
+points and labels use **purple, green, blue**, then **red for every additional
+person**, in person detection order. Face boxes, points and labels are **yellow**.
+Colors reset for each cue and do not track identity across cues.
+
+Face boxes and their landmarks move together to free space near the measured
+face. Each valid landmark has a faint hollow marker at its original position
+and a thin, translucent dashed line to its translated position. Pose points
+are drawn above these leaders, so overlapping eyes/noses remain readable.
+Placement avoids original face boxes, measured pose points and other face
+annotations. If there is no room inside the cue, the PNG gains a dark margin
+on the right for the face annotations; source pixels stay unscaled at `(0, 0)`.
+Partially visible face boxes are clipped to the source before translation.
+`F0` and `P0` labels show detection indices and scores; face labels additionally
+show `-> P0` for the matched person, or `-> unmatched`. Point labels retain
+their landmark indices. Other identity/person audits retain their existing
+rendering. A cue with no detections is still exported with unchanged pixels.
 The manifest records timestamps, original sprite rectangles, cue dimensions,
 geometry, scores, face/person associations, counters, source fingerprint and
-the applied detector settings. Detection audit manifest format 2 stores the RGB
-palette in `annotations` and each detection's RGB `annotation_color`, replacing
-the format 1 global face/person/landmark color fields.
+the applied detector settings. Manifest **format 3** keeps `box`/`landmarks`
+and person `bounds`/`keypoints` in original cue coordinates. Each face adds
+`display_offset: [dx, dy]`, `display_bounds` (xyxy) and `display_landmarks` in
+PNG coordinates; invalid/missing source landmarks remain omitted and use
+`[-1, -1]` in display geometry. `source_dimensions` describes the original cue,
+while `output_dimensions` includes any added margin. The palette and layout
+conventions are in `annotations`; each detection retains its RGB
+`annotation_color`. The translation is only a visualization change and has
+no effect on detector thresholds, face/person matching or recognition.
 
 The command uses `models.detector` and `sapiensid.pose` from the current YAML,
 including confidence, NMS, result-count and keypoint thresholds. **Both
