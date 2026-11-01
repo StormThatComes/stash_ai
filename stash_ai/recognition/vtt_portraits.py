@@ -102,15 +102,17 @@ def store(database, identifier, scope, target, scene, metadata):
 
 
 @batched
-def choose_vtt(database, client, config, scope, target, source_factory, visibility, expression, *, fallback_reason=None):
+def choose_vtt(database, client, config, scope, target, source_factory, visibility, expression, *, fallback_reason=None, category=None):
     db, policy = database.connection, config.data['portraits']
+    from .portrait_precedence import face_clause
+    clause, category_parameters = face_clause(db, config, category)
     person = db.execute('SELECT * FROM people WHERE id=? AND scope=?', (target['person'], scope)).fetchone()
     from .context import portrait_references
     groups, context = portrait_references(database, scope, person['namespace'], config,
         lambda: _groups(db, scope, person['namespace'], config.data['clustering']))
     policy_sha = policy_identity(config)
     ranking=Ranking(db,config,scope,target,person['namespace'],context,policy_sha,
-                    enabled=policy['source']=='vtt' and fallback_reason is None)
+                    enabled=policy['source']=='vtt' and fallback_reason is None,category=category)
     cached=ranking.load()
     preparation=portrait_pipeline()
     if preparation is not None:preparation.begin_ranking(target,groups,context)
@@ -128,7 +130,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                   JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
                   WHERE m.person=? AND o.scan=? AND s.scene=? AND s.scope=?
                   AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
-                  ORDER BY o.cue,o.id''', (target['person'], selected['scan'], scene, scope, person['namespace']))
+                  ''' + clause + ' ORDER BY o.cue,o.id',
+                  (target['person'], selected['scan'], scene, scope, person['namespace'], *category_parameters))
                 with tracking(
                     candidate_observations(db, rows, selected['scan'], matching_policy(config), prepare=True),
                     'Rank VTT portrait observations',
@@ -136,8 +139,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     total=lambda: db.execute(
                         'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id JOIN '
                         'scans s ON s.id=o.scan WHERE m.person=? AND o.scan=? AND s.scene=? AND s.scope=?'
-                        " AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL",
-                        (target['person'], selected['scan'], scene, scope, person['namespace']),
+                        " AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL" + clause,
+                        (target['person'], selected['scan'], scene, scope, person['namespace'], *category_parameters),
                     ).fetchone()[0],
                 ) as tracked:
                     for row, candidate in tracked:
@@ -146,6 +149,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         quality = json.loads(row['quality'])
                         original_quality = encoded(quality)
                         metadata = {'version': 3, 'source_type': 'vtt', 'requested_source': policy['source'],
+                            'selection_category': category or 'face',
                             'selection_policy': 'best-available-vtt-observations-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'observation': row['id'],
                             'scan': row['scan'], 'scene': scene, 'person': target['person'],

@@ -637,8 +637,12 @@ witness banks can still reach their explicit budgets.
 
 ### Body portraits and offline tools
 
-`portraits.kind: auto` prefers an eligible face without portrait quality shortfalls,
-then an accepted person crop, then the existing face fallback. `face` restricts
+`portraits.kind: auto` follows `portraits.auto_precedence`, defaulting to
+`[face+pose, face, pose]`: faces with usable associated SapiensID evidence under
+the current contract, remaining faces, then accepted person crops. A lower tier
+is considered only when the earlier tiers have no usable portrait, including
+retained-pixel fallbacks; quality scores rank within each tier. All three entries
+must appear exactly once. `face` restricts
 selection to faces; `person` uses only retained person crops without loading face,
 pose, visibility or identity models. `portraits.anchor_only: true` requires a body
 anchor for person crops, including after global aliases downgrade source samples.
@@ -652,7 +656,7 @@ crop in retained-person coordinates. It never invents a face.
 
 Person portraits use the same ownership tokens, intent-before-write, digest checks,
 retry reconciliation and manual-image preservation as face portraits. Auto mode
-can replace an acknowledged generated body image when a good face becomes available.
+can replace an acknowledged generated image when a higher-priority candidate becomes available.
 `recognition portraits` includes body-only performers and respects scene/performer
 filters without rebuilding identities.
 

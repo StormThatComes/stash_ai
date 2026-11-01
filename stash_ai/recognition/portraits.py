@@ -26,7 +26,7 @@ from .backend import prepared_frame
 
 def policy_identity(config):
     from .context import policy_digest
-    return policy_digest(config, ('portraits-v6', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+    return policy_digest(config, ('portraits-v7', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
                          lambda: _policy_value(config))
 
 
@@ -39,7 +39,9 @@ def _policy_value(config):
     from .expression import required as expression_required
     from .portrait_admission import extra_measurements
     from .body_identity import enabled as bodies_enabled, policy as body_policy
-    return {'version': 6, 'portraits': policy,
+    from .portrait_precedence import pose_contract
+    return {'version': 7, 'portraits': policy,
+                   'pose_contract': pose_contract(config) if policy['kind'] == 'auto' else None,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
@@ -170,20 +172,28 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
 
 
 def choose(database, client, config, scope, target, paths, backend_factory, decoder_factory,
-           source_factory=SpriteInput, *, visibility=None, expression=None):
+           source_factory=SpriteInput, *, visibility=None, expression=None, category=None):
+    if category == 'face+pose':
+        from .portrait_precedence import face_clause
+        clause, parameters = face_clause(database.connection, config, category)
+        if clause == ' AND 0':return None
+        if not any(database.connection.execute('SELECT 1 FROM observations o JOIN members m ON m.observation=o.id '
+            'WHERE m.person=? AND o.scan=? AND o.rejected IS NULL' + clause + ' LIMIT 1',
+            (target['person'], item['scan'], *parameters)).fetchone() for item in target['scans']):
+            return None
     if visibility is None:
         from stash_ai.runtime.cleanup import closing
         with closing(LazyVisibility(config, paths), name='close portrait visibility model') as owned:
             return choose(database, client, config, scope, target, paths, backend_factory, decoder_factory,
-                          source_factory, visibility=owned, expression=expression)
+                          source_factory, visibility=owned, expression=expression, category=category)
     if expression is None:
         from stash_ai.runtime.cleanup import closing
         with closing(LazyExpression(config, paths), name='close portrait expression model') as owned:
             return choose(database, client, config, scope, target, paths, backend_factory, decoder_factory,
-                          source_factory, visibility=visibility, expression=owned)
-    if config.data['portraits']['source'] == 'vtt':
+                          source_factory, visibility=visibility, expression=owned, category=category)
+    if config.data['portraits']['source'] == 'vtt' or category == 'face+pose':
         from .vtt_portraits import choose_vtt
-        return choose_vtt(database, client, config, scope, target, source_factory, visibility, expression)
+        return choose_vtt(database, client, config, scope, target, source_factory, visibility, expression, category=category)
     policy = config.data['portraits']
     person = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?',
                                          (target['person'], scope)).fetchone()
@@ -243,6 +253,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                     if not policy['anchor_only'] or why not in ('portrait_anchor_required','portrait_anchor_visibility_unavailable'):
                         continue
                 metadata = {'version': 3, 'source_type': 'video', 'requested_source': 'video',
+                            'selection_category': 'face',
                             'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
                             'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
@@ -345,7 +356,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     else:
         from .vtt_portraits import choose_vtt
         winner = choose_vtt(database, client, config, scope, target, source_factory, visibility, expression,
-                            fallback_reason='no_usable_identity_verified_video_portrait')
+                            fallback_reason='no_usable_identity_verified_video_portrait', category=category)
     return winner
 
 
@@ -410,8 +421,10 @@ def _current_prior(database, prior, client, config, scope, target, visibility, e
     groups, context = portrait_references(database, scope, namespace, config,
         lambda: _groups(database.connection, scope, namespace, config.data['clustering']))
     if metadata.get('source_type') == 'video':
-        return recheck_cached(database, prior, groups, config, target, namespace, context,
-                              client=client, visibility=visibility, expression=expression)
+        checked = recheck_cached(database, prior, groups, config, target, namespace, context,
+                                 client=client, visibility=visibility, expression=expression)
+        from .portrait_precedence import refresh_category
+        return refresh_category(database, checked, config) if checked is not None else None
     from .portrait_availability import observation_identity, fit_cached_bytes
     row = database.connection.execute('SELECT * FROM observations WHERE id=?',
                                      (metadata.get('observation'),)).fetchone()
@@ -424,7 +437,8 @@ def _current_prior(database, prior, client, config, scope, target, visibility, e
         fit_cached_bytes(prior['image'], prior['digest'], config, dict(metadata))
     except (KeyError, TypeError, OSError, ValueError):
         return None
-    return None if reason else prior
+    from .portrait_precedence import refresh_category
+    return None if reason else refresh_category(database, prior, config)
 
 
 @pipeline_stage('portrait')

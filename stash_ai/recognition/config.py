@@ -43,7 +43,8 @@ def defaults():
                        'max_view_prototypes_per_person': 4,
                        'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
-        'portraits': {'enabled': True, 'kind': 'auto', 'source': 'vtt', 'anchor_only': False, 'min_face_pixels': 96, 'min_sharpness': 25.,
+        'portraits': {'enabled': True, 'kind': 'auto', 'auto_precedence': ['face+pose', 'face', 'pose'],
+                     'source': 'vtt', 'anchor_only': False, 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
                      'max_clipped_fraction': .15, 'margin': .35, 'aspect_ratio': None,
                      'jpeg_quality': 90, 'min_visible_face_fraction': .8, 'max_candidates': 8,
@@ -254,6 +255,12 @@ def validate(data):
     portrait = data['portraits']
     if portrait['kind'] not in ('auto', 'face', 'person'):
         raise ValueError('portraits.kind must be auto, face or person.')
+    from .portrait_precedence import AUTO_PRECEDENCE
+    precedence = portrait['auto_precedence']
+    if (not isinstance(precedence, list) or len(precedence) != len(AUTO_PRECEDENCE)
+            or any(not isinstance(value, str) for value in precedence)
+            or set(precedence) != set(AUTO_PRECEDENCE)):
+        raise ValueError('portraits.auto_precedence must list face+pose, face and pose exactly once, in priority order.')
     if type(portrait['enabled']) is not bool:
         raise ValueError('portraits.enabled must be boolean.')
     if type(portrait['anchor_only']) is not bool:

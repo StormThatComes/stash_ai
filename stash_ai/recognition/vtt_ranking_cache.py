@@ -15,12 +15,15 @@ from .portrait_admission import extra_measurements,reason as anchor_reason
 
 
 class Ranking:
-    def __init__(self,db,config,scope,target,namespace,context,policy_sha,enabled=True):
+    def __init__(self,db,config,scope,target,namespace,context,policy_sha,enabled=True,category=None):
         self.db,self.config,self.scope,self.target=db,config,scope,target
         self.namespace,self.context,self.policy=namespace,context,policy_sha
         self.limit=config.data['execution']['portrait_ranking_cache_bytes']
         self.enabled=enabled and self.limit>0
-        self.key='vtt-ranking-cache:'+digest([scope,target['person'],policy_sha,
+        from .portrait_precedence import pose_contract
+        from .person_signal import available
+        self.pose_contract=pose_contract(config) if category is not None and available(db) else None
+        self.key='vtt-ranking-cache:'+digest([scope,target['person'],policy_sha,category,
             sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])),target.get('matching',{})])
         self.hit=False
 
@@ -37,9 +40,14 @@ class Ranking:
                 _hash_row(h,row)
             for row in self.db.execute('SELECT id,scan,person,status,payload FROM candidates '
                 'WHERE policy=? AND scan=? ORDER BY id',(policy,scan)):_hash_row(h,row)
+            if self.pose_contract is not None:
+                for row in self.db.execute('SELECT pe.observation,pe.status,pe.metadata FROM person_evidence pe '
+                    'JOIN observations o ON o.id=pe.observation JOIN members m ON m.observation=o.id '
+                    'WHERE m.person=? AND o.scan=? AND pe.contract=? ORDER BY pe.observation',
+                    (self.target['person'],scan,self.pose_contract)):_hash_row(h,row)
             return h.hexdigest()
         return cached(self.db,'portrait-inputs',digest([self.scope,self.namespace,self.target['person'],scan]),
-                      policy,compute,dependency='scan',dependency_key=scan)
+                      digest([policy,self.pose_contract]),compute,dependency='scan',dependency_key=scan)
 
     def inputs(self,*,check_retry=False):
         from .rebuild_cache import _hash_row

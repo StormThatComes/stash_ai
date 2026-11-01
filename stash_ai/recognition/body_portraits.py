@@ -53,7 +53,7 @@ def choose(database, config, scope, target):
                         data=encode_portrait(crop,config.data['portraits'],limit=config.data['storage']['max_crop_bytes'],details=details)
             except (OSError,ValueError,Image.DecompressionBombError):continue
             identifier=str(uuid.uuid5(uuid.NAMESPACE_URL,encoded(['body-portrait',scope,target['person'],row['id'],stamp])))
-            metadata=dict(portrait_kind='person',source_type='person_crop',observation=row['id'],
+            metadata=dict(portrait_kind='person',selection_category='pose',source_type='person_crop',observation=row['id'],
                 person=target['person'],policy_sha=stamp,quality=quality,encoding=details,
                 crop=bounds,crop_coordinate_system='retained_person_crop',pixels=details['pixels'],
                 identity_policy=identity_policy(config),role=row['role'],score=list(score(quality)))
@@ -77,21 +77,27 @@ def current_prior(database, prior, config, target):
 
 def choose_kind(database,client,config,scope,target,paths,backend_factory,decoder_factory,source_factory,**kwargs):
     from .portraits import choose as face_choose
-    from .quality import portrait_shortfalls
     kind=config.data['portraits']['kind']
-    face=None if kind=='person' else face_choose(database,client,config,scope,target,paths,
-                                                backend_factory,decoder_factory,source_factory,**kwargs)
-    if kind=='face':return face
-    if face is not None and not portrait_shortfalls(json.loads(face['metadata']).get('quality',{}),config.data['portraits']):
-        return face
-    return choose(database,config,scope,target) or face
+    if kind=='person':return choose(database,config,scope,target)
+    if kind=='face':
+        return face_choose(database,client,config,scope,target,paths,
+                           backend_factory,decoder_factory,source_factory,**kwargs)
+    for category in config.data['portraits']['auto_precedence']:
+        if category=='pose':
+            winner=choose(database,config,scope,target)
+        else:
+            winner=face_choose(database,client,config,scope,target,paths,
+                backend_factory,decoder_factory,source_factory,category=category,**kwargs)
+        if winner is not None:return winner
+    return None
 
 
 def rank(metadata,config):
-    from .quality import portrait_score,portrait_tiebreak,portrait_shortfalls
+    from .quality import portrait_score,portrait_tiebreak
     quality=metadata.get('quality',{})
-    if metadata.get('portrait_kind')=='person':return (1,*[-v for v in score(quality)])
-    preference=0 if not enabled(config) or not portrait_shortfalls(quality,config.data['portraits']) else 2
+    category=metadata.get('selection_category','pose' if metadata.get('portrait_kind')=='person' else 'face')
+    preference=config.data['portraits']['auto_precedence'].index(category) if config.data['portraits']['kind']=='auto' else 0
+    if metadata.get('portrait_kind')=='person':return (preference,*[-v for v in score(quality)])
     ranks={'video':0,'vtt':1,'recognition_crop':2}
     return (preference,-portrait_score(quality,config.data['portraits']),
             -portrait_tiebreak(quality,config.data['portraits']),ranks.get(metadata.get('source_type'),3))
