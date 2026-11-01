@@ -122,9 +122,10 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     assert not case.cfg.data['sapiensid']['collection']['enabled']
     manifest = json.loads((case.destination / 'manifest.json').read_text())
     assert manifest['kind'] == 'recognition_detection_audit'
-    assert manifest['format'] == 2
+    assert manifest['format'] == 3
     assert manifest['annotations']['person_colors'] == [[128, 0, 128], [0, 128, 0], [0, 0, 255]]
     assert manifest['annotations']['overflow_color'] == [255, 0, 0]
+    assert manifest['annotations']['face_color'] == [255, 220, 0]
     assert manifest['execution'] == dict(max_cues=0, force_pose=True, embeddings=False)
     assert manifest['configuration']['configured_max_cues'] == 1
     assert manifest['configuration']['detection']['min_face_pixels'] == 150
@@ -138,19 +139,24 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     assert len(list(case.destination.glob('*.png'))) == 3
     first, faceless, empty = scene['frames']
     assert first['faces'][0]['person_index'] == 0
-    assert first['faces'][0]['annotation_color'] == first['people'][0]['annotation_color'] == [128, 0, 128]
+    assert first['faces'][0]['annotation_color'] == [255, 220, 0]
+    assert first['people'][0]['annotation_color'] == [128, 0, 128]
     assert faceless['people'][0]['annotation_color'] == [128, 0, 128]  # palette resets per cue
     assert first['faces'][0]['landmarks'] == [list(p) for p in FACE.landmarks]
+    assert first['faces'][0]['box'] == list(FACE.box)
     assert first['people'][0]['drawn_indices'] == [0, 1]
     assert not faceless['faces'] and len(faceless['people']) == 1
     assert not empty['faces'] and not empty['people']
     with Image.open(case.destination / first['file']) as image:
-        assert image.size == (160, 160)
+        assert list(image.size) == first['output_dimensions']
+        assert image.width > 160  # large face needs a gutter; cue stays unscaled
+        dx, dy = first['faces'][0]['display_offset']
+        assert first['faces'][0]['display_landmarks'] == [[x + dx, y + dy] for x, y in FACE.landmarks]
         assert image.getpixel((32, 40)) == (128, 0, 128)
-        assert image.getpixel((49, 60)) == (128, 0, 128)
-        assert image.getpixel((80, 84)) == (128, 0, 128)  # face drawn above pose
+        assert image.getpixel((49 + dx, 60 + dy)) == (255, 220, 0)
+        assert image.getpixel((80, 84)) == (128, 0, 128)  # pose above faint leader
         assert image.getpixel((4, 120)) == (128, 0, 128)
-        assert image.getpixel((16, 120)) == (128, 0, 128)
+        assert image.getpixel((16 + dx, 120 + dy)) == (255, 220, 0)
     with Image.open(case.destination / empty['file']) as image, textured_image() as original:
         assert image.tobytes() == original.tobytes()
     if os.name == 'posix':
@@ -248,15 +254,18 @@ def test_full_cue_crop_contains_all_faces_and_people_in_source_coordinates(tmp_p
     assert len(frame['people']) == person_count and len(frame['faces']) == len(matches)
     colors = [(128, 0, 128), (0, 128, 0), (0, 0, 255), (255, 0, 0), (255, 0, 0)]
     with Image.open(case.destination / frame['file']) as image:
-        assert image.size == (width, 160)
+        assert list(image.size) == frame['output_dimensions']
         for slot, person in enumerate(frame['people']):
             assert person['annotation_color'] == list(colors[slot])
             assert image.getpixel((160*slot+32, 40)) == colors[slot]
             assert image.getpixel((160*slot+4, 120)) == colors[slot]
-        for face, slot in zip(frame['faces'], slots):
-            assert face['annotation_color'] == list(colors[slot])
-            assert image.getpixel((160*slot+49, 60)) == colors[slot]
-            assert image.getpixel((160*slot+16, 120)) == colors[slot]
+        for face, slot, detected in zip(frame['faces'], slots, faces):
+            assert face['annotation_color'] == [255, 220, 0]
+            assert face['box'] == list(detected.box)
+            assert face['landmarks'] == [list(p) for p in detected.landmarks]
+            dx, dy = face['display_offset']
+            assert image.getpixel((160*slot+49+dx, 60+dy)) == (255, 220, 0)
+            assert image.getpixel((160*slot+16+dx, 120+dy)) == (255, 220, 0)
         assert image.getpixel((width-1, 159)) == (10, 20, 30)
 
 
@@ -323,3 +332,26 @@ def test_refinement_original_box_and_decision_survive_audit_export(tmp_path, mon
     manifest = json.loads((case.destination / 'manifest.json').read_text())
     person = manifest['scene']['frames'][0]['people'][0]
     assert person['pose_refinement'] == details
+
+
+def test_larger_canvas_does_not_resurrect_missing_or_outside_measurements(tmp_path, monkeypatch):
+    case = setup(tmp_path, monkeypatch)
+    monkeypatch.setitem(PERSON, 'keypoints', [[80, 84], [200, 40]] + [[-1, -1]] * 15)
+    landmarks = [FACE.landmarks[0], [-1, -1], [160, 20], [20, 160], [1000, 20]]
+    partial = SimpleNamespace(box=FACE.box, score=FACE.score, landmarks=landmarks)
+    original_detect = case.detector.detect
+
+    def detect(image, *, force_pose):
+        return [partial] if original_detect(image, force_pose=force_pose) else []
+
+    case.detector.detect = detect
+    assert run(case) == 0
+    manifest = json.loads((case.destination / 'manifest.json').read_text())
+    first, faceless, _ = manifest['scene']['frames']
+    assert first['output_dimensions'][0] > 200
+    assert first['people'][0]['drawn_indices'] == [0]
+    assert first['people'][0]['keypoints'][1] == [200, 40]
+    assert first['faces'][0]['drawn_indices'] == [0]
+    assert first['faces'][0]['landmarks'] == [list(p) for p in landmarks]
+    assert first['faces'][0]['display_landmarks'][1:] == [[-1, -1]] * 4
+    assert faceless['output_dimensions'] == faceless['source_dimensions']
