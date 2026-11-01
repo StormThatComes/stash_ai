@@ -17,7 +17,12 @@ FLIP = (0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15)
 
 
 def contract(pose):
-    return dict(repository=REPOSITORY, revision=REVISION, source_revision=SOURCE_REVISION,
+    result = dict(repository=REPOSITORY, revision=REVISION, source_revision=SOURCE_REVISION,
                 inference=INFERENCE, sha256=SHA256, score='expected_oks',
                 presence_threshold=pose['pmpose_presence_threshold'],
                 visibility_threshold=pose['pmpose_visibility_threshold'])
+
+    if pose.get('refinement', {}).get('enabled', False):
+        from .pose_refinement_config import contract as refinement_contract
+        result['refinement'] = refinement_contract(pose['refinement'])
+    return result

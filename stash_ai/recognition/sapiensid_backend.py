@@ -187,7 +187,7 @@ class SapiensIDFaces(YuNetDetector):
             return faces
         return self._activate(image, faces, people)
 
-    def _people(self, bounds, scores, points, confidences, probabilities=None):
+    def _people(self, bounds, scores, points, confidences, probabilities=None, refinements=None):
         import numpy as np
         settings = self.config.data['sapiensid']['pose']
         if (points.shape != (len(bounds),17,2) or confidences.shape != (len(bounds),17)
@@ -200,6 +200,17 @@ class SapiensIDFaces(YuNetDetector):
                         or not np.isfinite(v).all() or np.any((v < 0) | (v > 1))
                         for v in probabilities.values())):
                 raise ValueError('PMPose requires separate finite presence and visibility probabilities.')
+        if refinements is not None:
+            if (not settings.get('refinement', {}).get('enabled', False) or
+                    len(refinements) != len(bounds)):
+                raise ValueError('Unexpected PMPose refinement metadata.')
+            for original, record in zip(bounds, refinements):
+                box = np.asarray(record['bounds'])
+                if (record['detector_bounds'] != list(original) or box.shape != (4,) or
+                        not np.isfinite(box).all() or np.any(box[2:] <= box[:2]) or
+                        np.any(box[:2] > original[:2]) or np.any(box[2:] < original[2:])):
+                    raise ValueError('PMPose refinement returned invalid expanded bounds.')
+            bounds = [record['bounds'] for record in refinements]
         people = []
         for index, (box, score, raw, confidence) in enumerate(zip(bounds, scores, points, confidences)):
             left, top, right, bottom = box
@@ -216,6 +227,8 @@ class SapiensIDFaces(YuNetDetector):
                     if threshold > 0:
                         usable &= values > threshold
             kps[~usable] = -1
+            if refinements is not None:
+                details['pose_refinement'] = refinements[index]
             people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score),**details))
         return people
 

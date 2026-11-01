@@ -163,8 +163,8 @@ sapiensid:
     pmpose_visibility_threshold: 0.0
 ```
 
-This integration uses **boxes only**, without segmentation masks, SAM or the
-iterative BBoxMaskPose/BMPv2 pipeline. It does not inherit reported results for
+By default this integration uses **boxes only**, without segmentation masks,
+SAM or the iterative BBoxMaskPose/BMPv2 pipeline. It does not inherit reported results for
 the full masked pipeline. Evaluate overlapping people and profile faces on
 your own VTT cues before replacing a working backend. Changing pose models
 alone does not guarantee that a nearby person's ankle cannot be selected.
@@ -177,8 +177,9 @@ PMPose predicts three different per-point quantities:
 | `pmpose_presence_threshold` / `keypoint_presence` | Probability that the landmark lies within the model crop |
 | `pmpose_visibility_threshold` / `keypoint_visibility` | Predicted visibility of the landmark |
 
-The point must exceed the configured thresholds and remain inside its original
-detector box. A zero presence/visibility threshold disables that filter.
+The point must exceed the configured thresholds and remain inside its person
+box (the original detector box unless mask refinement admits an expansion).
+A zero presence/visibility threshold disables that filter.
 Visibility filtering defaults to disabled, preserving useful occluded-body
 estimates. To omit hidden points, including an eye on the far side of a profile,
 try `pmpose_visibility_threshold: 0.5` and inspect the audit; the prediction can
@@ -228,6 +229,110 @@ and checks real pose inference against the upstream reference fixture plus audit
 geometry. The fixture uses MMPretrain 1.2.0 and the pinned upstream PMPose head
 and decoder with the same bbox-only input and flip averaging. Set
 `STASH_AI_PMPOSE_DIRECTORY` to reuse an existing verified checkpoint directory.
+
+### SAM-pose2seg masks, second PMPose pass and tight-box recovery
+
+Enable this optional path with the updated `requirements-sapiensid.txt`:
+
+```yaml
+sapiensid:
+  enabled: true
+  pose:
+    backend: pmpose
+    detector: dfine_x
+    refinement:
+      enabled: true
+      mode: all
+      expand_boxes: true
+```
+
+`SAM-pose2seg` is the pose-guided segmenter from BMPv2, built on SAM2.1. It is
+not a new pose estimator and does not replace D-FINE. This adapter performs one
+initial PMPose pass, one segmentation per eligible person, then one masked
+PMPose pass. It does not run the full BMP detector loop or 3D estimation.
+
+SAM receives the full RGB cue and up to three reliable, visible head/torso
+points from the initial pose. Elbows, wrists, knees and ankles are deliberately
+excluded from prompts because limb ownership is the problem being corrected.
+Presence, localization quality and visibility have independent prompt gates;
+points coinciding with another person's reliable core are excluded. The
+segmenter receives no box prompt and no image crop, so it can recover an arm
+outside a tight D-FINE box. People need at least two usable prompts by default.
+SAM's image features are computed once per eligible cue and released even on
+errors. Accepted masks are queued in batches bounded by `pmpose_batch_size`.
+
+The second PMPose pass uses upstream `MaskBackground(alpha=0.25)` preprocessing:
+instance pixels are unchanged, background RGB is reduced to 75%, then affine
+sampling and normalization are applied. The same flip averaging and COCO17
+mapping are used as in the first pass. This is mask conditioning, not a hard
+cutout or a post-hoc deletion of keypoints outside the mask.
+
+With `expand_boxes: true`, the person box becomes the union of its original
+bounds and the accepted mask bounds, clipped by the source image. It never
+shrinks, which preserves space for occluded body parts. Expanded bounds feed
+keypoint filtering, face association, body/face-associated collection, SapiensID
+crops and audits consistently. The original detector score stays separate from
+SAM's mask score. There is no second box NMS that could silently delete a person.
+
+Admission rejects low-quality/empty masks, missing prompt support, masks covering
+another person's reliable head/torso points, or excessive expansion. Defaults
+limit union area to 2x the original area and extension on each side to 0.5x the
+original width/height. Tiny disconnected speckles are removed; substantial
+disconnected hands/feet are retained. The second pose must retain at least the
+configured minimum number of prompt landmarks inside the mask, with adequate
+quality/presence and displacement within 15% of the original box diagonal
+(minimum 3 px). If any admission gate fails, **both the first pose and original
+box are retained**. Model errors, malformed outputs, missing dependencies or
+invalid assets raise errors; they are not treated as successful refinement.
+
+`mode: all` also attempts recovery for isolated, tightly cropped people.
+`mode: overlap` saves segmentation work by requiring intersection divided by the
+smaller detector-box area to reach `overlap_threshold` (default 0.20). It cannot
+repair an isolated person. Turning off `expand_boxes` still allows a masked
+second pose but keeps the original point/crop boundaries. All tuning parameters
+and their short descriptions are in `facial_recognition.yml`.
+
+Detection audit JSON includes `pose_refinement` for every person: status/reason,
+original and final bounds, prompt indices/points, mask score and mask area when
+admitted. Gray outlines in PNGs show the old box when it was expanded; the
+normal person color shows the final box/pose. No masks are retained in the DB.
+Pipeline profiling separates `pmpose_mask_refinement` (total, including nested
+work) and `pmpose_masked_second_pass`.
+
+On first enabled use, the adapter downloads the 357,549,748-byte
+`SAM-pose2seg_hiera_b+.pt` from the pinned VRG Prague revision
+`cfc89052cf16655a52889f1f4e1b866e74a6c19c`, with SHA256
+`c89ee52fdc323f61ec5c52075d49bebb7b4e76f39b4e1e0c87b331bf0dcd3b98`.
+It also downloads a small, per-file SHA256-pinned inference source subset and
+license from BBoxMaskPose commit `49a070a6f8396147323b1c4959474077dbe2ce8e`.
+No OpenMMLab/training imports, Git installation, CUDA extensions or automatic
+pip installation are needed. The existing CPU/GPU torch and torchvision profile
+is reused. Source bytes are verified before imports; weights are hashed and
+loaded from the same descriptor with `weights_only=True` and strict state keys.
+The directory defaults to `models.directory/sam_pose2seg/<revision>`; set
+`refinement.directory` to relocate it. `models.download_missing: false` requires
+all assets already present. Existing corrupt assets are never overwritten.
+
+Enabling refinement or changing its semantic settings invalidates person/body
+and SapiensID identity evidence contracts; rerun recognition on affected scenes
+before solving. Inactive refinement preserves existing contracts; relocating
+assets and changing batch size do not change vectors' contracts. Refinement
+settings are collection settings, not offline solver parameters.
+
+The opt-in real CPU test runs both pretrained models:
+
+```sh
+STASH_AI_SAM_POSE2SEG_SMOKE=1 python -m pytest -q tests/test_recognition_sam_pose2seg_smoke.py
+```
+
+It downloads about 975 MB including PMPose; `STASH_AI_PMPOSE_DIRECTORY` and
+`STASH_AI_SAM_POSE2SEG_DIRECTORY` can reuse cached assets. Offline tests cover
+cross-person mask rejection, disconnected limbs, clipped box expansion,
+second-pass drift, batching, failure cleanup and evidence invalidation. The
+real-model smoke verifies execution, not accuracy on overlapping VTT people.
+Benchmark representative audit cues before enabling this across a large library;
+wrong initial poses can still produce wrong masks, and small thumbnails may not
+contain enough detail to recover the limb.
 
 ### Sapiens Pose keypoints
 
