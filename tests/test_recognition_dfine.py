@@ -210,16 +210,13 @@ def test_person_filter_clipping_nms_limit_and_original_coordinates():
     assert empty.xyxy.shape == (0, 4) and empty.conf.shape == (0,)
 
 
-@pytest.mark.parametrize('failure', ['nan', 'infinite_score', 'negative_width', 'classes', 'frames', 'boxes'])
+@pytest.mark.parametrize('failure', ['classes', 'frames', 'boxes'])
 def test_malformed_outputs_fail_before_pose(failure):
     output = detections()
-    if failure == 'nan':output.pred_boxes[0, 0, 0] = float('nan')
-    elif failure == 'infinite_score':output.logits[0, 0, 0] = float('inf')
-    elif failure == 'negative_width':output.pred_boxes[0, 0, 2] = -.2
-    elif failure == 'classes':output.logits = output.logits[:, :, :79]
+    if failure == 'classes':output.logits = output.logits[:, :, :79]
     elif failure == 'frames':output.logits = output.logits[:0]
     else:output.pred_boxes = output.pred_boxes[:, :, :3]
-    with pytest.raises(ValueError, match='D-FINE returned malformed'):
+    with pytest.raises(ValueError, match='malformed detection tensor shapes:.*expected'):
         dfine.DFineDetector._decode(output, [(100, 200)], .5, .7, 100, True)
 
 

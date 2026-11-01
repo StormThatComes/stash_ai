@@ -339,6 +339,17 @@ after D-FINE's end-to-end predictions to keep this application's configured
 duplicate-suppression behavior. Other object classes do not consume the limit.
 Scores need calibration on your scenes; they are not interchangeable with YOLO.
 
+Finite proposals with non-positive width/height are discarded before NMS and
+the result limit; a warning reports their count and first frame/query example.
+NaN/Inf outputs are handled separately: only affected frames are retried once,
+individually in FP32 on the configured device, preserving healthy batch results.
+If the retry still contains NaN/Inf, inference fails with the tensor name, count,
+frame/query/component and example value; it is never saved as an empty detection.
+Frame indices are zero-based within the detector's input call, not scene cue IDs.
+Incorrect tensor shapes fail immediately with expected/actual dimensions.
+Autocast is disabled inside D-FINE inference. This recovery policy updates the
+D-FINE evidence contract (v2); rerun recognition for affected scenes.
+
 In this mode no YOLO model is downloaded, loaded or executed; `pose.path` and
 `pose.sha256` are unused. `backend: yolo` with a D-FINE detector is rejected,
 because D-FINE supplies no keypoints. Sapiens/ViTPose/PMPose supplies the 17 body points
