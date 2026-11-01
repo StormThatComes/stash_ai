@@ -269,7 +269,9 @@ in original VTT order (zero-based), and `manifest.json`. Each PNG preserves the
 whole cue at its original scale and shows **all returned face and person
 boxes**, five face landmarks and measured COCO17 pose points. Pose boxes,
 points and labels use **purple, green, blue**, then **red for every additional
-person**, in person detection order. Face boxes, points and labels are **yellow**.
+person**, in person detection order. Face boxes are **yellow** when associated
+with a pose and **red** when no pose is matched (`person_index: null`), including
+cues with no detected people. Face points and labels remain **yellow**.
 Colors reset for each cue and do not track identity across cues.
 
 Face boxes and their landmarks move together to free space near the measured
@@ -293,7 +295,9 @@ PNG coordinates; invalid/missing source landmarks remain omitted and use
 `[-1, -1]` in display geometry. `source_dimensions` describes the original cue,
 while `output_dimensions` includes any added margin. The palette and layout
 conventions are in `annotations`; each detection retains its RGB
-`annotation_color`. The translation is only a visualization change and has
+`annotation_color`, and faces also record their actual RGB `box_color`.
+`annotations.unmatched_face_box_color` defines the red unmatched-face outline.
+The translation is only a visualization change and has
 no effect on detector thresholds, face/person matching or recognition.
 
 The command uses `models.detector` and `sapiensid.pose` from the current YAML,
