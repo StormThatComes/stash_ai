@@ -52,8 +52,8 @@ vendored in this repository; its upstream license applies.
 
 Optional SAM-pose2seg downloads an unmodified, SHA256-pinned inference source
 subset and the GPL-3.0 license from BBoxMaskPose commit
-`49a070a6f8396147323b1c4959474077dbe2ce8e`. The manifest is
-`stash_ai/recognition/sam_pose2seg_sources.json`; upstream headers retain
+`49a070a6f8396147323b1c4959474077dbe2ce8e`. The source manifest is `SOURCE_FILES`
+in `stash_ai/recognition/sam_pose2seg_registry.py`; upstream headers retain
 Copyright (c) Meta Platforms, Inc. and affiliates and BMPv2 authors' notices.
 The loader uses only that verified subset, without executing upstream package
 initializers. PMPose mask preprocessing follows upstream

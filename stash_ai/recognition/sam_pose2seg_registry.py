@@ -7,3 +7,72 @@ SHA256 = 'c89ee52fdc323f61ec5c52075d49bebb7b4e76f39b4e1e0c87b331bf0dcd3b98'
 URL = f'https://huggingface.co/vrg-prague/BBoxMaskPose/resolve/{REVISION}/SAM-pose2seg_hiera_b%2B.pt'
 SOURCE_URL = f'https://raw.githubusercontent.com/MiraPurkrabek/BBoxMaskPose/{SOURCE_REVISION}/'
 CONFIG = 'bboxmaskpose/sam2/configs/sam-pose2seg/sam-pose2seg_hiera_b+.yaml'
+
+# Keep source pins in Python: existing updaters install .py modules, not JSON
+# package data. This must be available before any model download starts.
+SOURCE_FILES = {
+    "LICENSE": {
+        "size": 35149,
+        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "bboxmaskpose/sam2/configs/sam-pose2seg/sam-pose2seg_hiera_b+.yaml": {
+        "size": 3855,
+        "sha256": "4c546ff89a7f453148dcd93f561fc12b652d7b0e976eae08522b634e79a4aac4"
+    },
+    "bboxmaskpose/sam2/sam2_image_predictor.py": {
+        "size": 19462,
+        "sha256": "ab511842a52419f1440b5dab75d948b7300ebee07788d2c9358be21ecbe24437"
+    },
+    "bboxmaskpose/sam2/utils/transforms.py": {
+        "size": 4780,
+        "sha256": "07370a42b179cfc6fdb61bf3def74922411b712cd90b1b16e3843fab2b8186e0"
+    },
+    "bboxmaskpose/sam2/utils/misc.py": {
+        "size": 13018,
+        "sha256": "c7c2975aba81551d4f3877bf936100338b8fb6de103bdb35f8e31b87b015c1a6"
+    },
+    "bboxmaskpose/sam2/modeling/sam2_base.py": {
+        "size": 46994,
+        "sha256": "aebed058f472c792d28e2c1d4f312dfe02cf7815c6fd4e6741b6dbe0fd25d2cd"
+    },
+    "bboxmaskpose/sam2/modeling/sam2_utils.py": {
+        "size": 13104,
+        "sha256": "e1ab110e79752176ed43a1c7f7c64298d54cb6d63355e35e7e624940ad9bcf2d"
+    },
+    "bboxmaskpose/sam2/modeling/position_encoding.py": {
+        "size": 8745,
+        "sha256": "4722e218ee7fdb6629fcf8a9c12cf807712a7ff3ff305e394bd73f21bd3c960d"
+    },
+    "bboxmaskpose/sam2/modeling/memory_attention.py": {
+        "size": 5510,
+        "sha256": "853b6de32dec3131abe77b1e6aa09e0444e44bfc1285cf2942ab9a9cef6c2e00"
+    },
+    "bboxmaskpose/sam2/modeling/memory_encoder.py": {
+        "size": 5600,
+        "sha256": "f842f7eb00f55aa3955fef1a4469acd76c550393f8533a1336fa12614c87f658"
+    },
+    "bboxmaskpose/sam2/modeling/backbones/hieradet.py": {
+        "size": 9815,
+        "sha256": "6001f7c4d5284b2bdcb3b9298d029fd62b3ffdd1eeeb6f9ffb03e95ca0e1ad89"
+    },
+    "bboxmaskpose/sam2/modeling/backbones/image_encoder.py": {
+        "size": 4660,
+        "sha256": "ef99698b42b24712e48e0c71d6a9f09b9343653b8376126dab786756b533f66c"
+    },
+    "bboxmaskpose/sam2/modeling/backbones/utils.py": {
+        "size": 2971,
+        "sha256": "2a2af5da0a9f5e4c4a76f5b67bfb29431c9e21debfc2127ee652e9f8a44f4eaa"
+    },
+    "bboxmaskpose/sam2/modeling/sam/prompt_encoder.py": {
+        "size": 8034,
+        "sha256": "1617fdc77d2aa1d30f3d7118b6808a9b10b592ef5ce239a50e0e6c6b1a1143de"
+    },
+    "bboxmaskpose/sam2/modeling/sam/mask_decoder.py": {
+        "size": 12376,
+        "sha256": "c9468657f34782e636303aaac2e9a3db2f255af9a0183c2beb1f899e1a46bb67"
+    },
+    "bboxmaskpose/sam2/modeling/sam/transformer.py": {
+        "size": 10601,
+        "sha256": "466c8f60f849bf3bc163b3d78f02a72acb5ca2cedded349d186edaf1937cf441"
+    }
+}
