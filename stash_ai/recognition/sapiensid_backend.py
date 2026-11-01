@@ -56,6 +56,23 @@ def identity_contract(config):
     return result
 
 
+def association_rejection(face, person):
+    """Explain the existing pair gates without changing their acceptance rules."""
+    x, y, w, h = face.box
+    left, top, right, bottom = person['bounds']
+    # Small detector disagreement is allowed only with measured head points.
+    tolerance = .05 * min(w, h)
+    if not (left-tolerance <= x and top-tolerance <= y and
+            right+tolerance >= x+w and bottom+tolerance >= y+h):
+        return 'face_outside_person_box'
+    head = [(px, py) for px, py in person['keypoints'][:3] if px >= 0 and py >= 0]
+    if not head:
+        return 'no_valid_head_keypoints'
+    if not any(x <= px <= x+w and y <= py <= y+h for px, py in head):
+        return 'head_keypoints_outside_face'
+    return None
+
+
 def association_choices(faces, people):
     """Require unique face -> person and person -> face head-region membership.
 
@@ -63,23 +80,8 @@ def association_choices(faces, people):
     measured pose nose/eye must fall inside the face box. Ambiguity is withheld;
     neither detector confidence nor ordering breaks a cross-person tie.
     """
-    choices = []
-    for face in faces:
-        x, y, w, h = face.box
-        indices = []
-        for index, person in enumerate(people):
-            left, top, right, bottom = person['bounds']
-            # Small detector disagreement is allowed only with measured head
-            # points; reciprocal uniqueness below still includes rejected faces.
-            tolerance = .05 * min(w, h)
-            if not (left-tolerance <= x and top-tolerance <= y and
-                    right+tolerance >= x+w and bottom+tolerance >= y+h):
-                continue
-            head = person['keypoints'][:3]
-            if any(px >= 0 and py >= 0 and x <= px <= x+w and y <= py <= y+h for px, py in head):
-                indices.append(index)
-        choices.append(indices)
-    return choices
+    return [[index for index, person in enumerate(people) if association_rejection(face, person) is None]
+            for face in faces]
 
 
 def associate(faces, people):

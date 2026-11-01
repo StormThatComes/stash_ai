@@ -359,3 +359,68 @@ def test_larger_canvas_does_not_resurrect_missing_or_outside_measurements(tmp_pa
     assert first['faces'][0]['landmarks'] == [list(p) for p in landmarks]
     assert first['faces'][0]['display_landmarks'][1:] == [[-1, -1]] * 4
     assert faceless['output_dimensions'] == faceless['source_dimensions']
+
+
+@pytest.mark.parametrize('reason,label', [
+    ('no_people_detected', 'no detected pose'),
+    ('face_outside_person_box', 'face outside pose box'),
+    ('no_valid_head_keypoints', 'no valid nose/eye points'),
+    ('head_keypoints_outside_face', 'nose/eyes outside face'),
+    ('head_keypoints_missing_or_outside', 'nose/eyes missing or outside face'),
+    ('multiple_person_candidates', 'multiple poses: P0, P1'),
+    ('competing_faces', 'competing faces: F1'),
+])
+def test_unmatched_reason_is_drawn_in_png_and_retained_in_manifest(tmp_path, monkeypatch, reason, label):
+    from PIL import ImageDraw
+    from stash_ai.recognition.sapiensid_backend import associate
+    case = setup(tmp_path, monkeypatch)
+    missing = dict(PERSON, keypoints=[[-1, -1]] * 17)
+    outside = dict(PERSON, keypoints=[[4, 4]] * 3 + [[-1, -1]] * 14)
+    people = {
+        'no_people_detected': [],
+        'face_outside_person_box': [dict(PERSON, bounds=[32, 4, 156, 156])],
+        'no_valid_head_keypoints': [missing],
+        'head_keypoints_outside_face': [outside],
+        'head_keypoints_missing_or_outside': [missing, outside],
+        'multiple_person_candidates': [PERSON, PERSON],
+        'competing_faces': [PERSON],
+    }[reason]
+    faces = [FACE, FACE] if reason == 'competing_faces' else [FACE]
+
+    def detect(image, *, force_pose):
+        case.detector.frame_people = people
+        case.detector.face_matches = associate(faces, people)
+        return faces
+
+    case.detector.detect = detect
+    rendered = []
+    draw_label = detection_audit._label
+
+    def capture(image, bounds, text, *, color):
+        if text.startswith('F0 '):
+            rendered.append(text)
+        draw_label(image, bounds, text, color=color)
+
+    monkeypatch.setattr(detection_audit, '_label', capture)
+    assert run(case) == 0
+    manifest = json.loads((case.destination / 'manifest.json').read_text())
+    frame = manifest['scene']['frames'][0]
+    face = frame['faces'][0]
+    assert face['person_index'] is None
+    assert face['association']['reason'] == reason
+    assert rendered == [f'F0 0.990 -> unmatched\n{label}'] * 3
+    assert reason in manifest['annotations']['association_reasons']
+    # A large face needs a gutter: the entire second line must be visible above
+    # the shifted box, with a gap before the outline and without source clipping.
+    with Image.open(case.destination / frame['file']) as image:
+        left, top, right, bottom = face['display_bounds']
+        height = detection_audit.label_height(ImageDraw.Draw(image), rendered[0])
+        assert left >= 160 and top - height >= 0
+        text_box = ImageDraw.Draw(image).textbbox((left, top - height), rendered[0], stroke_width=1)
+        assert 0 <= text_box[0] <= text_box[2] < image.width
+        assert 0 <= text_box[1] <= text_box[3] < top
+        with image.crop((int(left), int(top - 14), image.width, int(top))) as second_line:
+            pixels = np.asarray(second_line)
+            # Pillow's antialiased font need not contain a fully opaque glyph pixel.
+            assert np.any((pixels[..., 0] > 150) & (pixels[..., 1] > 100) & (pixels[..., 2] < 60))
+        assert image.getpixel((int(left), int(bottom - 10))) == (255, 0, 0)
