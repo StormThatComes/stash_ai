@@ -9,6 +9,7 @@ from .config import plain
 from .detection_associations import REASON_LABELS, explain_associations, face_label
 from .detection_callouts import draw_leaders, label_height, layout_faces
 from .person_audit import BOX_COLOR, _draw
+from .person_association import policy as association_policy
 
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
@@ -156,6 +157,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                         face_color=list(BOX_COLOR),
                         unmatched_face_box_color=list(UNMATCHED_FACE_BOX_COLOR),
                         association_reasons=REASON_LABELS,
+                        face_person_association=association_policy(),
                         color_assignment='Per cue, pose colors follow person detection order; fourth and later '
                                          'people are red. Face points and labels are yellow. Face boxes are '
                                          'red when person_index is null, otherwise yellow; each face records box_color.',

@@ -8,6 +8,9 @@ REASON_LABELS = {
     'no_valid_head_keypoints': 'no valid nose/eye points',
     'head_keypoints_outside_face': 'nose/eyes outside face',
     'head_keypoints_missing_or_outside': 'nose/eyes missing or outside face',
+    'insufficient_head_landmarks': 'partial face: need 2 head points',
+    'head_landmark_mismatch': 'face/pose head points disagree',
+    'mixed_association_failures': 'pose candidates fail different gates',
     'multiple_person_candidates': 'multiple poses',
     'competing_faces': 'competing faces',
     'unmatched': 'association unavailable',
@@ -29,6 +32,7 @@ def explain_associations(faces, people, matches):
     for index, (face, match, candidates) in enumerate(zip(faces, matches, choices)):
         competing = sorted({other for person in candidates for other in owners[person] if other != index})
         reason = None
+        pair_rejections = []
         if match is None:
             if not people:
                 reason = 'no_people_detected'
@@ -37,15 +41,22 @@ def explain_associations(faces, people, matches):
             elif candidates:
                 reason = 'competing_faces' if competing else 'unmatched'
             else:
-                rejections = {association_rejection(face, person) for person in people}
+                pair_rejections = [dict(person_index=i, reason=association_rejection(face, person))
+                                   for i, person in enumerate(people)]
+                rejections = {item['reason'] for item in pair_rejections}
                 rejections.discard('face_outside_person_box')
                 if not rejections:
                     reason = 'face_outside_person_box'
                 elif len(rejections) == 1:
                     reason = next(iter(rejections))
-                else:
+                elif rejections == {'no_valid_head_keypoints', 'head_keypoints_outside_face'}:
                     reason = 'head_keypoints_missing_or_outside'
-        results.append(dict(reason=reason, candidates=candidates, competing_faces=competing))
+                else:
+                    reason = 'mixed_association_failures'
+        record = dict(reason=reason, candidates=candidates, competing_faces=competing)
+        if pair_rejections:
+            record['pair_rejections'] = pair_rejections
+        results.append(record)
     return results
 
 

@@ -116,3 +116,40 @@ def test_collection_validation_and_contract(tmp_path):
     assert contract(c)!=before
     path=tmp_path/'bad.yml';path.write_text('version: 1\nsapiensid: {collection: {enabled: true}}')
     with pytest.raises(ValueError,match='requires sapiensid.enabled'):load(path)
+
+
+def test_legacy_completed_body_cues_are_recollected_with_partial_face_match(tmp_path, monkeypatch):
+    from stash_ai.recognition.body_observations import _contract
+    from stash_ai.recognition.person_signal import contract as person_contract
+    monkeypatch.setattr('stash_ai.recognition.sapiensid_v1.prepare_person_input', lambda *a: (np.zeros(1),) * 3)
+    c = settings(tmp_path)
+
+    class PartialPerson(Persons):
+        def detect(self, image, faces=None):
+            super().detect(image, faces)
+            self.frame_people[0]['bounds'] = [32, 0, 160, 160]
+            self.frame_people[0]['keypoints'][:3] = [[80, 84], [111, 60], [49, 60]]
+            self.face_matches = associate(faces, self.frame_people)
+            assert self.face_matches == [0]
+            return faces
+
+    client, model = MediaClient(), PartialPerson(count=1)
+    collector = PersonCollector(c, {}, lambda *args: model)
+    try:
+        with FaceDatabase(c.database) as state, SpriteInput(client, client.scene, c) as source:
+            db = state.connection
+            scan, _ = scan_scene(state, 'scope', client.scene, c, 'ns', source, Backend)
+            legacy = _contract(c, 'independent-person-v2-rgb-pixels', legacy_association=True)
+            db.executemany('INSERT INTO body_cues VALUES (?,?,?)', [(scan, legacy, i) for i in range(3)])
+            db.commit()
+            collector.enrich(db, scan, source)
+            assert model.calls == model.embedded == 3
+            assert coverage(db, c, [scan])['complete_cues'] == 3
+            assert db.execute("SELECT COUNT(*) FROM person_evidence WHERE contract=? AND status='ready'",
+                              (person_contract(c),)).fetchone()[0] == 3
+            assert all(json.loads(row[0])['bounds'] == [32, 0, 160, 160]
+                       for row in db.execute('SELECT geometry FROM body_observations WHERE contract=?', (contract(c),)))
+            collector.enrich(db, scan, source)
+            assert model.calls == model.embedded == 3
+    finally:
+        collector.close()

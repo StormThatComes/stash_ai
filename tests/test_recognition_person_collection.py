@@ -44,6 +44,36 @@ def test_collection_resumes_without_reembedding_faces(tmp_path):
     collector.close();assert model.closed
 
 
+@pytest.mark.parametrize('old_ready', [False, True])
+def test_new_association_policy_recollects_cached_evidence_without_reembedding_faces(tmp_path, old_ready):
+    from stash_ai.recognition.person_signal import contract, save
+    settings = config(tmp_path)
+    data = plain(settings.data)
+    data['sapiensid']['enabled'] = True
+    settings = replace(settings, data=data)
+    client, model = MediaClient(), Person()
+    collector = PersonCollector(settings, {}, factory=lambda *args: model)
+    try:
+        with FaceDatabase(settings.database) as state, SpriteInput(client, client.scene, settings) as source:
+            scan, _ = scan_scene(state, 'scope', client.scene, settings, 'ns', source, Backend)
+            db = state.connection
+            faces = list(db.execute('SELECT id,embedding FROM observations ORDER BY id'))
+            legacy = contract(settings, legacy_association=True)
+            for face in faces:
+                save(db, face['id'], legacy, dict(identity_rejection=None if old_ready else
+                     'person_face_association_unavailable'), np.ones(4096) if old_ready else None)
+            db.commit()
+            collector.enrich(db, scan, source)
+            assert model.calls == 3
+            assert db.execute("SELECT COUNT(*) FROM person_evidence WHERE contract=? AND status='ready'",
+                              (contract(settings),)).fetchone()[0] == 3
+            assert faces == list(db.execute('SELECT id,embedding FROM observations ORDER BY id'))
+            collector.enrich(db, scan, source)
+            assert model.calls == 3
+    finally:
+        collector.close()
+
+
 def test_variant_change_collects_separate_evidence_and_switch_back_reuses_cache(tmp_path):
     from stash_ai.recognition.person_signal import contract, coverage
     settings=config(tmp_path);data=plain(settings.data);data['sapiensid']['enabled']=True

@@ -7,6 +7,7 @@ from .models import YuNetDetector
 from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING
 from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
 from .sapiensid_registry import POSE_SHA256, LEGACY_POSE_SHA256, POSE_INFERENCE, MODELS
+from .person_association import association_rejection, policy as association_policy
 
 CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v4'
 
@@ -30,6 +31,7 @@ def input_contract(config):
 def identity_contract(config):
     settings = config.data['sapiensid']
     result = {'contract': input_contract(config), 'source_revision': UPSTREAM_COMMIT,
+            'face_person_association': association_policy(),
             'model_variant': settings['model']['variant'],
             'model_sha256': MODELS[settings['model']['variant']]['sha256'],
             'model_yaml_sha256': settings['model']['model_yaml_sha256'],
@@ -56,28 +58,12 @@ def identity_contract(config):
     return result
 
 
-def association_rejection(face, person):
-    """Explain the existing pair gates without changing their acceptance rules."""
-    x, y, w, h = face.box
-    left, top, right, bottom = person['bounds']
-    # Small detector disagreement is allowed only with measured head points.
-    tolerance = .05 * min(w, h)
-    if not (left-tolerance <= x and top-tolerance <= y and
-            right+tolerance >= x+w and bottom+tolerance >= y+h):
-        return 'face_outside_person_box'
-    head = [(px, py) for px, py in person['keypoints'][:3] if px >= 0 and py >= 0]
-    if not head:
-        return 'no_valid_head_keypoints'
-    if not any(x <= px <= x+w and y <= py <= y+h for px, py in head):
-        return 'head_keypoints_outside_face'
-    return None
-
-
 def association_choices(faces, people):
     """Require unique face -> person and person -> face head-region membership.
 
-    Person boxes alone overlap too often to establish ownership. At least one
-    measured pose nose/eye must fall inside the face box. Ambiguity is withheld;
+    Contained faces need a measured nose/eye inside the face box. Partially
+    contained faces additionally need corresponding landmark agreement.
+    Person-box overlap alone cannot establish ownership. Ambiguity is withheld;
     neither detector confidence nor ordering breaks a cross-person tie.
     """
     return [[index for index, person in enumerate(people) if association_rejection(face, person) is None]
