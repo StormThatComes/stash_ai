@@ -56,8 +56,9 @@ See [facial recognition](docs/facial-recognition.md) for scope and configuration
 For visual detector tuning, `python stash_ai.py recognition audit-detection
 --scene-id 123 --output-dir recognition_detection_audit/scene-123-run01` exports
 every VTT cue as a full-size PNG with face and pose landmarks, plus a JSON
-manifest, using the current recognition YAML. Face boxes and `F` labels are
-yellow; person/pose boxes and `P` labels are magenta.
+manifest, using the current recognition YAML. Each person's boxes, points and
+labels share a color: purple, green, blue, then red for every additional person.
+Associated faces use their person's color; colors reset for each cue.
 
 ## Quick start
 
