@@ -6,7 +6,8 @@ from pathlib import Path
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png, _private_directory, _write_json
 from .config import plain
-from .detection_callouts import draw_leaders, layout_faces
+from .detection_associations import REASON_LABELS, explain_associations, face_label
+from .detection_callouts import draw_leaders, label_height, layout_faces
 from .person_audit import BOX_COLOR, _draw
 
 
@@ -23,8 +24,9 @@ def _label(image, bounds, text, *, color):
     from PIL import ImageDraw
     painter = ImageDraw.Draw(image)
     box = painter.textbbox((0, 0), text)
+    height = label_height(painter, text)
     x = max(0, min(bounds[0], image.width - (box[2] - box[0]) - 2))
-    y = max(0, min(bounds[1] - 14, image.height - 14))
+    y = max(0, min(bounds[1] - height, image.height - height))
     painter.text((x, y), text, fill=color, stroke_width=1, stroke_fill=(0, 0, 0))
 
 
@@ -40,9 +42,10 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                 faces = detector.detect(image, force_pose=True)
                 people = detector.frame_people
                 person_colors = [_person_color(i) for i in range(len(people))]
-                face_labels = [f'F{i} {face.score:.3f} -> ' +
-                               (f'P{match}' if match is not None else 'unmatched')
-                               for i, (face, match) in enumerate(zip(faces, detector.face_matches))]
+                explanations = explain_associations(faces, people, detector.face_matches)
+                face_labels = [face_label(i, face, match, explanation)
+                               for i, (face, match, explanation) in enumerate(zip(
+                                   faces, detector.face_matches, explanations))]
                 layouts, output_size = layout_faces(image, faces, people, face_labels)
                 name = f'scene-{scene_id}_cue-{index:06d}.png'
                 record = dict(cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
@@ -81,7 +84,7 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                             annotation_color=list(BOX_COLOR), box_color=list(box_color),
                             display_offset=layout['offset'],
                             display_bounds=layout['bounds'], display_landmarks=layout['landmarks'],
-                            person_index=person_index))
+                            person_index=person_index, association=explanations[face_index]))
                         _label(annotated, layout['bounds'], face_labels[face_index], color=BOX_COLOR)
                     _png(annotated, directory / name)
                 frames.append(record)
@@ -152,12 +155,14 @@ def execute(args, config, *, services=None, detector_factory=None):
                         person_color_names=['purple', 'green', 'blue'], overflow_color=list(OVERFLOW_COLOR),
                         face_color=list(BOX_COLOR),
                         unmatched_face_box_color=list(UNMATCHED_FACE_BOX_COLOR),
+                        association_reasons=REASON_LABELS,
                         color_assignment='Per cue, pose colors follow person detection order; fourth and later '
                                          'people are red. Face points and labels are yellow. Face boxes are '
                                          'red when person_index is null, otherwise yellow; each face records box_color.',
                         pose_point_order='COCO17 (0..16)',
                         face_point_order='five face-detector landmarks (0..4)',
                         labels='F=index and score of face; -> P=index of matched person or unmatched; '
+                               'unmatched faces add a reason below, with P/F candidate or competitor indices; '
                                'P=index and score of person; pose labels match boxes; face labels are yellow',
                         face_layout='Face boxes and landmarks are translated together to free space or a right '
                                     'gutter. Faint dashed leaders and hollow origins link valid source landmarks '

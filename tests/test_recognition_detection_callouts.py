@@ -17,11 +17,12 @@ def face(box, points=None):
 @pytest.mark.parametrize('box', [[0, 0, 30, 30], [269, 0, 30, 30],
                                  [0, 269, 30, 30], [269, 269, 30, 30],
                                  [120.5, 120.5, 30, 30]])
-def test_edge_faces_translate_without_clipping_or_scaling(box):
+@pytest.mark.parametrize('label', ['F0', 'F0 0.990 -> unmatched\nno valid nose/eye points'])
+def test_edge_faces_translate_without_clipping_or_scaling(box, label):
     detected = face(box)
     before = deepcopy(detected)
     with Image.new('RGB', (300, 300)) as image:
-        layouts, size = layout_faces(image, [detected], [], ['F0'])
+        layouts, size = layout_faces(image, [detected], [], [label])
     display = layouts[0]
     dx, dy = display['offset']
     assert (dx, dy) != (0, 0)

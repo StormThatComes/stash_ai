@@ -8,6 +8,11 @@ GAP = 12
 LEADER_COLOR = (*BOX_COLOR, 90)
 
 
+def label_height(painter, text):
+    """Shared vertical reserve for single- and multiline audit labels."""
+    return max(14, painter.textbbox((0, 0), text, stroke_width=1)[3] + 2)
+
+
 def _valid(point, size):
     x, y = point
     return math.isfinite(x) and math.isfinite(y) and 0 <= x < size[0] and 0 <= y < size[1]
@@ -54,11 +59,11 @@ def layout_faces(image, faces, people, labels):
     gutter_x, gutter_y, column_width = width + GAP, GAP, 0
     for face, box, label in zip(faces, bounds, labels):
         valid = [point for point in face.landmarks if _valid(point, image.size)]
-        text_box = painter.textbbox((0, 0), label)
+        text_box = painter.textbbox((0, 0), label, stroke_width=1)
         # The shared renderer places point indices at (+4, -8), face labels
         # above the box, and uses 2px point radii. Include all of that footprint.
         area = [min([box[0] - 3] + [p[0] - 3 for p in valid]),
-                min([box[1] - 16] + [p[1] - 10 for p in valid]),
+                min([box[1] - label_height(painter, label) - 2] + [p[1] - 10 for p in valid]),
                 max([box[2] + 3, box[0] + text_box[2] - text_box[0] + 3] +
                     [p[0] + 18 for p in valid]),
                 max([box[3] + 3] + [p[1] + 5 for p in valid])]

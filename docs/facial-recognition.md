@@ -284,7 +284,22 @@ on the right for the face annotations; source pixels stay unscaled at `(0, 0)`.
 Partially visible face boxes are clipped to the source before translation.
 `F0` and `P0` labels show detection indices and scores; face labels additionally
 show `-> P0` for the matched person, or `-> unmatched`. Point labels retain
-their landmark indices. Other identity/person audits retain their existing
+their landmark indices. Unmatched faces add a second line explaining why:
+
+- `no detected pose`: no person survived detector filtering.
+- `face outside pose box`: no person box contains the face within the existing tolerance.
+- `no valid nose/eye points`: containing poses have no usable nose/eye points.
+- `nose/eyes outside face`: usable head points of containing poses miss the face box.
+- `nose/eyes missing or outside face`: different containing poses fail for those two reasons.
+- `multiple poses: P0, P1`: more than one person satisfies the pair gates.
+- `competing faces: F1`: another face also nominates the sole person candidate.
+
+Candidate/competitor lists show at most three IDs and the remaining count.
+Labels reserve their full height and width, including the extra line; crowded
+or edge cases use the same margin fallback. Missing points are reported as
+unavailable, without guessing which confidence/visibility filter removed them.
+These diagnostics use the existing matching gates and do not relax them.
+Other identity/person audits retain their existing
 rendering. A cue with no detections is still exported with unchanged pixels.
 The manifest records timestamps, original sprite rectangles, cue dimensions,
 geometry, scores, face/person associations, counters, source fingerprint and
@@ -297,6 +312,9 @@ while `output_dimensions` includes any added margin. The palette and layout
 conventions are in `annotations`; each detection retains its RGB
 `annotation_color`, and faces also record their actual RGB `box_color`.
 `annotations.unmatched_face_box_color` defines the red unmatched-face outline.
+Each face's `association` records its reason (null when matched), candidate
+person indices and competing face indices. `annotations.association_reasons`
+maps reason codes to the PNG labels; full index lists remain in the manifest.
 The translation is only a visualization change and has
 no effect on detector thresholds, face/person matching or recognition.
 
