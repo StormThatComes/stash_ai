@@ -335,6 +335,35 @@ def test_installed_application_loads_extracted_modules_without_runtime_dependenc
     assert '--cleanup-only' in result.stdout
 
 
+@pytest.mark.parametrize('existing_installation', [False, True])
+def test_installed_sam_source_manifest_is_available_without_runtime_dependencies(tmp_path, existing_installation):
+    if existing_installation:
+        assert updater.update(tmp_path, Remote()) == 0
+    files = application_files()
+    # Include package data in the remote fixture so the real updater's allowlist
+    # determines what reaches the installation, as it does for a GitHub tree.
+    project = Path(updater.__file__).parent
+    for path in (project / 'stash_ai/recognition').glob('*.json'):
+        files[path.relative_to(project).as_posix()] = path.read_bytes()
+    assert updater.update(tmp_path, Remote(files)) == 0
+    result = subprocess.run([sys.executable, '-I', '-S', '-c', '''
+import hashlib
+import json
+from pathlib import Path
+import sys
+sys.path.insert(0, '.')
+from stash_ai.recognition.sam_pose2seg import source_manifest
+manifest = source_manifest()
+assert not Path('stash_ai/recognition/sam_pose2seg_sources.json').exists()
+assert len(manifest) == 16
+print(hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest())
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    # Preserve all upstream source paths, sizes and SHA256 pins during packaging.
+    assert result.stdout.strip() == '9690d84fc2ffb9b69935a07459e21827249ace71397c09f03347d61504a9c2cd'
+
+
 def database_module_installation(root):
     files = {name: data for name, data in application_files().items()
              if not name.startswith('stash_ai/db/')}

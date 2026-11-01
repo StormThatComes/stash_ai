@@ -3,15 +3,13 @@ from contextlib import contextmanager
 import hashlib
 import importlib.abc
 import importlib.util
-import json
-from pathlib import Path
 import sys
 
 from . import sam_pose2seg_registry as registry
 
 
 def source_manifest():
-    return json.loads(Path(__file__).with_name('sam_pose2seg_sources.json').read_text())
+    return {name: dict(spec) for name, spec in registry.SOURCE_FILES.items()}
 
 
 def assets(config):

@@ -305,6 +305,8 @@ On first enabled use, the adapter downloads the 357,549,748-byte
 `c89ee52fdc323f61ec5c52075d49bebb7b4e76f39b4e1e0c87b331bf0dcd3b98`.
 It also downloads a small, per-file SHA256-pinned inference source subset and
 license from BBoxMaskPose commit `49a070a6f8396147323b1c4959474077dbe2ce8e`.
+The source manifest is bundled in `sam_pose2seg_registry.py`, so updater-based
+installations include it without a separate JSON file or manual setup.
 No OpenMMLab/training imports, Git installation, CUDA extensions or automatic
 pip installation are needed. The existing CPU/GPU torch and torchvision profile
 is reused. Source bytes are verified before imports; weights are hashed and
