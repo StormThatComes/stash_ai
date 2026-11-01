@@ -12,6 +12,7 @@ from .person_audit import BOX_COLOR, _draw
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
 OVERFLOW_COLOR = (255, 0, 0)  # red for every subsequent person
+UNMATCHED_FACE_BOX_COLOR = (255, 0, 0)
 
 
 def _person_color(index):
@@ -71,13 +72,16 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None):
                         annotated.paste(source_overlay, (0, 0))
                     for face_index, face in enumerate(faces):
                         layout = layouts[face_index]
+                        person_index = detector.face_matches[face_index]
+                        box_color = UNMATCHED_FACE_BOX_COLOR if person_index is None else BOX_COLOR
                         drawn = _draw(annotated, layout['bounds'], layout['landmarks'],
-                                      face_only=True, box_color=BOX_COLOR, point_color=BOX_COLOR)
+                                      face_only=True, box_color=box_color, point_color=BOX_COLOR)
                         record['faces'].append(dict(face_index=face_index, box=list(face.box), score=face.score,
                             landmarks=[list(point) for point in face.landmarks], drawn_indices=drawn,
-                            annotation_color=list(BOX_COLOR), display_offset=layout['offset'],
+                            annotation_color=list(BOX_COLOR), box_color=list(box_color),
+                            display_offset=layout['offset'],
                             display_bounds=layout['bounds'], display_landmarks=layout['landmarks'],
-                            person_index=detector.face_matches[face_index]))
+                            person_index=person_index))
                         _label(annotated, layout['bounds'], face_labels[face_index], color=BOX_COLOR)
                     _png(annotated, directory / name)
                 frames.append(record)
@@ -147,12 +151,14 @@ def execute(args, config, *, services=None, detector_factory=None):
                     annotations=dict(person_colors=[list(c) for c in PERSON_COLORS],
                         person_color_names=['purple', 'green', 'blue'], overflow_color=list(OVERFLOW_COLOR),
                         face_color=list(BOX_COLOR),
+                        unmatched_face_box_color=list(UNMATCHED_FACE_BOX_COLOR),
                         color_assignment='Per cue, pose colors follow person detection order; fourth and later '
-                                         'people are red. Face boxes, points and labels are yellow.',
+                                         'people are red. Face points and labels are yellow. Face boxes are '
+                                         'red when person_index is null, otherwise yellow; each face records box_color.',
                         pose_point_order='COCO17 (0..16)',
                         face_point_order='five face-detector landmarks (0..4)',
                         labels='F=index and score of face; -> P=index of matched person or unmatched; '
-                               'P=index and score of person; label colors match boxes',
+                               'P=index and score of person; pose labels match boxes; face labels are yellow',
                         face_layout='Face boxes and landmarks are translated together to free space or a right '
                                     'gutter. Faint dashed leaders and hollow origins link valid source landmarks '
                                     'to display landmarks. Pose is drawn above leaders.',

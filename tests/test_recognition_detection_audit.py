@@ -126,6 +126,7 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     assert manifest['annotations']['person_colors'] == [[128, 0, 128], [0, 128, 0], [0, 0, 255]]
     assert manifest['annotations']['overflow_color'] == [255, 0, 0]
     assert manifest['annotations']['face_color'] == [255, 220, 0]
+    assert manifest['annotations']['unmatched_face_box_color'] == [255, 0, 0]
     assert manifest['execution'] == dict(max_cues=0, force_pose=True, embeddings=False)
     assert manifest['configuration']['configured_max_cues'] == 1
     assert manifest['configuration']['detection']['min_face_pixels'] == 150
@@ -140,6 +141,7 @@ def test_every_original_cue_is_exported_with_both_detectors_and_no_state_writes(
     first, faceless, empty = scene['frames']
     assert first['faces'][0]['person_index'] == 0
     assert first['faces'][0]['annotation_color'] == [255, 220, 0]
+    assert first['faces'][0]['box_color'] == [255, 220, 0]
     assert first['people'][0]['annotation_color'] == [128, 0, 128]
     assert faceless['people'][0]['annotation_color'] == [128, 0, 128]  # palette resets per cue
     assert first['faces'][0]['landmarks'] == [list(p) for p in FACE.landmarks]
@@ -260,12 +262,14 @@ def test_full_cue_crop_contains_all_faces_and_people_in_source_coordinates(tmp_p
             assert image.getpixel((160*slot+32, 40)) == colors[slot]
             assert image.getpixel((160*slot+4, 120)) == colors[slot]
         for face, slot, detected in zip(frame['faces'], slots, faces):
+            box_color = (255, 0, 0) if face['person_index'] is None else (255, 220, 0)
             assert face['annotation_color'] == [255, 220, 0]
+            assert face['box_color'] == list(box_color)
             assert face['box'] == list(detected.box)
             assert face['landmarks'] == [list(p) for p in detected.landmarks]
             dx, dy = face['display_offset']
             assert image.getpixel((160*slot+49+dx, 60+dy)) == (255, 220, 0)
-            assert image.getpixel((160*slot+16+dx, 120+dy)) == (255, 220, 0)
+            assert image.getpixel((160*slot+16+dx, 120+dy)) == box_color
         assert image.getpixel((width-1, 159)) == (10, 20, 30)
 
 
