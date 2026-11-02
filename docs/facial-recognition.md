@@ -346,6 +346,48 @@ with a pose and **red** when no pose is matched (`person_index: null`), includin
 cues with no detected people. Face points and labels remain **yellow**.
 Colors reset for each cue and do not track identity across cues.
 
+When `sapiensid.pose.refinement.enabled: true`, the audit also shows the
+SAM-pose2seg masks already produced during detection. The default is a **25%
+fill in the person's pose color plus a contour**. Masks and white rings around
+SAM's positive head/torso prompts are drawn below pose points and face annotations.
+A legend below the cue gives the person index, mask score, refinement status,
+rejection/skip reason and displayed mask stage. Solid contours mean the refined
+result was accepted; dashed contours mean it was rejected (including a second
+pose pass rejected for core drift). Empty/skipped masks are explicitly reported.
+
+Audit-only display switches (also apply to `--sweep`):
+
+- `--mask-view overlay`: default fill and contour; displays cleaned masks when
+  available, otherwise raw SAM masks, including rejected candidates.
+- `--mask-view contour`: contours without fill, for unobstructed source details.
+- `--mask-view panels`: overlay plus one row per person below the overview,
+  showing the **raw SAM mask** on the left and **cleaned mask** on the right.
+  Each panel shows only that person's mask, prompt rings and final pose. Headers
+  state whether the cleaned mask was actually used by the second PMPose pass.
+  Unavailable stages show an explicit placeholder. These are full-cue mask
+  overlays, not the resized/normalized tensor fed to PMPose.
+- `--mask-view off`: previous box/point-only view; no mask capture or legend.
+- `--mask-opacity 0.4`: change fill opacity in `0..1`; contours stay opaque.
+- `--hide-rejected-masks`: hide rejected mask overlays, prompt rings and detail
+  panels while keeping their reasons in the legend and JSON.
+
+For example, inspect one cue with separate person masks:
+
+```powershell
+python .\stash_ai.py recognition audit-detection --scene-id 123 --cue-index 42 --mask-view panels --face-config facial_recognition.yml --output-dir recognition_detection_audit/scene-123-cue42-masks
+```
+
+Display switches never enable refinement or override its YAML gates: `no_overlap`
+and `no_reliable_prompts` mean SAM did not run. The audit reuses the original
+inference masks without extra model calls, preserves source pixels/coordinates,
+and releases packed mask data after each cue/trial, including failed exports.
+No masks are stored in the recognition database or as arrays in JSON. The
+manifest records options in `annotations.sam_masks` and stage availability,
+second-pass use and panel offsets in each frame's `mask_visualization`.
+Panel offsets are frame-local; for sweeps add the frame's `source_offset`.
+Capture is limited to 16 MiB of packed masks per frame and extended PNGs to
+40 million pixels; an explicit error suggests a smaller display mode on overflow.
+
 Face/person matching keeps the existing contained-face path (5% of the shorter
 face side as boundary tolerance, with a valid pose nose/eye inside the face).
 A partially protruding face can also match when at least **50% of its box area**

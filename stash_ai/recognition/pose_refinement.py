@@ -41,7 +41,7 @@ def inside(mask, points):
     return result
 
 
-def check_mask(mask, score, prompts, foreign, box, settings, size):
+def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None):
     """Return an admitted mask/box or an explicit, auditable rejection reason."""
     import cv2
     width, height = size
@@ -49,6 +49,8 @@ def check_mask(mask, score, prompts, foreign, box, settings, size):
         raise ValueError('SAM-pose2seg mask must match the full source frame.')
     if not math.isfinite(score) or not 0 <= score <= 1:
         raise ValueError('SAM-pose2seg returned an invalid mask score.')
+    if observe is not None:
+        observe('raw', mask)
     if score < settings['min_mask_score']:
         return None, None, 'low_mask_score'
     if not mask.any():
@@ -59,6 +61,8 @@ def check_mask(mask, score, prompts, foreign, box, settings, size):
     keep = stats[:, cv2.CC_STAT_AREA] >= max(4, math.ceil(int(mask.sum()) * .001))
     keep[0] = False
     mask = keep[labels]
+    if observe is not None:
+        observe('cleaned', mask)
     if not mask.any():
         return None, None, 'empty_mask'
     if inside(mask, prompts).mean() < settings['min_prompt_coverage']:
@@ -127,7 +131,9 @@ class RefinedPMPose:
                 record = records[i]
                 record.update(status='rejected', mask_score=score, prompt_indices=indices.tolist(),
                               prompt_points=prompts.tolist())
-                mask, box, reason = check_mask(mask, score, prompts, foreign, bounds[i], settings, image.size)
+                from .pose_mask_capture import mask_observer
+                mask, box, reason = check_mask(mask, score, prompts, foreign, bounds[i], settings, image.size,
+                                              observe=mask_observer(image, i))
                 record['reason'] = reason
                 if reason:
                     continue

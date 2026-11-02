@@ -17,6 +17,11 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
         if result.command == 'audit-detection':
+            from .detection_masks import MaskOptions
+            try:
+                MaskOptions.from_args(result)
+            except ValueError as error:
+                self.error(str(error))
             if result.cue_index is not None and result.cue_index < 0:
                 self.error('--cue-index must be nonnegative (0-based VTT cue index).')
             if result.sweep is not None and result.cue_index is None:
@@ -173,6 +178,12 @@ def parser():
         help='Inspect only this 0-based original VTT cue index (from the exported PNG filename).')
     detection.add_argument('--sweep', type=Path,
         help='YAML/CSV parameter,value table; requires --cue-index. Stack baseline and independent trials into one PNG.')
+    detection.add_argument('--mask-view', choices=('overlay', 'contour', 'panels', 'off'), default='overlay',
+        help='SAM mask display: overlay (default), contour, overlay plus per-person raw/cleaned panels, or off. Does not enable SAM.')
+    detection.add_argument('--mask-opacity', type=float, default=.25,
+        help='Mask fill opacity in 0..1 (default: 0.25); contours and pose points remain opaque.')
+    detection.add_argument('--hide-rejected-masks', action='store_true',
+        help='Hide rejected masks and their prompt rings; keep rejection reasons in the legend/JSON.')
     detection.add_argument('--face-config', type=Path, help='Current detector YAML; default facial_recognition.yml.')
     detection.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
     detection.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')

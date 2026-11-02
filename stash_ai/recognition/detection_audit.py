@@ -9,8 +9,10 @@ from .alignment_audit import _png, _private_directory, _write_json
 from .config import plain
 from .detection_associations import REASON_LABELS, explain_associations, face_label
 from .detection_callouts import draw_leaders, label_height, layout_faces
+from .detection_masks import MaskOptions, append_details, draw_masks, draw_prompts
 from .person_audit import BOX_COLOR, _draw
 from .person_association import policy as association_policy
+from .pose_mask_capture import capture_masks
 
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
@@ -33,9 +35,10 @@ def _label(image, bounds, text, *, color):
 
 
 @contextmanager
-def render_frame(image, detector, scene_id, index, cue):
+def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
     """Draw one fresh detection using the same annotations in scene and sweep audits."""
-    with detector.prepared_frame(image):
+    mask_options = mask_options or MaskOptions()
+    with capture_masks(image, enabled=mask_options.view != 'off') as masks, detector.prepared_frame(image):
         faces = detector.detect(image, force_pose=True)
         people = detector.frame_people
         person_colors = [_person_color(i) for i in range(len(people))]
@@ -51,10 +54,14 @@ def render_frame(image, detector, scene_id, index, cue):
         from PIL import Image, ImageDraw
         with Image.new('RGB', output_size, (24, 24, 24)) as annotated:
             annotated.paste(image, (0, 0))
+            with annotated.crop((0, 0, *image.size)) as mask_overlay:
+                draw_masks(mask_overlay, people, masks, mask_options, _person_color)
+                annotated.paste(mask_overlay, (0, 0))
             draw_leaders(annotated, faces, layouts, image.size)
             # Render pose over leaders, clipped to the source cue even
             # when overflow face annotations need a larger canvas.
             with annotated.crop((0, 0, *image.size)) as source_overlay:
+                draw_prompts(source_overlay, people, mask_options)
                 for person_index, person in enumerate(people):
                     color = person_colors[person_index]
                     refinement = person.get('pose_refinement', {})
@@ -83,10 +90,13 @@ def render_frame(image, detector, scene_id, index, cue):
                     display_bounds=layout['bounds'], display_landmarks=layout['landmarks'],
                     person_index=person_index, association=explanations[face_index]))
                 _label(annotated, layout['bounds'], face_labels[face_index], color=BOX_COLOR)
-            yield annotated, record
+            with append_details(image, annotated, people, masks, mask_options, _person_color) as (output, details):
+                record['output_dimensions'] = list(output.size)
+                record['mask_visualization'] = details
+                yield output, record
 
 
-def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_index=None):
+def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_index=None, mask_options=None):
     """Keep full source coordinates and all post-NMS detections, including faceless people."""
     frames = []
     counts = dict(cues_exported=0, faces_detected=0, people_detected=0, cues_without_detections=0)
@@ -96,7 +106,7 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_ind
             # SpriteInput owns its images; the nested close also supports injected
             # sources and covers detection/export failures before the next yield.
             with closing(image, name='close detection audit image'):
-                with render_frame(image, detector, scene_id, index, cue) as (annotated, record):
+                with render_frame(image, detector, scene_id, index, cue, mask_options=mask_options) as (annotated, record):
                     _png(annotated, directory / record['file'])
                 frames.append(record)
                 counts['cues_exported'] += 1
@@ -125,6 +135,7 @@ def execute(args, config, *, services=None, detector_factory=None):
         raise FileExistsError(f'Detection audit output directory already exists: {directory}')
     cue_index = getattr(args, 'cue_index', None)
     sweep = getattr(args, 'sweep', None)
+    mask_options = MaskOptions.from_args(args)
     if cue_index is not None and (type(cue_index) is not int or cue_index < 0):
         raise ValueError('Detection audit cue index must be a nonnegative integer.')
     variants = None
@@ -161,7 +172,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                 from .detection_sweep import audit_sweep
                 directory = _private_directory(directory)
                 result = audit_sweep(source, variants, args.scene_id, cue_index, directory,
-                                     services, detector_factory, report)
+                                     services, detector_factory, report, mask_options=mask_options)
             else:
                 with activity(report, 'Load face and pose detectors'):
                     paths = services.assets(config, keys=[config.data['models']['detector']], write=report.write)
@@ -171,7 +182,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                     total = len(source.cues) if cue_index is None else 1
                     with WorkProgress(report, 'Export detection audit', total, unit='cue', key='cues') as progress:
                         result = audit_scene(source, detector, args.scene_id, directory, progress=progress,
-                                             cue_index=cue_index)
+                                             cue_index=cue_index, mask_options=mask_options)
             manifest = dict(
                 format=4 if variants is not None else 3,
                 kind='recognition_detection_sweep' if variants is not None else 'recognition_detection_audit',
@@ -186,6 +197,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                 },
                 execution=dict(max_cues=0, force_pose=True, embeddings=False),
                 annotations=dict(person_colors=[list(c) for c in PERSON_COLORS],
+                    sam_masks=mask_options.metadata(),
                     person_color_names=['purple', 'green', 'blue'], overflow_color=list(OVERFLOW_COLOR),
                     face_color=list(BOX_COLOR),
                     unmatched_face_box_color=list(UNMATCHED_FACE_BOX_COLOR),
@@ -211,7 +223,9 @@ def execute(args, config, *, services=None, detector_factory=None):
                     'Both detectors run on every selected cue/trial, even when sapiensid/independent collection is disabled.',
                     'Configured score/NMS/result-count and pose-keypoint thresholds apply, including PMPose presence/visibility. Suppressed detections are unavailable.',
                     'All returned detections are drawn, without face/person quality, anchor or identity filtering.',
-                    'With mask refinement, gray outlines show original expanded detector boxes; JSON records refinement decisions.',
+                    'With mask refinement, gray outlines show original expanded detector boxes; JSON records refinement decisions. '
+                    'Mask overlays use cleaned masks when available, otherwise raw SAM masks; rejected results use dashed contours. '
+                    'Mask panels and legends are appended below the unchanged source/face layout.',
                     'Missing/low-confidence/out-of-bounds keypoints are omitted, never inferred.',
                     'PNG pixels come from VTT sprites, not decoded video. No resizing or identity inference is performed.',
                     'Colors are local to each cue, not persistent identities across cues.',
