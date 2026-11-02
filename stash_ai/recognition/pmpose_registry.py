@@ -25,4 +25,7 @@ def contract(pose):
     if pose.get('refinement', {}).get('enabled', False):
         from .pose_refinement_config import contract as refinement_contract
         result['refinement'] = refinement_contract(pose['refinement'])
+    if pose.get('deduplication', {}).get('enabled', False):
+        from .pose_deduplication_config import contract as deduplication_contract
+        result['deduplication'] = deduplication_contract(pose['deduplication'])
     return result

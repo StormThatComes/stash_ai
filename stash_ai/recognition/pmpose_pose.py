@@ -50,12 +50,22 @@ def load(config, device):
         load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     model = model.float().to(device).eval()
     pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'])
+    return _pipeline(pose, config, device)
+
+
+def _pipeline(pose, config, device):
+    """Assemble optional stages around one shared first-pass pose estimator."""
     settings = config.data['sapiensid']['pose'].get('refinement', {})
+    refined = None
     if settings.get('enabled', False):
         from .sam_pose2seg import load as load_segmenter
         from .pose_refinement import RefinedPMPose
-        return RefinedPMPose(pose, load_segmenter(config, device), settings)
-    return pose
+        refined = RefinedPMPose(pose, load_segmenter(config, device), settings)
+    deduplication = config.data['sapiensid']['pose'].get('deduplication', {})
+    if deduplication.get('enabled', False):
+        from .pose_deduplication import DeduplicatedPMPose
+        return DeduplicatedPMPose(pose, deduplication, refined)
+    return refined or pose
 
 
 class PMPose:

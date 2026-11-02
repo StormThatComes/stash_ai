@@ -13,6 +13,7 @@ from .detection_masks import MaskOptions, append_details, draw_masks, draw_promp
 from .person_audit import BOX_COLOR, _draw
 from .person_association import policy as association_policy
 from .pose_mask_capture import capture_masks
+from . import pose_deduplication_audit as dedup_audit
 
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
@@ -38,9 +39,11 @@ def _label(image, bounds, text, *, color):
 def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
     """Draw one fresh detection using the same annotations in scene and sweep audits."""
     mask_options = mask_options or MaskOptions()
-    with capture_masks(image, enabled=mask_options.view != 'off') as masks, detector.prepared_frame(image):
+    with dedup_audit.capture(image) as dedup_reports, capture_masks(
+            image, enabled=mask_options.view != 'off') as masks, detector.prepared_frame(image):
         faces = detector.detect(image, force_pose=True)
         people = detector.frame_people
+        deduplication = dedup_reports[0] if dedup_reports else None
         person_colors = [_person_color(i) for i in range(len(people))]
         explanations = explain_associations(faces, people, detector.face_matches)
         face_labels = [face_label(i, face, match, explanation)
@@ -56,6 +59,7 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
             annotated.paste(image, (0, 0))
             with annotated.crop((0, 0, *image.size)) as mask_overlay:
                 draw_masks(mask_overlay, people, masks, mask_options, _person_color)
+                dedup_audit.draw_removed(mask_overlay, deduplication)
                 annotated.paste(mask_overlay, (0, 0))
             draw_leaders(annotated, faces, layouts, image.size)
             # Render pose over leaders, clipped to the source cue even
@@ -91,9 +95,12 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
                     person_index=person_index, association=explanations[face_index]))
                 _label(annotated, layout['bounds'], face_labels[face_index], color=BOX_COLOR)
             with append_details(image, annotated, people, masks, mask_options, _person_color) as (output, details):
-                record['output_dimensions'] = list(output.size)
                 record['mask_visualization'] = details
-                yield output, record
+                with dedup_audit.append_explanations(output, deduplication) as final:
+                    record['output_dimensions'] = list(final.size)
+                    if deduplication is not None:
+                        record['pose_deduplication'] = deduplication
+                    yield final, record
 
 
 def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_index=None, mask_options=None):
@@ -198,6 +205,10 @@ def execute(args, config, *, services=None, detector_factory=None):
                 execution=dict(max_cues=0, force_pose=True, embeddings=False),
                 annotations=dict(person_colors=[list(c) for c in PERSON_COLORS],
                     sam_masks=mask_options.metadata(),
+                    pose_deduplication='Optional first-pass PMPose core agreement suppresses duplicate candidates '
+                        'before SAM and face association. D indices refer to candidates after detector box NMS/score '
+                        'filtering; P indices refer to surviving people. Gray dashed boxes are removed candidates. '
+                        'Deduplication legend_offset is frame-local; add source_offset in sweeps.',
                     person_color_names=['purple', 'green', 'blue'], overflow_color=list(OVERFLOW_COLOR),
                     face_color=list(BOX_COLOR),
                     unmatched_face_box_color=list(UNMATCHED_FACE_BOX_COLOR),

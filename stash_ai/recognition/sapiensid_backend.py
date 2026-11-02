@@ -175,9 +175,24 @@ class SapiensIDFaces(YuNetDetector):
             return faces
         return self._activate(image, faces, people)
 
-    def _people(self, bounds, scores, points, confidences, probabilities=None, refinements=None):
+    def _people(self, bounds, scores, points, confidences, probabilities=None, refinements=None, deduplication=None):
         import numpy as np
         settings = self.config.data['sapiensid']['pose']
+        if deduplication is not None:
+            kept = deduplication['kept_indices']
+            suppressed = deduplication['suppressed_by']
+            if (settings.get('backend') != 'pmpose' or not settings.get('deduplication', {}).get('enabled')
+                    or len(scores) != len(bounds) or len(suppressed) != len(bounds)
+                    or any(type(i) is not int or not 0 <= i < len(bounds) for i in kept)
+                    or kept != sorted(set(kept)) or bool(bounds) != bool(kept)
+                    or any((representative is not None if i in kept else
+                            type(representative) is not int or representative not in kept)
+                           for i, representative in enumerate(suppressed))):
+                raise ValueError('Unexpected PMPose deduplication selection metadata.')
+            if 'audit' in deduplication:
+                for row, score in zip(deduplication['audit']['detections'], scores):
+                    row['detector_score'] = float(score)
+            bounds, scores = [bounds[i] for i in kept], [scores[i] for i in kept]
         if (points.shape != (len(bounds),17,2) or confidences.shape != (len(bounds),17)
                 or any(not np.isfinite(a).all() for a in (points,confidences))
                 or np.any((confidences<0)|(confidences>1))):
@@ -217,6 +232,11 @@ class SapiensIDFaces(YuNetDetector):
             kps[~usable] = -1
             if refinements is not None:
                 details['pose_refinement'] = refinements[index]
+            if deduplication is not None:
+                original = kept[index]
+                details['pose_deduplication'] = dict(detector_index=original,
+                    suppressed_detector_indices=[i for i, representative in enumerate(suppressed)
+                                                 if representative == original])
             people.append(dict(bounds=box,keypoints=kps.tolist(),score=float(score),**details))
         return people
 
