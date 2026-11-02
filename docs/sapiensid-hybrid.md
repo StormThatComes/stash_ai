@@ -336,6 +336,71 @@ Benchmark representative audit cues before enabling this across a large library;
 wrong initial poses can still produce wrong masks, and small thumbnails may not
 contain enough detail to recover the limb.
 
+### Duplicate PMPose detections before SAM
+
+When two high-confidence person boxes describe the same subject, optional
+`sapiensid.pose.deduplication.enabled: true` compares their **first-pass PMPose
+points before SAM prompt selection**. It also works with refinement disabled.
+It keeps the current box NMS threshold and makes no additional model calls.
+The option is off by default and requires `pose.backend: pmpose`.
+
+```yaml
+sapiensid:
+  pose:
+    backend: pmpose
+    deduplication:
+      enabled: true
+```
+
+Only in-box head, shoulder and hip points exceeding the independent
+`min_keypoint_score`, `min_presence` and `min_visibility` gates (all `0.5` by
+default) can support suppression. Anatomical indices must match; limbs and
+nearest arbitrary joints are not evidence of a duplicate. Boxes must overlap,
+but there is no high box-IoU gate. Matching requires at least
+`min_shared_points: 4` agreeing points from **two of head/shoulders/hips**, with
+`min_match_fraction: 0.8` agreement among all shared reliable core points.
+Distances use the smaller original box diagonal and must be at most
+`max_point_distance: 0.05` times that diagonal.
+
+A head/shoulder/hip group with at least two shared points and median distance
+above that limit vetoes suppression. Any shared reliable point farther than
+twice the limit also vetoes it. Matching points must span at least the larger
+of 10% of the smaller diagonal and twice the distance tolerance, so collapsed
+or near-coincident skeleton points cannot manufacture support. No rule assumes
+upright people, a head above hips, or a particular camera rotation.
+
+Candidates are ranked by the sum of `score * presence * visibility` over
+eligible core points, divided by nine: a coverage-weighted quality heuristic,
+not a calibrated probability. Reliable point count and original candidate
+index break ties. Only retained candidates may suppress another candidate;
+suppression never propagates through a discarded candidate. Survivors keep
+their original detector order, boxes and detector scores. Complementary body
+fragments without shared core evidence are retained; this stage does not union
+boxes or invent a combined skeleton. In SAM `mode: overlap`, eligibility is
+evaluated on the surviving people.
+
+The normal single-frame and batched paths, face associations and independent
+body collection all consume the same surviving rows. SAM masks use the new
+survivor indices; removed candidates cannot block prompts as foreign people.
+Detection audits (including `--sweep` and `--mask-view off`) draw removed
+candidate boxes as gray dashes and append reasons, box IoU and matched/shared
+point counts. D indices refer to candidates after box NMS/score filtering;
+P indices refer to surviving people. JSON `pose_deduplication` includes quality
+scores, original bounds, normalized point distances, regions and D-to-P mapping.
+All suppression explanations and up to 128 overlapping kept-pair explanations
+are retained per frame; omitted/non-overlapping pairs have aggregate counts.
+More than 50,000 greedy comparisons fails explicitly rather than silently
+changing selection. Profiling records `pmpose_pose_deduplication` and
+`pmpose_duplicate_people_removed`.
+
+These gates are conservative heuristics, not a guarantee against two people
+whose estimated cores coincide. Compare enabled/disabled results on crowded
+and unusual-view VTT cues before using the setting broadly. Enabling it or
+changing active settings invalidates person/body/identity evidence contracts:
+rerun recognition on affected scenes. With it disabled, previous contracts
+and detection behavior remain unchanged. These are collection settings, not
+offline identity-solver parameters.
+
 ### Sapiens Pose keypoints
 
 `sapiensid.pose.backend: sapiens` selects Meta's **Sapiens v1 Pose** as another

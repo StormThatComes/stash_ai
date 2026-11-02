@@ -388,6 +388,21 @@ Panel offsets are frame-local; for sweeps add the frame's `source_offset`.
 Capture is limited to 16 MiB of packed masks per frame and extended PNGs to
 40 million pixels; an explicit error suggests a smaller display mode on overflow.
 
+Optional `sapiensid.pose.deduplication.enabled: true` suppresses duplicate PMPose
+candidates using shared reliable head/torso points before SAM and face matching.
+It requires PMPose, is off by default, and also works without SAM. The audit
+draws removed candidate boxes as gray dashes and adds a footer with D-to-P
+mapping, first-pass core quality, detector score, box IoU, point agreement and
+keep/suppress reasons. `D0` means candidate 0 after detector score/box-NMS
+filtering; `P0` means output person 0 after deduplication. Normal pose colors
+and face matching refer to surviving P indices. This footer also appears with
+`--mask-view off`; JSON stores the details in each frame's `pose_deduplication`.
+Its legend offset is frame-local, so add the frame `source_offset` in sweeps.
+Use a sweep row `{parameter: sapiensid.pose.deduplication.enabled, value: true}`
+against a disabled baseline to compare the same cue with box NMS unchanged.
+See [PMPose deduplication](sapiensid-hybrid.md#duplicate-pmpose-detections-before-sam)
+for the gates, limitations and evidence recollection requirements.
+
 Face/person matching keeps the existing contained-face path (5% of the shorter
 face side as boundary tolerance, with a valid pose nose/eye inside the face).
 A partially protruding face can also match when at least **50% of its box area**

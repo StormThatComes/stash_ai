@@ -376,6 +376,21 @@ sapiensid:
     # Minimum probability of a PMPose point lying in the crop; 0 disables this filter.
     pmpose_visibility_threshold: 0.0
     # Minimum PMPose visibility probability; 0 retains occluded points. Try 0.5 for visible points only.
+    deduplication:
+      enabled: false
+      # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
+      min_keypoint_score: 0.50
+      # Minimum expected OKS for a point supporting duplicate selection.
+      min_presence: 0.50
+      # Minimum presence probability for a point supporting duplicate selection.
+      min_visibility: 0.50
+      # Minimum visibility probability; separate from final pose and SAM prompt filters.
+      min_shared_points: 4
+      # Minimum agreeing anatomical head/torso points (4..9); at least two regions are always required.
+      max_point_distance: 0.05
+      # Maximum matching-point distance as a fraction of the smaller box diagonal (0.001..0.1).
+      min_match_fraction: 0.80
+      # Required matching fraction among shared reliable core points; distinct heads/torsos veto suppression.
     refinement:
       enabled: false
       # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
