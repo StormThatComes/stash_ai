@@ -254,6 +254,78 @@ YAML configurations and **different new output directories**. Compare
 actual landmark positions and 112px aligned crops on same-person and
 different-person cues, not only face detection benchmark scores.
 
+## Single-cue parameter comparisons
+
+After inspecting a whole-scene detection audit, take the zero-based cue index
+from its PNG name: `scene-123_cue-000042.png` means scene `123`, cue `42`.
+The index identifies an original VTT thumbnail, not a decoded video frame or
+a timestamp. To rerun only that cue with the current configuration:
+
+```powershell
+python .\stash_ai.py recognition audit-detection --scene-id 123 --cue-index 42 --face-config facial_recognition.yml --output-dir recognition_detection_audit/scene-123-cue42-rerun
+```
+
+For a visual comparison, create `detection_sweep.yml` with a table of parameter
+names (dotted YAML paths) and single values to test, in the desired order:
+
+```yaml
+- {parameter: detection.score_threshold, value: 0.7}
+- {parameter: detection.score_threshold, value: 0.8}
+- {parameter: sapiensid.pose.keypoint_score_threshold, value: 0.3}
+- {parameter: sapiensid.pose.pmpose_presence_threshold, value: 0.4}
+- {parameter: sapiensid.pose.pmpose_presence_threshold, value: 0.6}
+```
+
+The PMPose settings require the corresponding backend to affect detections.
+CSV is also accepted (`.csv` extension), with the exact header `parameter,value`;
+cell values use YAML scalar types, e.g. numbers, `true`/`false`, or quoted strings:
+
+```csv
+parameter,value
+detection.score_threshold,0.7
+detection.score_threshold,0.8
+sapiensid.pose.keypoint_score_threshold,0.3
+```
+
+```powershell
+python .\stash_ai.py recognition audit-detection --scene-id 123 --cue-index 42 --sweep detection_sweep.yml --face-config facial_recognition.yml --output-dir recognition_detection_audit/scene-123-cue42-sweep01
+```
+
+The new directory contains **one** `scene-123_cue-000042_sweep.png` and
+`manifest.json`. The PNG stacks the baseline first, then every table row
+vertically, without resizing the original cue. Every panel has a header with
+scene/cue/time, parameter, tested and baseline values, and face/person/match
+counts. Existing colors, shifted face callouts, pose points and unmatched-face
+reasons are preserved, including any right gutter needed by a panel.
+
+**Each row changes exactly one parameter relative to the current configuration.**
+Changes do not accumulate and there is no Cartesian product. The YAML file is
+not edited. Each trial runs fresh face and pose inference on an independent
+copy of the same unannotated VTT crop; detections are not reused. Detector
+instances are loaded and closed sequentially, so model initialization can
+dominate runtime. Only the selected cue is inferred; source initialization
+still validates the scene's VTT/sprites and records their fingerprint.
+
+Supported parameters: `models.detector`, `detection.score_threshold`,
+`detection.nms_threshold`, `detection.max_faces_per_frame`, and existing scalar
+leaves under `sapiensid.pose` (including `refinement`). Backend-specific options
+only affect their backend; use the appropriate base YAML. Face/person quality,
+anchor and identity filters are not applied in this audit, so their parameters
+are rejected instead of producing a misleading comparison. Unknown paths,
+invalid values and incompatible configurations are rejected before network or
+model loading. A table has 1–64 rows; the final canvas is limited to 40 million
+pixels. Use fewer rows for large cues.
+
+Sweep manifest **format 4** records baseline configuration, ordered trials,
+old/new parameter values, detections and the original source fingerprint.
+`scene.frames` contains one record per panel, with `variant_index: 0` for the
+baseline. Source geometry remains cue-local; rendered face coordinates and
+each frame's `output_dimensions` remain panel-local. Add `source_offset` to
+rendered coordinates to locate them in the combined PNG. `panel_offset` marks
+the top of its header and `scene.output_dimensions` describes the full PNG.
+This mode has the same read-only recognition/Stash behavior as the whole-scene
+audit and requires a new output directory.
+
 ## Full-cue face and pose detection audit
 
 Use `recognition audit-detection` to tune the detectors visually on **every VTT
