@@ -1181,7 +1181,11 @@ For optional SapiensID support, after installing the CPU/GPU profile:
 python -m pip install -r requirements-sapiensid.txt
 ```
 
-This installs the inference extras. With `sapiensid.enabled: true` and
+RF-DETR-XL person detection additionally uses
+`python -m pip install -r requirements-rfdetr.txt`; see
+[model setup and terms](docs/sapiensid-hybrid.md#rf-detr-xl-person-detector).
+
+The SapiensID profile installs the inference extras. With `sapiensid.enabled: true` and
 `models.download_missing: true`, the application downloads missing upstream
 source and model checkpoints into the SapiensID paths configured in
 `facial_recognition.yml` when inference first needs them. The default

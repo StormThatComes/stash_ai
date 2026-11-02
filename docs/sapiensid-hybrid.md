@@ -149,7 +149,7 @@ including YOLO; no SapiensID identity checkpoint is needed).
 
 `sapiensid.pose.backend: pmpose` selects **PMPose-B 1.0.0** as a standalone
 pose estimator. It replaces ViTPose/Sapiens keypoints and accepts person boxes
-from YOLO, D-FINE-L or D-FINE-X:
+from YOLO, D-FINE-L, D-FINE-X or RF-DETR-XL:
 
 ```yaml
 sapiensid:
@@ -537,6 +537,78 @@ integration tests do not establish a quality advantage over YOLO.
 The opt-in pretrained CPU smoke covers both variants (about 378 MB total):
 `STASH_AI_DFINE_SMOKE=1 python -m pytest -q tests/test_recognition_dfine_smoke.py`.
 Set `STASH_AI_DFINE_MODEL_DIRECTORY` to reuse the parent model cache directory.
+
+### RF-DETR-XL person detector
+
+`sapiensid.pose.detector: rfdetr_xl` selects Roboflow's **detection XL** model
+(126.4M parameters, 700x700 input), paired with `backend: pmpose`,
+`vitpose_plus_large` or `sapiens`. It supplies person boxes to the existing pose
+pipeline, including optional PMPose deduplication and SAM refinement.
+
+Install the optional runtime into the same CPU/GPU environment, after its normal
+SapiensID dependencies:
+
+```bash
+python -m pip install -r requirements-rfdetr.txt
+```
+
+```yaml
+sapiensid:
+  enabled: true
+  pose:
+    backend: pmpose
+    detector: rfdetr_xl
+    batch_size: 1             # frames per detector batch (1..16); increase after checking VRAM
+    rfdetr_directory: ""     # optional folder containing rf-detr-xlarge.pth
+```
+
+The integration pins `rfdetr==1.11.2` and `rfdetr-plus==1.1.0`. The extra profile
+does not install training/export extras or replace the selected torch build.
+The application updater includes this profile but does not run pip. Other
+detectors do not import or require either package. YOLO remains the default.
+
+First use downloads the official **505,646,472-byte** checkpoint to
+`models.directory/rfdetr_xl/<SHA256>/rf-detr-xlarge.pth`. The Google Storage
+object generation and SHA256 are pinned in `rfdetr_registry.py`; cached and
+downloaded files are checked. `rfdetr_directory` is relative to the YAML unless
+absolute. With `models.download_missing: false`, the matching local checkpoint
+is required. An existing invalid file fails verification and is not overwritten.
+No independent backbone download occurs. We construct the detection architecture
+locally, then load the hash-verified file using `weights_only=True` and strict
+state-dict matching. Only the generated empty keypoint-schema buffer is excluded
+from persistence; no learned weights are omitted or randomly reinitialized.
+
+Inference uses FP32 on `models.device`, including inside an outer autocast
+context. RGB pixels are scaled by 255, resized bilinearly to 700x700 without
+antialiasing, then normalized with the upstream ImageNet mean/std. The pinned
+checkpoint has 91 raw COCO slots: **person is category 1**, not index 0.
+Person scores are selected before limiting results, so other classes and
+alternative labels for a query cannot consume the people budget. Boxes return
+in original cue coordinates and are clipped to the frame. Non-positive boxes
+are discarded; malformed shapes and NaN/Inf fail explicitly instead of becoming
+empty retained evidence.
+
+`pose.score_threshold`, `pose.nms_threshold` and `pose.max_people_per_frame`
+apply as with the existing detectors. Although RF-DETR is an end-to-end detector,
+this adapter applies the application's configured person-box NMS. Scores need
+calibration on representative VTT cues. The shared single/batch paths, face
+association, body collection and detection audit/sweeps consume the same boxes.
+Changing detectors invalidates person/body/identity evidence; rerun recognition
+before solving or merging. Local directories and batch size do not change those
+contracts, and existing YOLO/D-FINE contracts remain valid.
+
+RF-DETR-XL weights and `rfdetr-plus` use Roboflow's **Platform Model License 1.0**,
+not the core package's Apache 2.0 license. Upstream documents a Roboflow account
+requirement; see the [official model documentation](https://rfdetr.roboflow.com/latest/learn/run/detection/)
+and [PML terms](https://github.com/roboflow/rf-detr_plus/blob/main/LICENSE).
+This adapter runs inference locally and does not upload cue images.
+
+The opt-in actual-checkpoint CPU test covers strict loading, people detection
+and single/batched original coordinates:
+`STASH_AI_RFDETR_SMOKE=1 python -m pytest -q tests/test_recognition_rfdetr_smoke.py`.
+Set `STASH_AI_RFDETR_DIRECTORY` to an existing weight folder to reuse its checkpoint.
+This smoke test does not establish better accuracy than D-FINE on intertwined people;
+compare the detectors on the same cues using `audit-detection` sweeps.
 
 ### Shared geometry and existing YOLO configurations
 

@@ -42,7 +42,7 @@ def identity_contract(config):
             'person_nms_threshold': settings['pose']['nms_threshold'],
             'max_people_per_frame': settings['pose']['max_people_per_frame']}
     if settings['pose'].get('detector', 'yolo') != 'yolo':
-        from .dfine_registry import contract as detector_contract
+        from .person_detector import contract as detector_contract
         result['person_detector'] = detector_contract(settings['pose']['detector'])
         result.pop('pose_sha256')
         result.pop('pose_inference')

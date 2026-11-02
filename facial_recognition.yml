@@ -355,9 +355,11 @@ sapiensid:
     backend: yolo
     # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
     detector: yolo
-    # Person boxes: yolo, dfine_l or dfine_x; D-FINE requires ViTPose, Sapiens or PMPose above.
+    # Person boxes: yolo, dfine_l, dfine_x or rfdetr_xl; non-YOLO detectors require a separate pose backend.
     dfine_directory: ""
     # D-FINE asset folder; empty uses models.directory/<detector>/<pinned revision>.
+    rfdetr_directory: ""
+    # RF-DETR-XL weight folder; empty uses models.directory/rfdetr_xl/<SHA256>. Requires requirements-rfdetr.txt.
     batch_size: 4
     # Maximum frames per person-detector batch and people per ViTPose batch (1..16).
     vitpose_directory: ""
@@ -427,13 +429,13 @@ sapiensid:
     max_people_per_frame: 100
     # Maximum body detections per thumbnail, independent of the face detection limit.
     nms_threshold: 0.70
-    # Body-box IoU threshold for duplicate suppression in YOLO and D-FINE.
+    # Body-box IoU threshold for duplicate suppression in YOLO, D-FINE and RF-DETR-XL.
     path: recognition_models/sapiensid_v1/yolo26m-pose.pt
-    # YOLO checkpoint path; unused when detector is dfine_l or dfine_x.
+    # YOLO checkpoint path; unused with D-FINE or RF-DETR-XL.
     score_threshold: 0.50
     # Minimum person detection confidence (0..1).
     sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
-    # Expected YOLO checkpoint SHA256; unused with D-FINE; custom hashes require a local file.
+    # Expected YOLO checkpoint SHA256; unused with D-FINE/RF-DETR; custom hashes require a local file.
 
   storage:
     # Stored body images.
