@@ -134,7 +134,7 @@ def _stack(records, paths, scene_id, destination):
     return [width, height]
 
 
-def audit_sweep(source, variants, scene_id, cue_index, directory, services, detector_factory, report):
+def audit_sweep(source, variants, scene_id, cue_index, directory, services, detector_factory, report, *, mask_options=None):
     from stash_ai.runtime.console import activity
     from .detection_audit import render_frame
     from .progress import WorkProgress
@@ -162,7 +162,8 @@ def audit_sweep(source, variants, scene_id, cue_index, directory, services, dete
                     with closing(detector, name='close sweep detectors'), activity(report, f'Detect {label}'):
                         # Isolate even a backend that mutates its input.
                         with image.copy() as trial_image, render_frame(
-                                trial_image, detector, scene_id, index, cue) as (annotated, record):
+                                trial_image, detector, scene_id, index, cue,
+                                mask_options=mask_options) as (annotated, record):
                             record.update(metadata, file=filename)
                             path = Path(temporary) / f"{metadata['variant_index']:03d}.png"
                             _png(annotated, path)
