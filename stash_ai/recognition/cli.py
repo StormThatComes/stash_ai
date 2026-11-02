@@ -16,6 +16,11 @@ class RecognitionParser(argparse.ArgumentParser):
         result = super().parse_args(args, namespace)
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
+        if result.command == 'audit-detection':
+            if result.cue_index is not None and result.cue_index < 0:
+                self.error('--cue-index must be nonnegative (0-based VTT cue index).')
+            if result.sweep is not None and result.cue_index is None:
+                self.error('--sweep requires --cue-index.')
         if result.command == 'report-merge':
             for field in ('solver_cpus', 'solver_trials'):
                 value = getattr(result, field)
@@ -164,6 +169,10 @@ def parser():
     detection.add_argument('--scene-id', type=stash_id, required=True)
     detection.add_argument('--output-dir', type=Path, required=True,
         help='New local directory for annotated full-cue PNGs and manifest.json.')
+    detection.add_argument('--cue-index', type=int,
+        help='Inspect only this 0-based original VTT cue index (from the exported PNG filename).')
+    detection.add_argument('--sweep', type=Path,
+        help='YAML/CSV parameter,value table; requires --cue-index. Stack baseline and independent trials into one PNG.')
     detection.add_argument('--face-config', type=Path, help='Current detector YAML; default facial_recognition.yml.')
     detection.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
     detection.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')

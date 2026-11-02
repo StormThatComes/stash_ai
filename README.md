@@ -58,7 +58,12 @@ For visual detector tuning, `python stash_ai.py recognition audit-detection
 every VTT cue as a full-size PNG with face and pose landmarks, plus a JSON
 manifest, using the current recognition YAML. Each person's boxes, points and
 labels share a color: purple, green, blue, then red for every additional person.
-Associated faces use their person's color; colors reset for each cue.
+Face points are yellow; face boxes are yellow when matched and red when
+unmatched. Colors reset for each cue. Add `--cue-index 42 --sweep detection_sweep.yml`
+to rerun just cue 42 with a YAML/CSV parameter/value table and stack the baseline
+and independent trials vertically in one PNG. See
+[single-cue comparisons](docs/facial-recognition.md#single-cue-parameter-comparisons)
+for the table format and a complete command.
 
 ## Quick start
 
