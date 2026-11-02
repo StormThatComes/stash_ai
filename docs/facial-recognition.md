@@ -466,8 +466,11 @@ The command uses `models.detector` and `sapiensid.pose` from the current YAML,
 including confidence, NMS, result-count and keypoint thresholds. **Both
 detectors always run**, even if `sapiensid.enabled` or independent collection
 is disabled. The usual pose runtime dependencies from
-`requirements-sapiensid.txt` and the configured pose weights are required;
-weights follow the existing `models.download_missing` policy. Face and body
+`requirements-sapiensid.txt` and the configured pose weights are required.
+RF-DETR-XL person boxes (`sapiensid.pose.detector: rfdetr_xl`) additionally need
+`requirements-rfdetr.txt`. Its verified weights download on first use; see
+[RF-DETR-XL setup and model terms](sapiensid-hybrid.md#rf-detr-xl-person-detector).
+Weights follow the existing `models.download_missing` policy. Face and body
 recognition encoders are not loaded. `--device cpu` is an optional override.
 
 For complete coverage, this action **ignores `execution.max_cues`** and reports

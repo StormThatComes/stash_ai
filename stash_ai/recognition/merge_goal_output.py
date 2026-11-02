@@ -56,7 +56,7 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
         data['names']['file'] = str(config.names_path) if config.names_path else None
         for section,key in (('model','source_directory'),('model','checkpoint_directory'),
                             ('pose','path'),('pose','vitpose_directory'),('pose','sapiens_directory'),
-                            ('pose','dfine_directory'),('pose','pmpose_directory')):
+                            ('pose','dfine_directory'),('pose','pmpose_directory'),('pose','rfdetr_directory')):
             raw=data['sapiensid'][section][key]
             if raw:
                 path=Path(raw).expanduser()

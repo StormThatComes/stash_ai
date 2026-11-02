@@ -1,4 +1,12 @@
-"""Reuse verified YOLO box weights without executing or retaining pose heads."""
+"""Person-box contracts and verified YOLO detection-only head selection."""
+
+
+def contract(detector):
+    if detector == 'rfdetr_xl':
+        from .rfdetr_registry import contract as selected
+    else:
+        from .dfine_registry import contract as selected
+    return selected(detector)
 
 
 def detection_only(model):

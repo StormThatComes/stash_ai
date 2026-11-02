@@ -108,6 +108,9 @@ def load_encoder(config):
 
 
 def load_pose(config):
+    if config.data['sapiensid']['pose'].get('detector') == 'rfdetr_xl':
+        from .rfdetr_detector import load
+        return load(config)
     if config.data['sapiensid']['pose'].get('detector', 'yolo') != 'yolo':
         from .dfine_detector import load
         return load(config)

@@ -32,7 +32,7 @@ def defaults():
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
-                  nms_threshold=.7,max_people_per_frame=100,backend='yolo',detector='yolo',dfine_directory='',
+                  nms_threshold=.7,max_people_per_frame=100,backend='yolo',detector='yolo',dfine_directory='',rfdetr_directory='',
                   vitpose_directory='',batch_size=4,
                   sapiens_variant='0.3b',sapiens_directory='',sapiens_batch_size=1,
                   pmpose_directory='',pmpose_batch_size=1,pmpose_presence_threshold=.5,pmpose_visibility_threshold=0.,
@@ -49,11 +49,12 @@ def validate(settings):
     pose = settings['pose']
     if pose['backend'] not in ('yolo', 'vitpose_plus_large', 'sapiens', 'pmpose'):
         raise ValueError('sapiensid.pose.backend must be yolo, vitpose_plus_large, sapiens or pmpose.')
-    if pose['detector'] not in ('yolo', 'dfine_l', 'dfine_x'):
-        raise ValueError('sapiensid.pose.detector must be yolo, dfine_l or dfine_x.')
+    if pose['detector'] not in ('yolo', 'dfine_l', 'dfine_x', 'rfdetr_xl'):
+        raise ValueError('sapiensid.pose.detector must be yolo, dfine_l, dfine_x or rfdetr_xl.')
     if pose['detector'] != 'yolo' and pose['backend'] == 'yolo':
-        raise ValueError('sapiensid.pose.detector D-FINE requires pose.backend: sapiens, vitpose_plus_large or pmpose; '
-                         'D-FINE supplies boxes, not keypoints.')
+        raise ValueError('sapiensid.pose.detector '+str(pose['detector'])+
+                         ' requires pose.backend: sapiens, vitpose_plus_large or pmpose; '
+                         'this detector supplies boxes, not keypoints.')
     _number(pose['batch_size'], 'sapiensid.pose.batch_size', 1, 16, integer=True)
     if pose['sapiens_variant'] not in ('0.3b', '0.6b', '1b'):
         raise ValueError('sapiensid.pose.sapiens_variant must be 0.3b, 0.6b or 1b.')
@@ -131,7 +132,7 @@ def validate(settings):
         raise ValueError('sapiensid.execution.batch_size must be in [1,16].')
     for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path'),
                         ('pose','vitpose_directory'),('pose','sapiens_directory'),('pose','dfine_directory'),
-                        ('pose','pmpose_directory')):
+                        ('pose','pmpose_directory'),('pose','rfdetr_directory')):
         value=settings[section][key]
         if not isinstance(value,str) or '\x00' in value or value and not value.strip():
             raise ValueError(f'sapiensid.{section}.{key} requires a local path.')
@@ -149,12 +150,12 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items()
               if k not in ('refinement','deduplication','path','backend','vitpose_directory','batch_size',
-                           'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory',
+                           'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory','rfdetr_directory',
                            'pmpose_directory','pmpose_batch_size','pmpose_presence_threshold','pmpose_visibility_threshold')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
         evidence['pose_inference'] = POSE_INFERENCE
     if s['pose'].get('detector', 'yolo') != 'yolo':
-        from .dfine_registry import contract as detector_contract
+        from .person_detector import contract as detector_contract
         evidence['person_detector'] = detector_contract(s['pose']['detector'])
         evidence['pose'].pop('sha256')
         evidence.pop('pose_inference', None)
