@@ -5,7 +5,7 @@ import pytest
 
 
 @pytest.mark.skipif(os.getenv('STASH_AI_RFDETR_SMOKE') != '1', reason='explicit 506 MB RF-DETR-XL pretrained smoke')
-def test_pretrained_rfdetr_people_and_batched_coordinates(tmp_path, request, monkeypatch):
+def test_pretrained_rfdetr_people_and_batched_coordinates(tmp_path, request, monkeypatch, capsys):
     import hashlib
     from io import BytesIO
     import numpy as np
@@ -36,6 +36,8 @@ def test_pretrained_rfdetr_people_and_batched_coordinates(tmp_path, request, mon
     monkeypatch.setattr(huggingface_hub, 'hf_hub_download',
                         lambda *args, **kwargs: pytest.fail('unexpected HF backbone download'))
     model = load_pose(config)
+    captured = capsys.readouterr()
+    assert "we're not loading DINOv2 backbone weights" not in captured.out + captured.err
     assert model.task == 'detect' and not model.model.training
     with Image.open(BytesIO(raw)).convert('RGB') as image:
         options = dict(conf=.5, iou=.7, max_det=100)

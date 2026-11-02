@@ -1,9 +1,44 @@
 """Verified RF-DETR-XL person boxes for the shared top-down pose pipeline."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from importlib.metadata import version, PackageNotFoundError
+import logging
+from threading import get_ident
 from types import SimpleNamespace
 
 from . import rfdetr_registry as registry
+
+
+_BACKBONE_NOTICES = frozenset({
+    "Using a different number of positional encodings than DINOv2, which means"
+    " we're not loading DINOv2 backbone weights. This is not a problem if"
+    " finetuning a pretrained RF-DETR model.",
+    "Using patch size 20 instead of 14, which means we're not loading"
+    " DINOv2 backbone weights. This is not a problem if finetuning a pretrained"
+    " RF-DETR model.",
+})
+
+
+@contextmanager
+def _backbone_diagnostics():
+    """Route only the expected XL construction notices to verbose diagnostics."""
+    from stash_ai.runtime.console import current_report
+    logger, owner = logging.getLogger('rf-detr'), get_ident()
+    def keep(record):
+        if (record.thread != owner or record.module != 'dinov2' or record.levelno != logging.WARNING
+                or record.exc_info or record.stack_info or record.getMessage() not in _BACKBONE_NOTICES):
+            return True
+        message = 'RF-DETR-XL initialization: ' + record.getMessage()
+        report = current_report()
+        if report is not None:
+            report.detail(message)
+        else:
+            logging.getLogger(__name__).debug(message)
+        return False
+    logger.addFilter(keep)
+    try:
+        yield
+    finally:
+        logger.removeFilter(keep)
 
 
 def assets(config):
@@ -40,7 +75,8 @@ def load(config):
     # The builder constructs architecture only. A non-null pretrain_weights
     # disables backbone downloads; our verified loader owns all weight I/O.
     architecture = RFDETRXLargeConfig(pretrain_weights=str(path.resolve()), num_classes=90, device='cpu')
-    model = build_model_from_config(architecture)
+    with _backbone_diagnostics():
+        model = build_model_from_config(architecture)
     # Recent upstream detection models generate an empty keypoint-schema buffer,
     # absent from the original XL checkpoint. It carries no learned parameters.
     mask = model._kp_active_mask

@@ -577,6 +577,11 @@ No independent backbone download occurs. We construct the detection architecture
 locally, then load the hash-verified file using `weights_only=True` and strict
 state-dict matching. Only the generated empty keypoint-schema buffer is excluded
 from persistence; no learned weights are omitted or randomly reinitialized.
+The two expected upstream notices about positional encodings and patch size 20
+skipping standalone DINOv2 weights appear only in verbose diagnostics (DEBUG
+logging without a console report). They occur while building the XL architecture,
+before the complete RF-DETR checkpoint is loaded. Other warnings and errors,
+including weight-loading failures, remain visible.
 
 Inference uses FP32 on `models.device`, including inside an outer autocast
 context. RGB pixels are scaled by 255, resized bilinearly to 700x700 without
