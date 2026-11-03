@@ -26,13 +26,16 @@ from .scan_heads import predicate as current_scan
 
 
 def _ram(config):
-    db = sqlite3.connect(':memory:', uri=True)
+    from .ram_database import connect
+    db = connect(config, ':memory:', label='sqlite-trial')
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA temp_store=MEMORY')
-    page = db.execute('PRAGMA page_size').fetchone()[0]
-    db.execute(f"PRAGMA max_page_count={max(1, config.data['execution']['rebuild_memory_bytes']//page)}")
-    db.executescript(SCHEMA)
+    try:
+        db.executescript(SCHEMA)
+    except BaseException:
+        db.close()
+        raise
     return db
 
 

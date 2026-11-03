@@ -121,9 +121,9 @@ execution:
   rebuild_matrix_cache_bytes: 536870912
   # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables.
   rebuild_memory_bytes: 8589934592
-  # Maximum on-disk evidence snapshot used by offline reports and solver replay.
+  # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS.
   replay_snapshot_bytes: 68719476736
-  # Shared rebuild working-memory budget, allocated on demand; not a total process RAM cap.
+  # Maximum on-disk evidence snapshot used by offline reports and solver replay.
   rebuild_native_threads: 1
   # BLAS threads per compute worker; CPU availability also limits effective workers.
   rebuild_prefetch_scenes: false

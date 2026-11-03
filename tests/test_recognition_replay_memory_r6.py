@@ -15,11 +15,12 @@ from stash_ai.recognition.config import plain
 def test_automatic_admission_reserves_headroom_and_limits_parallelism(tmp_path, monkeypatch):
     from stash_ai.recognition import solver_execution as execution
     config, _ = fixture(tmp_path, 'face')
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda:16)
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda:16, raising=False)
     ceiling = execution.plan(config).trial_bytes
     monkeypatch.setattr(execution, 'available_memory', lambda:ceiling*3)
-    with pytest.raises(ValueError, match='resources admit only 2'):
-        execution.plan(config, dict(cpus=8,trials=8))
+    shared = execution.plan(config, dict(cpus=8,trials=8))
+    assert shared.trials == 8 and shared.trial_bytes * 8 <= shared.memory_bytes
+    assert shared.rebuild_memory_bytes < config.data['execution']['rebuild_memory_bytes']
     admitted = execution.plan(config, dict(cpus=8,trials=2))
     assert admitted.trials == 2 and admitted.memory_bytes == ceiling*3*4//5
     monkeypatch.setattr(execution, 'available_memory', lambda:1024)
@@ -27,8 +28,8 @@ def test_automatic_admission_reserves_headroom_and_limits_parallelism(tmp_path, 
         execution.plan(config, dict(cpus=8,trials=8))
     admitted = execution.plan(config, dict(cpus=8,trials=1))
     assert admitted.trials == 1 and admitted.memory_admission == 'automatic_serial_ceiling_exceeds_available'
-    with pytest.raises(ValueError, match='resources admit only 4'):
-        execution.plan(config, dict(cpus=8,trials=8,memory_bytes=ceiling*4))
+    shared = execution.plan(config, dict(cpus=8,trials=8,memory_bytes=ceiling*4))
+    assert shared.trials == 8 and shared.trial_bytes * 8 <= ceiling*4
     assert execution.plan(config, dict(cpus=8,trials=4,memory_bytes=ceiling*4)).trials == 4
 
 

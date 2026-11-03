@@ -1,7 +1,6 @@
-"""One admission plan for rebuild cache and queued numerical scratch.
+"""Shared admission budget for live replay pages, reservations and caches.
 
-SQLite keeps its existing half-memory ceiling. Reference banks and Python
-metadata have separate budgets; this is not an OS-wide RSS guarantee.
+Accounting covers owned work, not the process's complete OS RSS.
 """
 from dataclasses import dataclass
 
@@ -13,9 +12,17 @@ class Plan:
     cache: int
 
 
+def memory_limit(config):
+    from .solver_execution import current
+    runtime = current()
+    configured = config.data['execution']['rebuild_memory_bytes']
+    admitted = getattr(runtime, 'rebuild_memory_bytes', None)
+    return min(configured, admitted) if admitted is not None else configured
+
+
 def plan(config):
     settings=config.data['execution']
-    working=max(0,settings['rebuild_memory_bytes']//4)
+    working=max(0,memory_limit(config))
     queue=min(settings.get('rebuild_queue_bytes',67108864),working)
     cache=min(settings.get('rebuild_cache_bytes',0),max(0,working-queue))
     return Plan(working,queue,cache)

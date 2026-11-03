@@ -39,14 +39,14 @@ def test_disk_snapshot_does_not_consume_private_ram_limit(tmp_path):
             assert seed.execute('PRAGMA page_count').fetchone()[0] * 4096 > 1024
 
 
-def test_input_admission_bounds_references_but_keeps_both_private_database_limits(tmp_path):
+def test_input_admission_bounds_references_with_one_shared_working_limit(tmp_path):
     from stash_ai.recognition.solver_execution import plan
     config, goals = fixture(tmp_path, 'face')
     ceiling = plan(config)
     with closing(_open_readonly(config.database)) as source:
         measured = plan(config, source=source, scope=goals['scope'], namespace=goals['namespace'])
     assert measured.shared_input_bytes > 0
-    assert 2*config.data['execution']['rebuild_memory_bytes'] < measured.trial_bytes < ceiling.trial_bytes
+    assert config.data['execution']['rebuild_memory_bytes'] < measured.trial_bytes < ceiling.trial_bytes
 
 
 def test_copy_filters_relationships_in_sql(tmp_path):

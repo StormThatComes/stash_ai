@@ -109,7 +109,7 @@ class Search:
             if metadata+working+1024**2>limit:
                 raise ResourceLimit('Global body lookup exceeds sapiensid.execution.reference_bytes.')
             cache_bytes=min(16*1024**2,(limit-metadata-working-1024**2)//2)
-            self.reservation=Reservation(limit)
+            self.reservation=Reservation(limit, label='body-global-lookup')
             self.reservation.set(metadata+working+cache_bytes+1024**2)
             self.stack.callback(self.reservation.set,0)
             self.stats['reference_working_bytes']=metadata+working+cache_bytes+1024**2
@@ -211,7 +211,7 @@ class Search:
         if not active.any():return [{} for _ in lanes]
         excluded=set();blocked_owners={}
         positions={p:i for i,p in enumerate(self.identities)}
-        exclusion_budget=Reservation(self.config.data['sapiensid']['execution']['plan_bytes'])
+        exclusion_budget=Reservation(self.config.data['sapiensid']['execution']['plan_bytes'], label='body-exclusions')
         hard={'person_copresence','face_contradiction'}
         def exclude(a,b):
             key=tuple(sorted((a,b)))

@@ -24,6 +24,8 @@ class Execution:
     requested_cpus: int | None = None
     requested_trials: int = 1
     available_cpus: int | None = None
+    rebuild_memory_bytes: int | None = None
+    configured_rebuild_memory_bytes: int | None = None
 
     def document(self):
         return asdict(self)
@@ -31,7 +33,7 @@ class Execution:
     def signature(self):
         result = self.document()
         result.pop('available_memory_bytes')
-        for key in ('requested_cpus', 'requested_trials', 'available_cpus'):
+        for key in ('requested_cpus', 'requested_trials', 'available_cpus', 'configured_rebuild_memory_bytes'):
             result.pop(key)  # Diagnostics; only the effective plan affects replay.
         if self.memory_admission.startswith('automatic'):
             result.pop('memory_bytes')
@@ -52,9 +54,9 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
             raise ValueError(f'Solver {name} must be an integer in 1..{high}.')
     cpus = min(requested, available)
     settings = config.data['execution']
-    # Trial history and the inner production scene replay both have hard RAM
-    # page ceilings. Immutable source evidence lives on shared disk separately.
-    # This is admission accounting, not a promise about total process RSS.
+    # Trial history and inner replay pages now share one live working budget.
+    # Keep conservative extra headroom for reference/plan/native allocations
+    # not comprehensively covered by reservations. This is not an OS RSS cap.
     person = config.data['sapiensid']['execution']
     shared = 0
     face_bound = config.data['clustering']['max_reference_bytes']
@@ -75,15 +77,23 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
         evidence_bound = 16*shared + 4096*rows + 4*1024**2
         face_bound = min(face_bound, evidence_bound)
         body_bound = min(body_bound, evidence_bound)
-    trial_bytes = (2 * settings['rebuild_memory_bytes'] + face_bound + body_bound
-                   + person['plan_bytes'] + settings['rebuild_queue_bytes'])
+    overhead = face_bound + body_bound + person['plan_bytes'] + settings['rebuild_queue_bytes']
+    configured_rebuild = settings['rebuild_memory_bytes']
+    trial_bytes = configured_rebuild + overhead
     available_ram = available_memory() if 'memory_bytes' not in options else None
     automatic = 'memory_bytes' not in options
     memory = options.get('memory_bytes', max(1, available_ram*4//5) if available_ram is not None else trial_bytes*trials)
     if type(memory) is not int or memory < 1:
         raise ValueError('Solver memory_bytes must be a positive integer.')
-    # Configured ceilings are not allocations. Always allow a serial trial in
-    # automatic mode, but never multiply a ceiling exceeding available RAM.
+    # A configured maximum is not a minimum demand per trial. Share the global
+    # budget, then enforce the effective cap in each worker (and the baseline).
+    # One MiB is the configuration schema floor, not a guarantee the input fits:
+    # a too-large replay still fails with a typed, detailed resource error.
+    minimum_rebuild = min(configured_rebuild, 1024**2)
+    rebuild = configured_rebuild
+    if not (automatic and trials == 1):
+        rebuild = min(configured_rebuild, max(minimum_rebuild, memory // trials - overhead))
+    trial_bytes = rebuild + overhead
     memory_trials = max(1 if automatic else 0, memory // trial_bytes)
     admitted = min(trials, cpus, memory_trials)
     if admitted < requested_trials:
@@ -99,7 +109,7 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
                            f'per_trial={trial_bytes / 1024**3:.2f} GiB, '
                            f'required={trial_bytes * requested_trials / 1024**3:.2f} GiB '
                            f'({trial_bytes * requested_trials} bytes); permits {memory_trials} trials '
-                           'under the configured replay-memory ceilings (not measured RSS)')
+                           f'with minimum working budget={minimum_rebuild} bytes (not measured RSS)')
         raise ValueError(f'Cannot start {requested_trials} simultaneous solver trials: '
                          f'resources admit only {admitted}. ' + '; '.join(reasons) + '. '
                          'Adjust --solver-trials, --solver-cpus or --solver-memory-gib '
@@ -112,7 +122,7 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
     # Reserve one coordinator CPU inside each trial's allocation when possible.
     inner = max(1, cpus // trials - 1)
     return Execution(cpus, trials, inner, memory, trial_bytes, profile, scheduling, shared, available_ram, admission,
-                     requested, requested_trials, available)
+                     requested, requested_trials, available, rebuild, configured_rebuild)
 
 
 def cli_options(args):
@@ -158,6 +168,8 @@ def plan_text(execution, *, maximum):
               f'memory_admission={execution.memory_admission} '
               f'memory_budget_gib={execution.memory_bytes / 1024**3:.2f} '
               f'trial_memory_gib={execution.trial_bytes / 1024**3:.2f} '
+              f'rebuild_memory_gib={(execution.rebuild_memory_bytes or 0) / 1024**3:.2f} '
+              f'configured_rebuild_memory_gib={(execution.configured_rebuild_memory_bytes or 0) / 1024**3:.2f} '
               f'limited_by={",".join(limits) or "none"} max_trials={maximum}; '
               'baseline runs alone before candidate trials; trial memory is admission accounting, not measured RSS')
     if execution.requested_trials == 1:

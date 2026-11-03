@@ -1,5 +1,4 @@
 """Disposable RAM replay and explicitly enabled, fail-fast next-scene lookahead."""
-from .resource_errors import ResourceLimit
 from concurrent.futures import ThreadPoolExecutor, Future
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,19 +16,13 @@ MISSING = object()
 
 @contextmanager
 def memory_replay(config):
+    from .ram_database import connect
+    from .run_cache import scope
     uri = 'file:recognition-replay-' + uuid.uuid4().hex + '?mode=memory&cache=shared'
-    with closing(sqlite3.connect(uri, uri=True), name='close RAM replay') as db:
+    with scope(config), closing(connect(config, uri, label='sqlite-rebuild'), name='close RAM replay') as db:
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA temp_store=MEMORY')
-        page_size = db.execute('PRAGMA page_size').fetchone()[0]
-        pages = max(1, config.data['execution']['rebuild_memory_bytes']//2//page_size)
-        db.execute(f'PRAGMA max_page_count={pages}')
-        try:
-            yield db, uri
-        except sqlite3.OperationalError as error:
-            if getattr(error,'sqlite_errorcode',None) == sqlite3.SQLITE_FULL:
-                raise ResourceLimit('RAM replay exceeds execution.rebuild_memory_bytes; increase its capacity.') from error
-            raise
+        yield db, uri
 
 
 def report_pages(db):
@@ -52,8 +45,8 @@ class Lookahead:
         self.prepared = {}
         self.cancel = Cancellation()
         limit = config.data['execution']['rebuild_memory_bytes']
-        self.prepared_budget = Reservation(limit)
-        self.pending_budget = Reservation(limit)
+        self.prepared_budget = Reservation(limit, label='prefetch-prepared')
+        self.pending_budget = Reservation(limit, label='prefetch-pending')
 
     def release_prepared(self):
         self.prepared.clear()
