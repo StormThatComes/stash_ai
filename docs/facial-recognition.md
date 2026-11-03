@@ -939,6 +939,75 @@ in place without an upgrade. Status and `--dry-run` do not acquire the writer lo
 Progress reports the current phase and elapsed time; SQLite does not expose an
 exact VACUUM completion percentage.
 
+### Recognition evidence retention
+
+Changing detection settings creates a new immutable scan. Person/pose settings
+can also create multiple SapiensID contracts inside the same scan. Retention
+limits obsolete evidence without deleting identity labels or Stash performers:
+
+```powershell
+# Read-only preview for the model and detection policy in the selected YAML
+python .\stash_ai.py recognition db-prune --face-config facial_recognition.yml
+# Apply a freshly recomputed plan under the exclusive recognition writer lock
+python .\stash_ai.py recognition db-prune --face-config facial_recognition.yml --apply
+# Optionally limit the operation; --scene-id is repeatable
+python .\stash_ai.py recognition db-prune --scene-id 123 --scope YOUR_STASH_SCOPE --json
+# Reclaim physical free pages separately, after checking the pruning report
+python .\stash_ai.py recognition db-vacuum
+```
+
+`db-prune` defaults to preview; `--dry-run` is an explicit alias for that mode.
+It accepts `--faces-db`, `--face-config`, `--scope`, `--scene-id`, `--json` and
+`--progress-style`. It never contacts Stash or loads inference models. It requires
+the current schema; it does not migrate an old database or recover run history.
+The configured model namespace is the boundary, across all scopes unless limited.
+A different active detection policy is reported as blocked, not silently pruned.
+
+```yaml
+storage:
+  retention:
+    auto_prune: true
+    keep_previous_scans: 1
+    keep_previous_person_contracts: 1
+    prune_obsolete_crops: true
+```
+
+Automatic pruning is **opt-in** (default `false`). It runs only after a fully
+successful `recognition run`, including resource cleanup and finalized history,
+and only for its selected scenes. Portrait-only commands, failed/partial runs,
+and interrupted runs do not authorize pruning. The result is printed and saved
+as the run's `retention` progress record. A maintenance failure is reported without
+undoing completed recognition/publication work.
+
+The active scan plus one previous complete scan are retained by default. Within
+eligible retained scans, the configured complete person/body contract plus one
+previous contract are retained. Counts can be set from 0 to 100. These are
+retention targets, not hard database-size limits: incomplete scans, remembered
+head creation markers, original identity ownership, memberships, merge support,
+and SQL/JSON audit references can keep additional evidence. An active scan needs
+a successful rebuild run before it may supersede older scans; unresolved
+publications and queued scene reconciliation block the entire scene.
+
+Unreferenced obsolete scans/contracts are removed. Identity-pinned old evidence
+keeps its numerical vectors, geometry and origin bindings. With
+`prune_obsolete_crops: true`, unnecessary image BLOBs may be cleared while current
+membership/portrait/publication images remain protected. Retention does not alter
+people, origins, memberships, merges, publications or run history. Shared matching
+thumbnails are removed only when their deleted observations leave no references.
+
+Returning to a completely removed variant requires detection again. Returning
+to an archived variant reuses its numerical evidence and restores missing crops
+from verified VTT input without model inference. Until then, historical image
+exports may report missing crops. Active and retained previous variants keep
+their images. Existing body-crop retention and byte limits still apply.
+
+The report separates deleted rows from cleared crops, lists scan protection
+reasons, and estimates removed **logical evidence payload bytes**. It excludes
+indexes, bookkeeping and page fragmentation, so it is not a promise of physical
+file savings. Freed SQLite pages can be reused by subsequent writes; run
+`db-vacuum` separately to shrink the file. Retention preserves additional pinned
+history, and does not deduplicate active crop BLOBs or impose a hard disk quota.
+
 ## Recognition observation quality
 
 Detection quality gates run before embedding and grouping. They keep unreliable

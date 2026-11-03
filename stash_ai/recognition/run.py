@@ -431,3 +431,8 @@ def _execute(args, config, *, services=None):
                             report=report, primary=resource_error)
                 if resource_error is not None:
                     raise resource_error
+                if outcome == 'success' and not portraits_only:
+                    from .db_retention import after_run, format_report
+                    retained = report.optional('recognition_retention', after_run, database, config, run)
+                    if retained is not None:
+                        report.optional('recognition_retention_report', report.write, format_report(retained))

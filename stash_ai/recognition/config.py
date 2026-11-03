@@ -59,7 +59,9 @@ def defaults():
                       'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
                       'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592, 'replay_snapshot_bytes': 68719476736},
-        'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
+        'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576,
+                    'retention': {'auto_prune': False, 'keep_previous_scans': 1,
+                                  'keep_previous_person_contracts': 1, 'prune_obsolete_crops': True}},
         'names': {'file': None},
     }
 
@@ -136,6 +138,12 @@ def _number(value, name, low, high, *, integer=False):
 def validate(data):
     from .person_signal import validate as validate_person
     validate_person(data['sapiensid'])
+    retention = data['storage']['retention']
+    for key in ('auto_prune', 'prune_obsolete_crops'):
+        if type(retention[key]) is not bool:
+            raise ValueError('storage.retention.' + key + ' must be boolean.')
+    for key in ('keep_previous_scans', 'keep_previous_person_contracts'):
+        _number(retention[key], 'storage.retention.' + key, 0, 100, integer=True)
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('facial_recognition.yml version must be 1.')
     models = data['models']

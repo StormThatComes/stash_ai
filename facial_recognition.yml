@@ -448,6 +448,18 @@ storage:
   # Recognition SQLite database path, relative to this YAML.
   max_crop_bytes: 1048576
   # Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit.
+  retention:
+    # Opt in to pruning selected scenes only after a fully successful run.
+    # Existing YAML files that omit this section keep automatic pruning disabled.
+    auto_prune: false
+    # Keep the active scan plus this many previous complete scans per scene/model.
+    # Identity origins, audit references, incomplete scans and pending writes can pin more.
+    keep_previous_scans: 1
+    # Keep the configured SapiensID/person contract plus this many older variants.
+    keep_previous_person_contracts: 1
+    # Remove unneeded crops from obsolete but identity-pinned evidence; retain vectors/geometry.
+    # Returning to an archived policy restores crops from verified VTT input without inference.
+    prune_obsolete_crops: true
 
 version: 1
 # Configuration schema version; keep 1.
