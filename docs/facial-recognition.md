@@ -979,6 +979,15 @@ and interrupted runs do not authorize pruning. The result is printed and saved
 as the run's `retention` progress record. A maintenance failure is reported without
 undoing completed recognition/publication work.
 
+Automatic retention has its own `Recognition auto prune` phase. Its main bar
+tracks planning, pruning and commit (3 steps); 100% is reached only after the
+transaction is committed. A detail row counts inspected scenes/contracts or
+completed deletion statements, while the status names the active operation
+(including reference checks, crop clearing, commit and rollback). These are
+work counters, not a percentage of database bytes or a guaranteed time estimate.
+Redirected runs keep emitting the recognition heartbeat during long SQLite
+operations. `--progress-style off` and `db-prune --json` remain quiet.
+
 The active scan plus one previous complete scan are retained by default. Within
 eligible retained scans, the configured complete person/body contract plus one
 previous contract are retained. Counts can be set from 0 to 100. These are

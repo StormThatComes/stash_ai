@@ -359,7 +359,8 @@ def _execute(args, config, *, services=None):
                 if counts['scenes_failed'] or counts['people_failed'] or counts['metadata_failed']:
                     outcome = 'partial'
                 ui.finish()
-                report.console.finish_rendering()
+                # present() closes rendering after finally has also finished
+                # resource cleanup, history and optional automatic retention.
                 from .publication_queue import debt
                 publication_debt = report.optional('recognition_publication_snapshot',debt,
                     database.connection,scope,model_namespace,identifiers)

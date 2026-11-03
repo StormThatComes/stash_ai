@@ -202,10 +202,10 @@ class WorkProgress:
     def advance(self, amount=1, **postfix):
         self.set_completed(self.n + amount, **postfix)
 
-    def set_completed(self, completed, **postfix):
+    def set_completed(self, completed, *, force=False, **postfix):
         self.n = completed
         self.postfix.update(postfix)
-        self._render(force=self.n == self.total)
+        self._render(force=force or self.n == self.total)
 
     def _render(self, *, force=False):
         now = time.monotonic()
