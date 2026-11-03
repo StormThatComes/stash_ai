@@ -17,9 +17,12 @@ def test_models_are_shared_across_scenes_and_remain_lazy_on_cached_run(tmp_path,
     assert len(backends) == 1 and services.backend is factory
 
 
-def test_scan_and_video_portraits_share_the_invocation_backend(tmp_path, monkeypatch):
+@pytest.mark.parametrize('policy,expected', [('phase', 2), ('retain', 1)])
+def test_scan_and_video_portrait_model_policy(tmp_path, monkeypatch, policy, expected):
     from tests.test_recognition_metadata import setup as video_setup, run as video_run
+    from tests.test_recognition_gpu_memory import configured
     config, _, services = video_setup(tmp_path, monkeypatch)
+    config = configured(config, policy)
     backends = []
     def factory(*args):
         model = Backend()
@@ -27,7 +30,10 @@ def test_scan_and_video_portraits_share_the_invocation_backend(tmp_path, monkeyp
         return model
     services.backend = factory
     assert video_run(config, services, '1', '2') == 0
-    assert len(backends) == 1 and backends[0].calls > 6 and backends[0].closed
+    assert len(backends) == expected and sum(m.calls for m in backends) > 6
+    assert all(m.closed for m in backends)
+    if policy == 'phase':
+        assert backends[0].calls == 6 and backends[1].calls > 0
 
 
 def test_borrowed_cleanup_keeps_models_alive_and_owner_closes_once():
@@ -121,19 +127,23 @@ import pytest
 
 
 @pytest.mark.parametrize('failure', ['embed', 'detect'])
-def test_video_backend_lease_is_reacquired_after_one_candidate_failure(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize('policy', ['phase', 'retain'])
+def test_video_backend_lease_is_reacquired_after_one_candidate_failure(tmp_path, monkeypatch, failure, policy):
     from stash_ai.recognition.database import FaceDatabase
     from tests.helpers.recognition import Backend
     from tests.test_recognition_metadata import setup, run, Decoder
+    from tests.test_recognition_gpu_memory import configured
     config, client, services = setup(tmp_path, monkeypatch)
+    config = configured(config, policy)
     models = []
     def load(*a):
-        first = not models
-        model = Backend(fail_at=4 if first and failure == 'embed' else None)
+        first = len(models) == (1 if policy == 'phase' else 0)
+        before = 0 if policy == 'phase' else 3
+        model = Backend(fail_at=before + 1 if first and failure == 'embed' else None)
         if first and failure == 'detect':
             detect = model.detect
             def failing_detect(image):
-                if model.calls == 3:
+                if model.calls == before:
                     raise RuntimeError('synthetic portrait detection failure')
                 return detect(image)
             model.detect = failing_detect
@@ -141,7 +151,12 @@ def test_video_backend_lease_is_reacquired_after_one_candidate_failure(tmp_path,
         return model
     services.backend = load
     assert run(config, services, '1') == 0
-    assert len(models) == 2 and models[0].calls == (4 if failure == 'embed' else 3) and models[1].calls == 1
+    expected = [1 if failure == 'embed' else 0, 1]
+    if policy == 'phase':
+        expected.insert(0, 3)
+    else:
+        expected[0] += 3
+    assert [m.calls for m in models] == expected and all(m.closed for m in models)
     assert len(Decoder.instances[0].calls) == 2
     with FaceDatabase(config.database) as db:
         video = db.connection.execute("SELECT image,metadata FROM portraits WHERE json_extract(metadata,'$.source_type')='video'").fetchall()

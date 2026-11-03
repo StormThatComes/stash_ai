@@ -88,6 +88,12 @@ detection:
 
 execution:
   # Parallelism, caches and progress persistence; byte budgets are separate from total process memory.
+  gpu_model_policy: phase
+  # phase: unload inference models/cache after VTT (default); reload lazily for portraits.
+  # sequential: additionally run faces then bodies per scene, unloading between them.
+  # retain: keep face models until run exit (legacy throughput policy).
+  log_vram: true
+  # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
   checkpoint_cues: 32
   # Persist scan progress every N cues; memory pressure or body collection may save sooner.
   max_cues: 0

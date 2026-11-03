@@ -41,6 +41,13 @@ class LazyBackend:
         from stash_ai.runtime.shutdown import release
         release(self, self._close)
 
+    def unload(self):
+        """Release weights/sessions at a phase boundary; allow lazy reload."""
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
+        if self.model is not None:
+            self.invalidate(self.model)
+
     def _close(self):
         self.closed = True
         if self.model is not None:
