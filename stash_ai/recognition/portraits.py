@@ -26,7 +26,7 @@ from .backend import prepared_frame
 
 def policy_identity(config):
     from .context import policy_digest
-    return policy_digest(config, ('portraits-v7', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+    return policy_digest(config, ('portraits-v8', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
                          lambda: _policy_value(config))
 
 
@@ -40,7 +40,7 @@ def _policy_value(config):
     from .portrait_admission import extra_measurements
     from .body_identity import enabled as bodies_enabled, policy as body_policy
     from .portrait_precedence import pose_contract
-    return {'version': 7, 'portraits': policy,
+    return {'version': 8, 'portraits': policy,
                    'pose_contract': pose_contract(config) if policy['kind'] == 'auto' else None,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],

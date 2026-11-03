@@ -45,6 +45,16 @@ def refresh_category(database, portrait, config):
     """Historical portrait priority must follow today's evidence, not old metadata."""
     metadata = json.loads(portrait['metadata'])
     current = category(database.connection, config, metadata)
+    if config.data['portraits']['kind'] == 'face':
+        current = 'face'
+    from .paired_portraits import framing, matches, FACE_FRAMING
+    try:
+        expected = (framing(database.connection, config, metadata.get('observation'))
+                    if current == 'face+pose' else FACE_FRAMING)
+    except (ValueError, TypeError):
+        return None
+    if not matches(metadata, expected):
+        return None
     if metadata.get('selection_category') != current:
         metadata['selection_category'] = current
         with database.connection:
