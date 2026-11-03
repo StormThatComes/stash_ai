@@ -195,13 +195,16 @@ def retained_image(row):
 
 
 def retained_portrait(row, metadata, policy, limit):
+    from .paired_portraits import FACE_FRAMING
     image, face = retained_image(row)
     encoding = {}
     with image:
         data, bounds = portrait_bytes(image, face, policy, limit=limit, details=encoding)
     result = dict(metadata)
     result.pop('reason', None)
+    result.pop('person_crop_bounds', None)
     result.update(source_type='recognition_crop', crop=bounds,
+                  framing=FACE_FRAMING,
                   crop_coordinate_system='retained_recognition_crop', encoding=encoding,
                   pixels=encoding['pixels'], recognition_crop_bounds=json.loads(row['quality'])['crop_bounds'],
                   fallback={'from': metadata.get('requested_source', 'vtt'),
@@ -236,7 +239,7 @@ def fit_cached_bytes(data, sha, config, metadata):
     return data, hashlib.sha256(data).hexdigest()
 
 
-def cached_thumbnail(database, config, scope, target, row, identifier, metadata):
+def cached_thumbnail(database, config, scope, target, row, identifier, metadata, *, framing=None):
     """Re-score the same physical thumbnail JPEG under changed preferences."""
     db, policy = database.connection, config.data['portraits']
     rows = db.execute('''SELECT * FROM portraits WHERE scope=? AND person=? AND scene=? AND image IS NOT NULL AND json_valid(metadata)
@@ -248,22 +251,27 @@ def cached_thumbnail(database, config, scope, target, row, identifier, metadata)
        policy['margin'], policy['aspect_ratio'], policy['jpeg_quality']))
     for old in rows:
         candidate = dict(metadata)
-        reused = _cached_thumbnail_row(database, config, scope, target, identifier, candidate, old)
+        reused = _cached_thumbnail_row(database, config, scope, target, identifier, candidate, old, framing=framing)
         if reused is not None:
             metadata.update(candidate)
             return reused
     return None
 
 
-def _cached_thumbnail_row(database, config, scope, target, identifier, metadata, old):
+def _cached_thumbnail_row(database, config, scope, target, identifier, metadata, old, *, framing=None):
     db, policy = database.connection, config.data['portraits']
     before = json.loads(old['metadata'])
+    from .paired_portraits import matches, FACE_FRAMING
+    if not matches(before, FACE_FRAMING if framing is None else framing):
+        return None
+    metadata['framing'] = before.get('framing', FACE_FRAMING)
     if before.get('input_sha') != metadata['input_sha'] or before.get('geometry') != metadata['geometry']:
         return None
-    for field in ('crop', 'pixels', 'encoding', 'crop_coordinate_system'):
+    for field in ('crop', 'pixels', 'encoding', 'crop_coordinate_system', 'framing'):
         if field in before:
             metadata[field] = before[field]
     metadata.pop('recognition_crop_bounds', None)
+    metadata.pop('person_crop_bounds', None)
     metadata.pop('source_warning', None)
     if policy['source'] == 'vtt':
         metadata.pop('fallback', None)

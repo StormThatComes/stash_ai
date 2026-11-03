@@ -25,6 +25,7 @@ from .portrait_writes import execute as cache_write, flush, batched
 from .vtt_ranking_cache import Ranking
 from .portrait_pipeline import current as portrait_pipeline, Capacity
 from .portrait_encoding import Encoder
+from . import paired_portraits
 
 
 class Sources:
@@ -86,7 +87,7 @@ def store(database, identifier, scope, target, scene, metadata):
             # Re-ranking cannot relabel a cached recognition crop as a live
             # thumbnail, or change the coordinates of already encoded bytes.
             for name in ('source_type', 'crop', 'crop_coordinate_system', 'encoding', 'pixels',
-                         'recognition_crop_bounds', 'fallback'):
+                         'recognition_crop_bounds', 'fallback', 'framing', 'person_crop_bounds'):
                 if name in retained:
                     metadata[name] = retained[name]
         retained.update(metadata)
@@ -241,7 +242,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
         def candidates():
             while ranked:
                 yield heapq.heappop(ranked)
-        with Encoder(config,portrait_bytes,small=considered<2) as encodings, tracking(
+        crop_function = paired_portraits.source_bytes if category == 'face+pose' else portrait_bytes
+        with Encoder(config,crop_function,small=considered<2) as encodings, tracking(
             candidates(),
             'Choose VTT portrait',
             total=considered,
@@ -256,7 +258,15 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     metadata['reason']=rejected
                     store(database,identifier,scope,target,scene,metadata)
                     continue
-                if existing['image'] is not None and metadata['source_type'] == 'vtt':
+                try:
+                    framing = (paired_portraits.framing(db, config, metadata['observation'])
+                               if category == 'face+pose' else paired_portraits.FACE_FRAMING)
+                except (ValueError, TypeError):
+                    metadata['reason'] = 'portrait_pose_unavailable'
+                    store(database, identifier, scope, target, scene, metadata)
+                    continue
+                if (existing['image'] is not None and metadata['source_type'] == 'vtt'
+                        and paired_portraits.matches(metadata, framing)):
                     try:
                         data, sha = fit_cached_bytes(existing['image'], existing['digest'], config, metadata)
                     except (OSError, ValueError):
@@ -268,19 +278,20 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
                 row = db.execute('SELECT o.*,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',
                                  (metadata['observation'],)).fetchone()
-                reused = cached_thumbnail(database, config, scope, target, row, identifier, metadata)
+                reused = cached_thumbnail(database, config, scope, target, row, identifier, metadata, framing=framing)
                 if reused is not None:
                     return finish(reused)
                 try:
-                    face=checked_detection(metadata['geometry'])
+                    face=framing if category == 'face+pose' else checked_detection(metadata['geometry'])
                     image=sources.thumbnail(scene,row)
                     data,bounds,encoding=encodings.encode(image,face,policy,
                         config.data['storage']['max_crop_bytes'],
                         before_wait=preparation.ranking_finished if preparation is not None else lambda:None)
                     metadata.update(source_type='vtt', crop=bounds, pixels=encoding['pixels'], encoding=encoding,
-                                    crop_coordinate_system='thumbnail')
+                                    crop_coordinate_system='thumbnail', framing=framing)
                     metadata.pop('source_warning', None)
                     metadata.pop('recognition_crop_bounds', None)
+                    metadata.pop('person_crop_bounds', None)
                     if not fallback_reason:
                         metadata.pop('fallback', None)
                     else:
@@ -311,14 +322,22 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                 metadata = json.loads(existing['metadata'])
                 row = db.execute('SELECT * FROM observations WHERE id=?', (metadata['observation'],)).fetchone()
                 try:
-                    quality=json.loads(row['quality'])
-                    bounds=quality.get('crop_bounds',[0,0,0,0])
-                    encoded_crop=quality.get('crop_encoding')
-                    pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
-                            [bounds[2]-bounds[0],bounds[3]-bounds[1]])
-                    size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
-                    data,metadata=encodings.call(retained_portrait,dict(row),deepcopy(metadata),policy,
-                        config.data['storage']['max_crop_bytes'],size=size)
+                    if category == 'face+pose':
+                        framing = paired_portraits.framing(db, config, metadata['observation'])
+                        blob = paired_portraits.retained_crop(db, metadata['observation'], framing)
+                        left, top, right, bottom = framing['geometry']['bounds']
+                        size = (right-left)*(bottom-top)*3 + len(blob) + config.data['storage']['max_crop_bytes']
+                        data,metadata=encodings.call(paired_portraits.retained_portrait,blob,framing,
+                            deepcopy(metadata),policy,config.data['storage']['max_crop_bytes'],size=size)
+                    else:
+                        quality=json.loads(row['quality'])
+                        bounds=quality.get('crop_bounds',[0,0,0,0])
+                        encoded_crop=quality.get('crop_encoding')
+                        pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
+                                [bounds[2]-bounds[0],bounds[3]-bounds[1]])
+                        size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
+                        data,metadata=encodings.call(retained_portrait,dict(row),deepcopy(metadata),policy,
+                            config.data['storage']['max_crop_bytes'],size=size)
                 except Exception:
                     metadata['reason'] = 'portrait_source_unavailable'
                     store(database, identifier, scope, target, existing['scene'], metadata)

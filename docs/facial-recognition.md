@@ -8,9 +8,9 @@ portraits:
   auto_precedence: [face+pose, face, pose]
 ```
 
-`face+pose` selects a face crop whose observation has usable, associated SapiensID
-person evidence for the current model/pose contract. It does not combine different
-observations or change the face crop framing. `face` selects remaining eligible
+`face+pose` selects a face observation with usable, associated SapiensID person
+evidence for the current model/pose contract, then crops that associated **person**.
+It does not combine different observations. `face` selects remaining eligible
 faces, and `pose` uses accepted retained person crops. List all three exactly once,
 in the desired order (for example `[pose, face+pose, face]`). Older YAML files use
 the default above. Explicit `kind: face` and `kind: person` ignore this order.
@@ -21,12 +21,25 @@ quality shortfalls alone cannot let a lower tier win. Identity checks,
 `anchor_only`, crop/encoding limits and manual-image protection still apply.
 With SapiensID disabled or no current paired evidence, `face+pose` is empty.
 Decoded video faces belong to `face`: a VTT hint's pose does not prove a pose in
-different video pixels. The `face+pose` tier therefore uses VTT/retained face
-pixels even with `source: video`, without running new pose inference.
+different video pixels. The `face+pose` tier therefore uses the measured person
+bounds in the verified VTT thumbnail, even with `source: video`, without new pose
+inference. If that thumbnail is unavailable, only the associated retained person
+crop can supply this tier; a retained face crop cannot stand in for a person.
+Without usable person pixels, selection continues to another candidate or tier.
+
+Like `pose`, `face+pose` applies `portraits.aspect_ratio` within the person bounds,
+preserving measured head points with clearance where possible. `null` keeps the
+entire measured person crop. A fixed ratio can trim other parts of the body.
+`portraits.margin` applies only to face crops. Face identity checks, anchor gates
+and face quality ranking still choose the `face+pose` observation; framing does
+not change its membership or require body-only identity collection.
 
 Changing the order invalidates portrait caches only. Apply it to existing images
 with `python stash_ai.py recognition portraits`; no identity rebuild is needed.
 Portrait metadata records the winning `selection_category`.
+The framing upgrade also invalidates old face-framed `face+pose` images: refresh
+with the same command to reframe app-owned portraits without rebuilding identities.
+Cache reuse checks the person geometry and contract as well as the crop kind.
 
 Set `portraits.anchor_only: true` to require the actual portrait face to pass
 the current clustering anchor pose and visibility rules, in addition to its

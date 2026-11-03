@@ -171,6 +171,12 @@ def test_unusable_paired_evidence_falls_back_to_face(evidence, mutation):
 
 
 def test_retained_paired_crop_beats_live_lower_tier(evidence):
+    state, config, _, _, ids = evidence
+    with Image.new('RGB', (160, 160), (20, 90, 160)) as image:
+        output = BytesIO()
+        image.save(output, 'PNG')
+    state.connection.execute('UPDATE person_evidence SET crop=? WHERE observation=?', (output.getvalue(), ids[0]))
+    state.connection.commit()
     class NoPairedThumbnail(SpriteInput):
         def thumbnail(self, index):
             if index == 0:
@@ -178,7 +184,7 @@ def test_retained_paired_crop_beats_live_lower_tier(evidence):
             return super().thumbnail(index)
     metadata = json.loads(choose(evidence, NoPairedThumbnail)['metadata'])
     assert metadata['selection_category'] == 'face+pose'
-    assert metadata['source_type'] == 'recognition_crop'
+    assert metadata['source_type'] == 'person_crop'
 
 
 def test_unencodable_paired_candidate_does_not_hide_face_fallback(evidence):
@@ -232,7 +238,7 @@ def test_prior_pairing_is_rechecked_before_preserving_old_portrait(evidence):
     state.connection.execute("UPDATE person_evidence SET status='unavailable',embedding=NULL")
     state.connection.commit()
     refreshed = _current_prior(state, old, client, config, 'scope', target, Visibility(), object())
-    assert json.loads(refreshed['metadata'])['selection_category'] == 'face'
+    assert refreshed is None  # A pose crop cannot become a face crop by relabelling.
 
 
 def test_paired_tier_does_not_use_video_hint_as_pose_proof(evidence):

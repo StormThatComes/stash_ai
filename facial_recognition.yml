@@ -166,7 +166,7 @@ portraits:
   anchor_only: false
   # Require face anchor quality or an accepted body anchor for portrait candidates.
   auto_precedence: [face+pose, face, pose]
-  # Auto only: try each tier in order; list all three exactly once. face+pose uses paired SapiensID evidence.
+  # Auto only: try each tier in order; list all three exactly once. face+pose crops the associated SapiensID person.
   aspect_ratio: null
   # Crop width/height for faces and bodies; null keeps natural shape; body crops try to preserve the head.
   enabled: true
@@ -178,7 +178,7 @@ portraits:
   kind: auto
   # auto follows auto_precedence; face/person forces the crop kind.
   margin: 0.35
-  # Padding per side as a fraction of the face width/height.
+  # Face-only padding per side as a fraction of face width/height; face+pose uses the person bounds.
   max_candidates: 8
   # Maximum retained face candidates to sample from video; VTT ranks all retained observations.
   max_clipped_fraction: 0.15
