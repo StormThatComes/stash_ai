@@ -15,7 +15,8 @@ class GoalIndex:
         self.observation_ids = frozenset(addresses(goals))
         self.observation_ids |= frozenset(r['id'] for g in goals['groups']
             for m in g['members'] + g.get('excluded_members', []) for r in m.get('excluded_observations', ()))
-        self.outcome_ids = self.observation_ids | frozenset(oid for e in goals.get('scene_exclusions', ())
+        from .merge_scene_exclusions import constraints
+        self.outcome_ids = self.observation_ids | frozenset(oid for e in constraints(goals)
             for oid in e['observation_ids'] + e['target_observation_ids'])
         self.compiled = {}
         self.core_cohorts = {}

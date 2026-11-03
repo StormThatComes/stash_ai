@@ -1,7 +1,7 @@
-"""Bounded rejection-boundary hints from explicit negative scenes.
+"""Bounded rejection-boundary hints from explicit negative scenes or samples.
 
 Frozen vectors only steer proposals. Positive preservation and the full negative
-scene, including observations outside this sample, are checked by every replay.
+constraints, including observations outside this sample, are checked by every replay.
 """
 from collections import defaultdict
 
@@ -47,7 +47,8 @@ def analyse(db, config, goals):
             f'(SELECT value FROM json_each(?)) AND o.embedding IS NOT NULL{guard}{where} '
             f'ORDER BY o.{column} LIMIT ?', (encoded(ids), *params, limit+1)).fetchall()
         return [vector(r) for r in rows[:limit]], len(rows) > limit
-    for item in goals.get('scene_exclusions', ()):
+    from .merge_scene_exclusions import constraints
+    for item in constraints(goals):
         joint = {}
         for kind, table, oid, where, params, vector, keys in modes:
             keys = [k for k in keys if k in domains]
@@ -66,6 +67,8 @@ def analyse(db, config, goals):
             low, mean, high, _ = reference_stats(left, right, max_bytes=working)
             comparisons += len(left)*len(right)
             evidence.append(dict(set=item['set'], scene=item['scene'], evidence_kind=kind,
+                **({'requested_observation_ids': item['requested_observation_ids']}
+                   if 'requested_observation_ids' in item else {}),
                 minimum=low, mean=mean, maximum=high, positive_samples=len(left), negative_samples=len(right),
                 sampled=a or b))
             for score in (high, mean, low):

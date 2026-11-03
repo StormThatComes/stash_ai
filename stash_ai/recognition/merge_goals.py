@@ -4,7 +4,8 @@ from .models import namespace
 from .merge_goal_index import evaluation_scope
 
 
-def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity', scene_exclusions=()):
+def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity', scene_exclusions=(),
+            observation_exclusions=()):
     from .merge_goal_identity import POLICY, freeze
     from .merge_goal_sets import freeze_set
     from .reference_roles import strict_sql
@@ -40,8 +41,11 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
         groups.append(dict(index=index, members=list(members.values())))
     from .merge_scene_exclusions import resolve as resolve_exclusions, freeze_targets
     exclusions = resolve_exclusions(db, config, scene_exclusions, scope, owners)
+    from .merge_observation_exclusions import resolve as resolve_observations
+    samples = resolve_observations(db, config, observation_exclusions, scope, owners)
     for group in groups:
         forbidden = {e['scene'] for e in exclusions if e['set'] == group['index']}
+        forbidden_ids = {oid for e in samples if e['set'] == group['index'] for oid in e['observation_ids']}
         set_rows = []
         kept, excluded = [], []
         for item in group['members']:
@@ -57,10 +61,10 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             for row in rows:row['evidence_kind']='face'
             from .body_reports import goal_rows
             rows.extend(goal_rows(db,config,identity))
-            removed = [r for r in rows if r['scene'] in forbidden]
+            removed = [r for r in rows if r['scene'] in forbidden or r['id'] in forbidden_ids]
             if removed:
                 item['excluded_observations'] = [dict(id=r['id'], scene=r['scene']) for r in removed]
-                rows = [r for r in rows if r['scene'] not in forbidden]
+                rows = [r for r in rows if r['scene'] not in forbidden and r['id'] not in forbidden_ids]
                 if not rows:
                     excluded.append(item)
                     continue
@@ -87,6 +91,9 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
         freeze_physical(db, config, result)
     if exclusions:
         result['scene_exclusions'] = exclusions
+    if samples:
+        result['observation_exclusions'] = samples
+    if exclusions or samples:
         freeze_targets(db, config, result)
     return result
 
@@ -128,7 +135,8 @@ def execute(args, config):
             with report_phase('Resolve goals'):
                 result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
                                  policy=getattr(args, 'goal_policy', 'identity'),
-                                 scene_exclusions=getattr(args, 'exclude_performer_scene', None) or ())
+                                 scene_exclusions=getattr(args, 'exclude_performer_scene', None) or (),
+                                 observation_exclusions=getattr(args, 'exclude_performer_observation', None) or ())
             with report_phase('Fingerprint retained inputs'):
                 result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
@@ -297,13 +305,16 @@ def objective(status):
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)
-    if 'scene_exclusions_satisfied' in status:
-        unguarded = {k: v for k, v in status.items() if k != 'scene_exclusions_satisfied'}
+    from .merge_scene_exclusions import KINDS, constraints, satisfied
+    flags = {kind + '_exclusions_satisfied' for kind in KINDS}
+    if flags.intersection(status):
+        unguarded = {k: v for k, v in status.items() if k not in flags}
         # Positive coverage is still required for admissibility. Among failed
         # trials reward repairing more explicit negatives before consolidation.
-        return (status['admissible'], status['scene_exclusions_satisfied'],
-                -sum(not r['satisfied'] for r in status['scene_exclusions']),
-                -sum(r['matching_count'] for r in status['scene_exclusions'])) + objective(unguarded)
+        results = list(constraints(status))
+        return (status['admissible'], satisfied(status),
+                -sum(not r['satisfied'] for r in results),
+                -sum(r['matching_count'] for r in results)) + objective(unguarded)
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import objective as identity_objective
         return identity_objective(status)
@@ -324,10 +335,13 @@ def objective(status):
 
 def unmet_conditions(status):
     """Every unsatisfied goal, including empty members and cross-set merges."""
+    from .merge_scene_exclusions import KINDS
+    violations = list(status.get('outside_violations', []))
+    violations.extend(r for kind in KINDS for r in status.get(kind + '_exclusion_violations', ()))
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import unmet
-        return unmet(status) + status.get('outside_violations', []) + status.get('scene_exclusion_violations', [])
-    reasons = list(status.get('outside_violations', [])) + status.get('scene_exclusion_violations', [])
+        return unmet(status) + violations
+    reasons = violations
     for group in status.get('groups', []):
         for member in group['members']:
             base = dict(set=group['index'], identity=member['identity_id'])
@@ -353,9 +367,11 @@ def fingerprint(db, config, scope):
 
 def goal_diagnostics(status):
     """Small provenance summary shared by live winner YAML and final export."""
+    from .merge_scene_exclusions import KINDS
     return dict(policy=status.get('goal_policy', dict(name='strict', version=1)),
                 strict_fully_solved=status.get('strict_fully_solved', status['fully_solved']),
                 strict_disjoint=status.get('strict_disjoint', status['disjoint']),
                 soft_lost_units=sum(g.get('soft_lost_units', 0) for g in status['groups']),
                 soft_budget_excess=sum(g.get('soft_budget_excess', 0) for g in status['groups']),
-                **({'scene_exclusions': status['scene_exclusions']} if 'scene_exclusions' in status else {}))
+                **{kind + '_exclusions': status[kind + '_exclusions'] for kind in KINDS
+                   if kind + '_exclusions' in status})

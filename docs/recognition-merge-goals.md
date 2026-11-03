@@ -67,6 +67,41 @@ reported unmet conditions. Counts cover every observation; JSON observation exam
 are capped at 32 per condition to keep trial histories bounded. Recognition must be run with the selected YAML to apply
 it, and changed media/evidence requires revalidation.
 
+Use repeatable **`--exclude-performer-observation PERFORMER_ID:OBSERVATION_ID`**
+when only a particular face or body sample is wrong and the person can still
+appear in that scene. Copy the exact `observation_id` from the corresponding
+`samples` entry in a `report-identity` `manifest.json`; the PNG's `face-000001`
+or `person-000001` suffix is an export counter, not the observation ID.
+
+```powershell
+python stash_ai.py recognition report-merge --performer-set 47036,47034 --exclude-performer-observation 47036:724cd36c-2b66-45bd-b287-e4505417b6cb --solve --face-config input.yml --yaml-output corrected.yml --output corrected.json
+```
+
+The exclusion applies to the whole goal set after performer alias resolution.
+It removes only that sample's retained face and compatible linked body addresses
+from positive goals; other observations in the **same scene** remain positive.
+A face+body association is checked in both directions, so switching from its face
+to its body cannot bypass the constraint. Independent body-only samples are also
+supported. Face/body forms of the same exclusion are deduplicated. These addresses
+remain in the real replay and can join another person or remain unassigned.
+Changing a cluster UUID or losing the target person cannot satisfy the exclusion.
+
+Unknown IDs, another scope/recognizer, historical scans, incompatible scan/body
+contracts and disabled body identities for a requested body sample are input errors.
+After a rescan, regenerate the identity report and select its current observation
+ID. A set left without positive evidence is rejected. During evaluation a missing
+negative observation is a failure, not a successful exclusion. All goal policies,
+including `strict` and `identity-physical`, enforce this rule.
+
+Observation and scene exclusions can be combined. Both contribute to solver
+ranking, threshold proposals, checkpoint compatibility and JSON/YAML provenance.
+The `observation_exclusions` trial results list `requested_observation_ids`,
+`satisfied`, matching/missing counts and final `assignments` (assigned, unassigned
+or missing, with destination identity IDs). Assignment examples are capped at 32;
+`assignments_truncated` marks a longer list. Console progress includes each
+observation exclusion. As with scene exclusions, these are offline goals rather
+than runtime overrides: only a full replay validates the exported ordinary YAML.
+
 Each trial starts from the same read-only retained history in an independent RAM
 database and calls the ordinary production rebuild. All compatible complete latest
 scans in the scope participate, including competitors. `--solve` excludes scenes

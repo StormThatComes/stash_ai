@@ -61,7 +61,13 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
         from .merge_solver_targeted import plan as targeted_plan
         latest_feedback['targeted'] = targeted_plan(target, settings, goals, feasibility, membership, latest_feedback, hybrid)
     if excluded:
-        latest_feedback['scene_exclusions'] = {k: v for k, v in excluded.items() if k not in ('proposals', 'options')}
+        from .merge_scene_exclusions import KINDS
+        for kind in KINDS:
+            if goals.get(kind + '_exclusions'):
+                detail = {k: v for k, v in excluded.items() if k not in ('proposals', 'options')}
+                detail['evidence'] = [r for r in detail['evidence']
+                    if ('requested_observation_ids' in r) == (kind == 'observation')]
+                latest_feedback[kind + '_exclusions'] = detail
         for family in ('face', 'hybrid'):
             # Face-only runs still receive their negative boundary hints.
             hints = [p for p in excluded['proposals']

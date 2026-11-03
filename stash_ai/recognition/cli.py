@@ -92,6 +92,13 @@ def performer_scene(value):
     return tuple(stash_id(part.strip()) for part in parts)
 
 
+def performer_observation(value):
+    parts = value.split(':')
+    if len(parts) != 2 or not parts[1].strip() or any(c.isspace() for c in parts[1].strip()):
+        raise argparse.ArgumentTypeError('Expected PERFORMER_ID:OBSERVATION_ID')
+    return stash_id(parts[0].strip()), parts[1].strip()
+
+
 def parser():
     root = RecognitionParser(prog='stash_ai.py recognition', allow_abbrev=False,
                                    description='On-demand facial recognition independent of tagging.')
@@ -245,6 +252,10 @@ def parser():
         metavar='PERFORMER_ID:SCENE_ID',
         help='Declare that a performer from a goal set must not appear in this scene; repeatable. '
              'Applies to the whole set after alias resolution, in both goal policies; never forces recognition assignments.')
+    merge_report.add_argument('--exclude-performer-observation', action='append', type=performer_observation,
+        metavar='PERFORMER_ID:OBSERVATION_ID',
+        help='Exclude one retained observation (and its linked face/body addresses) from a goal-set person; '
+             'use observation_id from report-identity manifest.json. Repeatable; never forces recognition assignments.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
     merge_report.add_argument('--feasibility-trials', type=int, default=6,
         help='Initial permissive production probes within --max-trials (default: 6; 0 disables early probes). '
@@ -315,7 +326,8 @@ def main(argv=None, *, services=None):
         from .identity_report import execute
         return execute(args, config)
     if args.command == 'report-merge':
-        if args.solve or args.performer_set or args.exclude_performer_scene or len(args.performer_id or args.identity_id) > 2:
+        if (args.solve or args.performer_set or args.exclude_performer_scene or args.exclude_performer_observation
+                or len(args.performer_id or args.identity_id) > 2):
             from .merge_goals import execute
             return execute(args, config)
         from .merge_report import execute

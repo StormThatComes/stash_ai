@@ -213,7 +213,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     if not scans:
         hybrid.update(enabled=False, options={}, proposals=[])
     from .merge_exclusion_feedback import analyse as exclusion_feedback
-    excluded = exclusion_feedback(db, config, goals) if goals.get('scene_exclusions') else None
+    excluded = exclusion_feedback(db, config, goals) if (goals.get('scene_exclusions') or goals.get('observation_exclusions')) else None
     if excluded:
         for key, values in excluded['options'].items():
             options.setdefault(key, []).extend(values)
