@@ -27,7 +27,7 @@ class Lookup:
         if required>budget:
             raise ValueError('SapiensID reference_bytes budget exceeded by lookup working set.')
         from .memory_size import Reservation
-        self.reservation=Reservation(budget)
+        self.reservation=Reservation(budget, label='hybrid-lookup')
         self.reservation.set(required)
         self.faces=np.empty((len(identities),face_dim),dtype='float64')
         self.persons=np.empty((len(identities),person_dim),dtype='float64')

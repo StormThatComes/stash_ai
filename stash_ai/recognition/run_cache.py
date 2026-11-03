@@ -25,6 +25,8 @@ class Cache:
         self.reservations = {}
         self.reserved_size = 0
         self.ceiling, self.matrix_ceiling = limit, matrix_limit
+        self.databases = {}
+        self.reserved_peak = 0
 
     def configure_working(self, working, ceiling):
         self.working, self.ceiling = working, ceiling
@@ -35,13 +37,44 @@ class Cache:
             return
         total = self.reserved_size - self.reservations.get(owner, 0) + size
         if total > self.working:
-            raise ResourceLimit('Recognition working allocations exceed execution.rebuild_memory_bytes.')
+            raise self.resource_error(owner, total)
         self.reserved_size = total
         if size:
             self.reservations[owner] = size
         else:
             self.reservations.pop(owner, None)
         self._resize()
+        self.reserved_peak = max(self.reserved_peak, total)
+        # Each writer may borrow unused space, but its SQLite page ceiling must
+        # shrink before another owner is allowed to allocate that space.
+        for key, db in self.databases.items():
+            db.set_capacity(self.working - total + self.reservations.get(key, 0))
+
+    def resource_error(self, owner, total, *, minimum=False):
+        label = str(owner[0]) if isinstance(owner, tuple) else str(owner)
+        owners = {}
+        for key, size in self.reservations.items():
+            name = str(key[0]) if isinstance(key, tuple) else str(key)
+            owners[name] = owners.get(name, 0) + size
+        detail = ', '.join(f'{name}={size}' for name, size in sorted(owners.items())) or 'none'
+        requested = 'requested_total_at_least_bytes' if minimum else 'requested_total_bytes'
+        return ResourceLimit(
+            'Recognition working allocations exceed execution.rebuild_memory_bytes: '
+            f'owner={label}, {requested}={total}, limit_bytes={self.working}, '
+            f'reserved_bytes={self.reserved_size}, reservations=[{detail}].',
+            budget='execution.rebuild_memory_bytes', limit=self.working, requested=None if minimum else total)
+
+    def register_database(self, db):
+        self.databases[db.owner] = db
+        try:
+            db.account_pages()
+        except BaseException:
+            self.databases.pop(db.owner, None)
+            raise
+
+    def release_database(self, db):
+        self.databases.pop(db.owner, None)
+        self.reserve(db.owner, 0)
 
     def _resize(self):
         if self.working is None:
@@ -141,7 +174,7 @@ def scope(config):
         yield current()
         return
     settings = config.data['execution']
-    # Reserve the remaining memory for replay SQLite, worker queues and banks.
+    # The cache borrows the shared budget left by live pages, queues and banks.
     from .resource_plan import plan
     limit = plan(config).cache
     value = Cache(limit, settings['rebuild_matrix_cache_bytes'])
@@ -152,6 +185,8 @@ def scope(config):
     finally:
         count('ram_cache_peak_bytes', value.peak)
         count('ram_cache_limit_bytes', value.limit)
+        count('ram_working_peak_bytes', value.reserved_peak)
+        count('ram_working_limit_bytes', value.working)
         value.clear()
         _active.reset(token)
 

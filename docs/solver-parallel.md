@@ -2,9 +2,12 @@
 
 The solver keeps recognition thresholds and retained-input contracts unchanged.
 Execution options have a joint CPU ceiling (1–16), a trial count and an optional
-memory admission ceiling. Each trial reserves two rebuild database ceilings,
-reference/plan ceilings and its numerical queue. This conservative admission
-estimate is not a hard operating-system RSS limit. If CPU or memory admission
+memory admission ceiling. Each trial has one shared working budget for its
+history database, inner replay database, reservations and evictable cache.
+Additional reference/plan/queue headroom covers allocations outside that accounting.
+The configured rebuild limit is a maximum: the solver divides its total memory
+budget across requested trials and enforces a smaller working limit when needed.
+This conservative admission estimate is not a hard operating-system RSS limit. If CPU or memory admission
 cannot accommodate the requested trial count, the command fails before baseline
 or candidate trials instead of silently reducing concurrency. The error reports
 the requested/admissible counts and every insufficient resource, including CPU
@@ -54,11 +57,25 @@ An admitted plan preserves `requested_trials`. Insufficient resources produce
 an error with a nonzero exit code, including with `--progress-style off`.
 No baseline, candidate trial, checkpoint or result export is started by an
 admission failure. Automatic memory admission uses 80% of available RAM.
-The per-trial amount is conservative admission accounting based on configured
-ceilings, not measured RSS: raising `execution.rebuild_memory_bytes` can reduce
-admissible parallelism. For example, the default two 8 GiB replay ceilings plus
-references and queues admit only one trial with 24 GiB available RAM: requesting
-four now fails and explains this limit. An explicit
+The per-trial amount is conservative admission accounting, not measured RSS.
+`rebuild_memory_gib` shows the effective per-trial working limit and
+`configured_rebuild_memory_gib` shows the original YAML maximum. For example,
+a 30 GiB configured maximum and a 64 GiB total solver budget with four trials
+give each trial at most 16 GiB including additional headroom; the solver no
+longer demands two full 30 GiB allocations per trial. Both private RAM databases
+and other registered work share that trial's working limit, with SQLite page
+ceilings updated as reservations change. Source snapshots remain on disk under
+`execution.replay_snapshot_bytes`.
+
+The baseline uses the same effective memory limit as candidate trials, including
+spawned workers and reused worker caches. Runtime limits are included in checkpoint
+signatures and never replace the user's YAML values or the winning configuration.
+The 1 MiB schema floor plus headroom must fit every requested trial; otherwise
+admission fails before evaluation. Admitting a budget does not guarantee the input
+fits it: a larger replay fails with a typed resource error naming the owner, actual
+shared limit and reservation totals. Reducing trial count increases available
+memory per trial. Automatic serial execution retains its existing behavior when
+the configured ceiling exceeds detected available RAM. An explicit
 `--solver-memory-gib` replaces automatic admission and must be chosen to fit
 the machine; it does not allocate or enforce an operating-system RAM limit.
 

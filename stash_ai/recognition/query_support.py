@@ -62,7 +62,8 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
     from .memory_size import size, Reservation
     from .query_matrix import QueryMatrix
     families, used, metadata_used = {}, 0, 0
-    reservation=Reservation(config.data['execution']['rebuild_memory_bytes']//4)
+    from .resource_plan import memory_limit
+    reservation=Reservation(memory_limit(config), label='query-cohorts')
     for row in stream():
         family, origin = key(row), prototype(row)
         metadata_used += size((row['id'],row['scan'],row['seconds'],family,origin)) + 512

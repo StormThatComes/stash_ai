@@ -34,13 +34,14 @@ def test_two_production_trials_start_before_either_can_finish(tmp_path, monkeypa
     from stash_ai.recognition import solver_pool
     from stash_ai.recognition import solver_execution
     config, goals = fixture(tmp_path, 'disjoint')
-    monkeypatch.setattr(solver_execution.os, 'process_cpu_count', lambda: 4)
+    monkeypatch.setattr(solver_execution.os, 'process_cpu_count', lambda: 4, raising=False)
     monkeypatch.setattr(solver_pool, 'work', simultaneous_work)
     with closing(_open_readonly(config.database)) as source:
         result = solve(config, goals, source, maximum=3, targeted_trials=0,
             feasibility_trials=0, execution=dict(cpus=4, trials=2,
-                memory_bytes=128 * 1024**3, scheduling=scheduling))
+                memory_bytes=4 * 1024**3, scheduling=scheduling))
     assert result['simulation']['execution']['trials'] == 2
+    assert result['simulation']['execution']['rebuild_memory_bytes'] < config.data['execution']['rebuild_memory_bytes']
     trials = result['simulation']['trials']
     assert set(trials) == {'baseline', 'trial-1', 'trial-2'}
     assert len({trials[name]['worker']['worker_pid'] for name in ('trial-1', 'trial-2')}) == 2
@@ -48,7 +49,7 @@ def test_two_production_trials_start_before_either_can_finish(tmp_path, monkeypa
 
 def test_plan_is_emitted_before_checkpoint_and_measurements(tmp_path, monkeypatch):
     from stash_ai.recognition import merge_solver
-    monkeypatch.setattr('stash_ai.recognition.solver_execution.os.process_cpu_count', lambda: 4)
+    monkeypatch.setattr('stash_ai.recognition.solver_execution.os.process_cpu_count', lambda: 4, raising=False)
     config, goals = fixture(tmp_path, 'face')
     events = []
     def stop_at_measurements(*args, **kwargs):
@@ -69,17 +70,21 @@ def test_plan_is_emitted_before_checkpoint_and_measurements(tmp_path, monkeypatc
 def test_admission_explains_requested_cpu_and_memory_limits(tmp_path, monkeypatch):
     from stash_ai.recognition import solver_execution as execution
     config, _ = fixture(tmp_path, 'face')
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 16)
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 16, raising=False)
     monkeypatch.setattr(execution, 'available_memory', lambda: 24 * 1024**3)
+    shared = execution.plan(config, dict(cpus=16, trials=4))
+    assert shared.trials == 4 and shared.trial_bytes * 4 <= shared.memory_bytes
+    assert shared.rebuild_memory_bytes < config.data['execution']['rebuild_memory_bytes']
+    monkeypatch.setattr(execution, 'available_memory', lambda: 1024)
     with pytest.raises(ValueError) as failure:
         execution.plan(config, dict(cpus=16, trials=4))
     text = str(failure.value)
     assert 'Cannot start 4 simultaneous solver trials' in text
     assert 'resources admit only 1' in text
-    assert 'RAM:' in text and 'budget=19.20 GiB' in text and 'per_trial=' in text
-    assert '80% of 24.00 GiB available' in text and 'required=' in text
+    assert 'RAM:' in text and 'budget=0.00 GiB' in text and 'per_trial=' in text
+    assert '80% of 0.00 GiB available' in text and 'required=' in text
     assert 'CPU:' not in text
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 1)
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 1, raising=False)
     with pytest.raises(ValueError) as failure:
         execution.plan(config, dict(cpus=16, trials=4, memory_bytes=128 * 1024**3))
     text = str(failure.value)
@@ -95,29 +100,32 @@ def test_admission_explains_requested_cpu_and_memory_limits(tmp_path, monkeypatc
 def test_all_insufficient_resources_are_reported(tmp_path, monkeypatch):
     from stash_ai.recognition import solver_execution as execution
     config, _ = fixture(tmp_path, 'face')
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 16)
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 16, raising=False)
     with pytest.raises(ValueError) as failure:
-        execution.plan(config, dict(cpus=2, trials=4, memory_bytes=20 * 1024**3))
+        execution.plan(config, dict(cpus=2, trials=4, memory_bytes=1024))
     text = str(failure.value)
-    assert 'resources admit only 1' in text
+    assert 'resources admit only 0' in text
     assert 'CPU:' in text and 'budget=2' in text and 'available=16' in text
-    assert 'RAM:' in text and 'budget=20.00 GiB (explicit)' in text
+    assert 'RAM:' in text and 'budget=0.00 GiB (explicit)' in text
 
 
 def test_memory_boundary_is_strict_and_unknown_ram_does_not_invent_a_limit(tmp_path, monkeypatch):
     from stash_ai.recognition import solver_execution as execution
     config, _ = fixture(tmp_path, 'face')
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 4)
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 4, raising=False)
     monkeypatch.setattr(execution, 'available_memory', lambda: None)
     admitted = execution.plan(config, dict(cpus=4, trials=4))
     assert admitted.trials == 4
-    memory = admitted.trial_bytes * 4
+    # Admission can reduce the effective cap, but cannot go below the schema
+    # floor plus explicit headroom for untracked allocations.
+    minimum = admitted.trial_bytes - admitted.rebuild_memory_bytes + 1024**2
+    memory = minimum * 4
     assert execution.plan(config, dict(cpus=4, trials=4, memory_bytes=memory)).trials == 4
     with pytest.raises(ValueError, match='resources admit only 3'):
         execution.plan(config, dict(cpus=4, trials=4, memory_bytes=memory-1))
     with pytest.raises(ValueError, match='resources admit only 0'):
-        execution.plan(config, dict(cpus=4, trials=1, memory_bytes=admitted.trial_bytes-1))
-    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 2)
+        execution.plan(config, dict(cpus=4, trials=1, memory_bytes=minimum-1))
+    monkeypatch.setattr(execution.os, 'process_cpu_count', lambda: 2, raising=False)
     with pytest.raises(ValueError) as failure:
         execution.plan(config, dict(cpus=4, trials=4))
     assert 'CPU:' in str(failure.value) and 'RAM:' not in str(failure.value)
@@ -131,14 +139,14 @@ def test_cli_rejects_reduced_concurrency_before_trials_or_output(tmp_path, style
     checkpoint = tmp_path/'checkpoint.json'
     output = tmp_path/'report.json'
     argv = arguments(config, goals, tmp_path, style) + [
-        '--solver-cpus', '4', '--solver-trials', '4', '--solver-memory-gib', '20',
+        '--solver-cpus', '1', '--solver-trials', '4', '--solver-memory-gib', '20',
         '--checkpoint', str(checkpoint), '--output', str(output)]
     repo = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, str(repo/'stash_ai.py'), 'recognition', *argv],
         cwd=repo, env=dict(os.environ, PYTHON_CPU_COUNT='4'), capture_output=True, text=True, timeout=30)
     assert result.returncode == 1, result.stderr
     assert 'Cannot start 4 simultaneous solver trials' in result.stderr
-    assert 'RAM:' in result.stderr and 'resources admit only 1' in result.stderr
+    assert 'CPU:' in result.stderr and 'resources admit only 1' in result.stderr
     assert 'baseline: start' not in result.stderr and 'trial-1: start' not in result.stderr
     assert result.stdout == ''
     assert not checkpoint.exists() and not output.exists() and not (tmp_path/'winner.yml').exists()

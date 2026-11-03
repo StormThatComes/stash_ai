@@ -66,7 +66,7 @@ def analyse(db, config, goals):
     from .global_views import _cooccurs
     from .progress import tracking
     from .memory_size import Reservation, size
-    reservation = Reservation(limits['plan_bytes'])
+    reservation = Reservation(limits['plan_bytes'], label='solver-hybrid-evidence')
     def reserve(required):
         if required > limits['plan_bytes']:
             raise ResourceLimit('SapiensID plan_bytes budget exceeded by solver evidence.')

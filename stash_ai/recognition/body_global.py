@@ -63,7 +63,7 @@ def plan(db,config,bank,*,focus=None):
     labels={label:i for i,label in enumerate(dict.fromkeys(focus.values()))}
     focus={p:labels[g] for p,g in focus.items() if p in bank}
     pairs={};edges={p:set() for p in bank};plan_bytes=size(edges)+size(focus)
-    limit=config.data['sapiensid']['execution']['plan_bytes'];reservation=Reservation(limit)
+    limit=config.data['sapiensid']['execution']['plan_bytes'];reservation=Reservation(limit, label='body-global-plan')
     def reserve(extra=0):
         nonlocal plan_bytes
         plan_bytes+=extra

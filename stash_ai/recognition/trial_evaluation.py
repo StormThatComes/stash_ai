@@ -58,8 +58,6 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                 else:
                     from .trial_inputs import prepare
                     prepare(target, seed)
-                    pages = settings.data['execution']['rebuild_memory_bytes']//target.execute('PRAGMA page_size').fetchone()[0]
-                    target.execute(f'PRAGMA max_page_count={pages}')
             state = SimpleNamespace(connection=target, installation=installation)
             with stage('Rebuild selected identities'):
                 rebuild(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)

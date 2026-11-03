@@ -10,7 +10,12 @@ def prepare(target, seed):
     path = seed.execute('PRAGMA database_list').fetchone()[2]
     if not path:
         # Standalone callers may supply a RAM seed, which cannot be attached.
+        if getattr(target, 'budget', None) is not None:
+            required = seed.execute('PRAGMA page_count').fetchone()[0] * seed.execute('PRAGMA page_size').fetchone()[0]
+            target.budget.reserve(target.owner, required)
         seed.backup(target)
+        if getattr(target, 'budget', None) is not None:
+            target.account_pages()
         return
     from .database import TABLES
     from .profiling import count

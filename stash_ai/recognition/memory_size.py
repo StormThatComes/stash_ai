@@ -20,16 +20,18 @@ def size(value, seen=None):
 
 
 class Reservation:
-    def __init__(self, limit):
+    def __init__(self, limit, *, label='metadata'):
         from .run_cache import current
         import weakref
         self.cache, self.limit = current(), limit
-        self.owner = ('metadata',id(self))
+        self.owner = (label,id(self))
         if self.cache is not None:
             weakref.finalize(self,self.cache.reserve,self.owner,0)
 
     def set(self, required):
         if required > self.limit:
-            raise ResourceLimit('Recognition metadata exceeds execution.rebuild_memory_bytes.')
+            raise ResourceLimit(f'Recognition allocation exceeds its owner budget: owner={self.owner[0]}, '
+                                f'requested_bytes={required}, limit_bytes={self.limit}.',
+                                budget=str(self.owner[0]), limit=self.limit, requested=required)
         if self.cache is not None:
             self.cache.reserve(self.owner,required)

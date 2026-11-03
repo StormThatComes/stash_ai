@@ -115,7 +115,7 @@ class _Cluster:
         if shared is not None and shared.working is not None:
             if self.metadata_reservation is None:
                 from .memory_size import Reservation
-                self.metadata_reservation = Reservation(shared.working)
+                self.metadata_reservation = Reservation(shared.working, label='view-metadata')
             self.metadata_bytes += (1024 if cue not in self.cue_representatives else 0) + (1024 if stamp not in self.cue_times else 0)
             self.metadata_reservation.set(self.metadata_bytes)
         self.cues.add(row)

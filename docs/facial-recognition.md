@@ -2112,8 +2112,9 @@ reference fingerprint and logical reference budget are preserved. General
 reference loads use bounded person batches, including full membership-scope
 validation outside the representative cap.
 
-`execution.rebuild_memory_bytes` is a lazy working-index budget (8 GiB by default),
-not an upfront allocation or the existing representative-vector limit. It can be
+`execution.rebuild_memory_bytes` is a shared live working budget (8 GiB by default),
+covering replay pages, working reservations and evictable caches. It is not an
+upfront allocation, an OS RSS cap or the representative-vector limit. It can be
 increased on hosts with more RAM, such as a 96 GB system. If the canonical index
 cannot fit its conservative per-observation allowance, replay uses the existing
 ordered queries without a new disk-spill cache. A failed replay discards its
@@ -2196,7 +2197,7 @@ ownership remains separate from this CPU pool; invocation-wide unification of
 all model owners is tracked separately in #849/#850.
 
 `rebuild_queue_bytes` bounds queued CPU jobs including estimated scratch/results;
-its effective value is capped at `rebuild_memory_bytes / 16`. Packed matrix
+its effective value is capped at the admitted `rebuild_memory_bytes`. Packed matrix
 caches, the bounded current query batch and sparse-result accumulator retain
 their separate bounded ownership. This field is not a total-process RSS cap or
 unified accounting of every rebuild cache. No disk-backed working cache is
@@ -2830,7 +2831,7 @@ selected-scene work without pretending to reread embeddings.
 
 ### Run-wide immutable evidence cache
 
-`execution.rebuild_cache_bytes` (default 1 GiB, effective maximum one quarter of
+`execution.rebuild_cache_bytes` (default 1 GiB, capped by currently unused
 `rebuild_memory_bytes`) shares one LRU budget across validated vectors, immutable
 JSON metadata, sealed replay cue evidence, packed matrices, numerical pair evidence
 and lazy co-presence lookups. `rebuild_matrix_cache_bytes` (default 512 MiB) caps

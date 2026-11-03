@@ -21,7 +21,7 @@ def reference_stats(left, right, *, max_bytes=4194304):
     side = min(max(len(left), len(right)), max(1, int(math.sqrt(max_bytes/8))))
     while 8*(side*side+2*side*dimensions) > max_bytes:
         side = max(1, side//2)
-    reservation = Reservation(max_bytes)
+    reservation = Reservation(max_bytes, label='solver-face-measurements')
     reservation.set(8*(side*side+2*side*dimensions))
     minimum, maximum, weakest = math.inf, -math.inf, (0, 0)
     def tiles():

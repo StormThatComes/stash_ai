@@ -57,22 +57,23 @@ def test_prefetch_reserves_current_and_pending_before_worker_allocation(tmp_path
     from stash_ai.recognition.replay_memory import Lookahead, memory_replay, release_vectors
     from stash_ai.recognition.run_cache import scope as cache_scope
     from tests.test_recognition_ram_replay import enabled, setup
-    config = enabled(setup(tmp_path), rebuild_prefetch_scenes=True, rebuild_memory_bytes=4*1024*1024)
+    config = enabled(setup(tmp_path), rebuild_prefetch_scenes=True, rebuild_memory_bytes=1536*1024)
     blob=np.zeros(1024, dtype='<f4').tobytes()
     with memory_replay(config) as (db, uri), cache_scope(config) as cache:
         db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER)')
         db.executemany('INSERT INTO observations VALUES (?,?,1024,?,NULL,0)',
             ((s+str(i),s,blob) for s in ('a','b') for i in range(60)))
         db.commit()
+        pages = cache.reserved_size
         with Lookahead(uri,config) as ahead:
             ahead.submit('a'); ahead.take('a')
-            assert cache.reserved_size == 60*(2*len(blob)+1024)
+            assert cache.reserved_size == pages + 60*(2*len(blob)+1024)
             with pytest.raises(ResourceLimit): ahead.submit('b')
             assert ahead.pending is None
             release_vectors()
-            assert cache.reserved_size == 0
+            assert cache.reserved_size == pages
             ahead.submit('b'); ahead.take('b')
-        assert cache.reserved_size == 0
+        assert cache.reserved_size == pages
 
 
 @pytest.mark.parametrize('reason', ['person_sharpness', None])

@@ -1447,11 +1447,14 @@ payloads receive their reference context during insertion rather than a second
 JSON update pass.
 
 The disposable replay database now resides in RAM, including SQLite temporary
-work. Half of `execution.rebuild_memory_bytes` caps its main database pages;
-reference storage, model memory, transient SQLite sorts and separately bounded
-Python caches are additional allocations. Exceeding the page ceiling aborts the
-private replay before durable apply; increase the setting rather than spilling
-to disk. Durable FaceDatabase transactions retain their existing guarantees.
+work. Its live main-database pages share `execution.rebuild_memory_bytes` with
+working reservations and the evictable evidence cache. There is no fixed quarter
+for Python work or half for SQLite: each can borrow unused capacity. Page ceilings
+shrink before other owners reserve that capacity. Exceeding the shared budget
+aborts the private replay before durable apply, with owner, requested bytes and
+reservation totals in the error. Model memory, transient SQLite sorts and other
+untracked overhead are additional allocations; this is not a process RSS cap.
+Durable FaceDatabase transactions retain their existing guarantees.
 
 `execution.rebuild_prefetch_scenes` defaults to false. This experimental option
 uses one isolated read-only reader to validate at most one upcoming scene.
@@ -1461,8 +1464,8 @@ each selected scene, including the first scene in a cold replay. It prepares
 all eligible vectors without a separate per-scene prefetch RAM fraction or
 observation limit. Actual allocation failures, SQLite lock/read failures and
 worker errors fail the rebuild instead of silently falling back to serial
-decoding. `execution.rebuild_memory_bytes` still governs other rebuild caches
-and the in-memory replay database, not the prefetch's own ceiling. Disable the
+decoding. Current and pending prefetched vectors reserve space in the same
+`execution.rebuild_memory_bytes` budget as replay pages and other working data. Disable the
 option explicitly to use serial input handling. The read-only worker traverses indexed observation order
 without a large SQLite sort. Only immutable vectors are prepared; assignments
 and SQLite writes stay ordered on the coordinator. Invalid vectors are reported

@@ -21,7 +21,7 @@ def enabled(config,**execution):
 
 def test_ram_replay_has_no_file_and_enforces_page_capacity(tmp_path):
     config=enabled(setup(tmp_path),rebuild_memory_bytes=1048576)
-    with pytest.raises(ValueError,match='RAM replay exceeds'):
+    with pytest.raises(ValueError,match='owner=sqlite-rebuild'):
         with memory_replay(config) as (db,uri):
             assert db.execute('PRAGMA database_list').fetchone()[2]==''
             assert db.execute('PRAGMA temp_store').fetchone()[0]==2
