@@ -3,6 +3,7 @@ from itertools import groupby
 
 from .database import encoded
 from .scan_heads import predicate
+from .progress import stage, tracking
 
 
 TEMP_TABLES = ('retention_scans', 'retention_success', 'retention_targets', 'retention_pins',
@@ -18,86 +19,94 @@ def prepare(db, config, *, scope=None, scenes=None):
     """Caller holds one snapshot/transaction through planning and application."""
     from .models import namespace
     from .scanning import scan_identity
-    discard(db)
-    db.execute('CREATE TEMP TABLE retention_scans(id TEXT PRIMARY KEY, action TEXT, reason TEXT)')
-    db.execute('CREATE TEMP TABLE retention_success(scan TEXT PRIMARY KEY)')
-    db.execute('CREATE TEMP TABLE retention_targets(id TEXT PRIMARY KEY, scan TEXT NOT NULL)')
-    db.execute('CREATE TEMP TABLE retention_pins(id TEXT PRIMARY KEY, image INTEGER NOT NULL)')
-    db.execute('CREATE TEMP TABLE retention_actions(table_name TEXT, id TEXT, contract TEXT, action TEXT, '
-               'PRIMARY KEY(table_name,id,contract))')
-    db.execute('CREATE TEMP TABLE retention_contracts(scan TEXT, kind TEXT, contract TEXT, '
-               'PRIMARY KEY(scan,kind,contract))')
-    db.execute('CREATE TEMP TABLE retention_thumbnails(id TEXT PRIMARY KEY)')
+    with stage('Initialize retention plan'):
+        discard(db)
+        db.execute('CREATE TEMP TABLE retention_scans(id TEXT PRIMARY KEY, action TEXT, reason TEXT)')
+        db.execute('CREATE TEMP TABLE retention_success(scan TEXT PRIMARY KEY)')
+        db.execute('CREATE TEMP TABLE retention_targets(id TEXT PRIMARY KEY, scan TEXT NOT NULL)')
+        db.execute('CREATE TEMP TABLE retention_pins(id TEXT PRIMARY KEY, image INTEGER NOT NULL)')
+        db.execute('CREATE TEMP TABLE retention_actions(table_name TEXT, id TEXT, contract TEXT, action TEXT, '
+                   'PRIMARY KEY(table_name,id,contract))')
+        db.execute('CREATE TEMP TABLE retention_contracts(scan TEXT, kind TEXT, contract TEXT, '
+                   'PRIMARY KEY(scan,kind,contract))')
+        db.execute('CREATE TEMP TABLE retention_thumbnails(id TEXT PRIMARY KEY)')
     model = namespace(config)
     policy = scan_identity(config, model)
     settings = config.data['storage']['retention']
-    # A complete scan alone is not proof that rebuilding/publication succeeded.
-    db.execute("INSERT OR IGNORE INTO retention_success SELECT json_extract(j.value,'$.scan') "
-               "FROM progress p JOIN runs r ON r.id=p.run, json_each(p.data,'$.selection') j "
-               "WHERE r.status='success' AND p.phase='rebuild' AND json_extract(j.value,'$.scan') IS NOT NULL")
-    rows = db.execute('SELECT s.*,(' + predicate() + ') AS active FROM scans s WHERE namespace=? '
-                      'AND (? IS NULL OR scope=?) AND (? IS NULL OR scene IN (SELECT value FROM json_each(?))) '
-                      'ORDER BY scope,scene,rowid DESC',
-                      (model, scope, scope, None if scenes is None else encoded(scenes), encoded(scenes)))
-    for _, group in groupby(rows, lambda r: (r['scope'], r['scene'])):
-        scans = list(group)
-        active = next((r for r in scans if r['active']), None)
-        blocked = None
-        if active is None or active['status'] != 'complete' or active['cursor'] != active['total']:
-            blocked = 'active_scan_incomplete'
-        elif active['policy_sha'] != policy:
-            blocked = 'configuration_differs_from_active_scan'
-        elif not db.execute('SELECT 1 FROM retention_success WHERE scan=?', (active['id'],)).fetchone():
-            blocked = 'no_successful_replacement_run'
-        elif db.execute("SELECT 1 FROM publications WHERE scope=? AND scene=? "
-                        "AND status NOT IN ('confirmed','observed') LIMIT 1",
-                        (active['scope'], active['scene'])).fetchone():
-            blocked = 'unresolved_publication'
-        # A reconciliation queue may have no publication intent yet.
-        if not blocked:
-            from .publication_queue import key
-            if db.execute('SELECT 1 FROM metadata WHERE key=?',
-                          (key(active['scope'], model, active['scene']),)).fetchone():
-                blocked = 'pending_scene_reconciliation'
-        previous = settings['keep_previous_scans']
-        for index, scan in enumerate(scans):
-            reason = blocked
-            if not reason:
-                if scan['active']:
-                    reason = 'active_scan'
-                elif scan['status'] != 'complete' or scan['cursor'] != scan['total']:
-                    reason = 'incomplete_scan'
-                elif previous:
-                    reason = 'previous_scan'
-                    previous -= 1
-                elif index == 0:
-                    # The remembered-head marker refers to the newest created ID.
-                    reason = 'head_creation_marker'
-            db.execute('INSERT INTO retention_scans VALUES (?,?,?)',
-                       (scan['id'], 'keep' if reason else 'obsolete', reason))
-    _pins(db)
-    # Keep immutable numerical/geometry evidence that still owns identity roots.
-    db.execute("UPDATE retention_scans SET action='archive',reason='identity_or_audit_reference' "
-               "WHERE action='obsolete' AND (EXISTS (SELECT 1 FROM observations o JOIN retention_pins p ON p.id=o.id "
-               "WHERE o.scan=retention_scans.id) OR EXISTS (SELECT 1 FROM body_observations b "
-               "JOIN retention_pins p ON p.id=b.id WHERE b.scan=retention_scans.id))")
-    db.execute("UPDATE retention_scans SET action='delete' WHERE action='obsolete'")
-    for table, address in (('observations', 'id'), ('body_observations', 'id')):
-        db.execute(f"INSERT INTO retention_actions SELECT '{table}',o.{address},'', 'delete' FROM {table} o "
+    with stage('Read successful replacement runs'):
+        # A complete scan alone is not proof that rebuilding/publication succeeded.
+        db.execute("INSERT OR IGNORE INTO retention_success SELECT json_extract(j.value,'$.scan') "
+                   "FROM progress p JOIN runs r ON r.id=p.run, json_each(p.data,'$.selection') j "
+                   "WHERE r.status='success' AND p.phase='rebuild' AND json_extract(j.value,'$.scan') IS NOT NULL")
+    with stage('Select retained scans'):
+        rows = db.execute('SELECT s.*,(' + predicate() + ') AS active FROM scans s WHERE namespace=? '
+                          'AND (? IS NULL OR scope=?) AND (? IS NULL OR scene IN (SELECT value FROM json_each(?))) '
+                          'ORDER BY scope,scene,rowid DESC',
+                          (model, scope, scope, None if scenes is None else encoded(scenes), encoded(scenes)))
+        with tracking(groupby(rows, lambda r: (r['scope'], r['scene'])),
+                      'Inspect retention scenes', unit='scene') as groups:
+            for _, group in groups:
+                scans = list(group)
+                active = next((r for r in scans if r['active']), None)
+                blocked = None
+                if active is None or active['status'] != 'complete' or active['cursor'] != active['total']:
+                    blocked = 'active_scan_incomplete'
+                elif active['policy_sha'] != policy:
+                    blocked = 'configuration_differs_from_active_scan'
+                elif not db.execute('SELECT 1 FROM retention_success WHERE scan=?', (active['id'],)).fetchone():
+                    blocked = 'no_successful_replacement_run'
+                elif db.execute("SELECT 1 FROM publications WHERE scope=? AND scene=? "
+                                "AND status NOT IN ('confirmed','observed') LIMIT 1",
+                                (active['scope'], active['scene'])).fetchone():
+                    blocked = 'unresolved_publication'
+                # A reconciliation queue may have no publication intent yet.
+                if not blocked:
+                    from .publication_queue import key
+                    if db.execute('SELECT 1 FROM metadata WHERE key=?',
+                                  (key(active['scope'], model, active['scene']),)).fetchone():
+                        blocked = 'pending_scene_reconciliation'
+                previous = settings['keep_previous_scans']
+                for index, scan in enumerate(scans):
+                    reason = blocked
+                    if not reason:
+                        if scan['active']:
+                            reason = 'active_scan'
+                        elif scan['status'] != 'complete' or scan['cursor'] != scan['total']:
+                            reason = 'incomplete_scan'
+                        elif previous:
+                            reason = 'previous_scan'
+                            previous -= 1
+                        elif index == 0:
+                            # The remembered-head marker refers to the newest created ID.
+                            reason = 'head_creation_marker'
+                    db.execute('INSERT INTO retention_scans VALUES (?,?,?)',
+                               (scan['id'], 'keep' if reason else 'obsolete', reason))
+    with stage('Protect identity and audit references'):
+        _pins(db)
+    with stage('Plan obsolete scans and crops'):
+        # Keep immutable numerical/geometry evidence that still owns identity roots.
+        db.execute("UPDATE retention_scans SET action='archive',reason='identity_or_audit_reference' "
+                   "WHERE action='obsolete' AND (EXISTS (SELECT 1 FROM observations o JOIN retention_pins p ON p.id=o.id "
+                   "WHERE o.scan=retention_scans.id) OR EXISTS (SELECT 1 FROM body_observations b "
+                   "JOIN retention_pins p ON p.id=b.id WHERE b.scan=retention_scans.id))")
+        db.execute("UPDATE retention_scans SET action='delete' WHERE action='obsolete'")
+        for table, address in (('observations', 'id'), ('body_observations', 'id')):
+            db.execute(f"INSERT INTO retention_actions SELECT '{table}',o.{address},'', 'delete' FROM {table} o "
+                       "JOIN retention_scans s ON s.id=o.scan WHERE s.action='delete'")
+            if settings['prune_obsolete_crops']:
+                db.execute(f"INSERT INTO retention_actions SELECT '{table}',o.{address},'', 'clear_crop' FROM {table} o "
+                           "JOIN retention_scans s ON s.id=o.scan WHERE s.action='archive' AND o.crop IS NOT NULL "
+                           "AND NOT EXISTS (SELECT 1 FROM retention_pins p WHERE p.id=o.id AND p.image>=1)")
+        db.execute("INSERT INTO retention_actions SELECT 'person_evidence',p.observation,p.contract,'delete' "
+                   "FROM person_evidence p JOIN observations o ON o.id=p.observation "
                    "JOIN retention_scans s ON s.id=o.scan WHERE s.action='delete'")
         if settings['prune_obsolete_crops']:
-            db.execute(f"INSERT INTO retention_actions SELECT '{table}',o.{address},'', 'clear_crop' FROM {table} o "
-                       "JOIN retention_scans s ON s.id=o.scan WHERE s.action='archive' AND o.crop IS NOT NULL "
-                       "AND NOT EXISTS (SELECT 1 FROM retention_pins p WHERE p.id=o.id AND p.image>=1)")
-    db.execute("INSERT INTO retention_actions SELECT 'person_evidence',p.observation,p.contract,'delete' "
-               "FROM person_evidence p JOIN observations o ON o.id=p.observation "
-               "JOIN retention_scans s ON s.id=o.scan WHERE s.action='delete'")
-    if settings['prune_obsolete_crops']:
-        db.execute("INSERT INTO retention_actions SELECT 'person_evidence',p.observation,p.contract,'clear_crop' "
-                   "FROM person_evidence p JOIN observations o ON o.id=p.observation "
-                   "JOIN retention_scans s ON s.id=o.scan WHERE s.action='archive' AND p.crop IS NOT NULL "
-                   "AND NOT EXISTS (SELECT 1 FROM retention_pins pin WHERE pin.id=o.id AND pin.image>=1)")
-    _contracts(db, config)
+            db.execute("INSERT INTO retention_actions SELECT 'person_evidence',p.observation,p.contract,'clear_crop' "
+                       "FROM person_evidence p JOIN observations o ON o.id=p.observation "
+                       "JOIN retention_scans s ON s.id=o.scan WHERE s.action='archive' AND p.crop IS NOT NULL "
+                       "AND NOT EXISTS (SELECT 1 FROM retention_pins pin WHERE pin.id=o.id AND pin.image>=1)")
+    with stage('Plan obsolete person contracts'):
+        _contracts(db, config)
 
 
 def _pins(db):
@@ -124,10 +133,11 @@ def _pins(db):
         ('publications', 'precondition', '1', 2),
         ('candidates', 'payload', "(t.scan NOT IN (SELECT id FROM retention_scans WHERE action='obsolete') OR e.scan<>t.scan)", 0),
     ):
-        if db.execute(f'SELECT 1 FROM {table} t WHERE NOT json_valid(t.{column}) LIMIT 1').fetchone():
-            raise ValueError(f'Retention cannot inspect malformed {table}.{column}; no data was pruned.')
-        pin(f'SELECT e.id FROM {table} t, json_tree(t.{column}) j JOIN retention_targets e ON e.id=j.value '
-            f"WHERE j.type='text' AND ({condition})", image)
+        with stage(f'Protect references: {table}.{column}'):
+            if db.execute(f'SELECT 1 FROM {table} t WHERE NOT json_valid(t.{column}) LIMIT 1').fetchone():
+                raise ValueError(f'Retention cannot inspect malformed {table}.{column}; no data was pruned.')
+            pin(f'SELECT e.id FROM {table} t, json_tree(t.{column}) j JOIN retention_targets e ON e.id=j.value '
+                f"WHERE j.type='text' AND ({condition})", image)
 
 
 def _contracts(db, config):
@@ -140,68 +150,69 @@ def _contracts(db, config):
     # archived/incomplete/blocked scans' numerical evidence untouched.
     scans = db.execute("SELECT s.id,s.total FROM scans s JOIN retention_scans r ON r.id=s.id "
                        "WHERE r.reason IN ('active_scan','previous_scan')")
-    for scan, total in scans:
-        for kind, expected in (('person', person_contract(config)), ('body', body_contract(config))):
-            if kind == 'body':
-                if not enabled(config):
-                    continue
-                complete = db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues '
-                                      'WHERE scan=? AND contract=?', (scan, expected)).fetchone()
-                if not total or tuple(complete) != (total, 0, total - 1):
-                    continue
-                variants = [r[0] for r in db.execute('SELECT contract FROM body_cues WHERE scan=? '
-                            'GROUP BY contract ORDER BY MAX(rowid) DESC', (scan,))]
-            else:
-                if not db.execute('SELECT 1 FROM person_evidence p JOIN observations o ON o.id=p.observation '
-                                  'WHERE o.scan=? AND p.contract=? LIMIT 1', (scan, expected)).fetchone():
-                    continue
-                if db.execute('SELECT 1 FROM observations o WHERE o.scan=? AND o.rejected IS NULL AND NOT EXISTS '
-                              '(SELECT 1 FROM person_evidence p WHERE p.observation=o.id AND p.contract=?) LIMIT 1',
-                              (scan, expected)).fetchone():
-                    continue
-                variants = [r[0] for r in db.execute('SELECT p.contract FROM person_evidence p '
-                            'JOIN observations o ON o.id=p.observation WHERE o.scan=? '
-                            'GROUP BY p.contract ORDER BY MAX(p.rowid) DESC', (scan,))]
-            previous = settings['keep_previous_person_contracts']
-            for variant in variants:
-                if variant == expected:
-                    continue
+    with tracking(scans, 'Inspect person contracts', unit='scan') as items:
+        for scan, total in items:
+            for kind, expected in (('person', person_contract(config)), ('body', body_contract(config))):
                 if kind == 'body':
-                    coverage = db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues '
-                                          'WHERE scan=? AND contract=?', (scan, variant)).fetchone()
-                    if tuple(coverage) != (total, 0, total - 1):
-                        continue  # resumable partial variants do not consume rollback slots
-                elif db.execute('SELECT 1 FROM observations o WHERE o.scan=? AND o.rejected IS NULL AND NOT EXISTS '
-                                '(SELECT 1 FROM person_evidence p WHERE p.observation=o.id AND p.contract=?) LIMIT 1',
-                                (scan, variant)).fetchone():
-                    continue
-                if previous:
-                    previous -= 1
-                    continue
-                db.execute('INSERT INTO retention_contracts VALUES (?,?,?)', (scan, kind, variant))
-                if kind == 'body':
-                    source = 'body_observations o'
-                    where = 'o.scan=? AND o.contract=?'
-                    address, contract, table = 'o.id', "''", 'body_observations'
-                    # body_cues certifies the complete variant, so never delete
-                    # just some detections behind a still-complete certificate.
-                    deletable = not db.execute('SELECT 1 FROM body_observations b JOIN retention_pins p ON p.id=b.id '
-                                               'WHERE b.scan=? AND b.contract=? LIMIT 1', (scan, variant)).fetchone()
+                    if not enabled(config):
+                        continue
+                    complete = db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues '
+                                          'WHERE scan=? AND contract=?', (scan, expected)).fetchone()
+                    if not total or tuple(complete) != (total, 0, total - 1):
+                        continue
+                    variants = [r[0] for r in db.execute('SELECT contract FROM body_cues WHERE scan=? '
+                                'GROUP BY contract ORDER BY MAX(rowid) DESC', (scan,))]
                 else:
-                    source = 'person_evidence o JOIN observations f ON f.id=o.observation'
-                    where = 'f.scan=? AND o.contract=?'
-                    address, contract, table = 'o.observation', 'o.contract', 'person_evidence'
-                    deletable = not db.execute('SELECT 1 FROM person_evidence p JOIN observations f ON f.id=p.observation '
-                                               'JOIN retention_pins pin ON pin.id=p.observation WHERE f.scan=? '
-                                               'AND p.contract=? LIMIT 1', (scan, variant)).fetchone()
-                if deletable:
-                    db.execute(f"INSERT OR IGNORE INTO retention_actions SELECT '{table}',{address},{contract},'delete' "
-                               f'FROM {source} WHERE {where} AND NOT EXISTS '
-                               f'(SELECT 1 FROM retention_pins p WHERE p.id={address})', (scan, variant))
-                if settings['prune_obsolete_crops']:
-                    db.execute(f"INSERT OR IGNORE INTO retention_actions SELECT '{table}',{address},{contract},'clear_crop' "
-                               f'FROM {source} WHERE {where} AND o.crop IS NOT NULL AND NOT EXISTS '
-                               f'(SELECT 1 FROM retention_pins p WHERE p.id={address} AND p.image>={2 if kind == "person" else 1})', (scan, variant))
+                    if not db.execute('SELECT 1 FROM person_evidence p JOIN observations o ON o.id=p.observation '
+                                      'WHERE o.scan=? AND p.contract=? LIMIT 1', (scan, expected)).fetchone():
+                        continue
+                    if db.execute('SELECT 1 FROM observations o WHERE o.scan=? AND o.rejected IS NULL AND NOT EXISTS '
+                                  '(SELECT 1 FROM person_evidence p WHERE p.observation=o.id AND p.contract=?) LIMIT 1',
+                                  (scan, expected)).fetchone():
+                        continue
+                    variants = [r[0] for r in db.execute('SELECT p.contract FROM person_evidence p '
+                                'JOIN observations o ON o.id=p.observation WHERE o.scan=? '
+                                'GROUP BY p.contract ORDER BY MAX(p.rowid) DESC', (scan,))]
+                previous = settings['keep_previous_person_contracts']
+                for variant in variants:
+                    if variant == expected:
+                        continue
+                    if kind == 'body':
+                        coverage = db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues '
+                                              'WHERE scan=? AND contract=?', (scan, variant)).fetchone()
+                        if tuple(coverage) != (total, 0, total - 1):
+                            continue  # resumable partial variants do not consume rollback slots
+                    elif db.execute('SELECT 1 FROM observations o WHERE o.scan=? AND o.rejected IS NULL AND NOT EXISTS '
+                                    '(SELECT 1 FROM person_evidence p WHERE p.observation=o.id AND p.contract=?) LIMIT 1',
+                                    (scan, variant)).fetchone():
+                        continue
+                    if previous:
+                        previous -= 1
+                        continue
+                    db.execute('INSERT INTO retention_contracts VALUES (?,?,?)', (scan, kind, variant))
+                    if kind == 'body':
+                        source = 'body_observations o'
+                        where = 'o.scan=? AND o.contract=?'
+                        address, contract, table = 'o.id', "''", 'body_observations'
+                        # body_cues certifies the complete variant, so never delete
+                        # just some detections behind a still-complete certificate.
+                        deletable = not db.execute('SELECT 1 FROM body_observations b JOIN retention_pins p ON p.id=b.id '
+                                                   'WHERE b.scan=? AND b.contract=? LIMIT 1', (scan, variant)).fetchone()
+                    else:
+                        source = 'person_evidence o JOIN observations f ON f.id=o.observation'
+                        where = 'f.scan=? AND o.contract=?'
+                        address, contract, table = 'o.observation', 'o.contract', 'person_evidence'
+                        deletable = not db.execute('SELECT 1 FROM person_evidence p JOIN observations f ON f.id=p.observation '
+                                                   'JOIN retention_pins pin ON pin.id=p.observation WHERE f.scan=? '
+                                                   'AND p.contract=? LIMIT 1', (scan, variant)).fetchone()
+                    if deletable:
+                        db.execute(f"INSERT OR IGNORE INTO retention_actions SELECT '{table}',{address},{contract},'delete' "
+                                   f'FROM {source} WHERE {where} AND NOT EXISTS '
+                                   f'(SELECT 1 FROM retention_pins p WHERE p.id={address})', (scan, variant))
+                    if settings['prune_obsolete_crops']:
+                        db.execute(f"INSERT OR IGNORE INTO retention_actions SELECT '{table}',{address},{contract},'clear_crop' "
+                                   f'FROM {source} WHERE {where} AND o.crop IS NOT NULL AND NOT EXISTS '
+                                   f'(SELECT 1 FROM retention_pins p WHERE p.id={address} AND p.image>={2 if kind == "person" else 1})', (scan, variant))
 
 
 def summarize(db):

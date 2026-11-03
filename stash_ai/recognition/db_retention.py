@@ -4,10 +4,12 @@ import sqlite3
 from types import SimpleNamespace
 
 from stash_ai.db.common import format_bytes
+from stash_ai.runtime.console import current_report, phase
 from stash_ai.storage.writer_lock import writer_lock
 from . import database as schema
 from . import retention_plan as plan
 from .db_maintenance import _path, _connect, _header
+from .progress import stage, tracking, work
 
 FACE_CROPS = 'recognition-pruned-face-crops:'
 
@@ -26,12 +28,16 @@ def _validate(db):
 
 
 def _apply(db):
+    statements = []
+    def add(label, sql, parameters=()):
+        statements.append((label, sql, parameters))
+
     # Preserve enough information to restore archived face crops without model
     # inference if the operator selects that exact scan policy again.
-    db.execute("INSERT OR IGNORE INTO metadata SELECT ?||o.scan,'true' FROM observations o "
+    add('Remember archived face crops', "INSERT OR IGNORE INTO metadata SELECT ?||o.scan,'true' FROM observations o "
                "JOIN retention_actions a ON a.id=o.id WHERE a.table_name='observations' AND a.action='clear_crop'",
                (FACE_CROPS,))
-    db.execute("INSERT OR IGNORE INTO retention_thumbnails SELECT json_extract(o.quality,'$.evidence_thumbnail_id') "
+    add('Collect obsolete thumbnail references', "INSERT OR IGNORE INTO retention_thumbnails SELECT json_extract(o.quality,'$.evidence_thumbnail_id') "
                "FROM observations o JOIN retention_actions a ON a.id=o.id WHERE a.table_name='observations' "
                "AND a.action='delete' AND json_extract(o.quality,'$.evidence_thumbnail_id') IS NOT NULL")
     for table, address, metadata in (('person_evidence', 'observation', 'metadata'),
@@ -41,30 +47,35 @@ def _apply(db):
         if metadata:
             # Existing person backfill can rehydrate these pixels on reuse.
             update += f",{metadata}=json_set({metadata},'$.crop_status','retention_pruned','$.crop_attempt_limit',0)"
-        db.execute(f'UPDATE {table} SET {update} WHERE EXISTS (SELECT 1 FROM retention_actions a '
+        add(f'Clear obsolete crops: {table}', f'UPDATE {table} SET {update} WHERE EXISTS (SELECT 1 FROM retention_actions a '
                    f"WHERE a.table_name=? AND a.action='clear_crop' AND {match})", (table,))
     # Delete references before their parents. Pins include SQL and JSON roots.
-    db.execute("DELETE FROM candidates WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
-    db.execute("DELETE FROM body_cues WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete') "
+    add('Delete obsolete candidates', "DELETE FROM candidates WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
+    add('Delete obsolete body cues', "DELETE FROM body_cues WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete') "
                "OR EXISTS (SELECT 1 FROM retention_contracts c WHERE c.kind='body' AND c.scan=body_cues.scan "
                "AND c.contract=body_cues.contract AND NOT EXISTS (SELECT 1 FROM body_observations b "
                "WHERE b.scan=c.scan AND b.contract=c.contract AND NOT EXISTS (SELECT 1 FROM retention_actions a "
                "WHERE a.table_name='body_observations' AND a.id=b.id AND a.action='delete')))")
     for table, address in (('person_evidence', 'observation'), ('body_observations', 'id'), ('observations', 'id')):
         match = f'a.id={table}.{address}' + (f' AND a.contract={table}.contract' if table == 'person_evidence' else '')
-        db.execute(f'DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM retention_actions a '
+        add(f'Delete obsolete evidence: {table}', f'DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM retention_actions a '
                    f"WHERE a.table_name=? AND a.action='delete' AND {match})", (table,))
-    db.execute("DELETE FROM scans WHERE id IN (SELECT id FROM retention_scans WHERE action='delete')")
+    add('Delete obsolete scans', "DELETE FROM scans WHERE id IN (SELECT id FROM retention_scans WHERE action='delete')")
     # Only collect thumbnails made unreferenced by this plan, including sharing
     # with other scenes/model namespaces. Never touch matching RGB signatures.
-    db.execute('DELETE FROM evidence_thumbnails WHERE id IN (SELECT id FROM retention_thumbnails) '
+    add('Delete unreferenced thumbnails', 'DELETE FROM evidence_thumbnails WHERE id IN (SELECT id FROM retention_thumbnails) '
                "AND NOT EXISTS (SELECT 1 FROM observations o WHERE json_extract(o.quality,'$.evidence_thumbnail_id')=evidence_thumbnails.id)")
     for table in ('evidence_versions', 'evidence_fingerprints'):
-        db.execute(f"DELETE FROM {table} WHERE kind IN ('scan','raw-observations','raw-person','raw-body') "
+        add(f'Delete obsolete bookkeeping: {table}', f"DELETE FROM {table} WHERE kind IN ('scan','raw-observations','raw-person','raw-body') "
                    "AND key IN (SELECT id FROM retention_scans WHERE action='delete')")
-    db.execute("DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete')", (FACE_CROPS,))
-    if db.execute('PRAGMA foreign_key_check').fetchone():
-        raise ValueError('Retention would break identity references; changes rolled back.')
+    add('Delete obsolete crop markers', "DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete')", (FACE_CROPS,))
+    with tracking(statements, 'Prune obsolete recognition evidence', unit='statement') as steps:
+        for label, sql, parameters in steps:
+            with stage(label):
+                db.execute(sql, parameters)
+    with stage('Validate retained identity references'):
+        if db.execute('PRAGMA foreign_key_check').fetchone():
+            raise ValueError('Retention would break identity references; changes rolled back.')
 
 
 def on_connection(db, config, *, apply=False, scope=None, scenes=None, notify=lambda *args: None):
@@ -74,7 +85,8 @@ def on_connection(db, config, *, apply=False, scope=None, scenes=None, notify=la
     notify('Plan recognition retention', 0, 1)
     try:
         plan.prepare(db, config, scope=scope, scenes=scenes)
-        result = plan.summarize(db)
+        with stage('Summarize reclaimable evidence'):
+            result = plan.summarize(db)
         result.update(applied=apply, scope=scope, scenes=scenes,
                       settings=dict(config.data['storage']['retention']))
         notify('Plan recognition retention', 1, 1)
@@ -84,7 +96,8 @@ def on_connection(db, config, *, apply=False, scope=None, scenes=None, notify=la
             notify('Prune obsolete recognition evidence', 1, 1)
         return result
     finally:
-        plan.discard(db)
+        with stage('Discard temporary retention plan'):
+            plan.discard(db)
 
 
 def prune_database(config, *, apply=False, scope=None, scenes=None, notify=lambda *args: None):
@@ -142,15 +155,32 @@ def after_run(database, config, run):
         return None
     if db.in_transaction:
         raise ValueError('Finish the recognition transaction before automatic retention.')
-    db.execute('BEGIN IMMEDIATE')
-    try:
-        result = on_connection(db, config, apply=True, scope=record['scope'], scenes=scenes)
-        db.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)', (run, 'retention', schema.encoded(result)))
-        db.commit()
-        return result
-    except BaseException:
-        db.rollback()
-        raise
+    with phase(current_report(), 'Recognition auto prune'), work(
+            'Auto prune recognition', 3, unit='step', position=0) as progress:
+        console = getattr(current_report(), 'console', None)
+        if console is not None:
+            with console.lock:
+                console.completed = None
+        def notify(label, completed, total):
+            # Planning and deletion finish before commit. Never report 3/3
+            # until the atomic result and retention history are durable.
+            offset = 0 if label == 'Plan recognition retention' else 1
+            # Phase transitions must be visible before the next blocking SQL
+            # call, even when planning finished inside the UI throttle window.
+            progress.set_completed(offset + completed, force=True)
+        with stage('Begin automatic retention transaction'):
+            db.execute('BEGIN IMMEDIATE')
+        try:
+            result = on_connection(db, config, apply=True, scope=record['scope'], scenes=scenes, notify=notify)
+            with stage('Commit automatic retention'):
+                db.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)', (run, 'retention', schema.encoded(result)))
+                db.commit()
+            progress.advance()
+            return result
+        except BaseException:
+            with stage('Roll back automatic retention'):
+                db.rollback()
+            raise
 
 
 def format_report(result):
@@ -170,7 +200,7 @@ def execute(args, config):
     from stash_ai.runtime.console import present, activity
     from stash_ai.runtime.report import RunReport
     report = RunReport(args.progress_style == 'verbose')
-    with present(report, 'off' if args.json else args.progress_style, status_position=0):
+    with present(report, 'off' if args.json else args.progress_style, status_position=2):
         def notify(phase, completed, total):
             report.console.update(stage=phase, work=f'{completed}/{total}')
         with activity(report, 'Recognition retention'):
