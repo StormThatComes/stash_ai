@@ -201,7 +201,8 @@ class BidirectionalSearch:
         if not self.enabled:
             return
         self.executed += int(phase == 'bidirectional')
-        conflict_free = (status['disjoint'] and status.get('scene_exclusions_satisfied', True)
+        from .merge_scene_exclusions import satisfied
+        conflict_free = (status['disjoint'] and satisfied(status)
                          and status.get('outside_preserved', True))
         if conflict_free and (self.safe is None or rank > self.safe['rank']):
             self.safe = dict(name=name, changes=changes, rank=rank)

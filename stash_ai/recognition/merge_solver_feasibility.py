@@ -105,7 +105,8 @@ class Feasibility:
                 observed_blockers=[dict(stage=stage, reason=reason, count=count)
                                    for (stage, reason), count in blockers.most_common(16)]))
         merged = all(g['merged'] for g in groups)
-        conflicts = (not status['disjoint'] or not status.get('scene_exclusions_satisfied', True)
+        from .merge_scene_exclusions import satisfied
+        conflicts = (not status['disjoint'] or not satisfied(status)
                      or not status.get('outside_preserved', True))
         outcome = ('possible' if merged and status['fully_solved'] else
                    'possible_with_conflicts' if merged and conflicts else

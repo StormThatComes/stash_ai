@@ -78,6 +78,8 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
                 header += ('# Preservation uses set scene coverage; member representation and soft budgets are diagnostics.\n')
             if diagnostics.get('scene_exclusions'):
                 header += '# Explicit performer/scene exclusions were evaluated; see JSON. These are not runtime overrides.\n'
+            if diagnostics.get('observation_exclusions'):
+                header += '# Explicit performer/observation exclusions were evaluated; see JSON. These are not runtime overrides.\n'
         if not recommendation['fully_solved']:
             reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
             header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
@@ -130,10 +132,11 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
     for path in sorted(Path(__file__).parent.glob('*.py')):
         code_hash.update(path.name.encode())
         code_hash.update(path.read_bytes())
+    from .merge_scene_exclusions import KINDS
     result['provenance'] = dict(code_sha256=code_hash.hexdigest(), snapshot_sha256=result.get('snapshot_sha256'), configuration_sha256=digest(plain(config.data)),
         source_sha256=hashlib.sha256(config.source).hexdigest(), namespace=result['namespace'],
         goals_sha256=digest(dict(groups=result['groups'], goal_policy=result.get('goal_policy'),
-            **({'scene_exclusions': result['scene_exclusions']} if result.get('scene_exclusions') else {}))),
+            **{kind + '_exclusions': result[kind + '_exclusions'] for kind in KINDS if result.get(kind + '_exclusions')})),
         validity='Same retained evidence, scope, model, code and joint scene selection; changed media requires revalidation.')
     explain(result)
     text = json.dumps(result, indent=2, allow_nan=False) + '\n'
