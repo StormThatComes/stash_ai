@@ -83,17 +83,30 @@ def test_history_records_fatal_model_cleanup_failure(tmp_path, monkeypatch):
 
 def test_rebuild_scratch_close_preserves_primary_failure(tmp_path, monkeypatch):
     import stash_ai.recognition.rebuild as rebuild
+    from stash_ai.recognition import ram_database
     config = cluster_config(tmp_path)
     with FaceDatabase(config.database) as db:
         selected, _ = scan(db, config, '1')
-        connect = sqlite3.connect
-        class Connection(sqlite3.Connection):
+        closed = []
+        class Connection(ram_database.Connection):
             def close(self):
+                budget, owner = self.budget, self.owner
                 super().close()
+                closed.append((self, budget, owner))
                 raise OSError('scratch close failed')
-        monkeypatch.setattr(sqlite3, 'connect', lambda *a,**kw:connect(*a, **kw, factory=Connection))
-        def fail(*a, **kw): raise RuntimeError('primary replay failure')
+        # Inject at the RAM writer factory, preserving its page accounting and
+        # leaving schema validation and other SQLite connections untouched.
+        monkeypatch.setattr(ram_database, 'Connection', Connection)
+        primary = RuntimeError('primary replay failure')
+        def fail(*a, **kw): raise primary
         monkeypatch.setattr(rebuild, 'cluster_scene', fail)
         with pytest.raises(RuntimeError, match='primary replay failure') as caught:
             rebuild_selected(db, [{'scene':'1','scan':selected}], config)
+        assert caught.value is primary
         assert any('scratch close failed' in note for note in caught.value.__notes__)
+        assert len(closed) == 1
+        connection, budget, owner = closed[0]
+        assert connection.budget is None
+        assert owner not in budget.databases and owner not in budget.reservations
+        with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+            connection.execute('SELECT 1')

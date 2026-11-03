@@ -72,6 +72,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')
+        from .retention_crops import restore
+        restore(db, identifier, source, config)
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True

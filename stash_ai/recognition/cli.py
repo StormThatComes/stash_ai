@@ -98,7 +98,8 @@ def parser():
     commands = root.add_subparsers(dest='command', required=True)
     for name, aliases, help_text in (
             ('db-status', ['db-report'], 'Inspect recognition database health, table sizes and estimated VACUUM savings (offline).'),
-            ('db-vacuum', ['db-compact'], 'Compact the idle recognition database without changing evidence or history (offline).')):
+            ('db-vacuum', ['db-compact'], 'Compact the idle recognition database without changing evidence or history (offline).'),
+            ('db-prune', [], 'Preview obsolete recognition evidence retention; --apply removes eligible data (offline).')):
         maintenance = commands.add_parser(name, aliases=aliases, allow_abbrev=False, help=help_text)
         maintenance.add_argument('--face-config', type=Path, help='Recognition YAML selecting the database path.')
         maintenance.add_argument('--faces-db', type=Path, help='Existing recognition SQLite; overrides storage.database.')
@@ -106,6 +107,12 @@ def parser():
         maintenance.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
         if name == 'db-vacuum':
             maintenance.add_argument('--dry-run', action='store_true', help='Report estimated savings without executing VACUUM.')
+        if name == 'db-prune':
+            mode = maintenance.add_mutually_exclusive_group()
+            mode.add_argument('--apply', action='store_true', help='Apply the retention plan atomically; default is preview.')
+            mode.add_argument('--dry-run', action='store_true', help='Explicit read-only preview (the default).')
+            maintenance.add_argument('--scope', help='Limit to one Stash scope; default all scopes for the configured model.')
+            maintenance.add_argument('--scene-id', action='append', type=stash_id, help='Limit to these scenes; repeatable.')
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
     evaluation = commands.add_parser('evaluate', allow_abbrev=False,
@@ -283,6 +290,9 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command == 'db-prune':
+        from .db_retention import execute
+        return execute(args, config)
     if args.command in ('db-status', 'db-report', 'db-vacuum', 'db-compact'):
         from .db_maintenance import execute
         return execute(args, config)
