@@ -38,9 +38,17 @@ def test_status_row_can_follow_two_work_rows_without_empty_buffer_rows():
         owner.close()
 
 
-def test_terminal_has_scene_frame_publication_and_performer_bars_with_one_owner(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('log_vram', [True, False])
+def test_terminal_has_scene_frame_publication_and_performer_bars_with_one_owner(tmp_path, monkeypatch, capsys, log_vram):
     import stash_ai.recognition.progress as ui
     config, _, services, _ = setup(tmp_path, monkeypatch)
+    data = plain(config.data)
+    data['execution']['log_vram'] = log_vram
+    config = replace(config, data=data)
+    def memory_snapshot(self):
+        assert log_vram, 'disabled VRAM diagnostics must not query memory'
+        return {'torch': None, 'process_bytes': None}
+    monkeypatch.setattr('stash_ai.recognition.gpu_memory.GpuMemory.snapshot', memory_snapshot)
     stream, bars, owners = Terminal(), [], set()
     class Bar(tqdm):
         def __init__(self, *args, **kwargs):
@@ -66,7 +74,16 @@ def test_terminal_has_scene_frame_publication_and_performer_bars_with_one_owner(
     assert owners == {'stash-console'}
     assert all(bar.disable for bar in bars), 'rows must be closed when execution finishes'
     output = capsys.readouterr().out
-    assert output.startswith('Recognition success:')
+    lines = output.splitlines()
+    assert sum(line.startswith('Recognition success:') for line in lines) == 1
+    # Phase diagnostics are intentional output around the existing summary.
+    # All other ordinary log lines remain suppressed in compact terminal mode.
+    assert all(line.startswith(('Recognition success:', 'VRAM ')) for line in lines)
+    if log_vram:
+        assert lines[0].startswith('VRAM vtt before:')
+        assert lines[-1].startswith('VRAM final after_release:')
+    else:
+        assert len(lines) == 1 and lines[0].startswith('Recognition success:')
     assert 'Face references scene' not in output and 'Performer names starter' not in output
     assert stream.getvalue().count('Phase: Recognition VTT') == 2
     assert stream.getvalue().count('Phase: Recognition metadata') == 2

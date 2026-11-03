@@ -237,11 +237,16 @@ def test_repeated_source_failure_keeps_the_retained_portrait_idempotent(tmp_path
     assert len(image_writes(stash)) == 1 and image_operation(config) == operation
 
 
-def test_video_backend_inference_failure_uses_the_accepted_thumbnail(tmp_path, monkeypatch):
+@pytest.mark.parametrize('policy', ['phase', 'sequential', 'retain'])
+def test_video_backend_inference_failure_uses_the_accepted_thumbnail(tmp_path, monkeypatch, policy):
+    from tests.test_recognition_gpu_memory import configured
     config, stash, services = video_setup(tmp_path, monkeypatch)
-    calls, backends = [], []
+    config = configured(config, policy)
+    backends = []
     def backend(*args):
-        calls.append(1)
+        # Each replacement must follow release of the previous model, whether
+        # triggered by a phase transition or failed portrait inference.
+        assert all(model.closed for model in backends)
         model = Backend(fail_at=4 if not backends else 1)
         backends.append(model)
         return model
@@ -250,7 +255,12 @@ def test_video_backend_inference_failure_uses_the_accepted_thumbnail(tmp_path, m
     _, metadata = published(config)
     assert metadata['source_type'] == 'vtt' and metadata['requested_source'] == 'video'
     assert metadata['fallback']['reason'] == 'no_usable_identity_verified_video_portrait'
-    assert len(calls) == 2 and Decoder.instances and all(model.closed for model in backends)
+    # Phase/sequential close the healthy scan backend after three embeddings,
+    # then both video candidates fail on their own freshly loaded backends.
+    # Retain reuses the scan backend until the first video candidate fails.
+    assert [model.calls for model in backends] == ([4, 1] if policy == 'retain' else [3, 1, 1])
+    assert Decoder.instances and all(model.closed for model in backends)
+    assert sum(len(decoder.calls) for decoder in Decoder.instances) == 2
     assert last_counts(config).get('metadata_failed', 0) == 0
 
 
