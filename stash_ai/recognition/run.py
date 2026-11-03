@@ -181,6 +181,10 @@ def _execute(args, config, *, services=None):
             backend = None
             person_collector = None
             inputs = None
+            from .gpu_memory import GpuMemory
+            gpu = GpuMemory(config, report, database, run)
+            model_policy = config.data['execution']['gpu_model_policy']
+            sequential = model_policy == 'sequential' and config.data['sapiensid']['enabled']
             try:
                 with ui.phase('Recognition assets'):
                     with work('Configure lazy model loading', 1, unit='step', position=0) as assets:
@@ -215,9 +219,10 @@ def _execute(args, config, *, services=None):
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
-                    with ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
                         for position, identifier in enumerate(ordered):
                             following = ordered[position + 1] if position + 1 < len(ordered) else None
+                            scene_work = False
                             try:
                                 with activity(report, 'prepare VTT input', scene=identifier):
                                     prepared = inputs.take(identifier)
@@ -229,7 +234,11 @@ def _execute(args, config, *, services=None):
                                     with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
                                         scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
                                             backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
-                                            on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] else None)
+                                            on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] and not sequential else None)
+                                    scene_work = not reused
+                                    if sequential and (backend.model is not None or visibility.model is not None):
+                                        gpu.release('faces', [('unload face models', backend.unload),
+                                            ('unload face visibility', visibility.close)], scene=identifier)
                                     person_collector.flush()
                                     person_collector.enrich(database.connection, scan, source)
                                 counts['scenes_reused' if reused else 'scenes_scanned'] += 1
@@ -250,17 +259,29 @@ def _execute(args, config, *, services=None):
                                             ' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items())))
                                 selected.append({'scene': identifier, 'scan': scan})
                             except KeyboardInterrupt:
+                                scene_work = True
                                 raise
                             except Exception as error:
+                                scene_work = True
                                 counts['scenes_failed'] += 1
                                 report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
                                                 safe_error(error, key))
+                            finally:
+                                if sequential and (scene_work or backend.model is not None or
+                                                   visibility.model is not None or person_collector.model is not None):
+                                    cleanup([('release scene GPU models', lambda: gpu.release('scene', [
+                                        ('close person models', person_collector.close),
+                                        ('unload face models', backend.unload),
+                                        ('unload face visibility', visibility.close)], scene=identifier))], report=report)
                             scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
                             inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                             database.progress(run, 'run', dict(counts))
                     inputs.close()
                     person_collector.flush()
-                    person_collector.close()
+                    releases = [('close person models', person_collector.close)]
+                    if model_policy != 'retain':
+                        releases += [('unload face models', backend.unload), ('unload face visibility', visibility.close)]
+                    gpu.release('vtt', releases)
                     if selected:
                         last_scene = selected[-1]['scene']
                         def reference_progress(**values):
@@ -270,7 +291,7 @@ def _execute(args, config, *, services=None):
                             status(report, references=usage_line(references), reference_people=values['people'],
                                    reference_samples=values['samples'], reference_stage=values['stage'])
                         try:
-                            with ui.phase('Recognition identity rebuild'):
+                            with gpu.phase('rebuild'), ui.phase('Recognition identity rebuild'):
                                 with work('Reconcile previous merges', 1, unit='step', position=0) as merges:
                                     reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
                                     merges.advance()
@@ -331,7 +352,7 @@ def _execute(args, config, *, services=None):
                                 report.optional('recognition_names_preflight', report.issue, 'recognition', 'names_preflight',
                                                 'selected performers', error, safe_error(error, key))
                     label = 'Portraits' if portraits_only else 'Names and portraits'
-                    with NativeBudget(config), portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
+                    with gpu.phase('portraits'), NativeBudget(config), portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
                         enabled=services.metadata is enrich) as preparation, ui.phase('Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
                         for target_index,target in enumerate(targets):
                             preparation.activate(target_index)
@@ -403,10 +424,11 @@ def _execute(args, config, *, services=None):
                         summary['rebuild_profile'] = report.recognition_rebuild_profile
                     if references:
                         summary['references'] = dict(references)
+                    if gpu.enabled:
+                        summary['gpu_memory'] = gpu.summary()
                     database.finish_run(run, outcome, summary, failure)
                 actions = [('close face visibility model', visibility.close)] if visibility is not None else []
-                if inputs is not None:
-                    actions.insert(0, ('close recognition input prefetch', inputs.close))
+                stop = [('close recognition input prefetch', inputs.close)] if inputs is not None else []
                 if expression is not None:
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:
@@ -416,7 +438,7 @@ def _execute(args, config, *, services=None):
                 resource_error = None
                 before_cleanup = report.counts['cleanup_failures']
                 try:
-                    cleanup(actions, report=report)
+                    gpu.release('final', actions, stop=stop)
                 except BaseException as error:
                     resource_error = error
                     if outcome in ('success', 'partial'):

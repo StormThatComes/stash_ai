@@ -126,7 +126,8 @@ def test_auto_upgrades_managed_body_portrait_to_good_face(tmp_path,monkeypatch):
 
 
 @pytest.mark.parametrize('kind',['auto','person'])
-def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatch,kind):
+@pytest.mark.parametrize('policy',['phase','sequential'])
+def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatch,kind,policy):
     from tests.test_recognition_run import setup,run
     from tests.test_recognition_body_collection import Persons
     from tests.helpers.recognition import Backend,Response
@@ -134,6 +135,7 @@ def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatc
     from dataclasses import replace
     from stash_ai.recognition.config import plain
     c=replace(c,data=plain(c.data))
+    c.data['execution']['gpu_model_policy']=policy
     c.data['sapiensid']['enabled']=True
     c.data['sapiensid']['collection'].update(enabled=True,min_sharpness=0)
     c.data['sapiensid']['identities'].update(enabled=True,min_appearance_distance=0)

@@ -807,11 +807,51 @@ survive an interrupted inference; incomplete
 scans cannot publish identities. Partial sampling and rejected/no-face outcomes
 remain explicit coverage information, not proof that a person is absent.
 
-The detector and recognizer are initialized lazily once per invocation and shared
-by selected-scene scans and video portrait inference. A fully cached run does not
-load these models. Scene cleanup releases its borrowed backend; the invocation
-closes the actual models on completion or interruption. An inference failure
+The detector and recognizer are initialized lazily and shared across VTT scenes.
+By default, after VTT collection finishes, recognition closes the face, visibility,
+person/pose and SapiensID models before identity rebuild and Stash publication.
+ONNX sessions are released, Python garbage is collected, and unused PyTorch CUDA
+cache is returned. Portraits lazily reload only the models they need. A fully
+cached run does not load inference models just for cleanup. An inference failure
 discards the failed backend so a later scene can initialize a fresh instance.
+
+### Recognition GPU memory
+
+```yaml
+execution:
+  gpu_model_policy: phase
+  log_vram: true
+```
+
+`phase` is the default for existing YAML files too. Models remain shared during
+the VTT phase, then unload before rebuild. `sequential` additionally separates
+face detection/embedding from person evidence collection **within each scene**:
+faces finish and unload before person models load; person models close before
+the next scene. It trades model reloads and a second read of verified VTT crops
+for lower concurrent model residency. Completed face scans and person evidence
+remain reusable after interruptions; a failed person pass does not publish that
+scene. Switching policies does not invalidate evidence or change thresholds.
+Without SapiensID, `sequential` behaves like `phase`.
+
+`sequential` does not promise one model at a time: the person pass still holds
+the selected person detector, pose estimator, optional SAM and SapiensID encoder
+together. Batch sizes still control temporary inference allocations. `retain`
+keeps face/visibility models through rebuild for the legacy scan/portrait reuse
+behavior; person models still close after VTT. All modes reclaim unused cache at
+run exit, including failures, after workers relinquish their resources.
+
+`log_vram` writes phase snapshots and bounded `gpu_memory` run history. PyTorch
+`allocated` measures live tensors; `reserved` includes its reusable cache. If
+`nvidia-smi` is available, `process` sums this PID's compute-process usage across
+NVIDIA GPUs, including ONNX allocations. Missing/unsupported values (including
+WDDM `N/A`) are reported as unavailable, not zero. PyTorch queries cover its
+current CUDA device and never initialize CUDA or import PyTorch for monitoring.
+Sampled peaks are boundary observations, not the true intra-inference peak.
+Scene-level release lines are verbose-only. At most one new scene is sampled
+every ten seconds (keeping its before/after pair), and history retains the latest
+scene per boundary rather than an unbounded event list. Set `log_vram: false` to disable
+queries and logs without disabling cleanup. VRAM is separate from
+`execution.rebuild_memory_bytes`, which budgets CPU working allocations.
 
 `execution.prefetch_frames` defaults to 4 ready thumbnail crops. A CPU producer
 decodes/crops images ahead of inference, preserves cue order and owns independent
@@ -1050,8 +1090,9 @@ a required recognition asset. Missing/invalid assets or failed/invalid measureme
 fail the scene without publishing its partial scan; completed cue checkpoints
 remain resumable on a later explicit run. An unavailable measurement never counts
 as an uncovered face. Cheap size/sharpness/geometry gates run before segmentation.
-One lazy visibility model is shared across selected scenes and portraits; accepted
-VTT observations retain the raw measurement so portrait ranking does not repeat it.
+A lazy visibility model is reused within each active phase (or across phases in
+`retain` mode); accepted VTT observations retain the raw measurement so portrait
+ranking does not repeat it.
 If `require_complete_face: false` permits a partial face whose visibility region
 extends outside the real source, that observation is rejected as
 `face_visibility_unmeasurable`, without an embedding/crop. Other valid cues continue.
