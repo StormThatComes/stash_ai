@@ -218,6 +218,11 @@ def summary(result):
             detail.append(f'{key}={value}')
         lines.append('  Unmet: ' + violation['reason'] + ' (' + ', '.join(detail) + ').')
     lines.append('Best among tested configurations; global optimality is not proved.')
+    tightening = result.get('search', {}).get('tightening', {})
+    if tightening.get('first_solution') is not None:
+        lines.append(f"First feasible merge: {tightening['first_solution']}; "
+                     f"tightening replays={tightening['executed']}; "
+                     f"active parameters={len(tightening['parameters'])}.")
     if result.get('search', {}).get('stop_reason'):
         lines.append(f"Search stopped: {result['search']['stop_reason']}; completed "
                      f"{result['search']['executed']}/{result['search']['max_trials']} trials.")

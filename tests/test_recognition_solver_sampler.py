@@ -30,7 +30,13 @@ def test_tpe_proposals_reproduce_with_seed_and_completed_history(tmp_path):
 
 def test_tpe_uses_full_replay_and_checkpoint_reconstructs_proposals(tmp_path,monkeypatch):
     pytest.importorskip('optuna')
-    config,goals=fixture(tmp_path/'input','disjoint');path=tmp_path/'solver.json'
+    # Keep a genuinely unsolved goal so TPE is exercised before the new
+    # feasible-first scheduler switches to deterministic tightening.
+    from tests.test_recognition_merge_best_effort import incomplete_source
+    from stash_ai.recognition.merge_goals import resolve
+    config,people=incomplete_source(tmp_path);path=tmp_path/'solver.json'
+    with _open_readonly(config.database) as db:
+        goals=resolve(db,config,[people],by_performer=False,policy='strict')
     def stop(name,stage,item):
         if name=='trial-16' and stage=='complete':raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
@@ -45,7 +51,7 @@ def test_tpe_uses_full_replay_and_checkpoint_reconstructs_proposals(tmp_path,mon
         result=solve(config,goals,db,maximum=25,sampler='tpe',seed=7,checkpoint=path,resume=True)
     assert result['search']['restored_trials']==17
     assert len(calls)==len(result['simulation']['trials'])-17
-    assert result['best_result']['admissible']
+    assert not result['best_result']['fully_solved']
     for name,item in first['simulation']['trials'].items():assert item==result['simulation']['trials'][name]
     with _open_readonly(config.database) as db:
         with pytest.raises(ValueError,match='incompatible'):

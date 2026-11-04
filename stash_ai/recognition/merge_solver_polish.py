@@ -46,8 +46,13 @@ class Polisher:
             if self.parent != winner:
                 self.parent = winner
                 source = feedback.get(winner, {})
+                active = dict(source.get('provenance', {}).get('active_parameters', {}))
+                # Successful routes no longer emit rejection blockers. Keep
+                # their gates behind genuinely unused changes during ablation.
+                for key, count in source.get('matching_parameters', {}).items():
+                    active[key] = max(active.get(key, 0), count)
                 self.ablations = iter(ablations(self.config, changes(winner),
-                    source.get('provenance', {}).get('active_parameters', {}), learned_groups(source)))
+                    active, learned_groups(source)))
             if self.minimized < self.budget//2:
                 try:
                     return 'minimization', winner, 'parameter_ablation', next(self.ablations)

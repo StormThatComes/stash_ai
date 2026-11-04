@@ -72,8 +72,10 @@ def test_large_joint_list_cannot_delay_independent_gate_probes(tmp_path, monkeyp
     with _open_readonly(config.database) as db:
         result = solve(config, goals, db, targeted_trials=0, feasibility_trials=0, maximum=4)
     assert result['status'] == 'fully_solved'
-    assert result['selected_trial'] == 'trial-1'
-    assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .785}
+    assert result['search']['tightening']['first_solution'] == 'trial-1'
+    first = result['simulation']['trials']['trial-1']
+    assert {c['parameter']: c['proposed'] for c in first['changes']} == {PREFIX+'face_floor': .785}
+    assert result['search']['executed_by_phase']['tightening'] > 0
 
 
 def test_gate_search_keeps_distant_boundaries_and_explores_both_directions(tmp_path):
@@ -134,7 +136,7 @@ def test_tested_values_exclude_unfinished_probes(tmp_path, interrupted_trial):
     with _open_readonly(config.database) as db:
         result = solve(config, goals, db, targeted_trials=0, feasibility_trials=0, maximum=4, progress=progress)
     assert result['interrupted']
-    assert result['search']['executed_by_phase'] == dict(targeted=0, feasibility=0, baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, minimization=0, robustness=0)
+    assert result['search']['executed_by_phase'] == dict(targeted=0, feasibility=0, baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, tightening=0, minimization=0, robustness=0)
     if interrupted_trial == 'baseline':
         assert result['search']['tested_hybrid_values'] == {}
     else:

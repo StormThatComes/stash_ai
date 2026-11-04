@@ -100,8 +100,12 @@ def latest_decisions(db, observation_ids):
     result = []
     for row in rows:
         payload = json.loads(row['payload'])
+        merge_proofs = [payload[k] for k in ('strict_partition', 'global_view_merge', 'final_subcomponent_merge')
+                        if isinstance(payload.get(k), dict)]
         result.append(dict(observation=row['id'], scan=row['scan'], status=row['status'],
             reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
+            face_view=any(p.get('authority') == 'strict_view' for p in merge_proofs),
+            cooccurring_merge=any(p.get('cooccurring') for p in merge_proofs),
             hybrid_query=payload.get('hybrid_query'), measurements={k: v for k, v in payload.items()
                 if type(v) in (int, float, bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
     from .body_identity import available
@@ -113,6 +117,7 @@ def latest_decisions(db, observation_ids):
             result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
                 reason=proof.get('reason'),evidence_kind='person',measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
+                body_global=bool(proof.get('global_merge')),
                 **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))
     return result
 

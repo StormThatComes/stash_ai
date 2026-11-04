@@ -193,7 +193,12 @@ class Trials(AbstractContextManager):
         # async completion order. Unfinished requests are evaluated again.
         for event in self.history:
             if event['kind'] == 'dispatch':
-                name, settings = next(source)
+                proposal = next(source)
+                # Drain barriers do not dispatch a task. During reconstruction
+                # the intervening retire events may already have been applied.
+                while proposal is None:
+                    proposal = next(source)
+                name, settings = proposal
                 if name != event['name']:
                     raise ValueError('Checkpoint dispatch reconstruction diverged.')
                 self.dispatch(name, settings, restored=True)
@@ -206,7 +211,12 @@ class Trials(AbstractContextManager):
             if not exhausted:
                 while not exhausted and len(self.pending) < self.execution.trials:
                     try:
-                        name, settings = next(source)
+                        proposal = next(source)
+                        if proposal is None:
+                            if not self.pending:
+                                raise ValueError('Solver requested results without pending trials.')
+                            break
+                        name, settings = proposal
                     except StopIteration:
                         exhausted = True
                         break
