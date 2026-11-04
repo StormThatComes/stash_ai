@@ -33,7 +33,8 @@ jobs:
   pytest:
     name: pytest
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The 6k+ test suite reached only 84% before the previous 20-minute limit.
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,7 +74,9 @@ jobs:
         env:
           STASH_API_KEY: ""
           STASH_AI_HF_SMOKE: "1"
-        run: python -m pytest -q --tb=short
+        # Print the first failure before a later slow test can hide its traceback
+        # behind the job timeout; successful runs still execute the whole suite.
+        run: python -m pytest -q --tb=short --maxfail=1 --durations=20
 
   dependency-resolution:
     name: dependencies (${{ matrix.variant }}, ${{ matrix.platform }})

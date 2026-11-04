@@ -9,6 +9,7 @@ from stash_ai.recognition.config import load, plain
 from stash_ai.recognition.fragmentation_report import _open_readonly
 from stash_ai.recognition.merge_goals import evaluate
 from stash_ai.recognition.merge_solver_search import BeamSearch, PREFIX
+from stash_ai.recognition.merge_solver_tighten import Tightener
 
 
 def scripted_search(monkeypatch):
@@ -22,6 +23,13 @@ def scripted_search(monkeypatch):
         family = 'hybrid' if any(k.startswith(PREFIX) for k in patch) else 'face'
         return family, 'baseline_exploration', 'baseline', 'coordinate_probe', patch
     monkeypatch.setattr(BeamSearch, 'next', next_trial)
+    # The first replay solves the goals, so subsequent proposals now come from
+    # tightening. Keep this logging fixture's exact stream (including rejected
+    # proposals and the baseline-parent reversion) across that transition.
+    def next_tightening(self, parent, changes, source):
+        _, _, parent, strategy, patch = next_trial(self)
+        return 'tightening', parent, strategy, patch
+    monkeypatch.setattr(Tightener, 'next', next_tightening)
 
 
 def arguments(config, goals, tmp_path, style='auto'):
@@ -128,3 +136,27 @@ def test_mutation_is_printed_before_rebuild_and_interrupt_keeps_prior_winner(tmp
     assert set(result['simulation']['trials']) == {'baseline','trial-1'}
     assert 'trial-2: complete' not in captured.err
     assert load(tmp_path/'winner.yml').data['sapiensid']['matching']['face_floor'] == .785
+
+
+def test_cli_tightening_uses_feasible_parent_and_reports_actual_mutations(tmp_path, capsys):
+    from stash_ai.recognition.cli import main
+    from stash_ai.recognition.merge_report_policy import parameter
+    config, goals = auxiliary_goals(tmp_path)
+    assert main(arguments(config, goals, tmp_path)) == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    trials = result['simulation']['trials']
+    assert trials['trial-1']['goal_result']['fully_solved']
+    tightened = trials['trial-2']
+    assert tightened['search_phase'] == 'tightening'
+    assert tightened['search_parent'] == tightened['previous_trial'] == 'trial-1'
+    assert 'trial-2: start changes_vs=trial-1 parent=trial-1' in captured.err
+    assert tightened['changes_from_previous']
+    previous = {r['parameter']:r['proposed'] for r in trials['trial-1']['changes']}
+    for change in tightened['changes_from_previous']:
+        key = change['parameter']
+        assert change['previous'] == previous.get(key, parameter(config.data, key))
+        assert (f"  {key}: {json.dumps(change['previous'])} -> {json.dumps(change['current'])}"
+                in captured.err)
+    with _open_readonly(config.database) as db:
+        assert evaluate(load(tmp_path/'winner.yml'), goals, db)['trials']['baseline']['goal_result']['fully_solved']
