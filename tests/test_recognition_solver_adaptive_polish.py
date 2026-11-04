@@ -103,13 +103,17 @@ def test_full_replay_ablation_removes_redundant_gate_and_resumes(tmp_path, monke
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
         # Exercise the injected redundant proposal, not the targeted shortcut.
-        first = solve(config, goals, db, maximum=30, targeted_trials=0, checkpoint=path, progress=stop)
+        first = solve(config, goals, db, maximum=30, targeted_trials=0, feasibility_trials=0, checkpoint=path, progress=stop)
         assert first['interrupted']
-        result = solve(config, goals, db, maximum=30, targeted_trials=0, checkpoint=path, resume=True)
-        fresh = solve(config, goals, db, maximum=30, targeted_trials=0)
+        result = solve(config, goals, db, maximum=30, targeted_trials=0, feasibility_trials=0, checkpoint=path, resume=True)
+        fresh = solve(config, goals, db, maximum=30, targeted_trials=0, feasibility_trials=0)
     assert result['search']['restored_trials'] == len(first['simulation']['trials'])
     assert result['best_result']['fully_solved']
-    assert [c['parameter'] for c in result['best_result']['changes']] == [PREFIX+'face_floor']
+    changes = {c['parameter']:c['proposed'] for c in result['best_result']['changes']}
+    # Fully solved configurations now prefer stronger active gates; the unused
+    # injected gate still gets ablated rather than rewarded for being stricter.
+    assert 'recognition.cooccurrence_merge_threshold' not in changes
+    assert changes[PREFIX+'face_floor'] >= .78
     assert result['best_result']['changes'] == fresh['best_result']['changes']
     assert result['search']['executed_by_phase']['minimization'] > 0
     assert result['search']['executed_by_phase']['robustness'] > 0

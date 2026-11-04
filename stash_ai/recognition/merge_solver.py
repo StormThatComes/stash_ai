@@ -166,6 +166,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_checkpoint import Journal, fingerprint
     from .merge_solver_robustness import confidence
     from .merge_solver_polish import Polisher, allowance
+    from .merge_solver_tighten import Tightener
+    tightening = Tightener(config)
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
@@ -225,6 +227,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     families, origins, durations = {}, {}, {}
     transitions = {'baseline': dict(previous_trial=None, changes_from_previous=[])}
     feedback, outcomes = {}, {}
+    fallback_references = {}
     query_feedback = QueryFeedback(goals)
     latest_feedback = {}
     search = None
@@ -236,8 +239,18 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     restored_count = 0
     written_winner = None
     probe_state = None
+    def changes_for(name):
+        return {c['parameter']:c['proposed'] for c in patches.get(name,{}).get('changes',())}
     def ranking(name):
-        return ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
+        solved = summaries[name]['fully_solved']
+        # Hard goals/exclusions are prerequisites. Once solved, stricter matching
+        # outranks soft attachment retention and distance from a possibly loose
+        # YAML. Collateral damage still precedes threshold strength.
+        safety = ranks[name][-6:-2] if solved else (0,)*4
+        strength = tightening.score(changes_for(name)) if solved else (0.,)*5
+        preference = tightening.face_preference(fallback_references[name]) if solved else 0
+        strength = strength[:1]+(preference,)+strength[1:]
+        return (solved,)+safety+strength+ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
     def selected(name):
         status=summaries[name]
         return dict(trial=name,quality=('fully_solved' if status['fully_solved'] else
@@ -265,6 +278,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
             -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
         ranks[name] = rank
+        fallback_references[name] = latest_feedback.get('fallback_references', 0)
+        if status['fully_solved']:
+            tightening.begin(name, changes_for(name), latest_feedback)
         if origins.get(name,{}).get('search_strategy')=='robustness_probe':
             parent=origins[name]['search_parent']
             robustness.setdefault(parent,[]).append(rank[:-2]>=ranks[parent][:-2])
@@ -356,14 +372,14 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                           'crossover':mixing,'boundary_probe':boundaries,'learned_interaction':interactions})
         search = BeamSearch(factories, factory, maximum, config)
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
+        tightening.observe({}, summaries['baseline']['fully_solved'])
         bidirectional = BidirectionalSearch(config, goals, maximum, feedback['baseline'])
         bidirectional.observe('baseline', {}, summaries['baseline'], ranking('baseline'), outcomes['baseline'])
         polishing = None
+        tightening_reserve = None
         sampled_for=None
         normal_exhausted = False
         alternate_streak = 0
-        def changes_for(name):
-            return {c['parameter']:c['proposed'] for c in patches.get(name,{}).get('changes',())}
         def completed(name):
             nonlocal normal_exhausted, alternate_streak
             if name not in pending_search:
@@ -372,6 +388,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             if name in failures:
                 search.rejected(family, strategy)
                 return
+            tightening.observe(normalized, summaries[name]['fully_solved'] and
+                (not summaries[parent]['fully_solved'] or ranking(name) >= ranking(parent)))
+            tightening.executed += int(phase == 'tightening')
             alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
             search.completed(phase, parent=parent)
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
@@ -391,9 +410,32 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         while trials < maximum and attempts < maximum * 100:
             reserve = allowance(maximum, changes_for(best),
                 feedback[best]['provenance']['active_parameters'])
+            if summaries[best]['fully_solved']:
+                if tightening_reserve is None:
+                    # A solution found during polishing also deserves the
+                    # remaining budget, instead of inheriting a stale stop.
+                    polishing, stop_reason = None, None
+                    tightening_reserve = min(reserve, (maximum-trials)//4)
+                reserve = min(reserve, tightening_reserve)
             target = (targeted.next(best, feedback[best], changes_for(best))
                       if polishing is None and not summaries[best]['fully_solved'] else None)
-            if target is not None:
+            if summaries[best]['fully_solved'] and polishing is None and trials < maximum-reserve:
+                try:
+                    phase, parent, strategy, changes = tightening.next(best, changes_for(best),
+                        dict(feedback[best], options=options))
+                    parent_changes = changes_for(parent)
+                    family = 'hybrid' if any(k.startswith(PERSON_PREFIX) and
+                        changes.get(k, parameter(config.data,k)) != parent_changes.get(k, parameter(config.data,k))
+                        for k in changes.keys() | parent_changes.keys()) else 'face'
+                except StopIteration:
+                    if pending_search:
+                        # A parallel batch may be awaiting the very boundary
+                        # needed for the next proposal. Drain results, then retry.
+                        yield None
+                        continue
+                    stop_reason = 'tightening_frontier_exhausted'
+                    polishing = Polisher(config, min(reserve, maximum-trials))
+            elif target is not None:
                 changes, strategy = target['patch'], target['route']
                 family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
                 phase, parent = 'targeted', best
@@ -501,6 +543,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             return deepcopy(record['item']), baseline
         summaries[name]=state['status'];ranks[name]=tuple(state['rank']);outcomes[name]=state['outcome']
         latest_feedback.clear();latest_feedback.update(state['feedback']);feedback[name]=latest_feedback.copy()
+        fallback_references[name] = latest_feedback.get('fallback_references', 0)
+        if summaries[name]['fully_solved']:
+            tightening.begin(name, changes_for(name), latest_feedback)
         query_feedback.visits = dict(latest_feedback['query'].get('sampling_visits', {}))
         query_feedback.priorities = dict(latest_feedback.get('targets', {}).get('priorities', {}))
         options.clear();options.update(state['options'])
@@ -626,7 +671,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
             search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
                         attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
-                        scheduling='targeted_then_feasibility_and_bidirectional_beam',
+                        scheduling='targeted_then_feasibility_and_bidirectional_beam_then_tightening',
+                        tightening=tightening.report(changes_for(best) if best is not None else None),
                         execution=runtime.document() if runtime else None,
                         targeted=dict(requested=targeted_trials,budget=targeted.budget,
                             executed=sum(origins.get(n,{}).get('search_phase')=='targeted' for n in result['trials'])),
@@ -645,7 +691,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                             for family in ('hybrid', 'face')},
                         baseline_exploration_warmup=BASELINE_WARMUP,
                         executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                            for name in result['trials']) for phase in ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
+                            for name in result['trials']) for phase in ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'tightening', 'minimization', 'robustness')},
                         tested_hybrid_values=tested_hybrid,
                         budget_exhausted=len(result['trials'])+len(failures) >= maximum,
                         selection_scope='completed_trials_including_baseline',

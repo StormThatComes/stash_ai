@@ -49,7 +49,13 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     if directed and quality['proposals']:
         directed.append(dict(directed[0], **quality['proposals'][0]))
     latest_feedback = {}
+    from .merge_solver_tighten import route_parameters, body_supported
+    face_references = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']
+                       if r.get('goal_role') == 'reference' and r.get('evidence_kind', 'face') == 'face'}
     latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
+        matching_parameters=route_parameters(r for r in result if r['observation'] in target_ids),
+        fallback_references=sum(r['status'] == 'accepted' and r['observation'] in face_references and body_supported(r)
+                                for r in result),
         separation_intervals=separation['intervals'], quality=quality['observations'],
         proposals=dict(hybrid=directed, face=
             [dict(p, **q) for p in queries['face_proposals'][:2] for q in quality['proposals'][:1]] +

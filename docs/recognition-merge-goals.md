@@ -226,9 +226,65 @@ set evaluation; the legacy two-ID catalogue diagnostic is unchanged. Policy and
 frozen evidence are included in checkpoint compatibility. Start a fresh solve
 after this code update or a policy change; existing checkpoints cannot be resumed.
 
-Ties prefer fewer goal-to-outsider attachments, external coverage losses, splits
-and joins, then confirmed local stability and fewer/smaller normalized parameter changes. External partition changes are
-not accuracy estimates; labels of other people are unknown.
+Before a fully solved configuration exists, ties prefer fewer goal-to-outsider
+attachments, external coverage losses, splits and joins, then confirmed local
+stability and fewer/smaller normalized parameter changes. External partition
+changes are not accuracy estimates; labels of other people are unknown.
+
+### Find a feasible merge, then tighten it
+
+The first fully solved replay (including an already solved baseline) starts a
+dedicated `tightening` phase. Remaining ordinary search slots strengthen the
+solution instead of treating unchanged fragmentation as stagnation. The best
+completed configuration is still saved immediately; interruption or a failed
+probe cannot replace it with an unverified boundary.
+
+Among fully solved configurations the ranking preserves the existing collateral
+impact priorities, then prefers restoring relaxed admission requirements,
+preserving face support of frozen face references, stronger face-core matching, face views/attachments, the hybrid face floor, and
+body matching, in that order. Within each tier, bounded normalized strengths are
+summed (integer support uses `value / (value + baseline_scale)`). Switching more
+frozen face references to body-assisted matching than in the first feasible
+solution incurs a penalty before threshold strength; simply dropping auxiliary
+observations earns no route-preference reward. Original goal
+quality, local stability and smaller YAML changes break remaining ties. Thus a
+loose input YAML does not win merely because it needs fewer edits. All positive
+sets, negative scene/observation constraints and explicit outside limits still
+have to pass the full production rebuild.
+
+The first feasible replay's accepted production routes determine which matching
+gates receive a strength reward. Unused changed gates are restored towards the
+input policy rather than driven to an arbitrary domain extreme. Admission gates
+(anchor/auxiliary quality, pose and body keypoint rules) are also restored only
+up to their input requirements: filtering out additional evidence is not rewarded
+as stronger matching. Booleans and null opt-outs are not scalar tightening axes.
+The active scope is frozen for comparable trial rankings and included in
+`search.tightening.matching_parameters`.
+
+Tightening tries measured values and brackets a passing setting with an observed
+failing setting, down to integer or six-decimal resolution. A bracket is reused
+only with identical other parameters; clustering is not assumed globally
+monotone. Joint probes cover cohesion/match dependencies, effective face/view
+thresholds, hybrid gates and learned blocker groups. Every proposed point must
+pass replay; no interpolated configuration is exported. Parallel trials drain
+pending results when those results are needed for the next boundary proposal.
+`tightening_frontier_exhausted` means the current local proposals were exhausted,
+not that a global optimum has been proved. The total trial ceiling and the
+reserved ablation/robustness budget still apply.
+
+Targeted planning gives measured face routes priority while preserving slots for
+hybrid and body fallbacks. After two consecutive preferred face proposals for a
+set, an available fallback gets a turn. A face proposal that reduces the current
+ambiguity margin, or goes below the configured hybrid face floor when SapiensID
+is enabled, is marked `uncertain_face` and follows available hybrid proposals.
+This does not compare face and body cosine scores directly or modify production
+matching: face evidence still wins first where its guards pass; body evidence
+can resolve ambiguity or missing faces. Anchor references, direct auxiliary
+attachments and supported views retain their production authority rules.
+
+`search.tightening` and the final console summary report the first feasible
+trial, completed tightening replays and parameter scope. These are local
+experiments on retained evidence, not a false-merge guarantee for future samples.
 
 Search measures strict representative similarities, explores joint thresholds,
 margin/support gates and retained role-quality gates, then refreshes candidate
@@ -296,7 +352,7 @@ blocker information per replay second, with exploration and a starvation guard.
 This scheduling reward never changes the lexicographic winner ranking. Duplicate or
 invalid proposals do not consume a replay budget slot.
 
-After 64 completed trials without an improvement in goal/outside-impact metrics
+While no fully solved configuration exists, after 64 completed trials without an improvement in goal/outside-impact metrics
 (with a smaller patience for smaller budgets, at least 24), the solver refines
 around the retained beam. Refinement tries measured brackets, smaller steps and
 reverting unnecessary changes. Up to 24 completed refinement trials run; material
@@ -309,9 +365,9 @@ or interruption. `beam_width`, `peak_beam`, `beam_trials`, `pruned_trials`,
 `stagnation_patience` and `refinement_budget` expose the search limits.
 `search.executed_by_family` and each trial's `search_family` show actual allocation.
 `search_phase` is `baseline_exploration`, `adaptive`, `bidirectional`, `refinement`,
-`restart`, `minimization`, or `robustness`. `search_parent` and `search_strategy` explain the origin, including
+`restart`, `tightening`, `minimization`, or `robustness`. `search_parent` and `search_strategy` explain the origin, including
 `measured_blockers`, `coordinate_probe`, `boundary_probe`, `crossover`,
-`local_refinement`, `restart_probe`, `parameter_ablation`, `robustness_probe`, and optional `tpe`. `search.tested_hybrid_values` includes
+`local_refinement`, `restart_probe`, `tighten_boundary`, `tighten_joint`, `parameter_ablation`, `robustness_probe`, and optional `tpe`. `search.tested_hybrid_values` includes
 only completed trials, including baseline, never interrupted proposals.
 
 Each trial's `solver_feedback` contains query-stage blockers, separation intervals

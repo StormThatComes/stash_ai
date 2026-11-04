@@ -13,6 +13,28 @@ from .merge_solver_domains import normalize
 from .merge_solver_metrics import magnitude
 
 
+def route_family(item):
+    if item.get('uncertain_face'):
+        return 'uncertain_face'
+    route = item['route']
+    if route.startswith('face'):
+        return 'face'
+    if route.startswith(('body', 'local_body')):
+        return 'body'
+    return 'admission' if route == 'admission' else 'hybrid'
+
+
+def route_order(candidates):
+    """Prefer measured face routes, retaining bounded space for every fallback."""
+    buckets = defaultdict(list)
+    for item in candidates:
+        buckets[route_family(item)].append(item)
+    while any(buckets.values()):
+        for family in ('face', 'face', 'hybrid', 'uncertain_face', 'body', 'admission'):
+            if buckets[family]:
+                yield buckets[family].pop(0)
+
+
 def combine(*patches):
     result = {}
     for patch in patches:
@@ -99,11 +121,18 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
                     if any(r['id'] in observations or membership.get(r['id']) in fragments for r in m['observations'])]
         item = dict(set=index, route=route, patch=patch, observations=sorted(set(observations))[:16],
                     fragments=sorted(set(fragments)), performers=involved, blockers=sorted(set(blockers)), gain=gain)
+        if route.startswith('face'):
+            # Do not manufacture face precedence by erasing its ambiguity guard
+            # or going below the configured face floor for body-assisted matches.
+            item['uncertain_face'] = (patch.get('recognition.ambiguity_margin',
+                config.data['recognition']['ambiguity_margin']) < config.data['recognition']['ambiguity_margin'] or
+                config.data['sapiensid']['enabled'] and patch.get('recognition.match_threshold',
+                    config.data['recognition']['match_threshold']) < config.data['sapiensid']['matching']['face_floor'])
         group['candidates'].append(item)
         group['candidates'].sort(key=lambda p: (p['route']=='admission', -p['gain'],
             magnitude([dict(parameter=k,current=parameter(config.data,k),proposed=v) for k,v in p['patch'].items()]),
             len(p['patch']), digest(p['patch'])))
-        del group['candidates'][16:]
+        group['candidates'] = list(route_order(group['candidates']))[:16]
 
     for index, patch in quality.items():
         add(index, 'admission', patch, observations=quality_ids[index], blockers=patch,
@@ -273,6 +302,7 @@ class TargetedSearch:
     def __init__(self, budget):
         self.budget, self.executed, self.turn = budget, 0, 0
         self.seen = set()
+        self.face_streak = defaultdict(int)
 
     def next(self, parent, feedback, parent_changes):
         if self.executed >= self.budget:return None
@@ -282,7 +312,12 @@ class TargetedSearch:
         if not by_set:return None
         indices = sorted(by_set)
         index = next((i for i in indices if i >= self.turn), indices[0])
-        item = by_set[index][0]
+        candidates = by_set[index]
+        # A difficult face route gets a head start, not the entire budget. Body
+        # evidence remains available when face measurements are absent/ambiguous.
+        fallback = [p for p in candidates if route_family(p) != 'face']
+        item = fallback[0] if self.face_streak[index] >= 2 and fallback else candidates[0]
+        self.face_streak[index] = self.face_streak[index]+1 if route_family(item) == 'face' else 0
         self.turn = index+1
         self.seen.add((parent,digest(item['patch'])))
         return dict(item, patch=dict(parent_changes,**item['patch']))
