@@ -3,11 +3,12 @@ from itertools import groupby
 
 from .database import encoded
 from .scan_heads import predicate
-from .progress import stage, tracking
+from .progress import stage, tracking, work
 
 
 TEMP_TABLES = ('retention_scans', 'retention_success', 'retention_targets', 'retention_pins',
                'retention_actions', 'retention_contracts', 'retention_thumbnails')
+REFERENCE_BATCH_ROWS = 256
 
 
 def discard(db):
@@ -134,10 +135,46 @@ def _pins(db):
         ('candidates', 'payload', "(t.scan NOT IN (SELECT id FROM retention_scans WHERE action='obsolete') OR e.scan<>t.scan)", 0),
     ):
         with stage(f'Protect references: {table}.{column}'):
-            if db.execute(f'SELECT 1 FROM {table} t WHERE NOT json_valid(t.{column}) LIMIT 1').fetchone():
+            _pin_json(db, table, column, condition, image)
+
+
+def _pin_json(db, table, column, condition, image):
+    """Visit each source document once, with bounded batches and indexed pins.
+
+    These sources can reference evidence outside their own scope/scene. Keep
+    scanning all source rows; only the target lookup is selection-scoped.
+    """
+    with work(f'Inspect references: {table}.{column}',
+              total=lambda: db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0],
+              unit='record') as progress:
+        cursor = None
+        while True:
+            where = '' if cursor is None else 'WHERE rowid>?'
+            parameters = () if cursor is None else (cursor,)
+            low, high, count = db.execute(
+                f'SELECT MIN(rowid),MAX(rowid),COUNT(*) FROM '
+                f'(SELECT rowid FROM {table} {where} ORDER BY rowid LIMIT ?)',
+                (*parameters, REFERENCE_BATCH_ROWS)).fetchone()
+            if not count:
+                break
+            bounds = (low, high)
+            if db.execute(f'SELECT 1 FROM {table} WHERE rowid BETWEEN ? AND ? '
+                          f'AND NOT json_valid({column}) LIMIT 1', bounds).fetchone():
                 raise ValueError(f'Retention cannot inspect malformed {table}.{column}; no data was pruned.')
-            pin(f'SELECT e.id FROM {table} t, json_tree(t.{column}) j JOIN retention_targets e ON e.id=j.value '
-                f"WHERE j.type='text' AND ({condition})", image)
+            # CROSS JOIN fixes the loop order: source -> JSON leaves -> target
+            # PK lookup. The former outer IN filter let SQLite put targets first
+            # and parse every source JSON again for every possible target.
+            db.execute('INSERT INTO retention_pins SELECT e.id,? '
+                       f'FROM {table} t CROSS JOIN json_tree(t.{column}) j '
+                       'CROSS JOIN retention_targets e '
+                       "WHERE t.rowid BETWEEN ? AND ? AND j.type='text' AND e.id=j.value "
+                       f'AND ({condition}) '
+                       'ON CONFLICT(id) DO UPDATE SET image=MAX(image,excluded.image)',
+                       (image, *bounds))
+            cursor = high
+            # Flush before another potentially slow SQLite batch, rather than
+            # leaving the last visible count behind the work already completed.
+            progress.advance(count, force=True)
 
 
 def _contracts(db, config):

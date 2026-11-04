@@ -1028,6 +1028,13 @@ work counters, not a percentage of database bytes or a guaranteed time estimate.
 Redirected runs keep emitting the recognition heartbeat during long SQLite
 operations. `--progress-style off` and `db-prune --json` remain quiet.
 
+During planning the overall bar stays at `0/3` until the complete plan is ready.
+JSON reference checks show a separate `Inspect references: table.column` bar
+with completed/total source records, updated every 256 records. The planner
+visits source documents in row order and looks up referenced observations by
+their indexed IDs, avoiding repeated JSON traversal for every possible target.
+References from other scenes/scopes are still checked before evidence is removed.
+
 The active scan plus one previous complete scan are retained by default. Within
 eligible retained scans, the configured complete person/body contract plus one
 previous contract are retained. Counts can be set from 0 to 100. These are
