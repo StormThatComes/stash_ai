@@ -95,6 +95,8 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
     positions={block[0]:i for i,block in enumerate(blocks)}
     previous_ids=set(previous[0]) if previous else set()
     retained={}
+    if previous_ids.intersection(positions):
+        store.hits.add('hybrid-blocks')
     if previous:
         for left,right in previous[1]:
             if left in positions and right in positions:

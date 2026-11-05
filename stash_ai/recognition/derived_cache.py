@@ -25,6 +25,7 @@ class Store:
     def __init__(self, db, budget):
         self.db = db
         self.budget = budget
+        self.hits=set()
         marker=PREFIX+"hybrid-endpoint:"
         self.previous_endpoints={row[0][len(marker):] for row in db.execute(
             "SELECT key FROM metadata WHERE key GLOB ?",(marker+"*",))}
@@ -55,6 +56,7 @@ class Store:
         checksum, _, payload = row[0].partition(" ")
         if hashlib.sha256((key+payload).encode()).hexdigest() != checksum:
             return None
+        self.hits.add(kind)
         count(kind+"_cache_hits")
         return json.loads(payload)
 
@@ -65,6 +67,13 @@ class Store:
         size = len(record.encode())+len(key)+128
         if size > min(self.budget//8, 4*1024**2):
             return
+        if self.used+size<=self.budget:
+            # Cold keys need a single statement. Only a conflict needs to read
+            # the old record for checksum repair or duplicate detection.
+            inserted=self.db.execute("INSERT OR IGNORE INTO metadata VALUES (?,?)",(key,record))
+            if inserted.rowcount:
+                self.used+=size
+                return
         old=self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
         if old is not None:
             if old[0]==record:return

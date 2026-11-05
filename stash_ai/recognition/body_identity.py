@@ -386,6 +386,9 @@ def rebuild(database,selected,config,result):
             from .body_recovery import recover
             recover(database,selected,config)
         cache_stamp(db,selected,config)
+    from .derived_cache import current
+    store=current()
+    if enabled(config) and store and 'body-scene' in store.hits:database.body_rebuild_mode='partial'
     return results(db,selected,result)
 
 

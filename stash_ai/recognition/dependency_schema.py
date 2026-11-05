@@ -157,7 +157,8 @@ def upgrade_artifact_triggers(db):
 
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
-    accepted={**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
+    from .retention_index import TRIGGERS as pruning_triggers
+    accepted={**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
@@ -169,5 +170,6 @@ def validate_triggers(db, *, required=False):
     if db.execute('PRAGMA user_version').fetchone()[0]>=8:expected.update(RAW_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=9:expected.update(BODY_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=10:expected.update(BODY_MEMBER_TRIGGERS)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=11:expected.update(pruning_triggers)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
