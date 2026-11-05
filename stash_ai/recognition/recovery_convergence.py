@@ -13,8 +13,9 @@ def state(db):
     return digest.hexdigest()
 
 
-def _converge(db, step, *, maximum=8, worklist=False):
-    previous = state(db)
+def _converge(db, step, *, maximum=8, worklist=False, snapshot=None):
+    snapshot=snapshot or (lambda: state(db))
+    previous = snapshot()
     seen = {previous}
     for _ in range(maximum):
         from stash_ai.runtime.cancellation import current
@@ -23,7 +24,7 @@ def _converge(db, step, *, maximum=8, worklist=False):
             token.check()
         step()
         count('recovery_passes')
-        current_state = state(db)
+        current_state = snapshot()
         if current_state == previous:
             return
         if current_state in seen:
@@ -39,4 +40,8 @@ def _converge(db, step, *, maximum=8, worklist=False):
 def converge(db, step, *, maximum=8):
     from .recovery_worklist import scope
     with scope(db) as enabled:
-        return _converge(db,step,maximum=maximum,worklist=enabled)
+        if enabled:
+            from .recovery_digest import snapshots
+            with snapshots(db) as snapshot:
+                return _converge(db,step,maximum=maximum,worklist=True,snapshot=snapshot)
+        return _converge(db,step,maximum=maximum)

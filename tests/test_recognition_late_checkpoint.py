@@ -64,3 +64,25 @@ def test_convergence_detects_cycles_instead_of_repeating_forever():
             converge(db,cycle)
     finally:
         db.close()
+
+
+def test_dirty_recovery_ranges_track_replace_delete_and_rollback():
+    import sqlite3
+    from stash_ai.recognition.recovery_digest import snapshots
+    db=sqlite3.connect(':memory:')
+    try:
+        db.executescript("CREATE TABLE candidates(id TEXT PRIMARY KEY,person,status);"
+                         "CREATE TABLE identity_merges(source TEXT PRIMARY KEY,target);"
+                         "INSERT INTO candidates VALUES ('aa1','a','held'),('aa2','b','held');")
+        with snapshots(db) as snapshot:
+            original=snapshot()
+            db.execute("SAVEPOINT attempt")
+            db.execute("INSERT OR REPLACE INTO candidates VALUES ('aa1','c','held')")
+            db.execute("DELETE FROM candidates WHERE id='aa2'")
+            db.execute("ROLLBACK TO attempt")
+            assert snapshot()==original
+            db.execute("INSERT OR REPLACE INTO candidates VALUES ('aa1','c','held')")
+            assert snapshot()!=original
+            db.execute("INSERT OR REPLACE INTO candidates VALUES ('aa1','a','held')")
+            assert snapshot()==original
+    finally:db.close()
