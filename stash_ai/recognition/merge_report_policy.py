@@ -2,6 +2,7 @@
 from dataclasses import replace
 
 from .config import plain, validate
+from .config_layout import internal_path, public_path, v2_patch
 from .global_views import cohort_evidence, consolidation_plan
 from .pose_policy import restricted
 
@@ -28,6 +29,7 @@ def assign(data, path, value):
 def patched(config, changes):
     data = plain(config.data)
     for path, value in changes.items():
+        path = internal_path(path)
         parameter(data, path)  # Refuse unknown paths before assigning.
         assign(data, path, value)
     validate(data)
@@ -39,6 +41,7 @@ def proposal(config, changes):
     from .pose_anchor_rules import PARAMETER as regional
     patch, details = {}, []
     for path, value in sorted(changes.items()):
+        path = internal_path(path)
         current = plain(parameter(config.data, path))
         if current == value:
             continue
@@ -51,6 +54,10 @@ def proposal(config, changes):
                             direction='replace' if path == regional else
                             'disable' if value is None else 'enable' if type(value) is bool or current is None else
                             'decrease' if value < current else 'increase'))
+    if config.document_version == 2:
+        for row in details:
+            row['yaml_parameter'] = public_path(row['parameter'])
+        patch = v2_patch(patch)
     return dict(changes=details, yaml_patch=patch,
                 yaml=yaml.safe_dump(patch, sort_keys=False) if patch else '')
 

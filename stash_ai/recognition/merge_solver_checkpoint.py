@@ -56,7 +56,8 @@ def fingerprint(config,goals,db,settings):
     for path in sorted(Path(__file__).parent.glob('*.py')):
         code.update(path.name.encode());code.update(path.read_bytes())
     return dict(format=2,source=source,code=code.hexdigest(),
-                configuration=digest(plain(config.data)),goals=digest(goals),settings=settings,
+                configuration=digest(plain(config.data)),document_version=config.document_version,
+                goals=digest(goals),settings=settings,
                 database=str(config.database.resolve()),config_path=str(config.source_path))
 
 

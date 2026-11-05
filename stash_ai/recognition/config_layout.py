@@ -140,3 +140,27 @@ def v2_document(data):
             value = get(data, internal)
         put(result, public, plain(value))
     return result
+
+
+def internal_path(path):
+    """Resolve a v2 field, including an indexed regional-rule minimum."""
+    if path in PUBLIC_PATHS:
+        return PUBLIC_PATHS[path]
+    rules = 'matching.body.anchors.keypoint_rules'
+    if path == rules or path.startswith(rules + '.'):
+        return 'sapiensid.identities.anchor_keypoint_rules' + path[len(rules):]
+    return path
+
+
+def public_path(path):
+    rules = 'sapiensid.identities.anchor_keypoint_rules'
+    if path == rules or path.startswith(rules + '.'):
+        return 'matching.body.anchors.keypoint_rules' + path[len(rules):]
+    return INTERNAL_PATHS[path]
+
+
+def v2_patch(internal_patch):
+    result = {}
+    for path, value in leaf_items(internal_patch):
+        put(result, INTERNAL_PATHS[path], value)
+    return result

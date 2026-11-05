@@ -31,6 +31,12 @@ def configurations(config, grid, maximum):
         raise ValueError('max_trials must be an integer from 1 to 1024, including baseline.')
     from .pose_anchor_rules import parameters as regional_parameters
     supported=PARAMETERS | regional_parameters(config.data['sapiensid']['identities']).keys()
+    if isinstance(grid, dict):
+        from .config_layout import internal_path
+        normalized = {internal_path(key): values for key, values in grid.items() if isinstance(key, str)}
+        if len(normalized) != len(grid):
+            raise ValueError('Grid keys must be unique parameter names across both YAML layouts.')
+        grid = normalized
     if not isinstance(grid, dict) or not grid or set(grid)-supported:
         raise ValueError('Grid must contain supported recognition/clustering/sapiensid threshold parameters.')
     from .person_anchor import PIXEL_PARAMETER

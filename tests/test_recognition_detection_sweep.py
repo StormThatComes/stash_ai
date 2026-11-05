@@ -227,3 +227,21 @@ def test_canvas_limit_fails_without_partial_png_or_manifest(tmp_path, monkeypatc
         execute()
     assert all(d.closed for d in detectors) and case.stash.closed
     assert list(case.destination.iterdir()) == []
+
+
+def test_legacy_and_v2_sweep_paths_keep_batch_units_and_independent_rows(tmp_path):
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.detection_sweep import load_variants
+    config_path = tmp_path / 'current.yml'
+    config_path.write_text('version: 2\npose:\n  detector: {frame_batch_size: 8}\n'
+                           '  estimator: {vitpose_plus_large: {batch_size: 2}}\n')
+    csv = tmp_path / 'sweep.csv'
+    csv.write_text('parameter,value\nsapiensid.pose.batch_size,3\npose.detector.frame_batch_size,5\n'
+                   'pose.estimator.vitpose_plus_large.batch_size,6\nface.detector.score_threshold,0.7\n')
+    variants = load_variants(csv, load(config_path))
+    batches = []
+    for config, details in variants:
+        pose = config.data['sapiensid']['pose']
+        batches.append((pose['batch_size'], pose.get('vitpose_batch_size', pose['batch_size'])))
+    assert batches == [(8, 2), (3, 3), (5, 2), (8, 6), (8, 2)]
+    assert variants[-1][0].data['detection']['score_threshold'] == .7

@@ -50,18 +50,12 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
     if mode == 'diff':
         data = proposal(config, changes)['yaml_patch']
     else:
-        data = plain(settings.data)
-        data['storage']['database'] = str(config.database)
-        data['models']['directory'] = str(config.model_dir)
-        data['names']['file'] = str(config.names_path) if config.names_path else None
-        for section,key in (('model','source_directory'),('model','checkpoint_directory'),
-                            ('pose','path'),('pose','vitpose_directory'),('pose','sapiens_directory'),
-                            ('pose','dfine_directory'),('pose','pmpose_directory'),('pose','rfdetr_directory')):
-            raw=data['sapiensid'][section][key]
-            if raw:
-                path=Path(raw).expanduser()
-                data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
-    serialized = yaml.safe_dump(data, sort_keys=True)
+        from .config_export import export_data
+        data = export_data(settings, absolute_paths=True)
+        if config.document_version == 2:
+            from .config_layout import v2_document
+            data = v2_document(data)
+    serialized = yaml.safe_dump(data, sort_keys=config.document_version == 1)
     if mode == 'diff':
         serialized = ('# YAML diff: merge these keys into the input baseline configuration.\n'
                       '# This is not a standalone --face-config document.\n'
@@ -90,10 +84,10 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
                           '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n'))
         serialized = header + serialized
     # Validate the serialized full document before exposing it as a runnable config.
-    from .config import parse_yaml, validate
+    from .config import effective_data, parse_yaml
     document = parse_yaml(serialized.encode())
     if mode == 'full':
-        validate(document)
+        effective_data(document)
     return serialized
 
 

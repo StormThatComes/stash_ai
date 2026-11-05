@@ -8,7 +8,8 @@ from tempfile import TemporaryDirectory
 
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png
-from .config import _freeze, parse_yaml, plain, validate
+from .config import _freeze, effective_data, parse_yaml
+from .config_layout import INTERNAL_PATHS, VITPOSE_BATCH, get, put, v2_document
 
 
 MAX_VARIANTS = 64  # In addition to the baseline.
@@ -44,25 +45,25 @@ def load_variants(path, config):
         if not isinstance(row, dict) or set(row) != {'parameter', 'value'}:
             raise ValueError(f'{prefix}: expected exactly parameter and value.')
         parameter = row['parameter']
-        if not isinstance(parameter, str) or not (
-                parameter in FACE_PARAMETERS or parameter.startswith('sapiensid.pose.')):
+        if not isinstance(parameter, str):
+            raise ValueError(f'{prefix}: expected a dotted parameter name.')
+        public = INTERNAL_PATHS.get(parameter, parameter)
+        if not (public.startswith('pose.') or public.startswith('face.detector.')):
             raise ValueError(f'{prefix}: unsupported detector parameter {parameter!r}. '
-                             'Use face score/NMS/max_faces_per_frame, models.detector or sapiensid.pose leaves; '
-                             'quality, anchor and identity gates are not applied by this audit.')
-        data = plain(config.data)  # Every row starts from baseline, never the previous row.
-        target = data
-        parts = parameter.split('.')
-        for part in parts[:-1]:
-            if not isinstance(target, dict) or part not in target:
-                raise ValueError(f'{prefix}: unknown parameter {parameter!r}.')
-            target = target[part]
-        key = parts[-1]
-        if not isinstance(target, dict) or key not in target or isinstance(target[key], (dict, list)):
-            raise ValueError(f'{prefix}: unknown parameter or non-leaf {parameter!r}.')
-        old = target[key]
-        target[key] = row['value']
+                             'Use face.detector or pose settings (v1 names are also accepted).')
+        document = v2_document(config.data)  # Each row starts from the same baseline.
         try:
-            validate(data)
+            old = get(document, public)
+        except KeyError as error:
+            raise ValueError(f'{prefix}: unknown parameter {parameter!r}.') from error
+        if isinstance(old, (dict, list)):
+            raise ValueError(f'{prefix}: expected a leaf parameter, got {parameter!r}.')
+        put(document, public, row['value'])
+        if parameter == 'sapiensid.pose.batch_size':
+            # A legacy sweep always set both the frame and ViTPose limits.
+            put(document, VITPOSE_BATCH, row['value'])
+        try:
+            _, data = effective_data(document)
         except (ValueError, TypeError) as error:
             raise ValueError(f'{prefix} ({parameter}): {error}') from error
         variants.append((replace(config, data=_freeze(data)),

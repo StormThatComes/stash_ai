@@ -153,3 +153,61 @@ def test_diff_without_completed_baseline_creates_no_yaml(tmp_path, reason):
 def test_diff_requires_solver_and_a_destination(extra):
     with pytest.raises(SystemExit):
         parser().parse_args(['report-merge', '--performer-set', '1,2', '--yaml-mode', 'diff', *extra])
+
+
+def test_v2_solver_full_and_diff_match_effective_changes_and_keep_rule_siblings(tmp_path):
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.config_layout import v2_document
+    config, _ = fixture(tmp_path, 'query')
+    data = plain(config.data)
+    rules = {'all': [{'group': 'eyes', 'min': 1}],
+             'any': [{'group': 'torso', 'min': 2}, {'group': 'arms', 'min': 1}]}
+    data['sapiensid']['identities']['anchor_keypoint_rules'] = rules
+    config.source_path.write_text(yaml.safe_dump(v2_document(data)))
+    config = load(config.source_path)
+    changes = {'sapiensid.matching.face_floor': .6, 'sapiensid.identities.anchor_keypoint_rules.any.0.min': 3}
+    recommendation = proposal(config, changes)
+    diff = yaml.safe_load(configuration_document(config, recommendation, {}, mode='diff'))
+    assert diff == recommendation['yaml_patch']
+    keypoints = diff['matching']['body']['anchors']['keypoint_rules']
+    assert keypoints == {'all': rules['all'], 'any': [{'group': 'torso', 'min': 3}, rules['any'][1]]}
+    assert diff['matching']['hybrid']['face_floor'] == .6
+    full = tmp_path / 'elsewhere' / 'winner.yml'
+    full.parent.mkdir()
+    full.write_text(configuration_document(config, recommendation, {}, mode='full'))
+    winner = load(full)
+    assert winner.document_version == 2
+    assert plain(winner.data['sapiensid']['identities']['anchor_keypoint_rules']) == keypoints
+    assert winner.database == config.database
+
+
+def test_solver_cli_v2_winner_and_diff_are_usable(tmp_path, capsys):
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.config_layout import v2_document
+    config, goals = fixture(tmp_path / 'input', 'query')
+    destination = tmp_path / 'diff.yml'
+    argv = arguments(config, goals, destination)
+    document = v2_document(config.data)
+    config.source_path.write_text(yaml.safe_dump(document))
+    assert main(argv) == 0
+    result = json.loads(capsys.readouterr().out)
+    patch = yaml.safe_load(destination.read_text())
+    assert patch == result['best_result']['yaml_patch'] and patch
+    _merge(document, patch)
+    config.source_path.write_text(yaml.safe_dump(document))
+    with _open_readonly(config.database) as db:
+        assert evaluate(load(config.source_path), goals, db)['trials']['baseline']['goal_result']['fully_solved']
+
+
+def test_v2_tuning_grid_accepts_public_names_and_rejects_duplicate_aliases(tmp_path):
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.threshold_tuning import configurations
+    path = tmp_path / 'input.yml'
+    path.write_text('version: 2\n')
+    config = load(path)
+    grid = {'matching.face.match_threshold': [.7]}
+    variants, patches, _ = configurations(config, grid, 2)
+    assert variants['trial-1'].data['recognition']['match_threshold'] == .7
+    assert patches['trial-1']['yaml_patch'] == {'matching': {'face': {'match_threshold': .7}}}
+    with pytest.raises(ValueError, match='unique'):
+        configurations(config, grid | {'recognition.match_threshold': [.7]}, 3)
