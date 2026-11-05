@@ -111,3 +111,16 @@ def test_ranking_cache_uses_bytes_instead_of_global_entry_cap(tmp_path):
         size=ranking.db.execute("SELECT SUM(length(CAST(value AS BLOB))+length(key)+256) FROM metadata WHERE key LIKE 'vtt-ranking-cache:%'").fetchone()[0]
         assert size<=2000
         assert ranking.db.execute('SELECT 1 FROM metadata WHERE key=?',(ranking.key,)).fetchone()
+
+
+def test_bad_cue_is_local_but_changed_fingerprint_blocks_scene():
+    from stash_ai.recognition.vtt_portraits import Sources
+    source=Sources(None,None,None)
+    source.scene='1'
+    cue=SimpleNamespace(start=1.,image='http://local/sprite',rect=[0,0,20,20])
+    source.source=SimpleNamespace(fingerprint='abc',cues=[cue,cue],thumbnail=lambda i:i)
+    row=dict(cue=0,seconds=2.,input_sha='abc',source=cue.image,rect=encoded(cue.rect))
+    with pytest.raises(ValueError,match='cue'):source.thumbnail('1',row)
+    assert source.thumbnail('1',dict(row,cue=1,seconds=1.))==1
+    with pytest.raises(ValueError,match='changed'):source.thumbnail('1',dict(row,input_sha='old'))
+    with pytest.raises(ValueError,match='verified'):source.thumbnail('1',dict(row,cue=1,seconds=1.))

@@ -206,3 +206,20 @@ class SpriteInput:
 
     def __exit__(self, *args):
         cleanup([self.close], primary=args[1])
+
+
+class ChangedPortraitSource(ValueError):
+    pass
+
+
+def verify_portrait_cue(source,row):
+    import json
+    if source.fingerprint!=row['input_sha']:
+        raise ChangedPortraitSource('VTT source changed after recognition.')
+    index=row['cue']
+    if type(index) is not int or not 0<=index<len(source.cues):
+        raise ValueError('VTT cue does not match its recognition observation.')
+    cue=source.cues[index]
+    if (cue.start!=row['seconds'] or safe_url(cue.image)!=safe_url(row['source'])
+            or list(cue.rect)!=json.loads(row['rect'])):
+        raise ValueError('VTT cue does not match its recognition observation.')

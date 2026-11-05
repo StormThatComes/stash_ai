@@ -51,14 +51,10 @@ class Sources:
                 # A later candidate can retry a transient acquisition failure.
                 self.scene = self.source = None
                 raise
+        from .media import verify_portrait_cue, ChangedPortraitSource
         try:
-            if self.source.fingerprint != row['input_sha']:
-                raise ValueError('VTT source changed after recognition.')
-            cue = self.source.cues[row['cue']]
-            if (cue.start != row['seconds'] or safe_url(cue.image) != safe_url(row['source'])
-                    or list(cue.rect) != json.loads(row['rect'])):
-                raise ValueError('VTT cue does not match its recognition observation.')
-        except (ValueError, IndexError, KeyError, TypeError):
+            verify_portrait_cue(self.source,row)
+        except ChangedPortraitSource:
             self.failed.add(scene)
             raise
         return self.source.thumbnail(row['cue'])
