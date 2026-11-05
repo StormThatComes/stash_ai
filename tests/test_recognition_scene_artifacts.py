@@ -112,3 +112,19 @@ def test_mixed_worker_preserves_external_face_veto(tmp_path,monkeypatch):
         with scope(state,config),compute_scope(config) as pool:
             assert list(planned(db,[item],config))[0][2]==expected
             assert pool.submitted==1
+
+
+def test_cache_and_worker_input_include_external_pixel_representative(monkeypatch):
+    import json
+    import sqlite3
+    from stash_ai.recognition import evidence_pixels
+    db=sqlite3.connect(':memory:')
+    db.row_factory=sqlite3.Row
+    db.execute('CREATE TABLE observations(id TEXT,quality TEXT,rejected TEXT)')
+    db.execute('INSERT INTO observations VALUES (?,?,NULL)',('face',json.dumps({'evidence_pixel_sha256':'a'*64})))
+    monkeypatch.setattr(evidence_pixels,'aliases',lambda db,*a,**kw: [('a'*64,'b'*64)] if db=='external' else ())
+    with evidence_pixels.alias_scope('external'):
+        evidence_pixels.canonicalize(db)
+    raw=db.execute('SELECT quality FROM observations').fetchone()[0]
+    assert json.loads(raw)['evidence_pixel_sha256']=='b'*64
+    db.close()
