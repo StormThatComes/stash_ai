@@ -260,6 +260,8 @@ def plan(db,config,identities,*,focus=None,compact=False):
     eligible={p:d for d in decisions if not d['blockers'] for p in d['people']}
     internal={p:min(edges[tuple(sorted((p,q)))] for q in d['people'] if q!=p)
               for p,d in eligible.items()}
+    from .hybrid_modes import RivalBounds
+    bounds=RivalBounds(min(limits['reference_bytes']//32,8*1024**2))
     with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='nominated pair') as comparisons:
         for a,b,face_mean,person_mean in comparisons:
             # Known face contradiction is distinct from unknown body evidence.
@@ -269,6 +271,12 @@ def plan(db,config,identities,*,focus=None,compact=False):
             # A mean below the complete-link floor proves at least one veto,
             # including pairs screened out of positive nomination.
             from .hybrid_modes import competitor_score
+            rivals=[(person,eligible[person]['nearest_rival']) for person,rival in ((a,b),(b,a))
+                    if person in eligible and rival not in eligible[person]['people']]
+            if not rivals:continue
+            if all(known is not None for _,known in rivals) and owned[a].body_modes and owned[b].body_modes:
+                upper=bounds.upper(owned[a],owned[b])
+                if upper is not None and all(internal[person]-upper>known['gap'] for person,known in rivals):continue
             score=competitor_score(owned[a],owned[b],person_mean)
             if score is None and face_mean is not None and face_mean>=face_threshold:score=1.
             if score is None:continue

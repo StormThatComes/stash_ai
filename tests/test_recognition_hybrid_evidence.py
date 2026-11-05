@@ -46,3 +46,18 @@ def test_compact_plan_keeps_weak_rivals_and_excludes_contradictions(monkeypatch)
         compact=plan(None,cfg,bank,compact=True)
         assert compact['pairs']==[]
         assert compact['decisions']==full['decisions']
+
+
+def test_mode_rival_bound_covers_full_cross_sample_score():
+    from dataclasses import replace
+    from stash_ai.recognition.hybrid_modes import RivalBounds,competitor_score
+    rng=np.random.default_rng(71)
+    modes=[]
+    for rows in (2,4,8,16):
+        values=rng.normal(size=(rows,16)).astype('float32')
+        modes.append(values/np.linalg.norm(values,axis=1)[:,None])
+    a=replace(identity('a'),body_modes=tuple(modes[:2]))
+    b=replace(identity('b'),body_modes=tuple(modes[2:]))
+    exact=competitor_score(a,b,None)
+    assert exact<=RivalBounds(100000).upper(a,b)<=exact+.000002
+    assert RivalBounds(0).upper(a,b) is None

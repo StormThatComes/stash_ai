@@ -59,3 +59,39 @@ def guard_modes(bank,threshold):
         if target is None:groups.append([value])
         else:target.append(value)
     return tuple(np.asarray(g) for g in groups)
+
+
+class RivalBounds:
+    """Screen only rivals which cannot improve the exact reported runner-up."""
+    def __init__(self,budget):
+        self.means={}
+        self.remaining=budget
+
+    def get(self,owner):
+        if owner.person in self.means:return self.means[owner.person]
+        from .disk_body_modes import Matrix
+        if not owner.body_modes:return None
+        cost=sum(128+mode.shape[1]*8 for mode in owner.body_modes)
+        if cost>self.remaining:return None
+        means=[]
+        for mode in owner.body_modes:
+            if not len(mode) or len(mode)>1000000:return None
+            if isinstance(mode,Matrix):
+                total=np.zeros(mode.shape[1],dtype='float64');weight=0.
+                for start in range(0,len(mode),32):
+                    block=slice(start,start+32)
+                    weights=mode.weights(block)
+                    total+=(mode[block].astype('float64')*weights[:,None]).sum(axis=0)
+                    weight+=weights.sum()
+                if not weight:return None
+                means.append(total/weight)
+            else:means.append(mode.mean(axis=0,dtype='float64'))
+        self.remaining-=cost
+        self.means[owner.person]=means
+        return means
+
+    def upper(self,left,right):
+        a,b=self.get(left),self.get(right)
+        if not a or not b:return None
+        # Unit vectors, float64 products and at most 1M rows per mean.
+        return max(float(np.dot(x,y)) for x in a for y in b)+1e-6

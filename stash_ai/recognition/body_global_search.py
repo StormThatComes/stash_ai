@@ -2,8 +2,7 @@
 from .resource_errors import ResourceLimit
 from collections import OrderedDict
 from contextlib import ExitStack
-from pathlib import Path
-import sqlite3
+import os
 import tempfile
 
 import numpy as np
@@ -114,12 +113,8 @@ class Search:
             self.stack.callback(self.reservation.set,0)
             self.stats['reference_working_bytes']=metadata+working+cache_bytes+1024**2
             self.evidence=Evidence(self.db,self.config,cache_bytes,self.stats)
-            directory=self.stack.enter_context(tempfile.TemporaryDirectory(prefix='stash-body-means-'))
-            path=Path(directory)/'means.sqlite'
-            self.index=sqlite3.connect(path);self.stack.callback(self.index.close)
-            self.index.execute('PRAGMA journal_mode=OFF');self.index.execute('PRAGMA cache_size=-1024')
-            self.index.execute('PRAGMA mmap_size=0')
-            self.index.execute('CREATE TABLE means (ordinal INTEGER PRIMARY KEY,vector BLOB NOT NULL)')
+            self.index=self.stack.enter_context(tempfile.TemporaryFile(prefix='stash-body-means-'))
+            self.blocks=OrderedDict()
             self.entries=[];self.owner_modes={}
             retained=self.stats['reference_working_bytes']
             from .body_global_modes import references as appearance_references
@@ -139,14 +134,14 @@ class Search:
                         mean=np.zeros(4096,dtype='<f8')
                         for row in refs:mean+=self.evidence.feature(row)
                         if refs:mean/=len(refs)
-                        self.index.execute('INSERT INTO means VALUES (?,?)',(ordinal,mean.tobytes()))
+                        self.index.write(mean.tobytes())
                     del modes
                     self.reservation.set(retained)
             self.stats['reference_working_bytes']=retained
             self.reservation.set(self.stats['reference_working_bytes'])
             self.mode_owners=np.asarray([owner for owner,_ in self.entries],dtype='int64')
             self.stats['appearance_centroids']=len(self.entries)
-            self.index.commit();self.stats['centroid_disk_bytes']=path.stat().st_size
+            self.index.flush();self.stats['centroid_disk_bytes']=self.index.tell()
             return self
         except BaseException:
             self.stack.close();raise
@@ -158,8 +153,18 @@ class Search:
     def tiles(self,active=None):
         count=len(self.entries);block=self.block
         def read(start):
-            return np.array([np.frombuffer(r[0],dtype='<f8') for r in self.index.execute(
-                'SELECT vector FROM means WHERE ordinal>=? AND ordinal<? ORDER BY ordinal',(start,start+block))])
+            value=self.blocks.get(start)
+            if value is None:
+                rows=min(block,count-start)
+                self.index.seek(start*4096*8,os.SEEK_SET)
+                data=self.index.read(rows*4096*8)
+                if len(data)!=rows*4096*8:raise ValueError('Incomplete body centroid block.')
+                value=np.frombuffer(data,dtype='<f8').reshape(rows,4096)
+                if len(self.blocks)>=2:self.blocks.popitem(last=False)
+                self.blocks[start]=value
+                self.stats['centroid_block_reads']=self.stats.get('centroid_block_reads',0)+1
+            else:self.blocks.move_to_end(start)
+            return value
         from .parallel_numeric import matrix_tiles
         def inputs():
             for i in range(0,count,block):
@@ -253,6 +258,9 @@ class Search:
             while True:
                 before=len(excluded)
                 maxima=[np.full(len(self.identities),-np.inf) for _ in lanes]
+                # One MiB of the existing scratch allowance. If too many values
+                # tie, discard the shortlist and repeat the exact tiled scan.
+                shortlist=[]
                 for i,j,values in self.tiles(active):
                     for start,other,tile in rows(i,j,values):
                         for lane,g in enumerate(groups):
@@ -260,23 +268,40 @@ class Search:
                                 index=start+r;allowed=mask(g,index,other,tile.shape[1])
                                 owner=self.mode_owners[index]
                                 if owner not in pending[lane]:continue
-                                if allowed.any():maxima[lane][owner]=max(maxima[lane][owner],float(tile[r,allowed].max()))
-                def requests():
+                                if allowed.any():
+                                    maximum=max(maxima[lane][owner],float(tile[r,allowed].max()))
+                                    maxima[lane][owner]=maximum
+                                    if shortlist is not None:
+                                        near=np.flatnonzero(allowed & (tile[r]+2*ROUNDING>=maximum))
+                                        if len(shortlist)+len(near)>4096:
+                                            shortlist=None
+                                        else:
+                                            shortlist.extend((lane,index,other+int(c),float(tile[r,c])) for c in near)
+                def contenders():
+                    if shortlist is not None:
+                        self.stats['rival_passes_saved']=self.stats.get('rival_passes_saved',0)+1
+                        for lane,index,column,value in shortlist:
+                            if value+2*ROUNDING>=maxima[lane][self.mode_owners[index]]:
+                                yield lane,index,column
+                        return
                     for i,j,values in self.tiles(active):
                         for start,other,tile in rows(i,j,values):
                             for lane,g in enumerate(groups):
                                 for r in np.flatnonzero(g[start:start+len(tile)]>=0):
-                                    index=start+r;owner=self.mode_owners[index];a=self.identities[owner]
+                                    index=start+r;owner=self.mode_owners[index]
                                     if owner not in pending[lane]:continue
                                     allowed=mask(g,index,other,tile.shape[1]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
-                                    for c in np.flatnonzero(allowed):
-                                        b=self.identities[self.mode_owners[other+c]];key=tuple(sorted((a,b)))
-                                        if forbidden(a,b):continue
-                                        known=pairs.get(key)
-                                        if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
-                                            update(lane,a,b,known['score'])
-                                        else:
-                                            yield (lane,a,b),self.entries[index][1],self.entries[other+c][1],'body'
+                                    for c in np.flatnonzero(allowed):yield lane,index,other+c
+                def requests():
+                    for lane,index,column in contenders():
+                        a=self.identities[self.mode_owners[index]]
+                        b=self.identities[self.mode_owners[column]]
+                        if forbidden(a,b):continue
+                        known=pairs.get(tuple(sorted((a,b))))
+                        if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
+                            update(lane,a,b,known['score'])
+                        else:
+                            yield (lane,a,b),self.entries[index][1],self.entries[column][1],'body'
                 def update(lane,a,b,score):
                     previous=result[lane].get(a)
                     if previous is None or (-score,b)<(-previous['score'],previous['rival']):
