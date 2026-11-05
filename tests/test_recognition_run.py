@@ -198,25 +198,45 @@ def test_reference_run_peak_is_maximum_across_scenes_not_sum(tmp_path, monkeypat
         assert summary['people'] == 1 and summary['samples'] == 6
 
 
-def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('with_thumbnails', [False, True], ids=['face-references', 'pixel-witnesses'])
+def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeypatch, capsys, with_thumbnails):
     independent_media(monkeypatch)
+    if not with_thumbnails:
+        from stash_ai.recognition import scanning
+        crop_bytes = scanning.crop_bytes
+
+        def crop_without_thumbnail(*args, details, **kwargs):
+            result = crop_bytes(*args, details=details, **kwargs)
+            # Retain the crop and exact pixel fingerprint, as in a scan without thumbnail evidence.
+            details.pop('evidence_thumbnail')
+            return result
+
+        monkeypatch.setattr(scanning, 'crop_bytes', crop_without_thumbnail)
     config, client, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
+    with FaceDatabase(config.database) as state:
+        members = list(map(tuple, state.connection.execute('SELECT * FROM members ORDER BY observation')))
+        candidates = list(map(tuple, state.connection.execute('SELECT * FROM candidates ORDER BY id')))
+        assert len(members) == len(candidates) == 3
     writes = list(client.writes)
+    capsys.readouterr()
     config = replace(config, data=plain(config.data))
     config.data['clustering']['max_reference_bytes'] = 64
     assert run(config, services, '2') == 1
     output = capsys.readouterr().out
-    assert 'required=96 bytes, limit=64 bytes' in output
-    assert 'samples=6 stage=selected_and_historical' in output
+    if with_thumbnails:
+        assert 'Pixel witness index exceeds recognition evidence budget' in output
+    else:
+        assert 'required=96 bytes, limit=64 bytes' in output
+        assert 'samples=6 stage=selected_and_historical' in output
     assert client.writes == writes
     with FaceDatabase(config.database) as state:
         summary = json.loads(state.connection.execute('SELECT summary FROM runs ORDER BY started DESC').fetchone()[0])
-        assert summary['references']['bytes'] == summary['references']['peak_bytes'] == 96
+        if not with_thumbnails:
+            assert summary['references']['bytes'] == summary['references']['peak_bytes'] == 96
         assert summary['counts']['scenes_failed'] == 1
-        assert state.connection.execute('SELECT COUNT(*) FROM members').fetchone()[0] == 3
-        assert state.connection.execute('SELECT COUNT(*) FROM candidates').fetchone()[0] == 3
-        assert state.connection.execute("SELECT COUNT(*) FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scene='2'").fetchone()[0] == 0
+        assert list(map(tuple, state.connection.execute('SELECT * FROM members ORDER BY observation'))) == members
+        assert list(map(tuple, state.connection.execute('SELECT * FROM candidates ORDER BY id'))) == candidates
 
 
 def test_later_scene_merges_earlier_metadata_target_and_preserves_oldest_profile(tmp_path, monkeypatch, capsys):
