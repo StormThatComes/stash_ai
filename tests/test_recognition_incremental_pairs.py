@@ -35,3 +35,12 @@ def test_new_competitor_invalidates_old_merge_without_rescoring_its_proof(tmp_pa
         assert decision['blockers']==['competing_identity']
     assert result['decisions']==plan(None,config,pair+[rival])['decisions']
 
+
+
+def test_real_sapiens_buffers_have_stable_content_versions():
+    from stash_ai.recognition.hybrid_delta import endpoint_version
+    owner=replace(identity('a'),persons=np.zeros((8,4096),dtype='<f4'))
+    version=endpoint_version(owner)
+    assert endpoint_version(replace(owner,persons=owner.persons.copy()))==version
+    owner.persons[0,0]=.001
+    assert endpoint_version(owner)!=version

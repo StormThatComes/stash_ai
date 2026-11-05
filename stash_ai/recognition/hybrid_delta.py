@@ -25,7 +25,7 @@ def endpoint_version(identity):
     class Writer:
         def write(self, value):
             stream.update(value)
-            return len(value)
+            return memoryview(value).nbytes
     Fingerprinter(Writer(),protocol=5).dump(identity)
     return stream.hexdigest()
 
