@@ -42,13 +42,16 @@ class Lookup:
     def pairs(self, *, face_floor=None, person_floor=None, incident=None):
         count=len(self.identities)
         active=None if incident is None else np.array([i.person in incident for i in self.identities])
+        if active is not None:
+            if not active.any():return
+            if active.all():active=None
         from .parallel_numeric import matrix_tiles
         def tiles():
             for start in range(0,count,64):
                 rows=np.arange(start,min(start+64,count))
                 for other in range(start,count,64):
                     cols=np.arange(other,min(other+64,count))
-                    if active is None:
+                    if active is None or active[rows].all() or active[cols].all():
                         yield (rows,cols), ((self.faces[start:start+64],self.faces[other:other+64]),
                                             (self.persons[start:start+64],self.persons[other:other+64]))
                         continue
