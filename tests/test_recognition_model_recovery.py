@@ -39,7 +39,9 @@ def test_auto_preload_failure_falls_back_but_strict_cuda_still_fails(tmp_path, m
     ort = SimpleNamespace(get_available_providers=lambda:['CUDAExecutionProvider','CPUExecutionProvider'],
         preload_dlls=preload, SessionOptions=lambda:SimpleNamespace(),
         InferenceSession=lambda *a,**kw:calls.append(kw) or SimpleNamespace(get_providers=lambda:['CPUExecutionProvider']))
-    monkeypatch.setattr(runtime.metadata, 'version', version)
+    # PyTorch may be imported during CUDA preload and must see real package metadata.
+    monkeypatch.setattr(runtime, 'metadata', SimpleNamespace(
+        version=version, PackageNotFoundError=runtime.metadata.PackageNotFoundError))
     monkeypatch.setitem(sys.modules, 'onnxruntime', ort)
     result,device=runtime.session(changed(cluster_config(tmp_path), models={'device':'auto'}), b'model')
     assert device=='cpu' and calls[0]['providers']==['CPUExecutionProvider']
