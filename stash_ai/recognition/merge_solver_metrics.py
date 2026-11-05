@@ -11,7 +11,8 @@ def scale(key, current):
 
 
 def magnitude(changes):
-    return sum(abs(float(c['proposed'])-float(c['current']))/scale(c['parameter'],c['current']) for c in changes)
+    return sum(1. if c.get('direction') == 'replace' else
+               abs(float(c['proposed'])-float(c['current']))/scale(c['parameter'],c['current']) for c in changes)
 
 
 def signature(changes, config=None):

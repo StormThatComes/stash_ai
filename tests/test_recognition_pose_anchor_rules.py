@@ -184,7 +184,7 @@ def test_report_explains_or_without_marking_passing_anchor_failed(tmp_path):
     assert payload['anchor_gate']['keypoint_rules']['any'][0]['measured'] == 1
 
 
-def test_indexed_solver_patch_preserves_rules_and_round_trips_yaml(tmp_path):
+def test_explicit_tune_grid_can_set_minima_but_solver_cannot(tmp_path):
     from stash_ai.recognition.merge_report_policy import parameter, patched, proposal
     from stash_ai.recognition.merge_solver_domains import registry, normalize
     from stash_ai.recognition.merge_solver_profiles import admission
@@ -203,9 +203,11 @@ def test_indexed_solver_patch_preserves_rules_and_round_trips_yaml(tmp_path):
     _merge(copied, yaml.safe_load(result['yaml']))
     assert copied == patched(c, changes).data
     assert parameter(c.data, PARAMETER+'.any.0.min') == 3
-    assert normalize(c, changes) == changes
-    assert registry(c)[PARAMETER+'.any.1.min'].high == 2
-    assert admission(c)[PARAMETER+'.all.0.min'] == 0
+    for change in (changes, {PARAMETER: {'all': [], 'any': []}}):
+        with pytest.raises(ValueError, match='registered'):
+            normalize(c, change)
+    assert not any(k.startswith(PARAMETER) for k in registry(c))
+    assert not any(k.startswith(PARAMETER) for k in admission(c))
     trials, _, _ = configurations(c, {PARAMETER+'.all.0.min': [0, 1]}, 3)
     assert len(trials) == 2
     with pytest.raises(ValueError):
@@ -222,41 +224,44 @@ def test_solver_diagnostics_name_only_blocking_regional_parameters():
     gate = anchor_gate(metadata(['left_hip']), settings(rules))['keypoint_rules']
     record = diagnostic_record(SimpleNamespace(data=defaults()), [], {}, {}, [dict(
         observation='test', blockers=[gate['reason']], keypoint_rules=gate)])
-    assert record['blocker_trace'][0]['parameters'] == [PARAMETER+'.all.0.min']
-    assert record['active_parameters'] == {PARAMETER+'.all.0.min': 1}
+    assert record['blocker_trace'][0]['keypoint_rules']['failed_parameters'] == [PARAMETER+'.all.0.min']
+    assert record['blocker_trace'][0]['parameters'] == []
+    assert record['active_parameters'] == {}
     assert not record['blocker_trace'][0]['requires_evidence']
     record = diagnostic_record(SimpleNamespace(data=defaults()), [dict(
         observation='test', status='withheld', reason='body_anchor_pixels', keypoint_rules=gate)], {}, {}, [])
-    assert record['blocker_trace'][0]['parameters'] == [
-        'sapiensid.identities.anchor_min_person_pixels', PARAMETER+'.all.0.min']
+    assert record['blocker_trace'][0]['parameters'] == ['sapiensid.identities.anchor_min_person_pixels']
+    assert record['blocker_trace'][0]['keypoint_rules']['failed_parameters'] == [PARAMETER+'.all.0.min']
     missing = evaluate(rules, None)
     record = diagnostic_record(SimpleNamespace(data=defaults()), [], {}, {}, [dict(
         observation='old', blockers=[missing['reason']], keypoint_rules=missing)])
     assert record['blocker_trace'][0]['requires_evidence']
 
 
-def test_region_minima_are_native_integer_tpe_dimensions(tmp_path):
+def test_tpe_ignores_regional_minima_even_if_given_options(tmp_path):
     pytest.importorskip('optuna')
     from stash_ai.recognition.merge_solver_sampler import create
-    from stash_ai.recognition.merge_report_policy import patched, parameter
     path = tmp_path/'sampler.yml'
     path.write_text(yaml.safe_dump(dict(version=1, sapiensid=dict(enabled=True, identities=dict(
         anchor_keypoint_rules={'all': [{'group': 'hips', 'min': 1}], 'any': []})))))
     c = load(path)
     key = PARAMETER+'.all.0.min'
     result = create('tpe', 42).suggest(c, [({}, (0,))], {key: [0, 1, 2]}, {}, 15)
-    assert type(result[key]) is int and 0 <= result[key] <= 2
-    assert parameter(patched(c, result).data, key) == result[key]
+    assert result == {}
 
 
-def test_solver_relaxes_regional_gate_using_offline_production_replay(tmp_path, monkeypatch):
+@pytest.mark.parametrize('scheduling', [None, 'batch', 'async'])
+def test_solver_only_compares_whole_regional_profiles_on_request(tmp_path, monkeypatch, scheduling):
     from tests.test_recognition_body_integration import seeded
     from stash_ai.recognition.database import FaceDatabase, encoded
     from stash_ai.recognition.fragmentation_report import _open_readonly
     from stash_ai.recognition.merge_goals import resolve, evaluate as replay
     from stash_ai.recognition.merge_solver import solve
     from stash_ai.recognition.merge_report_policy import patched
+    from stash_ai.recognition.merge_goal_output import configuration_document
+    from stash_ai.recognition.merge_solver_profiles import anchor_rule_profiles
     c, _, ids, _ = seeded(tmp_path, vectors=[[1, 0]])
+    c.data['recognition']['min_merge_support'] = 1000
     c.data['sapiensid']['global_matching']['enabled'] = False
     with FaceDatabase(c.database) as state:
         for index, oid in enumerate(ids[0]):
@@ -264,15 +269,72 @@ def test_solver_relaxes_regional_gate_using_offline_production_replay(tmp_path, 
             value['quality']['pixel_digest'] = str(index)
             state.connection.execute('UPDATE body_observations SET quality=? WHERE id=?', (encoded(value), oid))
         state.connection.commit()
-    c.data['sapiensid']['identities']['anchor_keypoint_rules'] = {'all': [{'group': 'hips', 'min': 2}], 'any': []}
+    current = {'all': [{'group': 'hips', 'min': 2}], 'any': [{'points': ['nose', 'left_eye'], 'min': 2}]}
+    c.data['sapiensid']['identities']['anchor_keypoint_rules'] = deepcopy(current)
     monkeypatch.setattr('stash_ai.recognition.models.load_backend', lambda *a, **k: pytest.fail('offline inference'))
     before = c.database.read_bytes()
     with _open_readonly(c.database) as db:
         goals = resolve(db, c, [['900']], policy='strict')
         assert not replay(c, goals, db)['trials']['baseline']['goal_result']['fully_solved']
-        result = solve(c, goals, db, maximum=24)
+        fixed = solve(c, goals, db, maximum=12)
+        assert not fixed['best_result']['fully_solved']
+        for trial in fixed['simulation']['trials'].values():
+            assert not any(r['parameter'].startswith(PARAMETER) for r in trial.get('changes', ()))
+        checkpoint = tmp_path/'solver.json'
+        args = dict(maximum=6, compare_anchor_rules=True, checkpoint=checkpoint)
+        if scheduling:
+            args['execution'] = dict(cpus=4, trials=2, scheduling=scheduling, memory_bytes=128*1024**3)
+        result = solve(c, goals, db, **args)
+        trials = result['simulation']['trials']
+        profiles = dict(anchor_rule_profiles(c))
+        comparisons = [t for t in trials.values() if t.get('search_phase') == 'anchor_rules']
+        assert len(trials) <= 6 and len(comparisons) == 2
+        parent, = {t['search_parent'] for t in comparisons}
+        controls = {r['parameter']: r['proposed'] for r in trials[parent].get('changes', [])}
+        for trial in comparisons:
+            actual = {r['parameter']: r['proposed'] for r in trial['changes']}
+            assert actual == controls | {PARAMETER: profiles[trial['search_strategy']]}
         assert result['status'] == 'fully_solved'
         changes = {r['parameter']: r['proposed'] for r in result['recommendation']['changes']}
-        assert changes[PARAMETER+'.all.0.min'] <= 1
+        assert changes[PARAMETER] in profiles.values()
         assert replay(patched(c, changes), goals, db)['trials']['baseline']['goal_result']['fully_solved']
+        for mode in ('diff', 'full'):
+            document = configuration_document(c, result['best_result'], {}, mode=mode)
+            exported = yaml.safe_load(document)
+            assert exported['sapiensid']['identities']['anchor_keypoint_rules'] == changes[PARAMETER]
+            assert exported['recognition']['min_merge_support'] <= 8
+        resumed = solve(c, goals, db, resume=True, **args)
+        assert resumed['best_result'] == result['best_result']
+        assert resumed['search']['restored_trials'] == len(trials)
+    assert c.data['sapiensid']['identities']['anchor_keypoint_rules'] == current
     assert c.database.read_bytes() == before
+
+
+def test_empty_configured_rule_is_eligible_and_disabled_sapiensid_skips_comparisons(tmp_path):
+    from stash_ai.recognition.merge_solver_profiles import anchor_rule_profiles
+    config = load(root=tmp_path)
+    assert anchor_rule_profiles(config) == ()
+    config = replace(config, data=plain(config.data))
+    config.data['sapiensid']['enabled'] = True
+    assert len(anchor_rule_profiles(config)) == 2
+    assert config.data['sapiensid']['identities']['anchor_keypoint_rules'] == {'all': [], 'any': []}
+
+
+@pytest.mark.parametrize(('maximum', 'expected_profiles'), [(1, []), (2, ['face_or_torso'])])
+def test_cli_preserves_configured_preset_and_skips_its_duplicate(tmp_path, capsys, maximum, expected_profiles):
+    from stash_ai.recognition.cli import main
+    from tests.test_recognition_body_integration import seeded
+
+    config, _, _, _ = seeded(tmp_path, vectors=[[1, 0]])
+    rules = {'all': [{'group': 'shoulders', 'min': 1}, {'group': 'hips', 'min': 1}], 'any': []}
+    config.data['sapiensid']['identities']['anchor_keypoint_rules'] = rules
+    config.source_path.write_text(yaml.safe_dump(plain(config.data)))
+    assert main(['report-merge', '--solve', '--compare-anchor-rules', '--max-trials', str(maximum),
+                 '--face-config', str(config.source_path), '--faces-db', str(config.database),
+                 '--performer-set', '900', '--yaml-output', str(tmp_path/'winner.yml')]) == 0
+    report = json.loads(capsys.readouterr().out)
+    trials = report['simulation']['trials']
+    assert len(trials) == maximum
+    assert [t['search_strategy'] for t in trials.values() if t.get('search_phase') == 'anchor_rules'] == expected_profiles
+    assert report['selected_trial'] == 'baseline'
+    assert yaml.safe_load((tmp_path/'winner.yml').read_text())['sapiensid']['identities']['anchor_keypoint_rules'] == rules

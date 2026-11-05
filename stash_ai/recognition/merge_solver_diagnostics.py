@@ -125,8 +125,7 @@ def latest_decisions(db, observation_ids):
 def diagnostic_record(settings, decisions, queries, hybrid, quality):
     trace, active = [], Counter()
     def add(stage, reason, observation=None, **detail):
-        parameters = tuple(dict.fromkeys((*GATES.get(reason, ()),
-            *detail.get('keypoint_rules', {}).get('failed_parameters', ()))))
+        parameters = GATES.get(reason, ())
         active.update(parameters)
         trace.append(dict(stage=stage, reason=reason, observation=observation,
             parameters=list(parameters), requires_evidence=reason in HARD, **detail))

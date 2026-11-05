@@ -46,7 +46,7 @@ def validate(rules):
 
 
 def parameters(settings):
-    """Only numerical minima are tunable; preserve selections and boolean logic."""
+    """Indexed minima accepted by an explicitly supplied recognition tune grid."""
     rules = settings.get('anchor_keypoint_rules', {})
     return {f'{PARAMETER}.{mode}.{index}.min': len(indices(rule))
             for mode in ('all', 'any') for index, rule in enumerate(rules.get(mode, ()))}
