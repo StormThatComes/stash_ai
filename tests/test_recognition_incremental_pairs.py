@@ -112,3 +112,13 @@ def test_sparse_catalogue_skips_unchanged_empty_block_pairs(tmp_path,monkeypatch
         bank.append(identity('new',.2))
         assert not list(nominations(Lookup(bank,2**26),store,2.,2.))
         assert 0<stats['hybrid_block_pairs_visited']<cold
+
+
+def test_face_bounds_keep_weak_boundary_and_small_catalogue():
+    from stash_ai.recognition.scoring import FrozenFaceBlocks
+    from stash_ai.recognition.clustering import Group
+    query=np.array([1,0],dtype='float32')
+    groups=[Group(str(i),(-query if i<64 else query,),True) for i in range(128)]
+    blocks=FrozenFaceBlocks(groups,2**20)
+    assert list(blocks.candidates(query,.999999))==groups[64:]
+    assert list(FrozenFaceBlocks(groups[:8],2**20).candidates(query,.9))==groups[:8]

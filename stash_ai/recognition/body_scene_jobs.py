@@ -11,6 +11,23 @@ def _worker(payload):
     return _plan(None,config,*frozen)
 
 
+def _witnesses(db, owners, limit):
+    from .scan_heads import predicate
+    where=(' FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+           "WHERE m.person=? AND o.rejected IS NULL AND s.status='complete' AND "+predicate())
+    frozen={}
+    used=0
+    for person in sorted(owners):
+        charge=db.execute('SELECT COALESCE(SUM(3*COALESCE(length(o.embedding),0)+512),0)'+where,
+                          (person,)).fetchone()[0]+512
+        used+=charge
+        if used>limit:return None,0
+        # Keep raw values. Validate in traversal order on demand, just like the
+        # serial guard; a veto may stop before a later corrupt witness.
+        frozen[person]=tuple(dict(r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
+    return frozen,used
+
+
 def planned(db, items, config):
     from .body_identity import scene_plan, _load_scene, _plan
     from .hybrid_query_observer import _observer
@@ -44,10 +61,16 @@ def planned(db, items, config):
         if size and size <= pool.limit//max(2,pool.workers):
             frozen=_load_scene(db,scan,config)
             rows=frozen[1]
-            # Unowned observations with a face can require the complete owner's
-            # off-scene veto bank. Keep this case on the SQLite coordinator.
-            if not frozen[2] or not any(r['face_person'] is None and r['_face_vector'] is not None for r in rows):
-                batch.append((key,frozen,size))
+            faces,charge={},0
+            if any(r['face_person'] is None and r['_face_vector'] is not None for r in rows):
+                from .body_identity import anchor
+                settings=config.data['sapiensid']['identities']
+                owners={frozen[2][r['face_person']] for r in rows if r['face_person'] is not None
+                        and r['face_anchor'] and anchor(r,settings)}
+                room=min(pool.limit//max(2,pool.workers)-size,config.data['sapiensid']['execution']['reference_bytes']//16)
+                faces,charge=_witnesses(db,owners,room)
+            if faces is not None:
+                batch.append((key,(*frozen,faces),size+charge))
                 if len(batch)>=pool.workers:
                     yield from drain()
                 continue

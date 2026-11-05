@@ -5,7 +5,8 @@ from .clustering import vector
 
 
 class FaceGuard:
-    def __init__(self, db, config, *, scores=None):
+    def __init__(self, db, config, *, scores=None, frozen=None):
+        self.frozen=frozen
         from .body_identity import Scores
         self.scores=scores if scores is not None else Scores(config)
         self.db = db
@@ -17,6 +18,10 @@ class FaceGuard:
 
     def witnesses(self, person):
         from .scan_heads import predicate as current_scan
+        if self.frozen is not None:
+            for raw in self.frozen[person]:
+                yield vector(raw)
+            return
         key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
         if key in self.banks:
             self.banks.move_to_end(key)

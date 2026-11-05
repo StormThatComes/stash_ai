@@ -40,18 +40,18 @@ def report(db,config,scope,namespace,*,focus=None):
     return deepcopy(found)
 
 
-def _report(db,config,scope,namespace,*,focus=None):
+def _report(db,config,scope,namespace,*,focus=None,compact=False):
     """Retain candidate proofs and requested diagnostic pairs, not an N² graph."""
     result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
     from .incomplete_rivals import protect
-    result=protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus))
+    result=protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus,compact=compact))
     from .body_reference_gaps import protect as protect_contracts
     return protect_contracts(db,config,scope,namespace,result)
 
 
-def plan(db,config,bank,*,focus=None):
+def plan(db,config,bank,*,focus=None,compact=False):
     """Plan on a frozen metadata catalogue; source evidence is only read."""
     from .body_global_search import Search,exact_pairs
     from .memory_size import Reservation,size
@@ -90,9 +90,16 @@ def plan(db,config,bank,*,focus=None):
                 membership.update((p,len(components)) for p in component)
                 components.append(sorted(component))
             reserve(size(components)+size(membership))
+            incomplete={i for i,people in enumerate(components)
+                        if any(len(edges[p])!=len(people)-1 for p in people)}
+            if compact:
+                membership={p:i for p,i in membership.items() if i not in incomplete}
             rivals,goal_rivals=search.nearest([membership,focus],pairs)
             result['nearest_competitors']=list(goal_rivals.values())
-            for people in components:
+            for index,people in enumerate(components):
+                if compact and index in incomplete:
+                    result['decisions'].append(dict(people=people,outcome='blocked',blockers=['incomplete_body_component']))
+                    continue
                 blockers=[];nearest=-1.
                 if any(b not in edges[a] for a in people for b in people if a!=b):
                     blockers.append('incomplete_body_component')
@@ -151,7 +158,9 @@ def reconcile(database,selected,config):
             db.execute("UPDATE body_members SET person=NULL,status='withheld',role='auxiliary',proof=? "
                 'WHERE person=? AND observation IN (SELECT id FROM body_observations WHERE scan IN (SELECT value FROM json_each(?)))',
                 (encoded(dict(reason='body_alias_requires_complete_selection',source=row['source'])),row['source'],encoded([s['scan'] for s in selected])))
-    result=report(db,config,scope,namespace)
+    from .solver_execution import current as solver
+    result=(report(db,config,scope,namespace) if solver() is not None else
+            _report(db,config,scope,namespace,compact=True))
     from .publication_queue import enqueue
     proof_bytes=0
     for decision in result['decisions']:

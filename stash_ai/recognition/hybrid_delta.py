@@ -80,7 +80,7 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
         yield from lookup.pairs(face_floor=face_floor,person_floor=body_floor)
         return
     bounds=[(ball(block[1]),ball(block[2])) for block in blocks]
-    device=select(config,lookup,blocks)
+    device=None
     def compute(payload):
         if device is not None:
             left,right,_,ff,bf=payload
@@ -123,8 +123,28 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
                     count('hybrid_blocks_excluded')
                     continue
                 yield key,payload,store.get("hybrid-nominations",key) if store else None
+    def admitted():
+        nonlocal device
+        # Calibrate only when eight uncached, non-excluded tiles really exist.
+        attempted=False
+        pending=[]
+        for item in items():
+            if attempted or config is None or len(lookup.identities)<1024:
+                yield item
+            elif item[2] is not None:
+                yield from pending
+                pending.clear()
+                yield item
+            else:
+                pending.append(item)
+                if len(pending)>=8:
+                    device=select(config,lookup,blocks,len(pending))
+                    attempted=True
+                    yield from pending
+                    pending.clear()
+        yield from pending
     from .profiling import count
-    for (key,payload,hit),result in map_bounded(compute,items(),
+    for (key,payload,hit),result in map_bounded(compute,admitted(),
             payload=lambda item:item[1],cost=lambda item:65536+512*len(item[1][0][3])*len(item[1][1][3]),
             cached=lambda item:item[2],kind="incremental_hybrid_tiles"):
         if hit is None:
