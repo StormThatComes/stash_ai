@@ -66,9 +66,11 @@ def _apply(db):
     add('Delete unreferenced thumbnails', 'DELETE FROM evidence_thumbnails WHERE id IN (SELECT id FROM retention_thumbnails) '
                "AND NOT EXISTS (SELECT 1 FROM observations o WHERE json_extract(o.quality,'$.evidence_thumbnail_id')=evidence_thumbnails.id)")
     for table in ('evidence_versions', 'evidence_fingerprints'):
-        add(f'Delete obsolete bookkeeping: {table}', f"DELETE FROM {table} WHERE kind IN ('scan','raw-observations','raw-person','raw-body') "
+        kinds="'scan','raw-observations','raw-person','raw-body','scene-face-vectors','hybrid-observations','hybrid-person','vtt-scan-decisions'"
+        add(f'Delete obsolete bookkeeping: {table}', f"DELETE FROM {table} WHERE kind IN ({kinds}) "
                    "AND key IN (SELECT id FROM retention_scans WHERE action='delete')")
-    add('Delete obsolete crop markers', "DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete')", (FACE_CROPS,))
+    add('Delete obsolete crop markers', "DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete' "
+        "UNION ALL SELECT 'verified-scan-geometry:'||id FROM retention_scans WHERE action='delete')",(FACE_CROPS,))
     with tracking(statements, 'Prune obsolete recognition evidence', unit='statement') as steps:
         for label, sql, parameters in steps:
             with stage(label):
@@ -84,7 +86,7 @@ def on_connection(db, config, *, apply=False, scope=None, scenes=None, notify=la
         raise ValueError('Retention requires an explicit transaction.')
     notify('Plan recognition retention', 0, 1)
     try:
-        plan.prepare(db, config, scope=scope, scenes=scenes)
+        plan.prepare(db, config, scope=scope, scenes=scenes,writable=apply)
         with stage('Summarize reclaimable evidence'):
             result = plan.summarize(db)
         result.update(applied=apply, scope=scope, scenes=scenes,
@@ -140,7 +142,8 @@ def prune_database(config, *, apply=False, scope=None, scenes=None, notify=lambd
         raise
 
 
-def after_run(database, config, run):
+def after_run(database, config, run, *, api_key=''):
+    from .diagnostics import message
     """Only a successfully finalized run may prune its own selected scenes."""
     if not config.data['storage']['retention']['auto_prune']:
         return None
@@ -173,14 +176,20 @@ def after_run(database, config, run):
         try:
             result = on_connection(db, config, apply=True, scope=record['scope'], scenes=scenes, notify=notify)
             with stage('Commit automatic retention'):
+                result['outcome']='success'
                 db.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)', (run, 'retention', schema.encoded(result)))
                 db.commit()
-            progress.advance()
-            return result
-        except BaseException:
+        except BaseException as error:
             with stage('Roll back automatic retention'):
                 db.rollback()
+            outcome='interrupted' if isinstance(error,KeyboardInterrupt) else 'failed'
+            detail=dict(outcome=outcome,applied=False,scope=record['scope'],scenes=scenes,
+                        error_type=type(error).__name__,error=message(error,api_key)[:1000])
+            with db:
+                db.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)',(run,'retention',schema.encoded(detail)))
             raise
+        progress.advance()
+        return result
 
 
 def format_report(result):

@@ -121,3 +121,59 @@ def test_unobserved_reference_checks_do_not_run_optional_total_counts():
         db.set_trace_callback(statements.append)
         plan._pin_json(db, 'candidates', 'payload', '1', 0)
         assert 'SELECT COUNT(*) FROM candidates' not in statements
+
+
+def test_warm_retention_refreshes_only_changed_documents_and_repairs_missing_pins(tmp_path):
+    from stash_ai.recognition.retention_index import refresh
+    config=settings(tmp_path)
+    with FaceDatabase(config.database) as state:
+        scans(state,config)
+        db=state.connection
+        with db:
+            db.execute("INSERT INTO candidates VALUES ('other','s3','p',NULL,'accepted',?)",(encoded(['face-s0']),))
+        # An external decision preserves s0; after applying, its indexed document
+        # and verified runs survive reopen and unchanged previews.
+        db.execute('BEGIN IMMEDIATE')
+        assert retention.on_connection(db,config,apply=True)['scans']['archive']==1
+        db.commit()
+        def refreshed():
+            operations=[]
+            db.set_trace_callback(operations.append)
+            try:
+                with db:
+                    assert refresh(db,True)
+            finally:db.set_trace_callback(None)
+            return [s for s in operations if 'CROSS JOIN json_tree' in s or "CROSS JOIN json_each(p.data" in s]
+        assert refreshed()==[]
+        with db:
+            db.execute("DELETE FROM retention_links WHERE doc='other'")
+        assert len(refreshed())>=1
+        assert db.execute("SELECT value FROM retention_links WHERE doc='other'").fetchone()[0]==b'face-s0'
+        db.execute("UPDATE candidates SET payload='bad' WHERE id='other'")
+        db.rollback()
+        assert refreshed()==[]
+        with db:
+            db.execute("UPDATE candidates SET payload='[]' WHERE id='other'")
+        assert refreshed()
+        assert not db.execute("SELECT 1 FROM retention_links WHERE doc='other'").fetchone()
+
+
+def test_version_ten_upgrades_and_indexes_legacy_cross_scene_pins(tmp_path):
+    import uuid
+    from stash_ai.recognition import database
+    config=settings(tmp_path)
+    with closing(sqlite3.connect(config.database)) as db:
+        db.executescript(database.SCHEMA_V10)
+        db.execute(f'PRAGMA application_id={database.APPLICATION_ID}')
+        db.execute('PRAGMA user_version=10')
+        db.execute("INSERT INTO metadata VALUES ('installation',?)",(str(uuid.uuid4()),))
+        db.row_factory=sqlite3.Row
+        legacy=FaceDatabase.__new__(FaceDatabase)
+        legacy.connection=db
+        scans(legacy,config)
+        db.execute("INSERT INTO candidates VALUES ('legacy','s3','p',NULL,'accepted',?)",(encoded(['face-s0']),))
+        db.commit()
+    with FaceDatabase(config.database) as state:
+        assert state.connection.execute('PRAGMA user_version').fetchone()[0]==database.SCHEMA_VERSION
+    result=retention.prune_database(config,apply=True)
+    assert result['scans']=={'archive':1,'delete':1,'keep':2}

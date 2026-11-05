@@ -48,6 +48,15 @@ def logical(path):
                 for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
+def assert_only_retention_index_changed(before,after):
+    from stash_ai.recognition.retention_index import TABLES,MARKER
+    for name,rows in before.items():
+        if name not in TABLES:
+            observed=after[name]
+            if name=='metadata':observed=[r for r in observed if r[0]!=MARKER]
+            assert observed==rows
+
+
 def test_preview_is_readonly_and_apply_keeps_active_and_one_previous(tmp_path):
     c = settings(tmp_path)
     with FaceDatabase(c.database) as state:
@@ -107,7 +116,7 @@ def test_unfinished_or_unpublished_replacement_never_prunes(tmp_path, block):
     before = logical(c.database)
     report = retention.prune_database(c, apply=True)
     assert report['actions'] == [] and report['scans'] == {'keep': 4}
-    assert logical(c.database) == before
+    assert_only_retention_index_changed(before,logical(c.database))
 
 
 def test_scope_scene_and_model_isolation(tmp_path):
@@ -211,7 +220,7 @@ def test_incomplete_current_person_contract_does_not_prune_old_variants(tmp_path
             db.execute("INSERT INTO body_observations VALUES ('new','s0',0,0,?,NULL,'{}','{}',NULL,NULL,NULL)", (contract(c),))
     before = logical(c.database)
     assert retention.prune_database(c, apply=True)['actions'] == []
-    assert logical(c.database) == before
+    assert_only_retention_index_changed(before,logical(c.database))
 
 
 def test_writer_lock_and_failure_rollback(tmp_path, monkeypatch):

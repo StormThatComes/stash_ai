@@ -16,7 +16,7 @@ def discard(db):
         db.execute('DROP TABLE IF EXISTS temp.' + name)
 
 
-def prepare(db, config, *, scope=None, scenes=None):
+def prepare(db, config, *, scope=None, scenes=None, writable=False):
     """Caller holds one snapshot/transaction through planning and application."""
     from .models import namespace
     from .scanning import scan_identity
@@ -35,10 +35,13 @@ def prepare(db, config, *, scope=None, scenes=None):
     policy = scan_identity(config, model)
     settings = config.data['storage']['retention']
     with stage('Read successful replacement runs'):
-        # A complete scan alone is not proof that rebuilding/publication succeeded.
-        db.execute("INSERT OR IGNORE INTO retention_success SELECT json_extract(j.value,'$.scan') "
-                   "FROM progress p JOIN runs r ON r.id=p.run, json_each(p.data,'$.selection') j "
-                   "WHERE r.status='success' AND p.phase='rebuild' AND json_extract(j.value,'$.scan') IS NOT NULL")
+        from . import retention_index
+        indexed=retention_index.refresh(db,writable)
+        if not indexed:
+            # A complete scan alone is not proof that rebuilding/publication succeeded.
+            db.execute("INSERT OR IGNORE INTO retention_success SELECT json_extract(j.value,'$.scan') "
+                       "FROM progress p JOIN runs r ON r.id=p.run, json_each(p.data,'$.selection') j "
+                       "WHERE r.status='success' AND p.phase='rebuild' AND json_extract(j.value,'$.scan') IS NOT NULL")
     with stage('Select retained scans'):
         rows = db.execute('SELECT s.*,(' + predicate() + ') AS active FROM scans s WHERE namespace=? '
                           'AND (? IS NULL OR scope=?) AND (? IS NULL OR scene IN (SELECT value FROM json_each(?))) '
@@ -54,7 +57,9 @@ def prepare(db, config, *, scope=None, scenes=None):
                     blocked = 'active_scan_incomplete'
                 elif active['policy_sha'] != policy:
                     blocked = 'configuration_differs_from_active_scan'
-                elif not db.execute('SELECT 1 FROM retention_success WHERE scan=?', (active['id'],)).fetchone():
+                elif not db.execute(("SELECT 1 FROM retention_verified v JOIN runs r ON r.id=v.run "
+                    "JOIN progress p ON p.run=v.run AND p.phase='rebuild' WHERE v.scan=? AND r.status='success' LIMIT 1"
+                    if indexed else 'SELECT 1 FROM retention_success WHERE scan=?'), (active['id'],)).fetchone():
                     blocked = 'no_successful_replacement_run'
                 elif db.execute("SELECT 1 FROM publications WHERE scope=? AND scene=? "
                                 "AND status NOT IN ('confirmed','observed') LIMIT 1",
@@ -83,7 +88,7 @@ def prepare(db, config, *, scope=None, scenes=None):
                     db.execute('INSERT INTO retention_scans VALUES (?,?,?)',
                                (scan['id'], 'keep' if reason else 'obsolete', reason))
     with stage('Protect identity and audit references'):
-        _pins(db)
+        _pins(db,indexed)
     with stage('Plan obsolete scans and crops'):
         # Keep immutable numerical/geometry evidence that still owns identity roots.
         db.execute("UPDATE retention_scans SET action='archive',reason='identity_or_audit_reference' "
@@ -110,7 +115,7 @@ def prepare(db, config, *, scope=None, scenes=None):
         _contracts(db, config)
 
 
-def _pins(db):
+def _pins(db,indexed=False):
     for table in ('observations', 'body_observations'):
         db.execute(f'INSERT OR IGNORE INTO retention_targets SELECT o.id,o.scan FROM {table} o '
                    'JOIN retention_scans s ON s.id=o.scan')
@@ -135,7 +140,11 @@ def _pins(db):
         ('candidates', 'payload', "(t.scan NOT IN (SELECT id FROM retention_scans WHERE action='obsolete') OR e.scan<>t.scan)", 0),
     ):
         with stage(f'Protect references: {table}.{column}'):
-            _pin_json(db, table, column, condition, image)
+            if indexed:
+                from .retention_index import pins
+                pins(db,table,column,condition,image)
+            else:
+                _pin_json(db, table, column, condition, image)
 
 
 def _pin_json(db, table, column, condition, image):

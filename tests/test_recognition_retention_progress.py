@@ -127,7 +127,13 @@ def test_failed_retention_rolls_back_without_completing_progress(tmp_path, failu
         progress = [data for kind, data in events if kind == 'work' and data['label'] == 'Auto prune recognition']
         assert progress[-1]['completed'] == (1 if point == 'delete' else 2)
         assert all(data['completed'] < data['total'] for data in progress)
-        assert logical(config.database) == before
+        after=logical(config.database)
+        saved=after['progress'].pop()
+        assert saved[:2]==(run,'retention')
+        detail=json.loads(saved[2])
+        assert detail['outcome']==('failed' if failure is RuntimeError else 'interrupted')
+        assert detail['applied'] is False and detail['error_type']==failure.__name__
+        assert after==before
 
 
 def test_progress_off_and_json_stay_quiet(tmp_path, monkeypatch, capsys):
