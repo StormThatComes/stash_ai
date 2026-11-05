@@ -191,6 +191,7 @@ def plan(db,config,identities,*,focus=None,compact=False):
     owned={x.person:x for x in identities};edges={};proofs={}
     limits=config.data['sapiensid']['execution']
     lookup=Lookup([owned[p] for p in sorted(owned)],limits['reference_bytes'])
+    contradictions=set()
     candidates=used=0
     def nominations():
         nonlocal candidates
@@ -214,11 +215,14 @@ def plan(db,config,identities,*,focus=None,compact=False):
     from .hybrid_jobs import proofs as exact_proofs
     for a,b,proof in exact_proofs(db,owned,nominations(),config,compact=compact):
         if compact and proof['blockers']:
-            proof=dict(blockers=proof['blockers'])
-        used+=len(encoded(proof).encode())+128
+            if 'face_contradiction' not in proof['blockers']:continue
+            contradictions.add((a,b))
+            used+=128
+        else:
+            proofs[a,b]=proof
+            used+=len(encoded(proof).encode())+128
         if used>limits['plan_bytes']:
             raise ResourceLimit('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
-        proofs[a,b]=proof
         if not proof['blockers']:edges[a,b]=proof['person']['mean']
     adjacency={p:set() for p in owned}
     for a,b in edges:adjacency[a].add(b);adjacency[b].add(a)
@@ -265,7 +269,9 @@ def plan(db,config,identities,*,focus=None,compact=False):
     with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='nominated pair') as comparisons:
         for a,b,face_mean,person_mean in comparisons:
             # Known face contradiction is distinct from unknown body evidence.
-            witness=proofs.get(tuple(sorted((a,b))))
+            key=tuple(sorted((a,b)))
+            if key in contradictions:continue
+            witness=proofs.get(key)
             from .competitor_eligibility import hybrid as eligible_rival
             if not eligible_rival(witness, face_mean, settings['face_floor']):continue
             # A mean below the complete-link floor proves at least one veto,
