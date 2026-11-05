@@ -33,7 +33,7 @@ def _scene(payload):
 
 def prepare_parallel(db, selected, config, pool):
     from .local_cohorts import _prepare_serial
-    db.execute('CREATE TEMP TABLE local_core_order(observation TEXT PRIMARY KEY,position INTEGER)')
+    db.execute('CREATE TEMP TABLE IF NOT EXISTS local_core_order(observation TEXT PRIMARY KEY,position INTEGER)')
     condition = 'WHERE scan=? AND rejected IS NULL AND '+query_sql('observations', config.data['clustering'])
     settings = {k: plain(config.data[k]) for k in ('clustering', 'recognition')}
     def jobs():

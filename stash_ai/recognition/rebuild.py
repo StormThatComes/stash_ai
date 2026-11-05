@@ -407,7 +407,8 @@ def rebuild_selected(database, selected, config, *, progress=None):
         from .incomplete_rivals import require_complete
         require_complete(database.connection,*first)
     from .rebuild_transaction import atomic
-    with atomic(database), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
+    from . import derived_cache
+    with atomic(database), derived_cache.scope(database,config), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
         from .consolidation_queue import expand
         selected=expand(database.connection,selected,config)
@@ -526,10 +527,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         if cursor < len(selected):
             replay.execute('DROP TABLE IF EXISTS temp.local_core_order')
         clock = ReplayClock(next_clock)
-        from .local_cohorts import prepare as prepare_local_cohorts
+        from . import scene_artifacts
+        local_keys=scene_artifacts.face_keys(replay,selected,config)
         with stage('Prepare local face cohorts'):
             if not replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='local_core_order'").fetchone():
-                prepare_local_cohorts(replay,selected,config)
+                scene_artifacts.prepare(replay,selected,config,local_keys)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
@@ -555,7 +557,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                             with stage('Match selected scene', scene=item['scene']):
                                 lookahead.take(item['scan'])
                                 lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
-                                cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+                                scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
+                                    lambda: cluster_scene(temporary,item['scan'],config,progress=progress,_cold_replay=True))
                                 compute_current().scenes_applied += 1
                                 compute_current().publish()
                                 checkpoints.save(replay, index+1, clock.value)

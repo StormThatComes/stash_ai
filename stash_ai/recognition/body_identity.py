@@ -187,7 +187,7 @@ class Scores:
         return (total/count,minimum) if count else (-1.,-1.)
 
 
-def scene_plan(db,scan,config):
+def _load_scene(db,scan,config):
     settings=config.data['sapiensid']['identities'];expected=contract(config)
     record=db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()
     completed=db.execute('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)).fetchone()[0]
@@ -211,12 +211,24 @@ def scene_plan(db,scan,config):
         row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
             if row['face_embedding'] is not None and row['face_rejected'] is None else None)
         rows.append(row)
+    from .body_origins import origins_for_scene, ordered_owners
+    roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
+    origins=origins_for_scene(db,record)
+    return dict(record),rows,roots,origins,ordered_owners(db,origins)
+
+
+def scene_plan(db,scan,config):
+    return _plan(db,config,*_load_scene(db,scan,config))
+
+
+def _plan(db,config,record,rows,roots,origins_by_key,owners):
+    settings=config.data['sapiensid']['identities']
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
     seeds={};decisions={}
     for row in rows:
         if row['face_person'] is None:continue
-        person=canonical(db,row['face_person'])
+        person=roots[row['face_person']]
         strong=bool(row['face_anchor']) and anchor(row,settings)
         decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
                                   reason='measured_face_association')
@@ -280,9 +292,8 @@ def scene_plan(db,scan,config):
             keep.append(row)
         if keep:retained.append(keep)
     groups=retained
-    from .body_origins import physical_key, origins_for_scene,labels_for_groups
-    origins_by_key=origins_for_scene(db,record)
-    labels=labels_for_groups(db,record,groups,origins_by_key,settings)
+    from .body_origins import physical_key, labels_for_groups
+    labels=labels_for_groups(record,groups,origins_by_key,settings,owners)
     used=set(labels.values())
     for index,group in enumerate(groups):
         # Exact source observation origins, not previous assignments, preserve
@@ -336,8 +347,8 @@ def rebuild(database,selected,config,result):
     if enabled(config):
         with tracking(selected,'Build scene person identities',unit='scene') as items:
             plan_bytes=0
-            for item in items:
-                scan,rows,decisions=scene_plan(db,item['scan'],config)
+            from .body_scene_jobs import planned
+            for scan,rows,decisions in planned(db,items,config):
                 plan_bytes+=len(encoded(decisions))+len(rows)*128
                 if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
                     raise ResourceLimit('Person scene plan exceeds sapiensid.execution.plan_bytes.')
