@@ -18,7 +18,14 @@ def origins_for_scene(db, scan):
     return result
 
 
-def labels_for_groups(db,scan,groups,origins,settings):
+def ordered_owners(db, origins):
+    from .database import encoded
+    owners=sorted({owner for values in origins.values() for owner in values})
+    return [row[0] for row in db.execute('SELECT id FROM people WHERE id IN (SELECT value FROM json_each(?)) ORDER BY created,id',
+                                         (encoded(owners),))]
+
+
+def labels_for_groups(scan,groups,origins,settings,owners):
     """Oldest label wins merges; its largest physical overlap wins a split."""
     from collections import Counter
     from .database import encoded
@@ -30,10 +37,9 @@ def labels_for_groups(db,scan,groups,origins,settings):
         accepted=len(independent(group,settings))>=settings['min_support']
         for person,total in counts.items():votes[person].append((total,accepted,index))
     assigned={}
-    for row in db.execute('SELECT id FROM people WHERE id IN (SELECT value FROM json_each(?)) ORDER BY created,id',
-                          (encoded(sorted(votes)),)):
-        candidates=[v for v in votes[row['id']] if v[2] not in assigned]
+    for owner in owners:
+        candidates=[v for v in votes[owner] if v[2] not in assigned]
         if candidates:
             winner=max(candidates,key=lambda v:(v[0],v[1],-v[2]))
-            assigned[winner[2]]=row['id']
+            assigned[winner[2]]=owner
     return assigned
