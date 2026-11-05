@@ -39,8 +39,12 @@ class Store:
             rows=self.db.execute("SELECT key,length(CAST(value AS BLOB))+length(key)+128 FROM metadata "
                                  "WHERE key GLOB ? ORDER BY rowid LIMIT 256",(PREFIX+"*",)).fetchall()
             if not rows:break
-            self.db.executemany("DELETE FROM metadata WHERE key=?",((key,) for key,_ in rows))
-            self.used-=sum(charge for _,charge in rows)
+            victims=[]
+            for key,charge in rows:
+                victims.append((key,))
+                self.used-=charge
+                if self.used<=target:break
+            self.db.executemany("DELETE FROM metadata WHERE key=?",victims)
 
     def get(self, kind, version):
         key = PREFIX+kind+":"+version
@@ -61,6 +65,11 @@ class Store:
         size = len(record.encode())+len(key)+128
         if size > min(self.budget//8, 4*1024**2):
             return
+        old=self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
+        if old is not None:
+            if old[0]==record:return
+            self.db.execute('DELETE FROM metadata WHERE key=?',(key,))
+            self.used-=len(old[0].encode())+len(key)+128
         if self.used+size > self.budget:
             self.trim(self.budget*3//4-size)
         change = self.db.execute("INSERT OR IGNORE INTO metadata VALUES (?,?)", (key,record))

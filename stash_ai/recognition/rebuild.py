@@ -535,7 +535,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             replay.execute('DROP TABLE IF EXISTS temp.local_core_order')
         clock = ReplayClock(next_clock)
         from . import scene_artifacts
-        local_keys=scene_artifacts.face_keys(replay,selected,config)
+        local_keys=scene_artifacts.face_keys(replay,selected,config,source=db)
         with stage('Prepare local face cohorts'):
             if not replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='local_core_order'").fetchone():
                 scene_artifacts.prepare(replay,selected,config,local_keys)
