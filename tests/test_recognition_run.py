@@ -179,6 +179,10 @@ def test_reference_metrics_reach_console_history_and_cached_run(tmp_path, monkey
             assert summary['budget_bytes'] == 134217728
             assert summary['people'] == 1 and summary['samples'] == 3
             assert summary['recognizer'] == 'sface' and summary['max_samples_per_person'] == 32
+        modes=[json.loads(state.connection.execute("SELECT data FROM progress WHERE run=? AND phase='rebuild'",
+                (row['id'],)).fetchone()[0]) for row in histories]
+        assert [r['mode'] for r in modes]==['cold','warm']
+        assert all(r['selection']==r['rebuild_selection'] for r in modes)
         assert json.loads(histories[0]['summary'])['references']['stage'] == 'retained'
         assert json.loads(histories[1]['summary'])['references']['stage'] == 'cached'
 

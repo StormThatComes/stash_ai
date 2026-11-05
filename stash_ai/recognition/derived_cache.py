@@ -25,6 +25,7 @@ class Store:
     def __init__(self, db, budget):
         self.db = db
         self.budget = budget
+        self.hits=set()
         marker=PREFIX+"hybrid-endpoint:"
         self.previous_endpoints={row[0][len(marker):] for row in db.execute(
             "SELECT key FROM metadata WHERE key GLOB ?",(marker+"*",))}
@@ -55,6 +56,7 @@ class Store:
         checksum, _, payload = row[0].partition(" ")
         if hashlib.sha256((key+payload).encode()).hexdigest() != checksum:
             return None
+        self.hits.add(kind)
         count(kind+"_cache_hits")
         return json.loads(payload)
 

@@ -137,6 +137,7 @@ def apply(database,selected,config,*,compact=False):
 
 
 def rebuild(database,selected,config,ordinary,results):
+    database.hybrid_rebuild_mode='disabled'
     if not selected or not config.data['sapiensid']['enabled']:
         return ordinary()
     db=database.connection
@@ -145,7 +146,7 @@ def rebuild(database,selected,config,ordinary,results):
         key,before=signature(db,selected,config)
     record=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-rebuild:'+key,)).fetchone()
     if record is not None and record[0]==before:
-        database.face_rebuild_mode='warm'
+        database.hybrid_rebuild_mode=database.face_rebuild_mode='warm'
         return results()
     existing={row[0] for row in db.execute('SELECT id FROM people')}
     ordinary()
@@ -155,6 +156,10 @@ def rebuild(database,selected,config,ordinary,results):
         if births:recover(database,selected,config,births=births)
         apply(database,selected,config,compact=True)
         recover(database,selected,config)
+    from .derived_cache import current
+    store=current()
+    database.hybrid_rebuild_mode=('partial' if store and store.hits.intersection({'hybrid-nominations','hybrid-pair','hybrid-blocks'})
+                                  else 'cold')
     with stage('Checkpoint hybrid identity decisions'):
         _,after=signature(db,selected,config)
         with db:db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',('hybrid-rebuild:'+key,after))

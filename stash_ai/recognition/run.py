@@ -308,9 +308,12 @@ def _execute(args, config, *, services=None):
                                     database.connection, matching_policy(config), [s['scan'] for s in selected]))
                             face_mode=getattr(database,'face_rebuild_mode','cold')
                             body_mode=getattr(database,'body_rebuild_mode','disabled')
-                            mode=face_mode if body_mode in ('disabled',face_mode) else 'partial'
+                            hybrid_mode=getattr(database,'hybrid_rebuild_mode','disabled')
+                            phases={face_mode,body_mode,hybrid_mode}-{'disabled'}
+                            mode=next(iter(phases)) if len(phases)==1 else 'partial'
                             database.progress(run, 'rebuild', {'mode': mode, 'face_mode':face_mode,'body_mode':body_mode,
-                                                             'selection': getattr(database,'last_rebuild_selection',selected),
+                                                             'hybrid_mode':hybrid_mode,'selection':selected,
+                                                             'rebuild_selection':getattr(database,'last_rebuild_selection',selected),
                                                              'matching_policy': matching_policy(config)})
                             with ui.phase('Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
                                 _publish_selection(database, client, report, config, scope, model_namespace,
