@@ -49,8 +49,9 @@ def load(config, device):
         raise ValueError('ViTPose++ checkpoint does not match the Transformers architecture; '
                          'install requirements-sapiensid.txt in the CPU/GPU environment.')
     model = model.float().to(device).eval()
+    settings = config.data['sapiensid']['pose']
     return ViTPoseLarge(model, processor, device=device,
-                        batch_size=config.data['sapiensid']['pose']['batch_size'])
+                        batch_size=settings.get('vitpose_batch_size', settings['batch_size']))
 
 
 class ViTPoseLarge:

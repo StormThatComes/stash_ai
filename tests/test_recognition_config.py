@@ -27,7 +27,7 @@ def test_default_config_and_immutable_snapshot(tmp_path):
 
 
 @pytest.mark.parametrize('text', [
-    'version: 1\nversion: 1', 'version: true', 'version: 2', 'version: 1\nwrong: 1',
+    'version: 1\nversion: 1', 'version: true', 'version: 3', 'version: 1\nwrong: 1',
     'version: 1\nrecognition: {match_threshold: .nan}',
     'version: 1\nrecognition: {min_support: true}',
     'version: 1\nrecognition: {match_threshold: 0.4}',
