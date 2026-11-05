@@ -56,4 +56,3 @@ def snapshots(db):
     finally:
         for trigger in triggers:db.execute(f"DROP TRIGGER {trigger}")
         db.execute("DROP TABLE recovery_ranges")
-

@@ -240,7 +240,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                 effective=settings['match_threshold'] if strict else threshold
                 eligible_groups=groups
                 if focus is None:
-                    eligible_groups=by_owner[bisect_right(owners,person):]
+                    first=bisect_right(owners,person)
+                    eligible_groups=(by_owner[i] for i in range(first,len(by_owner)))
                 for other,score,_ in comparisons(eligible_groups,view.group.samples[0],effective-margin,
                                                    catalogue_size=len(groups)):
                     if (other.identifier==person or

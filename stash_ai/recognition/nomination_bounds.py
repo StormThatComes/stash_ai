@@ -14,4 +14,3 @@ def upper(left,right):
     # All scoring vectors are normalized or means of normalized vectors.
     # This envelope exceeds the float64 reductions for the supported dimensions.
     return float(np.dot(x,y))+nx*ry+ny*rx+rx*ry+1e-8
-

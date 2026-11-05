@@ -83,4 +83,3 @@ def scope(database, config):
 
 def current():
     return _active.get()
-

@@ -92,8 +92,9 @@ def comparisons(groups, query, threshold=float('-inf'), cohesion=float('-inf'), 
     if exact is None:
         from .clustering import _similarities
         exact = _similarities
+    size=catalogue_size if catalogue_size is not None else (len(groups) if hasattr(groups,'__len__') else None)
     if (not isinstance(query, np.ndarray) or query.dtype != np.float32 or query.ndim != 1
-            or hasattr(groups, '__len__') and (len(groups) if catalogue_size is None else catalogue_size) < 16):
+            or size is not None and size<16):
         for group in groups:
             yield group, *exact(group, query)
         return

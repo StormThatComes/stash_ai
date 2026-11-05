@@ -106,4 +106,3 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
             count('hybrid_centroid_pairs_recomputed',len(payload[0][3])*len(payload[1][3]))
             if store:store.put("hybrid-nominations",key,result)
         yield from result
-

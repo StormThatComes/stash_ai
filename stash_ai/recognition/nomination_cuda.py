@@ -74,4 +74,3 @@ def select(config,lookup,blocks):
     except (ImportError,RuntimeError,MemoryError,OSError):
         count('nomination_cuda_fallback')
     return None
-
