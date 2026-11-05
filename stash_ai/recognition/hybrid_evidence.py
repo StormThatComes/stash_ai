@@ -194,7 +194,12 @@ def plan(db,config,identities,*,focus=None,compact=False):
     candidates=used=0
     def nominations():
         nonlocal candidates
-        stream=lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin'])
+        from .derived_cache import current as derived
+        from .hybrid_delta import nominations as reusable_nominations
+        floor=settings['person_threshold']-settings['ambiguity_margin']
+        store=derived() if compact else None
+        stream=(reusable_nominations(lookup,store,settings['face_floor'],floor) if store is not None
+                else lookup.pairs(face_floor=settings['face_floor'],person_floor=floor))
         with tracking(stream,'Nominate hybrid pairs',unit='nominated pair') as pairs:
             for a,b,face_mean,person_mean in pairs:
                 if ((face_mean is None or face_mean+1e-6<settings['face_floor']) and

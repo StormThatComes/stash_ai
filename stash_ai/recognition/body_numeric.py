@@ -28,6 +28,14 @@ def lookup(left, right, kind):
     # shared cache for complete reductions with meaningful recomputation work.
     work = len(left)*len(right)
     profitable = work >= 256 and work*(len(arrays[0]) if arrays else 0) >= 1024**2
+    from .derived_cache import current as derived
+    from .config import digest
+    store=derived() if profitable else None
+    durable=None
+    if found is MISSING and store:
+        durable=digest([extra,[(v.dtype.str,v.shape,vector_digest(v).hex()) for v in arrays]])
+        result=store.get('body-witness',durable)
+        if result is not None:found=tuple(result)
     if found is MISSING and shared and profitable:
         signature = shared_key('ordered-witness-f32-v1', arrays, extra)
         value = shared.get(signature)
@@ -35,16 +43,19 @@ def lookup(left, right, kind):
             found = tuple(float(v) for v in value)
             if cache and key is not None:
                 cache.put(key,found,sum(len(v[2])+256 for v in key[2])+256)
-    return (key, signature), None if found is MISSING else found
+    return (key, signature, durable), None if found is MISSING else found
 
 
 def publish(identity, result):
-    key, signature = identity
+    key, signature, durable = identity
     shared, cache = shared_current(), current()
     if shared and signature is not None:
         result = tuple(float(v) for v in shared.put(signature, np.asarray(result, dtype='<f8')))
     if cache and key is not None:
         cache.put(key, result, sum(len(v[2])+256 for v in key[2])+256)
+    if durable is not None:
+        from .derived_cache import current as derived
+        derived().put('body-witness',durable,result)
     return result
 
 
