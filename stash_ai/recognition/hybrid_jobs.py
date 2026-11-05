@@ -1,5 +1,5 @@
 """Pure bounded hybrid jobs; SQLite and decisions stay on coordinator."""
-from .profiling import measured,count
+from .profiling import measured,count,timed_stream
 from .compute import current, Work
 from .disk_body_modes import Matrix,resident_bytes
 from stash_ai.runtime.cleanup import closing
@@ -81,7 +81,10 @@ def proofs(db,owned,nominations,config,*,compact=False):
     policy=encoded(settings)
     def signature(identity):
         if identity.person not in signatures:
-            signatures[identity.person]=(endpoint_version(identity) if store else hashlib.sha256(pickle.dumps(identity,protocol=5)).hexdigest())
+            version=(endpoint_version(identity) if store else hashlib.sha256(pickle.dumps(identity,protocol=5)).hexdigest())
+            signatures[identity.person]=version
+            if store and version not in store.previous_endpoints:
+                store.put('hybrid-endpoint',version,True)
         return signatures[identity.person]
     def cache_key(payload):
         left,right,_,present,threshold=payload
@@ -93,6 +96,8 @@ def proofs(db,owned,nominations,config,*,compact=False):
             saved=dict(blockers=result['blockers']) if result['blockers'] else result
             store.put('hybrid-pair',digest(key),saved)
             count('hybrid_pair_proofs_recomputed')
+            if key[1] in store.previous_endpoints and key[2] in store.previous_endpoints:
+                count('hybrid_unchanged_pair_proofs_recomputed')
         return result
     def drain(jobs,keys):
         if not jobs:return
@@ -102,7 +107,7 @@ def proofs(db,owned,nominations,config,*,compact=False):
             with closing(pool.ordered(exact,jobs),name='close hybrid proof workers') as stream:
                 for key,job,result in zip(keys,jobs,stream):yield *key,remember(job.payload,result.value)
     cues=cue_index(db,owned,min(16*1024**2,config.data['sapiensid']['execution']['reference_bytes']//16))
-    pending=iter(nominations)
+    pending=timed_stream('hybrid_nomination',nominations)
     start=0
     while block:=list(islice(pending,64)):
         if compact:
@@ -134,14 +139,14 @@ def proofs(db,owned,nominations,config,*,compact=False):
                 saved=store.get('hybrid-pair',digest(cache_key(payload)))
                 if saved is not None:hit=saved
             if hit is not MISSING:
-                yield from drain(jobs,keys);jobs=[];keys=[]
+                yield from timed_stream('hybrid_proof_scoring',drain(jobs,keys));jobs=[];keys=[]
                 yield a,b,deepcopy(hit)
                 continue
             if pool is not None and size>pool.limit:
-                yield from drain(jobs,keys);jobs=[];keys=[]
+                yield from timed_stream('hybrid_proof_scoring',drain(jobs,keys));jobs=[];keys=[]
                 pool.fallback('hybrid_proof_admission')
                 yield a,b,remember(payload,exact(payload))
             else:
                 jobs.append(Work(start+offset,'hybrid-frozen',payload,size));keys.append((a,b))
-        yield from drain(jobs,keys)
+        yield from timed_stream('hybrid_proof_scoring',drain(jobs,keys))
         start+=len(block)

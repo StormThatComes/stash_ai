@@ -996,6 +996,10 @@ in the global decision. The total entry budget is the smaller of 64 MiB and
 one eighth of `execution.rebuild_cache_bytes`. Setting that byte budget to zero
 disables durable reuse. The face-order, strict-scene, body-scene and hybrid-pair
 cache counters appear in `rebuild_profile.counts` when profiling is enabled.
+`hybrid_unchanged_pair_proofs_recomputed` counts newly computed hybrid proofs
+whose two endpoint versions were retained from a previous rebuild. The
+`hybrid_nomination`, `hybrid_copresence` and `hybrid_proof_scoring` entries in
+`rebuild_profile.stages` time the corresponding work on the coordinator.
 
 `execution.rebuild_nomination_device` defaults to `cpu`. Set it to `auto` to
 try CUDA for hybrid centroid nomination on catalogues of at least 1,024
