@@ -150,8 +150,11 @@ def execute(args, config):
                 if args.progress_style != 'off':
                     detail = ''
                     if stage == 'start':
-                        detail = (' (input configuration)' if item['previous_trial'] is None else
-                                  f" changes_vs={item['previous_trial']} parent={item['search_parent']}")
+                        if item['previous_trial'] is None:
+                            detail = (' (input configuration with capped support)' if item['changes_from_previous']
+                                      else ' (input configuration)')
+                        else:
+                            detail = f" changes_vs={item['previous_trial']} parent={item['search_parent']}"
                     elif stage == 'complete':
                         completed_trials += 1
                         detail = (f" disjoint={item['goal_result']['disjoint']} "

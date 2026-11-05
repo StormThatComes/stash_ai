@@ -1,13 +1,19 @@
 """Bound the historical option pool without discarding live parent settings."""
 from .merge_report_policy import parameter
+from .merge_solver_domains import registry
 
 
 def compact(config, previous, fresh, *, parents=(), limit=128):
     from .merge_solver_search import spread
+    domains = registry(config)
     result = {}
     for key in sorted(previous.keys() | fresh.keys()):
         current = parameter(config.data, key)
         old, new = set(previous.get(key, ())), set(fresh.get(key, ()))
+        if key.endswith('_support') and key in domains:
+            # Many distinct evidence counts can yield the same legal threshold.
+            old = {domains[key].project(value) for value in old}
+            new = {domains[key].project(value) for value in new}
         values = old | new
         center = current if current is not None else min(values, default=0)
         if len(values) <= limit:

@@ -75,6 +75,74 @@ def test_inverse_integer_and_admission_bounds_do_not_drop_more_evidence():
     assert search.score({quality:0}) == search.score({})
 
 
+@pytest.mark.parametrize('references', [4, 32])
+def test_support_proposals_and_tightening_respect_the_cap(references):
+    from stash_ai.recognition.merge_solver_domains import normalize
+    from stash_ai.recognition.merge_solver_options import compact
+
+    config = SimpleNamespace(data=defaults())
+    body = config.data['sapiensid']
+    body['enabled'] = body['collection']['enabled'] = body['identities']['enabled'] = True
+    body['global_matching'].update(enabled=True, max_references=references)
+    keys = {
+        'recognition.min_identity_support', 'recognition.min_merge_support',
+        'clustering.same_scene_min_support', 'clustering.auxiliary_min_support',
+        'clustering.view_min_support', 'clustering.view_attach_min_support',
+        'sapiensid.matching.min_support', 'sapiensid.identities.min_support',
+        'sapiensid.identities.attach_min_support', 'sapiensid.global_matching.min_support',
+    }
+    search = Tightener(config)
+    search.begin('baseline', {}, {'matching_parameters': dict.fromkeys(keys, 1)})
+    for key in keys:
+        cap = min(8, references) if key == 'sapiensid.global_matching.min_support' else 8
+        assert compact(config, {key: [cap - 1, 1000]}, {key: [9, 800]})[key] == [cap, cap - 1]
+        assert search.candidate({}, (key,), {})[key] == cap
+        for proposed in (cap - 1, cap, 9, 1000):
+            patch = normalize(config, {key: proposed})
+            assert search.value(patch, key) == min(proposed, cap)
+    assert search.domains['clustering.view_min_support'].low == 2
+    assert search.domains['sapiensid.identities.min_support'].low == 2
+    assert normalize(config, {'sapiensid.identities.anchor_min_keypoints': 12}) == {
+        'sapiensid.identities.anchor_min_keypoints': 12}
+
+
+@pytest.mark.parametrize(('mode', 'trials'), [('diff', 1), ('full', 5)])
+def test_solver_caps_legacy_input_before_replay_and_exports_the_change(tmp_path, capsys, mode, trials):
+    import json
+    import yaml
+    from stash_ai.recognition.cli import main
+    from stash_ai.recognition.config import digest
+
+    config, _ = seeded(tmp_path, recognition={'min_merge_support': 1000})
+    original = config.source_path.read_bytes()
+    winner = tmp_path / 'winner.yml'
+    checkpoint = tmp_path / 'solver.json'
+    assert main(['report-merge', '--solve', '--face-config', str(config.source_path),
+                 '--faces-db', str(config.database), '--performer-set', '900,901',
+                 '--checkpoint', str(checkpoint),
+                 '--max-trials', str(trials), '--yaml-mode', mode, '--yaml-output', str(winner)]) == 0
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    replays = report['simulation']['trials']
+    assert len(replays) == trials
+    assert replays['baseline']['changes_from_previous'] == [
+        dict(parameter='recognition.min_merge_support', previous=1000, current=8)]
+    for trial in replays.values():
+        assert 1 <= trial['yaml_patch']['recognition']['min_merge_support'] <= 8
+    journal = json.loads(checkpoint.read_text())
+    for entry in journal['records']:
+        record = json.loads((tmp_path / 'solver.json.trials' / entry['file']).read_text())
+        changes = {row['parameter']: row['proposed'] for row in replays[record['name']]['changes']}
+        assert record['configuration'] == digest(patched(config, changes).data)
+    selected = report['best_result']
+    assert selected['changed']
+    assert winner.read_text() == journal['winner']['text']
+    assert yaml.safe_load(winner.read_text())['recognition']['min_merge_support'] == (
+        selected['yaml_patch']['recognition']['min_merge_support'])
+    assert config.source_path.read_bytes() == original
+
+
 def test_disabled_and_unused_gates_do_not_improve_strength():
     unused = 'recognition.cooccurrence_merge_threshold'
     search = lane([MATCH], {unused:.99})
