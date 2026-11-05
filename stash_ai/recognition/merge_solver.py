@@ -145,7 +145,7 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False):
     from .solver_execution import current as execution_plan
     runtime = execution_plan()
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside, outsiders
@@ -173,6 +173,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     if baseline_changes:
         config = patched(config, baseline_changes)
     from .merge_solver_profiles import anchor_rule_profiles, profiles
+    from .merge_solver_report import observation_locations, trim_completed
+    locations = observation_locations(goals) if compact_report else {}
     rule_profiles = anchor_rule_profiles(config)[:maximum-1] if compare_anchor_rules else ()
     search_limit = maximum - len(rule_profiles)
     tightening = Tightener(config)
@@ -625,7 +627,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 if origins.get(name, {}).get('search_phase') == 'feasibility' else None)
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
-        if progress:progress(name, stage, item)
+        try:
+            if progress:progress(name, stage, item)
+        finally:
+            if compact_report and stage == 'complete':
+                trim_completed(name, item, config, changes_for(name), locations)
     trial_progress.telemetry_enabled = progress is not None and getattr(progress, 'telemetry_enabled', True)
     def trial_error(name, settings, exc, stage):
         if name == 'baseline' or not resource_limit(exc):
@@ -658,7 +664,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 parent=origins[name]['search_parent']
                 robustness.setdefault(parent,[]).append(ranks[name][:-2]>=ranks[parent][:-2])
         best = max(result['trials'], key=ranking, default=None)
-        if best is not None:
+        if best is not None and not compact_report:
             from .trial_report_compaction import expand
             trial = result['trials'][best]
             trial['independent_person'] = expand(trial['independent_person'],

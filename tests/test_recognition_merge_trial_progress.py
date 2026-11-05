@@ -85,7 +85,8 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
             stop = next((i for i in range(position+1, len(lines)) if lines[i].startswith('Merge solver ')), len(lines))
             details = lines[position+1:stop]
             headers = [line for line in details if line.startswith('  Set ')]
-            for line, group in zip(headers, item['goal_result']['groups'], strict=True):
+            groups = (result['merge_diagnostics']['set_states'][ref] for ref in item['goal_result']['set_states'])
+            for line, group in zip(headers, groups, strict=True):
                 assert line.startswith(f"  Set {group['index']+1}: scenes_preserved={group['covered_scenes']}/{group['required_scenes']}")
                 assert f"consolidated={group['consolidated_performers']}/{group['total_performers']}" in line
                 assert f"largest_complete={group['largest_complete_performers']}/{group['total_performers']}" in line
@@ -152,7 +153,7 @@ def test_cli_tightening_uses_feasible_parent_and_reports_actual_mutations(tmp_pa
     assert tightened['search_parent'] == tightened['previous_trial'] == 'trial-1'
     assert 'trial-2: start changes_vs=trial-1 parent=trial-1' in captured.err
     assert tightened['changes_from_previous']
-    previous = {r['parameter']:r['proposed'] for r in trials['trial-1']['changes']}
+    previous = {r['parameter']:r['current'] for r in trials['trial-1']['changes_from_previous']}
     for change in tightened['changes_from_previous']:
         key = change['parameter']
         assert change['previous'] == previous.get(key, parameter(config.data, key))

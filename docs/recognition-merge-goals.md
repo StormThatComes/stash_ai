@@ -27,6 +27,32 @@ compare the two predefined whole-rule alternatives on the winning numeric
 configuration, add `--compare-anchor-rules`. These replays share the existing
 `--max-trials` budget. [Regional anchor rule profiles](sapiensid-hybrid.md#regional-body-anchor-keypoints)
 
+### Reading the solver JSON
+
+`report-merge --solve` writes a compact diagnostic report to `--output` or stdout.
+Start with `merge_diagnostics.sets`. Each entry names the performers, the first
+trial that merged the set, and the stages and reasons most often observed when
+it remained split. Counts distinguish trials from occurrences across replays.
+Use `baseline_state` and `selected_state` as indices into `merge_diagnostics.set_states`
+to compare coverage, fragments, withheld samples and blockers. Group indices are
+zero-based (console “Set 1” has index 0).
+
+Every completed trial under `simulation.trials` keeps its search parent, strategy,
+changes since the preceding trial, input-relative `yaml_patch`, unmet conditions
+by reason, and references to the set states it produced. Baseline, winner, best
+trial per set and the first trial exhibiting a new per-set blocker also carry
+sample assignment counts and bounded diagnostic examples when available.
+`measured_query` examples show observed face/body scores and the thresholds
+tested. `proposed_route` gives a suggested change, which may never have been
+tested. Certified input problems are in `feasibility.groups[].input_certificates`.
+
+The compact schema is identified by `solver_report_format: compact-v1`.
+`best_result` contains the selected configuration changes. To export the previous
+detailed schema, including individual observations and full decision traces, use
+`--solver-report full`. The report mode applies only to the final JSON. Solver
+checkpoints keep the evidence needed for resume, and `--yaml-output` exports
+the winning configuration in either mode.
+
 Repeated `--performer-id` or `--identity-id` selects one set. The original
 exactly-two-ID diagnostic remains available without `--solve`. Set syntax is
 mutually exclusive with those selectors. Alias overlap across sets is rejected.
