@@ -231,6 +231,9 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     from bisect import bisect_right
     by_owner=sorted(groups,key=lambda group:group.identifier)
     owners=[group.identifier for group in by_owner]
+    from .scoring import FrozenFaceBlocks
+    ordered=by_owner if focus is None else groups
+    blocks=FrozenFaceBlocks(ordered,grouping['max_reference_bytes']//8)
     people=sorted(owned) if focus is None else focused_people()
     with tracking(people,'Validate frozen identity components',unit='person') as tracked:
         for person in tracked:
@@ -238,10 +241,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
             for view in owned[person]:
                 strict=view.authority=='strict_core'
                 effective=settings['match_threshold'] if strict else threshold
-                eligible_groups=groups
-                if focus is None:
-                    first=bisect_right(owners,person)
-                    eligible_groups=(by_owner[i] for i in range(first,len(by_owner)))
+                first=bisect_right(owners,person) if focus is None else 0
+                eligible_groups=blocks.candidates(view.group.samples[0],effective-margin,first)
                 for other,score,_ in comparisons(eligible_groups,view.group.samples[0],effective-margin,
                                                    catalogue_size=len(groups)):
                     if (other.identifier==person or
@@ -284,7 +285,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                 for view in owned[person]:
                     strict=view.authority=='strict_core'
                     effective=settings['match_threshold'] if strict else threshold
-                    for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
+                    for other,score,_ in comparisons(blocks.candidates(view.group.samples[0],effective-margin),
+                            view.group.samples[0],effective-margin,catalogue_size=len(groups)):
                         if other.identifier in members:
                             continue
                         if mixed and view.authority!=by_group[id(other)].authority:

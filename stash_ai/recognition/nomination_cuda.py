@@ -26,7 +26,7 @@ class Resident:
         return ((self.faces[a]@self.faces[b].T).cpu().numpy(),
                 (self.bodies[a]@self.bodies[b].T).cpu().numpy())
 
-    def competitive(self,blocks):
+    def competitive(self,blocks,tiles):
         block=max(blocks,key=lambda item:len(item[1]))
         def elapsed(operation):
             samples=[]
@@ -37,7 +37,6 @@ class Resident:
             return sorted(samples)[1]
         cpu=elapsed(lambda:(block[1]@block[1].T,block[2]@block[2].T))
         gpu=elapsed(lambda:self.scores(block,block))
-        tiles=len(blocks)*(len(blocks)+1)//2
         return gpu+self.upload/tiles < cpu*.9
 
     def measured_tile(self,left,right,face_floor,body_floor):
@@ -56,7 +55,7 @@ class Resident:
         return faces,bodies
 
 
-def select(config,lookup,blocks):
+def select(config,lookup,blocks,tiles):
     if (config is None or config.data['execution'].get('rebuild_nomination_device')!='auto' or
         config.data['models']['device']=='cpu' or len(lookup.identities)<1024):
         return None
@@ -68,7 +67,7 @@ def select(config,lookup,blocks):
         if required>min(free//4,config.data['sapiensid']['execution']['reference_bytes']//2):
             return None
         resident=Resident(torch,lookup,blocks)
-        if resident.competitive(blocks):
+        if resident.competitive(blocks,tiles):
             count('nomination_cuda_selected')
             return resident
     except (ImportError,RuntimeError,MemoryError,OSError):

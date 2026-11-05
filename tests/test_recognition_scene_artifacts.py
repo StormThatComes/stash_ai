@@ -78,6 +78,42 @@ def test_duplicate_artifact_neither_evicts_nor_prevents_checksum_repair():
     assert store.used==before and store.get('test','9')=='x'*160
 
 
+def test_mixed_worker_preserves_external_face_veto(tmp_path,monkeypatch):
+    import numpy as np
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.compute import compute_scope
+    from stash_ai.recognition.derived_cache import scope
+    from stash_ai.recognition.body_scene_jobs import planned
+    from stash_ai.recognition.body_identity import scene_plan
+    from tests.test_recognition_body_global import configured,scene
+    config=configured(tmp_path)
+    config.data['execution']['rebuild_workers']=2
+    config.data['clustering']['max_anchor_pose_deviation']=None
+    config.data['sapiensid']['identities']['attach_min_support']=1
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus',lambda:4)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        item,ids=scene(db,config)
+        other,_=scene(db,config,'2')
+        db.execute("INSERT INTO people VALUES ('owner','scope','ns',1,NULL,'token')")
+        def face(identifier,scan,direction,owner):
+            blob=np.asarray([direction,0],dtype='<f4').tobytes()
+            db.execute("INSERT INTO observations VALUES (?,?,0,0,'vtt','[]','[]','{}',NULL,2,?,NULL)",
+                       (identifier,scan,blob))
+            if owner:db.execute("INSERT INTO members VALUES (?,'owner')",(identifier,))
+        face('seed',item['scan'],1,True)
+        face('query',item['scan'],1,False)
+        db.execute('UPDATE body_observations SET face=? WHERE id=?',('seed',ids[0]))
+        db.execute('UPDATE body_observations SET face=? WHERE id=?',('query',ids[1]))
+        assert scene_plan(db,item['scan'],config)[2][ids[1]]['person']=='owner'
+        face('veto',other['scan'],-1,True)
+        expected=scene_plan(db,item['scan'],config)[2]
+        assert expected[ids[1]]['person']!='owner'
+        with scope(state,config),compute_scope(config) as pool:
+            assert list(planned(db,[item],config))[0][2]==expected
+            assert pool.submitted==1
+
+
 def test_cache_and_worker_input_include_external_pixel_representative(monkeypatch):
     import json
     import sqlite3

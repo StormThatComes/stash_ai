@@ -86,6 +86,44 @@ def _prepared(groups, query):
     return matrix, lengths, starts, norms
 
 
+class FrozenFaceBlocks:
+    """Bounds on immutable view/core samples, including every weak competitor."""
+    def __init__(self, groups, budget):
+        import numpy as np
+        from .nomination_bounds import ball
+        self.groups=groups
+        self.bounds={}
+        used=0
+        if len(groups)<16:return
+        for start in range(0,len(groups),64):
+            block=groups[start:start+64]
+            samples=[v for g in block for v in g.samples]
+            if not samples or any(len(g.samples)==0 for g in block):continue
+            shape=samples[0].shape
+            if any(v.dtype!=np.float32 or v.shape!=shape or v.ndim!=1 for v in samples):continue
+            scratch=8*sum(v.nbytes for v in samples)
+            charge=512+8*shape[0]
+            if used+charge+scratch>budget:continue
+            center,norm,radius=ball(np.stack(samples))
+            self.bounds[start]=center,norm+radius,radius
+            used+=charge
+
+    def candidates(self, query, floor, start=0):
+        import numpy as np
+        qnorm=float(np.linalg.norm(query.astype(np.float64)))
+        for offset in range(start//64*64,len(self.groups),64):
+            bound=self.bounds.get(offset)
+            if bound is not None and query.dtype==np.float32 and query.shape==bound[0].shape:
+                center,max_norm,radius=bound
+                # Cover the screening kernel's f32 error band too: a borderline
+                # weak rival still reaches the unchanged scalar ranking.
+                slack=8*len(query)*np.finfo(np.float32).eps*max(1.,qnorm*max_norm)
+                if float(np.dot(center,query))+qnorm*radius+slack<floor:
+                    count('face_blocks_excluded')
+                    continue
+            yield from self.groups[max(start,offset):offset+64]
+
+
 def comparisons(groups, query, threshold=float('-inf'), cohesion=float('-inf'), *, exact=None, catalogue_size=None):
     """Yield unchanged scalar scores for every potentially relevant group."""
     import numpy as np

@@ -221,10 +221,10 @@ def scene_plan(db,scan,config):
     return _plan(db,config,*_load_scene(db,scan,config))
 
 
-def _plan(db,config,record,rows,roots,origins_by_key,owners):
+def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
     settings=config.data['sapiensid']['identities']
     from .body_guards import FaceGuard,resolve_claims
-    scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
+    scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
     seeds={};decisions={}
     for row in rows:
         if row['face_person'] is None:continue
