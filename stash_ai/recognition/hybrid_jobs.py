@@ -70,20 +70,29 @@ def proofs(db,owned,nominations,config,*,compact=False):
     from .database import encoded
     from copy import deepcopy
     import hashlib,pickle
+    from .derived_cache import current as derived
+    from .config import digest
+    from .hybrid_delta import endpoint_version
     cache=current_cache()
+    store=derived() if compact else None
     from itertools import islice
     from .profiling import count
     signatures={}
     policy=encoded(settings)
     def signature(identity):
         if identity.person not in signatures:
-            signatures[identity.person]=hashlib.sha256(pickle.dumps(identity,protocol=5)).digest()
+            signatures[identity.person]=(endpoint_version(identity) if store else hashlib.sha256(pickle.dumps(identity,protocol=5)).hexdigest())
         return signatures[identity.person]
     def cache_key(payload):
         left,right,_,present,threshold=payload
         return ('hybrid-proof-v2',signature(left),signature(right),policy,present,threshold)
     def remember(payload,result):
-        if cache is not None:cache.put(cache_key(payload),deepcopy(result),2*len(encoded(result).encode())+512)
+        key=cache_key(payload) if cache is not None or store is not None else None
+        if cache is not None:cache.put(key,deepcopy(result),2*len(encoded(result).encode())+512)
+        if store is not None:
+            saved=dict(blockers=result['blockers']) if result['blockers'] else result
+            store.put('hybrid-pair',digest(key),saved)
+            count('hybrid_pair_proofs_recomputed')
         return result
     def drain(jobs,keys):
         if not jobs:return
@@ -121,6 +130,9 @@ def proofs(db,owned,nominations,config,*,compact=False):
             if any(isinstance(m,Matrix) for i in (left,right) for m in i.body_modes):size+=4*1024**2
             payload=left,right,settings,present.get((a,b),False),threshold
             hit=cache.get(cache_key(payload)) if cache is not None else MISSING
+            if hit is MISSING and store is not None:
+                saved=store.get('hybrid-pair',digest(cache_key(payload)))
+                if saved is not None:hit=saved
             if hit is not MISSING:
                 yield from drain(jobs,keys);jobs=[];keys=[]
                 yield a,b,deepcopy(hit)
