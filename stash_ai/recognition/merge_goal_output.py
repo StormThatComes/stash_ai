@@ -97,7 +97,7 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
     return serialized
 
 
-def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='full'):
+def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='full', compact_report=False):
     if yaml_mode not in ('full', 'diff'):
         raise ValueError('YAML mode must be full or diff.')
     targets = [p.expanduser().resolve() for p in (output, yaml_output) if p]
@@ -139,12 +139,17 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
             **{kind + '_exclusions': result[kind + '_exclusions'] for kind in KINDS if result.get(kind + '_exclusions')})),
         validity='Same retained evidence, scope, model, code and joint scene selection; changed media requires revalidation.')
     explain(result)
-    text = json.dumps(result, indent=2, allow_nan=False) + '\n'
-    if output:
-        from .merge_solver_checkpoint import AtomicFile
-        AtomicFile(output).write(text)
+    if compact_report:
+        from .merge_solver_report import compact_document
+        document = compact_document(result, config)
     else:
-        print(text, end='')
+        document = result
+    from contextlib import nullcontext
+    from stash_ai.reports.io import report_stream
+    import sys
+    with report_stream(output, sync_directory=True) if output else nullcontext(sys.stdout) as stream:
+        json.dump(document, stream, indent=2, allow_nan=False)
+        stream.write('\n')
 
 
 def group_summary(group):

@@ -103,6 +103,7 @@ from .report_metrics import command as report_command, phase as report_phase, at
 
 @report_command
 def execute(args, config):
+    compact_report = args.solve and getattr(args, 'solver_report', None) != 'full'
     from contextlib import closing
     from .fragmentation_report import _open_readonly
     checkpoint=getattr(args,'checkpoint',None)
@@ -205,6 +206,7 @@ def execute(args, config):
                                     checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                      compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
+                                     compact_report=compact_report,
                                     yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
                                     targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
                                         key: getattr(args, attr, None) for key, attr in (
@@ -219,7 +221,8 @@ def execute(args, config):
     from .merge_goal_output import export
     report_profile(result)
     with report_phase('Serialize and publish report'):
-        export(config, result, args.output, args.yaml_output,yaml_owner=writer,yaml_mode=yaml_mode)
+        export(config, result, args.output, args.yaml_output,yaml_owner=writer,yaml_mode=yaml_mode,
+               compact_report=compact_report)
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
         print(summary(result), file=sys.stderr, flush=True)

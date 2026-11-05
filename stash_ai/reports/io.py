@@ -3,15 +3,15 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from contextlib import contextmanager
 
 from stash_ai.runtime.cleanup import cleanup
 
 
-def write_json_report(report, destination, *, validate_json=False):
+@contextmanager
+def report_stream(destination, *, sync_directory=False):
+    """Publish complete UTF-8 output once, including when serialization is streamed."""
     destination = Path(destination).expanduser().resolve()
-    payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n'
-    if validate_json:
-        json.loads(payload)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -21,12 +21,27 @@ def write_json_report(report, destination, *, validate_json=False):
                 dir=destination.parent, prefix='.' + destination.name + '.', suffix='.tmp',
                 delete=False) as stream:
             temporary = Path(stream.name)
-            stream.write(payload)
+            yield stream
             stream.flush()
             os.fsync(stream.fileno())
         os.link(temporary, destination)
+        if sync_directory and os.name != 'nt':
+            directory = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         cleanup([lambda: temporary.unlink(missing_ok=True) if temporary is not None else None])
+
+
+def write_json_report(report, destination, *, validate_json=False):
+    destination = Path(destination).expanduser().resolve()
+    payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n'
+    if validate_json:
+        json.loads(payload)
+    with report_stream(destination) as stream:
+        stream.write(payload)
     return destination
 
 

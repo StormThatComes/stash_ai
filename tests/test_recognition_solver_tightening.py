@@ -111,7 +111,7 @@ def test_solver_caps_legacy_input_before_replay_and_exports_the_change(tmp_path,
     import json
     import yaml
     from stash_ai.recognition.cli import main
-    from stash_ai.recognition.config import digest
+    from stash_ai.recognition.config import _merge, digest, plain
 
     config, _ = seeded(tmp_path, recognition={'min_merge_support': 1000})
     original = config.source_path.read_bytes()
@@ -133,8 +133,9 @@ def test_solver_caps_legacy_input_before_replay_and_exports_the_change(tmp_path,
     journal = json.loads(checkpoint.read_text())
     for entry in journal['records']:
         record = json.loads((tmp_path / 'solver.json.trials' / entry['file']).read_text())
-        changes = {row['parameter']: row['proposed'] for row in replays[record['name']]['changes']}
-        assert record['configuration'] == digest(patched(config, changes).data)
+        effective = plain(config.data)
+        _merge(effective, replays[record['name']]['yaml_patch'])
+        assert record['configuration'] == digest(effective)
     selected = report['best_result']
     assert selected['changed']
     assert winner.read_text() == journal['winner']['text']
