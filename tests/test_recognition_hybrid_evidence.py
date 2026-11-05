@@ -34,3 +34,15 @@ def test_independent_votes_not_raw_sample_count():
     a=identity('a');b=identity('b')
     b=Identity(b.person,b.observations,b.faces,b.persons,(('scene',1),))
     assert 'insufficient_independent_support' in pair(a,b,defaults()['sapiensid']['matching'])['blockers']
+
+
+def test_compact_plan_keeps_weak_rivals_and_excludes_contradictions(monkeypatch):
+    from dataclasses import replace
+    monkeypatch.setattr('stash_ai.recognition.global_views._cooccurs',lambda *a:False)
+    cfg=SimpleNamespace(data=defaults())
+    for angle in (0.,3.):
+        bank=[identity('a'),identity('b',.1),replace(identity('c',angle),independent=())]
+        full=plan(None,cfg,bank)
+        compact=plan(None,cfg,bank,compact=True)
+        assert compact['pairs']==[]
+        assert compact['decisions']==full['decisions']
