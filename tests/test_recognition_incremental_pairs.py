@@ -61,3 +61,11 @@ def test_cuda_tiles_fall_back_at_boundary_or_device_error():
     device.scores=offline
     assert device.measured_tile(None,None,.75,.96) is None
     assert not device.active
+
+def test_real_sapiens_buffers_have_stable_content_versions():
+    from stash_ai.recognition.hybrid_delta import endpoint_version
+    owner=replace(identity('a'),persons=np.zeros((8,4096),dtype='<f4'))
+    version=endpoint_version(owner)
+    assert endpoint_version(replace(owner,persons=owner.persons.copy()))==version
+    owner.persons[0,0]=.001
+    assert endpoint_version(owner)!=version
