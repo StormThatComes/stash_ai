@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from stash_ai.inference.image_io import open_image
 from stash_ai.runtime.cancellation import Cancellation,use
 from stash_ai.runtime.cleanup import cleanup, closing
-from .media import safe_url
+from .media import safe_url, verify_portrait_cue, ChangedPortraitSource
 from .models import checked_detection
 from .visibility import cached as visible,required as needs_visible
 from .portrait_admission import extra_measurements,pose_reason
@@ -63,6 +63,7 @@ class SourceOwner:
         self.lookahead=[]
         self.sources=OrderedDict();self.scenes=OrderedDict();self.images=OrderedDict()
         self.capacity=OrderedDict();self.image_bytes=0
+        self.changed_scenes=set()
 
     def _reader(self):
         if self.reader is None:self.reader=self.client.new_media_reader()
@@ -110,6 +111,7 @@ class SourceOwner:
 
     def thumbnail(self,scene,row):
         self.cancel.check()
+        if scene in self.changed_scenes:raise ChangedPortraitSource('VTT source could not be verified.')
         key=signature(row)
         cached=self.images.pop(key,None)
         if cached is not None:
@@ -128,11 +130,7 @@ class SourceOwner:
                     with open_image(BytesIO(data)) as raw:
                         if raw.width*raw.height*4>self.limit//4:
                             raise Capacity('Decoded portrait sheet exceeds preparation allowance.')
-            if source.fingerprint!=row['input_sha']:raise ValueError('VTT source changed after recognition.')
-            cue=source.cues[row['cue']]
-            if (cue.start!=row['seconds'] or safe_url(cue.image)!=safe_url(row['source'])
-                    or list(cue.rect)!=json.loads(row['rect'])):
-                raise ValueError('VTT cue does not match its recognition observation.')
+            verify_portrait_cue(source,row)
             image=source.thumbnail(row['cue'])
             if image.width*image.height*3>self.limit//4:
                 image.close();raise Capacity('Portrait thumbnail exceeds preparation allowance.')
@@ -147,6 +145,7 @@ class SourceOwner:
                 _,old=self.sources.popitem(last=False);old.close()
             return image
         except BaseException as error:
+            if isinstance(error,ChangedPortraitSource):self.changed_scenes.add(scene)
             if isinstance(error,Capacity):
                 self.capacity[scene,row['input_sha']]=None
                 while len(self.capacity)>128:self.capacity.popitem(last=False)

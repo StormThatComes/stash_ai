@@ -38,16 +38,23 @@ class Ranking:
                 'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
                 'WHERE m.person=? AND o.scan=? AND o.rejected IS NULL ORDER BY o.id',(self.target['person'],scan)):
                 _hash_row(h,row)
-            for row in self.db.execute('SELECT id,scan,person,status,payload FROM candidates '
-                'WHERE policy=? AND scan=? ORDER BY id',(policy,scan)):_hash_row(h,row)
             if self.pose_contract is not None:
                 for row in self.db.execute('SELECT pe.observation,pe.status,pe.metadata FROM person_evidence pe '
                     'JOIN observations o ON o.id=pe.observation JOIN members m ON m.observation=o.id '
                     'WHERE m.person=? AND o.scan=? AND pe.contract=? ORDER BY pe.observation',
                     (self.target['person'],scan,self.pose_contract)):_hash_row(h,row)
             return h.hexdigest()
-        return cached(self.db,'portrait-inputs',digest([self.scope,self.namespace,self.target['person'],scan]),
-                      digest([policy,self.pose_contract]),compute,dependency='scan',dependency_key=scan)
+        def candidate_digest():
+            h=hashlib.sha256()
+            for row in self.db.execute('SELECT id,scan,person,status,payload FROM candidates '
+                'WHERE policy=? AND scan=? ORDER BY id',(policy,scan)):_hash_row(h,row)
+            return h.hexdigest()
+        candidates=cached(self.db,'vtt-scan-decisions',scan,policy,candidate_digest,
+                          dependency='scan',dependency_key=scan)
+        owner=cached(self.db,'vtt-owner-inputs',digest([self.scope,self.namespace,self.target['person'],scan]),
+                     digest([policy,self.pose_contract]),compute,dependency='scan',dependency_key=scan)
+        return digest([candidates,owner])
+
 
     def inputs(self,*,check_retry=False):
         from .rebuild_cache import _hash_row
@@ -78,9 +85,14 @@ class Ranking:
                                        for v in quality.get('measurement_basis',{}).values())):
                             return None
                 _hash_row(h,row)
-        for row in self.db.execute('SELECT a.source,a.target FROM identity_merges a JOIN people p ON p.id=a.source '
-            'WHERE p.scope=? AND p.namespace=? ORDER BY a.source',(self.scope,self.namespace)):
-            _hash_row(h,row)
+        from .dependencies import cached
+        def aliases():
+            signature=hashlib.sha256()
+            for row in self.db.execute('SELECT a.source,a.target FROM identity_merges a JOIN people p ON p.id=a.source '
+                    'WHERE p.scope=? AND p.namespace=? ORDER BY a.source',(self.scope,self.namespace)):
+                _hash_row(signature,row)
+            return signature.hexdigest()
+        _hash_row(h,[cached(self.db,'vtt-aliases',digest([self.scope,self.namespace]),'v1',aliases,dependency='bindings')])
         return h.hexdigest()
 
     def load(self):
