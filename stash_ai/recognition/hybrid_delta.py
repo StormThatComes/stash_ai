@@ -87,9 +87,34 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
             measured=device.measured_tile(left,right,ff,bf)
             if measured is not None:return _selected(payload,*measured)
         return _nominations(payload)
+    # A completed catalogue certifies empty comparisons as well as hits. Only
+    # positive old block pairs need individual tile records. If one was evicted
+    # or damaged it is recomputed before this run can certify a successor.
+    catalogue_key=digest(['hybrid-block-catalogue-v1',face_floor,body_floor])
+    previous=store.get('hybrid-catalogue',catalogue_key) if store else None
+    positions={block[0]:i for i,block in enumerate(blocks)}
+    previous_ids=set(previous[0]) if previous else set()
+    retained={}
+    if previous:
+        for left,right in previous[1]:
+            if left in positions and right in positions:
+                i,j=sorted((positions[left],positions[right]))
+                retained.setdefault(i,[]).append(j)
+    changed=[i for i,block in enumerate(blocks) if block[0] not in previous_ids]
+    changed_set=set(changed)
+    positive=[]
+    # Keep both the temporary list and the serialized record bounded.
+    catalogue_limit=min(store.budget//8,4*1024**2,lookup.budget-lookup.working_bytes) if store else 0
+    catalogue_ok=len(blocks)*256<catalogue_limit
     def items():
+        from bisect import bisect_left
         for i,first in enumerate(blocks):
-            for j in range(i,len(blocks)):
+            if i in changed_set:
+                neighbours=range(i,len(blocks))
+            else:
+                neighbours=sorted((*retained.get(i,()),*changed[bisect_left(changed,i):]))
+            for j in neighbours:
+                count('hybrid_block_pairs_visited')
                 second=blocks[j]
                 key=digest([first[0],second[0],i==j,face_floor,body_floor])
                 payload=(first,second,i==j,face_floor,body_floor)
@@ -105,4 +130,11 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
         if hit is None:
             count('hybrid_centroid_pairs_recomputed',len(payload[0][3])*len(payload[1][3]))
             if store:store.put("hybrid-nominations",key,result)
+        if result and catalogue_ok:
+            if (len(positive)+len(blocks)+1)*256>catalogue_limit:
+                catalogue_ok=False
+                positive.clear()
+            else:positive.append([payload[0][0],payload[1][0]])
         yield from result
+    if catalogue_ok:
+        store.put('hybrid-catalogue',catalogue_key,[[block[0] for block in blocks],positive])

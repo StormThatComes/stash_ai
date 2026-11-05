@@ -69,3 +69,46 @@ def test_real_sapiens_buffers_have_stable_content_versions():
     assert endpoint_version(replace(owner,persons=owner.persons.copy()))==version
     owner.persons[0,0]=.001
     assert endpoint_version(owner)!=version
+
+
+def test_sparse_incident_rows_preserve_order_and_visit_only_active_cells(monkeypatch):
+    from stash_ai.recognition.hybrid_lookup import Lookup
+    from stash_ai.recognition import parallel_numeric
+    bank=[identity(str(i),i*.01) for i in range(256)]
+    lookup=Lookup(bank,2**26)
+    dense=[p for p in lookup.pairs() if '0' in p[:2]]
+    original=parallel_numeric.matrix_tiles
+    cells=[]
+    def measure(tiles,**options):
+        def counted():
+            for meta,pairs in tiles:
+                cells.append(len(pairs[0][0])*len(pairs[0][1]))
+                yield meta,pairs
+        yield from original(counted(),**options)
+    monkeypatch.setattr(parallel_numeric,'matrix_tiles',measure)
+    sparse=list(lookup.pairs(incident={'0'}))
+    assert [p[:2] for p in sparse]==[p[:2] for p in dense]
+    assert np.allclose([p[2:] for p in sparse],[p[2:] for p in dense])
+    assert sum(cells)==255
+
+
+def test_sparse_catalogue_skips_unchanged_empty_block_pairs(tmp_path,monkeypatch):
+    from collections import Counter
+    from stash_ai.recognition import profiling
+    from stash_ai.recognition.hybrid_lookup import Lookup
+    from stash_ai.recognition.hybrid_delta import nominations
+    config=SimpleNamespace(data=defaults())
+    bank=[identity(str(i),i*.07) for i in range(256)]
+    stats=Counter()
+    monkeypatch.setattr(profiling,'count',lambda key,n=1:stats.update({key:n}))
+    with FaceDatabase(tmp_path/'blocks.sqlite') as db,scope(db,config):
+        from stash_ai.recognition.derived_cache import current
+        store=current()
+        assert not list(nominations(Lookup(bank,2**26),store,2.,2.))
+        cold=stats['hybrid_block_pairs_visited']
+        stats.clear()
+        assert not list(nominations(Lookup(bank,2**26),store,2.,2.))
+        assert stats['hybrid_block_pairs_visited']==0
+        bank.append(identity('new',.2))
+        assert not list(nominations(Lookup(bank,2**26),store,2.,2.))
+        assert 0<stats['hybrid_block_pairs_visited']<cold

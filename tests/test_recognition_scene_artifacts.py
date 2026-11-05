@@ -1,3 +1,4 @@
+import pytest
 from tests.test_recognition_rebuild import changed, library, partition, two_people, run
 from stash_ai.recognition import rebuild
 
@@ -37,13 +38,14 @@ def test_parallel_body_plans_reuse_independent_scenes(tmp_path):
             assert [p[2] for p in planned(state.connection,selected,config)]==expected
 
 
-def test_ten_to_32_scenes_match_cold_partition_and_statuses(tmp_path,monkeypatch):
+@pytest.mark.parametrize(('before','after'),[(10,32),(32,33)])
+def test_append_matches_cold_partition_and_statuses(tmp_path,monkeypatch,before,after):
     import json
     from stash_ai.recognition.database import FaceDatabase
-    scenes=[str(i+1) for i in range(32)]
+    scenes=[str(i+1) for i in range(after)]
     vectors={s:[[float(k==int(s)%4) for k in range(4)]]*2 for s in scenes}
     results=[]
-    for name,steps in (('expanded',(10,32)),('cold',(32,))):
+    for name,steps in (('expanded',(before,after)),('cold',(after,))):
         cfg,_,services,_=library(tmp_path/name,monkeypatch,vectors)
         cfg=changed(cfg,clustering={'anchor_view_matching':True},execution={'profile_rebuild':True})
         for amount in steps:
@@ -54,7 +56,7 @@ def test_ten_to_32_scenes_match_cold_partition_and_statuses(tmp_path,monkeypatch
                 "ON json_extract(c.payload,'$.observation')=o.id JOIN scans s ON s.id=o.scan ORDER BY s.scene,o.cue")]
             if name=='expanded':
                 summary=json.loads(db.connection.execute("SELECT summary FROM runs ORDER BY started DESC LIMIT 1").fetchone()[0])
-                assert summary['rebuild_profile']['counts']['strict-scene_cache_hits']==10
+                assert summary['rebuild_profile']['counts']['strict-scene_cache_hits']==before
         results.append((partition(cfg),statuses))
     assert results[0]==results[1]
 
