@@ -37,16 +37,46 @@ def _confirmed(db, policy, grouping, usage):
     never vote twice; contextual attachments cannot seed strict views.
     """
     anchor = anchor_sql('o', grouping)
-    rows = db.execute(
+    source = (
         'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
         f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
         'JOIN members m ON m.observation=o.id AND m.person=c.person '
         'JOIN scans s ON s.id=o.scan '
         "WHERE c.policy=? AND c.status='accepted' AND "
         "json_extract(c.payload,'$.reason') IN ('known_identity','candidate_group') "
-        f'AND c.person IS NOT NULL AND o.rejected IS NULL AND {anchor} '
-        'ORDER BY CAST(s.scene AS INTEGER),s.scene,c.person,o.cue,o.seconds,o.geometry,o.embedding,o.id',
-        (policy,))
+        f'AND c.person IS NOT NULL AND o.rejected IS NULL AND {anchor} ')
+    ordering=' ORDER BY CAST(s.scene AS INTEGER),s.scene,c.person,o.cue,o.seconds,o.geometry,o.embedding,o.id'
+    from .derived_cache import current, fingerprint
+    from .config import plain
+    store=current()
+    if store is None:
+        result,_=_build_strict(db.execute(source+ordering,(policy,)),grouping,usage)
+    else:
+        result=[]
+        query=source+' AND o.scan=?'+ordering
+        for scan, in db.execute('SELECT id FROM scans ORDER BY CAST(scene AS INTEGER),scene'):
+            inputs=(policy,scan)
+            key=fingerprint(db,[(query,inputs)],[policy,scan,plain(grouping)])
+            entry=store.get('anchor-views',key)
+            if entry is None or usage.bytes+entry[0]>usage.limit:
+                views,peak=_build_strict(db.execute(query,inputs),grouping,usage)
+                store.put('anchor-views',key,[peak,[[v.group.identifier,v.pose,v.medoid,v.support_ids,
+                    v.support_count] for v in views]])
+                result.extend(views)
+            else:
+                for person,pose,medoid,ids,support in entry[1]:
+                    row=db.execute('SELECT dimensions,embedding FROM observations WHERE id=?',(medoid,)).fetchone()
+                    sample=vector(row)
+                    usage.add((sample,),kind='Anchor view')
+                    result.append(AnchorView(scan,Group(person,(sample,),True,(medoid,)),pose,medoid,tuple(ids),support))
+    if grouping['context_view_enrichment']:
+        _enrich_from_validated_context(db,policy,grouping,usage,result)
+    return result
+
+
+def _build_strict(rows,grouping,usage):
+    initial=usage.bytes
+    peak=initial
     result, key, slots, cover, scratch = [], None, [], [], 0
     minimum = max(grouping['view_min_support'], grouping['same_scene_min_support'])
     cohesion = grouping['view_cohesion_threshold']
@@ -69,12 +99,11 @@ def _confirmed(db, policy, grouping, usage):
             query = vector(row)
             scratch+=add_cohort(slots,row,query,cohesion,complete=True,maximum=witness_limit(grouping))
             scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
+            peak=max(peak,usage.bytes+scratch)
             if usage.bytes+scratch>usage.limit:
                 raise ResourceLimit('Local anchor view evidence exceeds clustering.max_reference_bytes.')
     emit()
-    if grouping['context_view_enrichment']:
-        _enrich_from_validated_context(db, policy, grouping, usage, result)
-    return result
+    return result,max(peak,usage.bytes)-initial
 
 
 def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):

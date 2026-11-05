@@ -976,8 +976,8 @@ merge candidates. Outsider maxima are found in tiled passes and near ties are
 checked exactly. Original-core, co-presence and face-contradiction vetoes remain.
 
 Reference selection happens before embedding loading. The planner keeps bank
-metadata and a bounded vector cache in RAM; float64 means are stored in a disposable
-SQLite index in the system temporary directory. Allow roughly 33 KiB of temporary
+metadata and a bounded vector cache in RAM; float64 means are stored as contiguous blocks in a disposable
+binary file in the system temporary directory. Allow roughly 33 KiB of temporary
 disk space per appearance (about 318 MiB for 10,000 appearances). The index is removed
 on success, failure or interruption. No source database writes or inference are
 needed for reports. Repeated core checks reuse scores within the frozen pass.
@@ -988,6 +988,25 @@ limits exact vector comparisons per body scene or global pass, including origina
 core and face checks. `reference_bytes` and `plan_bytes` still bound working
 references and retained proofs. Budget exhaustion raises an error before applying
 a global merge plan; no rivals or original witnesses are silently dropped.
+
+During a production rebuild, a byte-bounded derived cache reuses independent
+scene results and numeric evidence across selections. Its entries share the
+recognition database transaction. New or changed competitors still participate
+in the global decision. The total entry budget is the smaller of 64 MiB and
+one eighth of `execution.rebuild_cache_bytes`. Setting that byte budget to zero
+disables durable reuse. The face-order, strict-scene, body-scene and hybrid-pair
+cache counters appear in `rebuild_profile.counts` when profiling is enabled.
+`hybrid_unchanged_pair_proofs_recomputed` counts newly computed hybrid proofs
+whose two endpoint versions were retained from a previous rebuild. The
+`hybrid_nomination`, `hybrid_copresence` and `hybrid_proof_scoring` entries in
+`rebuild_profile.stages` time the corresponding work on the coordinator.
+
+`execution.rebuild_nomination_device` defaults to `cpu`. Set it to `auto` to
+try CUDA for hybrid centroid nomination on catalogues of at least 1,024
+identities with a GPU-enabled model configuration. The planner checks memory
+headroom and measures upload, tile computation and result transfer against CPU
+work. It uses CPU for borderline nomination scores and after a CUDA failure.
+Exact witness checks and competitor ranking continue on CPU.
 
 Global reports declare `pair_coverage: candidates_and_requested`: `pairs` is a
 sparse list, not an exhaustive list of every rejected pair. Pair reports and the

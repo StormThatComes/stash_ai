@@ -10,6 +10,8 @@ from .disk_body_modes import Matrix,resident_bytes
 
 class Lookup:
     def __init__(self,identities,budget):
+        self.budget=budget
+        self.working_bytes=0
         self.identities=tuple(identities)
         self.faces=self.persons=None
         if not identities:return
@@ -29,6 +31,7 @@ class Lookup:
         from .memory_size import Reservation
         self.reservation=Reservation(budget, label='hybrid-lookup')
         self.reservation.set(required)
+        self.working_bytes=required
         self.faces=np.empty((len(identities),face_dim),dtype='float64')
         self.persons=np.empty((len(identities),person_dim),dtype='float64')
         for index,item in enumerate(identities):

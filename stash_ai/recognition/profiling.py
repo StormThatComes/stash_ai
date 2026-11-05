@@ -44,6 +44,29 @@ def measured(name):
     return decorate
 
 
+def timed_stream(name, values):
+    """Time coordinator/worker execution up to each yield, excluding its caller."""
+    metrics=_active.get()
+    if metrics is None:
+        yield from values
+        return
+    row=metrics['stages'].setdefault(name,dict(calls=0,errors=0,seconds=0.))
+    iterator=iter(values)
+    while True:
+        start=time.perf_counter()
+        try:
+            value=next(iterator)
+        except StopIteration:
+            return
+        except BaseException:
+            row['errors']+=1
+            raise
+        finally:
+            row['seconds']+=time.perf_counter()-start
+        row['calls']+=1
+        yield value
+
+
 class Cursor:
     """Measure lazy SQLite work, separately from executing a statement."""
     def __init__(self, raw, metrics, key):

@@ -213,14 +213,14 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
     norms=np.linalg.norm(first_vectors.astype(np.float64),axis=1)
     with tracking(range(0, n, 128), 'Compare provisional identity blocks', unit='block', position=0) as tracked:
         for offset in tracked:
-            block = first_vectors[offset:offset+128] @ first_vectors.T
+            block = first_vectors[offset:offset+128] @ first_vectors[offset:].T
             with tracking(block, 'Compare provisional identity groups', unit='group') as groups:
                 for local, scores in enumerate(groups):
                     i = offset+local
                     if i in barred:
                         continue
                     errors=multiplier*norms[i]*norms + dimension*np.finfo(np.float32).tiny
-                    for j in np.flatnonzero(scores[i+1:] + errors[i+1:] >= cohesion) + i+1:
+                    for j in np.flatnonzero(scores[local+1:] + errors[i+1:] >= cohesion) + i+1:
                         if j in barred or not pool[i].scenes.isdisjoint(pool[j].scenes):
                             continue
                         mean, low = _cross_score(pool[i].samples, pool[j].samples)

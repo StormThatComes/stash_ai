@@ -201,3 +201,22 @@ def test_anchor_view_does_not_assign_two_distinct_faces_to_same_person(tmp_path)
         rows = statuses(db, identifier, config)
         assert sum(status == 'accepted' for status, _, _ in rows) == 8
         assert sum(status == 'withheld' for status, _, _ in rows) == 2
+
+
+def test_frozen_local_views_reuse_the_same_medoids_and_independent_support(tmp_path,monkeypatch):
+    from stash_ai.recognition import anchor_views
+    from stash_ai.recognition.derived_cache import scope
+    from stash_ai.recognition.reference_usage import ReferenceUsage
+    config=config_for(tmp_path)
+    grouping=config.data['clustering']
+    with FaceDatabase(config.database) as db:
+        run(db, config, [A]*3+[X]*3)
+        with scope(db,config):
+            def confirmed():
+                found=anchor_views._confirmed(db.connection,matching_policy(config),grouping,
+                                              ReferenceUsage(grouping['max_reference_bytes']))
+                return [(v.medoid,v.support_ids,v.group.samples[0].tobytes()) for v in found]
+            expected=confirmed()
+            assert expected
+            monkeypatch.setattr(anchor_views,'_build_strict',lambda *_:pytest.fail('rebuilt unchanged view'))
+            assert confirmed()==expected

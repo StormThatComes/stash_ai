@@ -35,3 +35,25 @@ def test_parallel_body_plans_reuse_independent_scenes(tmp_path):
         with scope(state,config),compute_scope(config):
             assert [p[2] for p in planned(state.connection,selected[:2],config)]==expected[:2]
             assert [p[2] for p in planned(state.connection,selected,config)]==expected
+
+
+def test_ten_to_32_scenes_match_cold_partition_and_statuses(tmp_path,monkeypatch):
+    import json
+    from stash_ai.recognition.database import FaceDatabase
+    scenes=[str(i+1) for i in range(32)]
+    vectors={s:[[float(k==int(s)%4) for k in range(4)]]*2 for s in scenes}
+    results=[]
+    for name,steps in (('expanded',(10,32)),('cold',(32,))):
+        cfg,_,services,_=library(tmp_path/name,monkeypatch,vectors)
+        cfg=changed(cfg,clustering={'anchor_view_matching':True},execution={'profile_rebuild':True})
+        for amount in steps:
+            assert run(cfg,services,*scenes[:amount])==0
+        with FaceDatabase(cfg.database) as db:
+            statuses=[tuple(row) for row in db.connection.execute(
+                "SELECT s.scene,o.cue,c.status FROM candidates c JOIN observations o "
+                "ON json_extract(c.payload,'$.observation')=o.id JOIN scans s ON s.id=o.scan ORDER BY s.scene,o.cue")]
+            if name=='expanded':
+                summary=json.loads(db.connection.execute("SELECT summary FROM runs ORDER BY started DESC LIMIT 1").fetchone()[0])
+                assert summary['rebuild_profile']['counts']['strict-scene_cache_hits']==10
+        results.append((partition(cfg),statuses))
+    assert results[0]==results[1]

@@ -59,4 +59,3 @@ def planned(db, items, config):
         if store:store.put('body-scene',key,plan[2])
         yield plan
     yield from drain()
-

@@ -53,7 +53,7 @@ def defaults():
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
         'execution': {'gpu_model_policy': 'phase', 'log_vram': True,
-                      'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
+                      'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
                       'sprite_cache_bytes': 1073741824, 'media_cache_bytes': 1073741824, 'portrait_ranking_cache_bytes': 16777216, 'prefetch_scene_depth': 3,
@@ -221,6 +221,8 @@ def validate(data):
         raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:
         raise ValueError('execution.profile_rebuild must be boolean.')
+    if data['execution']['rebuild_nomination_device'] not in ('cpu','auto'):
+        raise ValueError('execution.rebuild_nomination_device must be cpu or auto.')
     if data['execution']['gpu_model_policy'] not in ('phase', 'sequential', 'retain'):
         raise ValueError('execution.gpu_model_policy must be phase, sequential or retain.')
     if type(data['execution']['log_vram']) is not bool:

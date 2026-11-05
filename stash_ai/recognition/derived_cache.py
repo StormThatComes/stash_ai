@@ -25,6 +25,9 @@ class Store:
     def __init__(self, db, budget):
         self.db = db
         self.budget = budget
+        marker=PREFIX+"hybrid-endpoint:"
+        self.previous_endpoints={row[0][len(marker):] for row in db.execute(
+            "SELECT key FROM metadata WHERE key GLOB ?",(marker+"*",))}
         self.used = db.execute("SELECT COALESCE(SUM(length(CAST(value AS BLOB))+length(key)+128),0) "
                                "FROM metadata WHERE key GLOB ?", (PREFIX+"*",)).fetchone()[0]
 
@@ -80,4 +83,3 @@ def scope(database, config):
 
 def current():
     return _active.get()
-

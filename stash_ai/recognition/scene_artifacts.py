@@ -96,4 +96,3 @@ def body_key(db, scan, config):
         'AND o.rejected IS NULL AND s.status=\'complete\' AND '+predicate()+' ORDER BY m.person,o.id',
         (encoded(sorted({root for _,root in roots})),)))
     return derived_cache.fingerprint(db,queries,[scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots)])
-
