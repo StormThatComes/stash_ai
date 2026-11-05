@@ -1,6 +1,7 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
 from .profiling import pipeline_stage
 import json
+import sqlite3
 import uuid
 from types import SimpleNamespace
 
@@ -80,7 +81,12 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                                'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
                                (encoded(quality), reason, reason is None, reason is None, row['id']))
             if audited:
-                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(address,certificate()))
+                try:
+                    db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(address,certificate()))
+                except sqlite3.DatabaseError as error:
+                    # An optional certificate cannot block verified raw evidence.
+                    if getattr(error,'sqlite_errorcode',0) & 255 not in (sqlite3.SQLITE_AUTH,sqlite3.SQLITE_READONLY):
+                        raise
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')

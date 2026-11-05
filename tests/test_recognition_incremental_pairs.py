@@ -122,3 +122,19 @@ def test_face_bounds_keep_weak_boundary_and_small_catalogue():
     blocks=FrozenFaceBlocks(groups,2**20)
     assert list(blocks.candidates(query,.999999))==groups[64:]
     assert list(FrozenFaceBlocks(groups[:8],2**20).candidates(query,.9))==groups[:8]
+
+
+def test_warm_catalogue_does_not_calibrate_or_upload_cuda(tmp_path,monkeypatch):
+    from stash_ai.recognition.derived_cache import current
+    from stash_ai.recognition.hybrid_lookup import Lookup
+    from stash_ai.recognition.hybrid_delta import nominations
+    lookup=Lookup([identity(str(i),i*.1) for i in range(1024)],2**26)
+    config=SimpleNamespace(data=defaults())
+    calls=[]
+    monkeypatch.setattr('stash_ai.recognition.nomination_cuda.select',lambda *args:calls.append(args[-1]))
+    with FaceDatabase(tmp_path/'cuda.sqlite') as db,scope(db,config):
+        assert not list(nominations(lookup,current(),1.001,1.001,config))
+        assert calls==[8]
+        calls.clear()
+        assert not list(nominations(lookup,current(),1.001,1.001,config))
+        assert not calls

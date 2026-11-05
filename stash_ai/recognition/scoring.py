@@ -98,7 +98,7 @@ class FrozenFaceBlocks:
         for start in range(0,len(groups),64):
             block=groups[start:start+64]
             samples=[v for g in block for v in g.samples]
-            if not samples or any(not g.samples for g in block):continue
+            if not samples or any(len(g.samples)==0 for g in block):continue
             shape=samples[0].shape
             if any(v.dtype!=np.float32 or v.shape!=shape or v.ndim!=1 for v in samples):continue
             scratch=8*sum(v.nbytes for v in samples)
