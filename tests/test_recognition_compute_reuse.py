@@ -56,3 +56,12 @@ def test_query_shortlist_never_loses_exact_face_witness():
             candidates={b[0] for b in index.candidates(query,floor)}
             exact={i for i,_,_,f in banks if (f.astype('float64') @ query.astype('float64')).min()>=floor}
             assert exact<=candidates
+
+
+def test_batch_query_index_preserves_bank_order_across_partial_blocks():
+    rng=np.random.default_rng(83)
+    banks=[(n,None,np.empty((0,3)),rng.normal(size=(2,3))) for n in range(69)]
+    index=QueryIndex(banks,10**7)
+    faces=[(i,rng.normal(size=3)) for i in range(19)]
+    results=[(i,[b[0] for b in selected]) for i,_,selected in index.batch(faces,.3)]
+    assert results==[(i,[b[0] for b in index.candidates(face,.3)]) for i,face in faces]

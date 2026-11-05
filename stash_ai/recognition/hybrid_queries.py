@@ -43,11 +43,13 @@ def _recover(database, selected, config, *, births=()):
     used=0;claim_rows=[]
     source_counts=dict(db.execute('SELECT person,COUNT(*) FROM members WHERE person IN '
         '(SELECT value FROM json_each(?)) GROUP BY person',(encoded(list(births)),)))
-    for row in rows:
-        if not config.data['clustering']['auxiliary_matching']:
-            from .pose_policy import is_anchor
-            if not is_anchor(row['quality'],config.data['clustering']):continue
-        face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
+    def queries():
+        from .pose_policy import is_anchor
+        for row in rows:
+            if config.data['clustering']['auxiliary_matching'] or is_anchor(row['quality'],config.data['clustering']):
+                yield row,vector(row)
+    for row,face,candidates in index.batch(queries(),settings['face_floor']):
+        body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
         if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
         choices=[];face_choices=[];query_modes={}
@@ -55,7 +57,7 @@ def _recover(database, selected, config, *, births=()):
         body_batch=np.asarray([body],dtype='float64') if body is not None else None
         if observe is not None:
             observe(row,face_batch,body_batch)
-        for identity,group,bodies,faces in index.candidates(face,settings['face_floor']):
+        for identity,group,bodies,faces in candidates:
             if identity.person in births:continue
             f=scores(face_batch,faces)
             if f is None or f['minimum']<settings['face_floor']:continue

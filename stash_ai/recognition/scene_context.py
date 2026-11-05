@@ -109,7 +109,14 @@ def apply_scene_context(database, selected, config, *, progress=None):
                     f"WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='withheld' AND {anchor}")
                 rows = db.execute("SELECT o.*,c.id AS candidate " + source +
                     " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
-                with tracking(scored_rows(rows, groups, float('-inf'), local_cohesion),
+                local=[group for group in groups if group.identifier in cores]
+                def viable(source):
+                    for row, frozen in scored_rows(source,local,local_match,local_cohesion):
+                        query=cache.vector(row) if cache is not None else vector(row)
+                        ranked=_rank(local,query,config,cache=cache,observation=row['id'],frozen=frozen,cohesion=local_cohesion)
+                        if ranked and ranked[0][0]>=local_match:yield row
+                candidates=viable(rows) if len(local)<len(groups) else rows
+                with tracking(scored_rows(candidates, groups, float('-inf'), local_cohesion),
                               'Match same-scene observations', unit='observation',
                               total=lambda: db.execute('SELECT COUNT(*) ' + source, (policy, scan)).fetchone()[0]) as observations:
                     for row, frozen in observations:
