@@ -98,3 +98,24 @@ def test_fully_checkpointed_partial_scan_finishes_without_a_backend(tmp_path):
             assert scan_scene(db,'scope',client.scene,config,'ns',source,unavailable) == (identifier, True)
         assert db.connection.execute('SELECT cursor,total,status FROM scans').fetchone()[:] == (3,3,'complete')
 
+
+
+def test_warm_scan_checks_geometry_again_only_after_raw_change(tmp_path,monkeypatch):
+    from stash_ai.recognition import scanning
+    settings,client=config(tmp_path),MediaClient()
+    with FaceDatabase(settings.database) as state, SpriteInput(client,client.scene,settings) as source:
+        def scan():
+            return scan_scene(state,'scope',client.scene,settings,'ns',source,Backend)
+        scan()
+        scan()
+        original=scanning.geometry_contract
+        calls=[]
+        def counted(face,cue):
+            calls.append(cue)
+            return original(face,cue)
+        monkeypatch.setattr(scanning,'geometry_contract',counted)
+        scan()
+        assert not calls
+        state.connection.execute("UPDATE observations SET quality=json_remove(quality,'$.geometry_contract')")
+        scan()
+        assert len(calls)==len(source.cues)

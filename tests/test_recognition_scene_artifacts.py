@@ -57,3 +57,36 @@ def test_ten_to_32_scenes_match_cold_partition_and_statuses(tmp_path,monkeypatch
                 assert summary['rebuild_profile']['counts']['strict-scene_cache_hits']==10
         results.append((partition(cfg),statuses))
     assert results[0]==results[1]
+
+
+def test_duplicate_artifact_neither_evicts_nor_prevents_checksum_repair():
+    import sqlite3
+    from stash_ai.recognition.derived_cache import Store,PREFIX
+    db=sqlite3.connect(':memory:')
+    db.execute('CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT)')
+    store=Store(db,4096)
+    for n in range(10):store.put('test',str(n),'x'*160)
+    before=store.used
+    store.put('test','9','x'*160)
+    assert store.used==before and store.get('test','0')=='x'*160
+    db.execute('UPDATE metadata SET value=replace(value,?,?) WHERE key=?',
+               ('x','y',PREFIX+'test:9'))
+    assert store.get('test','9') is None
+    store.put('test','9','x'*160)
+    assert store.used==before and store.get('test','9')=='x'*160
+
+
+def test_cache_and_worker_input_include_external_pixel_representative(monkeypatch):
+    import json
+    import sqlite3
+    from stash_ai.recognition import evidence_pixels
+    db=sqlite3.connect(':memory:')
+    db.row_factory=sqlite3.Row
+    db.execute('CREATE TABLE observations(id TEXT,quality TEXT,rejected TEXT)')
+    db.execute('INSERT INTO observations VALUES (?,?,NULL)',('face',json.dumps({'evidence_pixel_sha256':'a'*64})))
+    monkeypatch.setattr(evidence_pixels,'aliases',lambda db,*a,**kw: [('a'*64,'b'*64)] if db=='external' else ())
+    with evidence_pixels.alias_scope('external'):
+        evidence_pixels.canonicalize(db)
+    raw=db.execute('SELECT quality FROM observations').fetchone()[0]
+    assert json.loads(raw)['evidence_pixel_sha256']=='b'*64
+    db.close()

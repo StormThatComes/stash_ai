@@ -64,11 +64,14 @@ def _confirmed(db, policy, grouping, usage):
                     v.support_count] for v in views]])
                 result.extend(views)
             else:
-                for person,pose,medoid,ids,support in entry[1]:
-                    row=db.execute('SELECT dimensions,embedding FROM observations WHERE id=?',(medoid,)).fetchone()
-                    sample=vector(row)
-                    usage.add((sample,),kind='Anchor view')
-                    result.append(AnchorView(scan,Group(person,(sample,),True,(medoid,)),pose,medoid,tuple(ids),support))
+                for offset in range(0,len(entry[1]),64):
+                    views=entry[1][offset:offset+64]
+                    rows={r['id']:r for r in db.execute('SELECT id,dimensions,embedding FROM observations '
+                        'WHERE id IN (SELECT value FROM json_each(?))',(encoded([v[2] for v in views]),))}
+                    for person,pose,medoid,ids,support in views:
+                        sample=vector(rows[medoid])
+                        usage.add((sample,),kind='Anchor view')
+                        result.append(AnchorView(scan,Group(person,(sample,),True,(medoid,)),pose,medoid,tuple(ids),support))
     if grouping['context_view_enrichment']:
         _enrich_from_validated_context(db,policy,grouping,usage,result)
     return result

@@ -1,6 +1,7 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
 from .profiling import pipeline_stage
 import json
+import sqlite3
 import uuid
 from types import SimpleNamespace
 
@@ -34,41 +35,58 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     policy = scan_identity(config, namespace)
     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, str(scene['id']), namespace,
                                                            source.fingerprint, policy])))
-    with db:
-        db.execute('INSERT OR IGNORE INTO scans(id,scope,scene,namespace,input_sha,policy_sha,manifest,coverage,total) '
-                   'VALUES (?,?,?,?,?,?,?,?,?)', (identifier, scope, str(scene['id']), namespace,
-                   source.fingerprint, policy, encoded(source.manifest), encoded(source.coverage), len(source.cues)))
     record = db.execute('SELECT * FROM scans WHERE id=?', (identifier,)).fetchone()
+    if record is None:
+        with db:
+            db.execute('INSERT OR IGNORE INTO scans(id,scope,scene,namespace,input_sha,policy_sha,manifest,coverage,total) '
+                       'VALUES (?,?,?,?,?,?,?,?,?)', (identifier, scope, str(scene['id']), namespace,
+                       source.fingerprint, policy, encoded(source.manifest), encoded(source.coverage), len(source.cues)))
+        record = db.execute('SELECT * FROM scans WHERE id=?', (identifier,)).fetchone()
     if (record['status'] not in ('partial', 'complete') or
             not 0 <= record['cursor'] <= record['total'] or record['total'] != len(source.cues)):
         raise ValueError('Invalid recognition scan checkpoint.')
-    # Validate retained geometry even when an old alignment flag says true.
-    # Reuse valid vectors; retire only evidence invalid under this same policy.
-    with db:
+    from .dependencies import snapshot, version
+    from .dependency_schema import validate_triggers
+    with snapshot(db):
         from .scan_heads import activate
         activate(db, record)
-        for row in db.execute('SELECT id,cue,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
-            quality = json.loads(row['quality'])
-            face = checked_detection(json.loads(row['geometry']))
-            if type(row['cue']) is not int or not 0 <= row['cue'] < len(source.cues):
-                raise ValueError('Retained face observation has an invalid cue.')
-            cue = source.cues[row['cue']]
-            stamp = geometry_contract(face, cue)
-            if quality.get('geometry_contract') != stamp or face.score <= config.data['detection']['score_threshold']:
-                quality['alignment_valid'] = alignable(face, SimpleNamespace(width=cue.rect[2], height=cue.rect[3]))
-                quality['geometry_contract'] = stamp
-                reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
-                          else None if quality['alignment_valid'] else 'face_landmarks_invalid')
-                if reason:
-                    # Earlier SFace scans may already have matching memberships.
-                    # Keep raw geometry/origins, retire only this invalid support,
-                    # and replay matching instead of serving its old cached result.
-                    db.execute('DELETE FROM members WHERE observation=?', (row['id'],))
-                    db.execute('DELETE FROM candidates WHERE scan=?', (identifier,))
-                    db.execute('DELETE FROM metadata WHERE key=?', ('identity-rebuild:' + digest([scope, namespace]),))
-                db.execute('UPDATE observations SET quality=?,rejected=?,embedding=CASE WHEN ? THEN embedding ELSE NULL END,'
-                           'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
-                           (encoded(quality), reason, reason is None, reason is None, row['id']))
+        audited=record['status']=='complete' and db.execute('PRAGMA user_version').fetchone()[0]>=8
+        if audited:
+            validate_triggers(db,required=True)
+        address='verified-scan-geometry:'+identifier
+        def certificate():
+            return encoded([3,source.fingerprint,policy,version(db,'raw-observations',identifier)])
+        previous=db.execute('SELECT value FROM metadata WHERE key=?',(address,)).fetchone() if audited else None
+        if previous is None or previous[0]!=certificate():
+            for row in db.execute('SELECT id,cue,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
+                quality = json.loads(row['quality'])
+                face = checked_detection(json.loads(row['geometry']))
+                if type(row['cue']) is not int or not 0 <= row['cue'] < len(source.cues):
+                    raise ValueError('Retained face observation has an invalid cue.')
+                cue = source.cues[row['cue']]
+                stamp = geometry_contract(face, cue)
+                if quality.get('geometry_contract') != stamp or face.score <= config.data['detection']['score_threshold']:
+                    quality['alignment_valid'] = alignable(face, SimpleNamespace(width=cue.rect[2], height=cue.rect[3]))
+                    quality['geometry_contract'] = stamp
+                    reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
+                              else None if quality['alignment_valid'] else 'face_landmarks_invalid')
+                    if reason:
+                        # Earlier SFace scans may already have matching memberships.
+                        # Keep raw geometry/origins, retire only this invalid support,
+                        # and replay matching instead of serving its old cached result.
+                        db.execute('DELETE FROM members WHERE observation=?', (row['id'],))
+                        db.execute('DELETE FROM candidates WHERE scan=?', (identifier,))
+                        db.execute('DELETE FROM metadata WHERE key=?', ('identity-rebuild:' + digest([scope, namespace]),))
+                    db.execute('UPDATE observations SET quality=?,rejected=?,embedding=CASE WHEN ? THEN embedding ELSE NULL END,'
+                               'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
+                               (encoded(quality), reason, reason is None, reason is None, row['id']))
+            if audited:
+                try:
+                    db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(address,certificate()))
+                except sqlite3.DatabaseError as error:
+                    # An optional certificate cannot block verified raw evidence.
+                    if getattr(error,'sqlite_errorcode',0) & 255 not in (sqlite3.SQLITE_AUTH,sqlite3.SQLITE_READONLY):
+                        raise
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')

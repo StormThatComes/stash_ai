@@ -6,13 +6,30 @@ from .database import encoded
 from .rebuild_cache import resource_limits
 
 
-def face_keys(db, selected, config):
+def face_keys(db, selected, config, *, source=None):
     if derived_cache.current() is None or not config.data['clustering']['anchor_view_matching']:
         return {}
-    settings=[matching_policy(config),resource_limits(config),plain(config.data['execution'])]
-    return {item['scan']:derived_cache.fingerprint(db,[
-        ('SELECT id,cue,seconds,geometry,quality,rejected,dimensions,embedding FROM observations WHERE scan=? ORDER BY id',(item['scan'],))
-    ],[settings,item]) for item in selected}
+    from .dependencies import cached
+    from .dependency_schema import validate_triggers
+    # Replay compacts quality and canonicalizes duplicate pixels across the
+    # selection. Sign those exact replay values separately from durable vectors.
+    audited=source is not None and source.execute('PRAGMA user_version').fetchone()[0]>=8
+    if audited:validate_triggers(source,required=True)
+    grouping=config.data['clustering']
+    settings=[plain(grouping),config.data['recognition']['min_identity_support'],
+              config.data['recognition']['match_threshold']]
+    keys={}
+    for item in selected:
+        scan=item['scan']
+        vectors='SELECT id,dimensions,embedding FROM observations WHERE scan=? ORDER BY id'
+        def vector_digest():
+            return derived_cache.fingerprint(source if audited else db,[(vectors,(scan,))],scan)
+        signed=(cached(source,'scene-face-vectors',scan,'v1',vector_digest,
+                       dependency='raw-observations',dependency_key=scan,checked=True) if audited else vector_digest())
+        keys[scan]=derived_cache.fingerprint(db,[
+            ('SELECT id,cue,seconds,geometry,quality,rejected FROM observations WHERE scan=? ORDER BY id',(scan,))
+        ],[settings,item,signed])
+    return keys
 
 
 def prepare(db, selected, config, keys):
@@ -45,7 +62,8 @@ def match(database, scan, config, base, build):
     prior=db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='prior_attachment_queries'").fetchone()
     hints=[r[0] for r in db.execute("SELECT q.id FROM prior_attachment_queries q JOIN observations o "
         "ON o.id=q.id WHERE o.scan=? ORDER BY q.id",(scan,))] if prior else []
-    key=digest([base,hints,database.installation])
+    key=digest([base,hints,database.installation,matching_policy(config),resource_limits(config),
+                config.data['execution']['rebuild_memory_bytes']])
     store=derived_cache.current()
     entry=store.get('strict-scene',key)
     if entry is None:
@@ -93,8 +111,21 @@ def body_key(db, scan, config):
     for row in db.execute('SELECT DISTINCT m.person FROM body_observations b JOIN members m ON m.observation=b.face '
                           'WHERE b.scan=? AND b.contract=? ORDER BY m.person',(scan,expected)):
         roots.add((row[0],canonical(db,row[0])))
-    queries.append(('SELECT m.person,o.id,o.dimensions,o.embedding FROM observations o JOIN members m '
-        'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
-        'AND o.rejected IS NULL AND s.status=\'complete\' AND '+predicate()+' ORDER BY m.person,o.id',
-        (encoded(sorted({root for _,root in roots})),)))
-    return derived_cache.fingerprint(db,queries,[scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots)])
+    from .dependencies import cached
+    from .dependency_schema import validate_triggers
+    audited=db.execute('PRAGMA user_version').fetchone()[0]>=10
+    if audited:validate_triggers(db,required=True)
+    # Membership, old/new head selection, REPLACE and owner age can span scans.
+    # Use the audited global clock for joined inputs. Keep owner digests separate
+    # so multiple scene plans reuse a shared veto bank.
+    def signed(kind,key,records):
+        read=lambda:derived_cache.fingerprint(db,records,key)
+        return cached(db,kind,key,'v1',read,checked=True) if audited else read()
+    banks=[]
+    for owner in sorted({root for _,root in roots}):
+        banks.append(signed('body-scene-owner',owner,[(
+            'SELECT m.person,o.id,o.dimensions,o.embedding FROM observations o JOIN members m '
+            'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
+            "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))]))
+    local=signed('body-scene-input',digest([scan,expected]),queries)
+    return digest([scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks])
