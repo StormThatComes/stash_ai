@@ -3,10 +3,26 @@ from .merge_report_policy import parameter, patched
 from .merge_solver_domains import registry, normalize, UNIT, SUPPORT
 
 
+def anchor_rule_profiles(config):
+    """Whole alternatives to compare with the configured anchor rule."""
+    from .config import plain
+    body = config.data['sapiensid']
+    if not body['enabled']:
+        return ()
+    current = plain(body['identities']['anchor_keypoint_rules'])
+    variants = (
+        ('shoulder_and_hip', {'all': [{'group': 'shoulders', 'min': 1},
+                                     {'group': 'hips', 'min': 1}], 'any': []}),
+        ('face_or_torso', {'all': [], 'any': [
+            {'points': ['nose', 'left_eye', 'right_eye'], 'min': 3}, {'group': 'torso', 'min': 3}]}),
+    )
+    return tuple((name, rules) for name, rules in variants if rules != current)
+
+
 def admission(config):
     domains = registry(config)
     keys = [k for k in domains if k.startswith('clustering.min_') or k == 'clustering.max_anchor_pose_deviation'
-            or k.startswith(('sapiensid.identities.anchor_min_', 'sapiensid.identities.anchor_keypoint_rules.'))]
+            or k.startswith('sapiensid.identities.anchor_min_')]
     values = {k: (max(parameter(config.data, k), domains[k].high) if domains[k].relax > 0
                   else min(parameter(config.data, k), domains[k].low))
               for k in keys if parameter(config.data, k) is not None}
@@ -21,7 +37,7 @@ def profiles(config):
     from .person_signal import same_contract
     domains = registry(config)
     keys = [k for k in UNIT+SUPPORT+active(config) if k in domains
-            and '.anchor_min_' not in k and '.anchor_keypoint_rules.' not in k]
+            and '.anchor_min_' not in k]
     matching = {k: domains[k].low for k in keys}
     matching['clustering.same_scene_match_bonus'] = max(config.data['clustering']['same_scene_match_bonus'],
                                                        domains['clustering.same_scene_match_bonus'].high)

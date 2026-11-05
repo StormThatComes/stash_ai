@@ -46,7 +46,6 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
                 (('keypoints','sapiensid.identities.anchor_min_keypoints'),
                  ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER))]
         regional=measured['keypoint_rules']
-        values.extend((rule['measured'],rule['parameter']) for mode in ('all','any') for rule in regional[mode])
         for value,key in values:
             if key not in options:continue
             domain=domains[key]

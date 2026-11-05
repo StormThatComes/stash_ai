@@ -1147,15 +1147,24 @@ a passing `any` group. `anchor_gate.keypoint_rules` also exposes selected/presen
 point names; failed regional gates use `body_anchor_keypoint_rules` or
 `body_anchor_keypoint_rules_missing` when geometry is unavailable.
 
-The solver can tune **only existing minima**, using integer domains `0..group_size`;
-it never invents/reorders rules or changes their selectors or `all`/`any` logic.
-For example, the first `all` threshold is
-`sapiensid.identities.anchor_keypoint_rules.all.0.min` (zero-based index). The same
-path works in an explicit `tune` grid. A zero proposal disables that requirement.
-Measured hints and full production replay use the same filtered points as admission.
-Missing geometry is reported explicitly and cannot provide a measured threshold hint.
-YAML diffs include the complete regional rule lists, preserving untouched siblings
-and selectors, because merging a YAML list replaces it as a whole.
+`report-merge --solve` keeps the configured regional rules for the baseline and
+throughout numeric search. Diagnostics still show which landmarks failed a rule.
+The separate `recognition tune` command accepts explicitly requested indexed
+minima such as `sapiensid.identities.anchor_keypoint_rules.all.0.min`.
+
+With `--compare-anchor-rules`, the solver reserves up to two trials within
+`--max-trials`. It takes the best completed trial using the configured rule and
+replays the same scalar settings with each distinct whole policy below.
+
+| Profile | Required visible pose landmarks |
+| --- | --- |
+| `shoulder_and_hip` | At least one shoulder and one hip. Admits views from behind. |
+| `face_or_torso` | Nose and both eyes, or at least three of the four shoulders/hips. Admits close-ups and back views. |
+
+The configured policy runs first even when it is custom or empty. If it already
+matches a preset, that preset is skipped. With a budget of one trial only the
+configured policy is replayed. Reports identify each comparison and its control
+trial. A winning alternative is exported with both complete `all` and `any` lists.
 
 Pose points with sufficient confidence at x=0 or y=0 are valid inside the person
 box. Right/bottom edges remain exclusive and low-confidence points remain missing.

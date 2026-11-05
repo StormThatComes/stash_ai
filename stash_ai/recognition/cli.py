@@ -52,6 +52,8 @@ class RecognitionParser(argparse.ArgumentParser):
                 self.error('--yaml-mode diff requires --solve and --yaml-output or --checkpoint')
             if result.solver_sampler!='heuristic' and not result.solve:
                 self.error('--solver-sampler requires --solve')
+            if result.compare_anchor_rules and not result.solve:
+                self.error('--compare-anchor-rules requires --solve')
             if (result.checkpoint or result.resume) and not result.solve:
                 self.error('--checkpoint/--resume require --solve')
             if result.resume and not result.checkpoint:
@@ -277,6 +279,8 @@ def parser():
     merge_report.add_argument('--profile-solver', '--profile-report', dest='profile_solver', action='store_true',
         help='Profile report execution and optional solver trials; final output cost is included in the stderr summary.')
     merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
+    merge_report.add_argument('--compare-anchor-rules', action='store_true',
+        help='Reserve up to two trials to compare whole regional anchor rules with the best configured-rule trial.')
     merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')
     merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')
     merge_report.add_argument('--resume', action='store_true', help='Resume --checkpoint with identical inputs, code and search settings.')

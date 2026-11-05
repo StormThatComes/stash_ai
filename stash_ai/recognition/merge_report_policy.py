@@ -39,7 +39,7 @@ def proposal(config, changes):
     from .pose_anchor_rules import PARAMETER as regional
     patch, details = {}, []
     for path, value in sorted(changes.items()):
-        current = parameter(config.data, path)
+        current = plain(parameter(config.data, path))
         if current == value:
             continue
         if path.startswith(regional+'.') and not any(row['parameter'].startswith(regional+'.') for row in details):
@@ -48,7 +48,8 @@ def proposal(config, changes):
             assign(patch, regional, plain(parameter(config.data, regional)))
         assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
-                            direction='disable' if value is None else 'enable' if type(value) is bool or current is None else
+                            direction='replace' if path == regional else
+                            'disable' if value is None else 'enable' if type(value) is bool or current is None else
                             'decrease' if value < current else 'increase'))
     return dict(changes=details, yaml_patch=patch,
                 yaml=yaml.safe_dump(patch, sort_keys=False) if patch else '')

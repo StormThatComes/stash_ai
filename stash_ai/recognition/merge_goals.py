@@ -178,6 +178,8 @@ def execute(args, config):
                                   file=sys.stderr, flush=True)
                         if item.get('search_phase') == 'feasibility':
                             print(f"  Search: phase=feasibility profile={item['search_strategy']}", file=sys.stderr, flush=True)
+                        if item.get('search_phase') == 'anchor_rules':
+                            print(f"  Anchor rule profile: {item['search_strategy']}", file=sys.stderr, flush=True)
                         if item.get('search_phase') == 'targeted':
                             target = item['search_target']
                             print(f"  Search: phase=targeted set={target['set']+1} route={target['route']} "
@@ -202,6 +204,7 @@ def execute(args, config):
                                      progress=progress if args.progress_style != 'off' else None,
                                     checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
+                                     compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
                                     yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
                                     targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
                                         key: getattr(args, attr, None) for key, attr in (

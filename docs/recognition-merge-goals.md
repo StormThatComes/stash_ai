@@ -21,6 +21,12 @@ when it is smaller than 8. If an input YAML requests more support, the solver
 uses the capped count starting with the baseline replay and shows the adjustment
 in the trial report and exported YAML diff. This limit applies only to the solver.
 
+The solver keeps `sapiensid.identities.anchor_keypoint_rules` exactly as configured
+during numeric tuning, including custom point lists and empty rules. To also
+compare the two predefined whole-rule alternatives on the winning numeric
+configuration, add `--compare-anchor-rules`. These replays share the existing
+`--max-trials` budget. [Regional anchor rule profiles](sapiensid-hybrid.md#regional-body-anchor-keypoints)
+
 Repeated `--performer-id` or `--identity-id` selects one set. The original
 exactly-two-ID diagnostic remains available without `--solve`. Set syntax is
 mutually exclusive with those selectors. Alias overlap across sets is rejected.
