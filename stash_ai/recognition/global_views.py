@@ -228,6 +228,9 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
         a,b=root(left),root(right)
         if a!=b:
             parents[max(a,b)]=min(a,b)
+    from bisect import bisect_right
+    by_owner=sorted(groups,key=lambda group:group.identifier)
+    owners=[group.identifier for group in by_owner]
     people=sorted(owned) if focus is None else focused_people()
     with tracking(people,'Validate frozen identity components',unit='person') as tracked:
         for person in tracked:
@@ -235,7 +238,11 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
             for view in owned[person]:
                 strict=view.authority=='strict_core'
                 effective=settings['match_threshold'] if strict else threshold
-                for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
+                eligible_groups=groups
+                if focus is None:
+                    eligible_groups=by_owner[bisect_right(owners,person):]
+                for other,score,_ in comparisons(eligible_groups,view.group.samples[0],effective-margin,
+                                                   catalogue_size=len(groups)):
                     if (other.identifier==person or
                             (other.identifier<=person if focus is None else other.identifier in processed)):
                         continue

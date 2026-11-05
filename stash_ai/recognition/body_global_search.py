@@ -115,6 +115,7 @@ class Search:
             self.evidence=Evidence(self.db,self.config,cache_bytes,self.stats)
             self.index=self.stack.enter_context(tempfile.TemporaryFile(prefix='stash-body-means-'))
             self.blocks=OrderedDict()
+            self.bounds=OrderedDict()
             self.entries=[];self.owner_modes={}
             retained=self.stats['reference_working_bytes']
             from .body_global_modes import references as appearance_references
@@ -150,7 +151,7 @@ class Search:
         self.evidence.cache.clear();self.evidence.scores.clear()
         return self.stack.__exit__(*args)
 
-    def tiles(self,active=None):
+    def tiles(self,active=None,*,floor=None):
         count=len(self.entries);block=self.block
         def read(start):
             value=self.blocks.get(start)
@@ -165,6 +166,13 @@ class Search:
                 self.stats['centroid_block_reads']=self.stats.get('centroid_block_reads',0)+1
             else:self.blocks.move_to_end(start)
             return value
+        from .nomination_bounds import ball,upper
+        def bound(start,rows):
+            if start not in self.bounds:
+                if len(self.bounds)>=16:self.bounds.popitem(last=False)
+                self.bounds[start]=ball(rows)
+            self.bounds.move_to_end(start)
+            return self.bounds[start]
         from .parallel_numeric import matrix_tiles
         def inputs():
             for i in range(0,count,block):
@@ -173,6 +181,9 @@ class Search:
                     if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
                     right=left if j==i else read(j)
                     right.flags.writeable=False
+                    if floor is not None and upper(bound(i,left),bound(j,right))+ROUNDING<floor:
+                        self.stats['centroid_blocks_excluded']=self.stats.get('centroid_blocks_excluded',0)+1
+                        continue
                     yield (i,j), ((left,right),)
         blocks=(count+block-1)//block
         inactive=(sum(not active[i:i+block].any() for i in range(0,count,block)) if active is not None else 0)
@@ -187,7 +198,7 @@ class Search:
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
         wanted=np.array([p in focus for p in self.identities])
         seen=set()
-        for i,j,values in self.tiles():
+        for i,j,values in self.tiles(floor=None if focus else floor):
             rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
             mask=(rows[:,None]<cols[None,:]) & ((values+ROUNDING>=floor) |
                   (wanted[rows,None] & wanted[None,cols]))

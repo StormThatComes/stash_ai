@@ -86,14 +86,14 @@ def _prepared(groups, query):
     return matrix, lengths, starts, norms
 
 
-def comparisons(groups, query, threshold=float('-inf'), cohesion=float('-inf'), *, exact=None):
+def comparisons(groups, query, threshold=float('-inf'), cohesion=float('-inf'), *, exact=None, catalogue_size=None):
     """Yield unchanged scalar scores for every potentially relevant group."""
     import numpy as np
     if exact is None:
         from .clustering import _similarities
         exact = _similarities
     if (not isinstance(query, np.ndarray) or query.dtype != np.float32 or query.ndim != 1
-            or hasattr(groups, '__len__') and len(groups) < 16):
+            or hasattr(groups, '__len__') and (len(groups) if catalogue_size is None else catalogue_size) < 16):
         for group in groups:
             yield group, *exact(group, query)
         return

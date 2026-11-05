@@ -131,6 +131,8 @@ execution:
   replay_snapshot_bytes: 68719476736
   # Maximum on-disk evidence snapshot used by offline reports and solver replay.
   rebuild_native_threads: 1
+  # Hybrid centroid nomination: cpu, or auto to benchmark CUDA including transfers.
+  rebuild_nomination_device: cpu
   # BLAS threads per compute worker; CPU availability also limits effective workers.
   rebuild_prefetch_scenes: false
   # Experimental preloading of the next scene's immutable rebuild inputs.

@@ -35,3 +35,29 @@ def test_new_competitor_invalidates_old_merge_without_rescoring_its_proof(tmp_pa
         assert decision['blockers']==['competing_identity']
     assert result['decisions']==plan(None,config,pair+[rival])['decisions']
 
+
+
+def test_block_bound_and_cpu_nominations_match_unpruned_lookup():
+    from stash_ai.recognition.hybrid_lookup import Lookup
+    from stash_ai.recognition.hybrid_delta import nominations
+    from stash_ai.recognition.nomination_bounds import ball,upper
+    bank=[identity(str(i),i*.071) for i in range(180)]
+    lookup=Lookup(bank,2**26)
+    expected=sorted(lookup.pairs(face_floor=.8,person_floor=.95))
+    found=sorted(nominations(lookup,None,.8,.95))
+    assert [p[:2] for p in found]==[p[:2] for p in expected]
+    assert np.allclose([p[2:] for p in found],[p[2:] for p in expected],rtol=0,atol=1e-12)
+    a=lookup.faces[:70];b=lookup.faces[109:]
+    assert upper(ball(a),ball(b))>=(a@b.T).max()
+
+
+def test_cuda_tiles_fall_back_at_boundary_or_device_error():
+    from stash_ai.recognition.nomination_cuda import Resident
+    device=Resident.__new__(Resident)
+    device.active=True
+    device.scores=lambda *_:(np.array([[.75-1e-6]]),np.array([[.5]]))
+    assert device.measured_tile(None,None,.75,.96) is None
+    def offline(*args):raise RuntimeError("device unavailable")
+    device.scores=offline
+    assert device.measured_tile(None,None,.75,.96) is None
+    assert not device.active

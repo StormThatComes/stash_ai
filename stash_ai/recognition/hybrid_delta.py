@@ -49,29 +49,61 @@ def _nominations(payload):
     left,right,diagonal,face_floor,body_floor=payload
     _,faces,bodies,labels=left
     _,other_faces,other_bodies,others=right
-    face=faces@other_faces.T
-    body=bodies@other_bodies.T
+    return _selected(payload,faces@other_faces.T,bodies@other_bodies.T)
+
+
+def _selected(payload,face,body):
+    left,right,diagonal,face_floor,body_floor=payload
+    labels,others=left[3],right[3]
     mask=(face+1e-6>=face_floor)|(body+1e-6>=body_floor)
     if diagonal:mask=np.triu(mask,1)
     return [(labels[i][0],others[j][0],float(face[i,j]) if labels[i][1] and others[j][1] else None,
              float(body[i,j]) if labels[i][2] and others[j][2] else None) for i,j in zip(*np.nonzero(mask))]
 
 
-def nominations(lookup, store, face_floor, body_floor):
+def nominations(lookup, store, face_floor, body_floor, config=None):
+    from .nomination_bounds import ball, upper
+    from .nomination_cuda import select
     blocks=list(_blocks(lookup))
+    if not blocks:return
+    dimensions=lookup.faces.shape[1]+lookup.persons.shape[1]
+    required=(len(blocks)+64)*dimensions*8+len(lookup.identities)*512
+    if required>lookup.budget-lookup.working_bytes:
+        yield from lookup.pairs(face_floor=face_floor,person_floor=body_floor)
+        return
+    from .memory_size import Reservation
+    from .resource_errors import ResourceLimit
+    bound_budget=Reservation(lookup.budget-lookup.working_bytes,label='hybrid-block-bounds')
+    try:
+        bound_budget.set(required)
+    except ResourceLimit:
+        yield from lookup.pairs(face_floor=face_floor,person_floor=body_floor)
+        return
+    bounds=[(ball(block[1]),ball(block[2])) for block in blocks]
+    device=select(config,lookup,blocks)
+    def compute(payload):
+        if device is not None:
+            left,right,_,ff,bf=payload
+            measured=device.measured_tile(left,right,ff,bf)
+            if measured is not None:return _selected(payload,*measured)
+        return _nominations(payload)
     def items():
         for i,first in enumerate(blocks):
             for j in range(i,len(blocks)):
                 second=blocks[j]
                 key=digest([first[0],second[0],i==j,face_floor,body_floor])
                 payload=(first,second,i==j,face_floor,body_floor)
-                yield key,payload,store.get("hybrid-nominations",key)
+                if (upper(bounds[i][0],bounds[j][0])+1e-6<face_floor and
+                    upper(bounds[i][1],bounds[j][1])+1e-6<body_floor):
+                    count('hybrid_blocks_excluded')
+                    continue
+                yield key,payload,store.get("hybrid-nominations",key) if store else None
     from .profiling import count
-    for (key,payload,hit),result in map_bounded(_nominations,items(),
+    for (key,payload,hit),result in map_bounded(compute,items(),
             payload=lambda item:item[1],cost=lambda item:65536+512*len(item[1][0][3])*len(item[1][1][3]),
             cached=lambda item:item[2],kind="incremental_hybrid_tiles"):
         if hit is None:
             count('hybrid_centroid_pairs_recomputed',len(payload[0][3])*len(payload[1][3]))
-            store.put("hybrid-nominations",key,result)
+            if store:store.put("hybrid-nominations",key,result)
         yield from result
 
