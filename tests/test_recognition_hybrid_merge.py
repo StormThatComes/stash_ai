@@ -108,3 +108,25 @@ def test_later_merge_cannot_hide_an_original_source_contradiction(tmp_path):
         db.execute('DELETE FROM person_evidence WHERE observation=?',(missing,));db.commit()
         assert 'missing_original_core_evidence' in report(db,config,'scope',
             db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0])['pairs'][0]['blockers']
+
+
+def test_hybrid_merge_requires_and_publishes_body_only_scene(tmp_path):
+    from tests.test_recognition_body_identity import scene
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.publication_queue import current
+    config,people=prepared(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
+        third,ids=scene(db,config,'3')
+        namespace=db.execute('SELECT namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()[0]
+        db.execute('UPDATE scans SET namespace=? WHERE id=?',(namespace,third['scan']))
+        db.executemany('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
+            [(i,people[1],'anchor','accepted',policy(config),'{}') for i in ids])
+        result=apply(state,selected,config)
+        assert result['pending_consolidations'][0]['missing_scans']==[third['scan']]
+        assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==0
+        result=apply(state,[*selected,third],config)
+        assert result['decisions'][0]['outcome']=='merge'
+        assert set(map(tuple,db.execute('SELECT person,role FROM body_members')))=={(people[0],'auxiliary')}
+        assert 'hybrid_identity_merge' in current(db,'scope',namespace,'3')['reasons']

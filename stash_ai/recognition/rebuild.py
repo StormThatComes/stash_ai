@@ -401,6 +401,8 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
+    database.face_rebuild_mode='cold'
+    database.body_rebuild_mode='disabled'
     first=(database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',
            (selected[0]['scan'],)).fetchone() if selected else None)
     if first is not None and config.data['sapiensid']['enabled']:
@@ -465,6 +467,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .dependencies import certified
         if certified(db,scope,namespace,state):
             from .profiling import count
+            database.face_rebuild_mode='warm'
             count('certified_warm_rebuilds')
             return _results(db,selected,config)
         references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
@@ -484,6 +487,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             if complete:
                 from .dependencies import snapshot,certify
                 with snapshot(db):certify(db,scope,namespace,state)
+                database.face_rebuild_mode='warm'
                 usage.begin('cached')
                 return _results(db,selected,config)
     from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
@@ -518,12 +522,15 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             ready.restore(replay)
             if ready.restored_payload is not None:
                 from .ready_checkpoint import restore
+                database.face_rebuild_mode='partial'
                 mapping, history = restore(database, replay, ready.restored_payload)
                 _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
                 return _results(db,selected,config)
             cursor, next_clock = late.restore(replay)
             if late.restored_payload is None:
                 cursor, next_clock = checkpoints.restore(replay)
+        if cursor or late.restored_payload is not None:
+            database.face_rebuild_mode='partial'
         if cursor < len(selected):
             replay.execute('DROP TABLE IF EXISTS temp.local_core_order')
         clock = ReplayClock(next_clock)
@@ -557,8 +564,10 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                             with stage('Match selected scene', scene=item['scene']):
                                 lookahead.take(item['scan'])
                                 lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
-                                scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
-                                    lambda: cluster_scene(temporary,item['scan'],config,progress=progress,_cold_replay=True))
+                                local_progress=(lambda **values: progress(scene=item['scene'],**values)) if progress else None
+                                reused=scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
+                                    lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True))
+                                if reused:database.face_rebuild_mode='partial'
                                 compute_current().scenes_applied += 1
                                 compute_current().publish()
                                 checkpoints.save(replay, index+1, clock.value)

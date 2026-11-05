@@ -137,6 +137,9 @@ def remove_other_model_links(database, client, report, scope, scene, wanted, nam
     active model's recognition identities. Ordinary, unowned performers survive.
     """
     db = database.connection
+    if not db.execute('SELECT 1 FROM people WHERE scope=? AND namespace<>? AND performer IS NOT NULL LIMIT 1',
+                      (scope, namespace)).fetchone():
+        return 0
     live = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
     if not live:
         return 0
