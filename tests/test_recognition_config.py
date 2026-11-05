@@ -96,14 +96,28 @@ def test_shipped_template_matches_default_schema():
             if isinstance(value, dict):
                 found.update(paths(value, name + '.'))
         return found
-    expected = defaults()
+    from stash_ai.recognition.config_layout import v2_document
+    from stash_ai.recognition.config_render import render_v2
+    from stash_ai.recognition.body_observations import enabled as collection_enabled
+    expected = v2_document(defaults())
     actual_paths, expected_paths = paths(supplied), paths(expected)
     assert actual_paths == expected_paths, dict(
         missing=sorted(expected_paths-actual_paths), unknown=sorted(actual_paths-expected_paths))
-    validate(supplied)
-    assert supplied['sapiensid'] == expected['sapiensid']
-    assert supplied['execution']['portrait_ranking_cache_bytes'] == expected['execution']['portrait_ranking_cache_bytes']
     config = load(path)
+    assert config.document_version == supplied['version'] == 2
+    # Every section and leaf has its own help immediately beneath its key.
+    lines = path.read_text().splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() and not line.lstrip().startswith('#'):
+            assert lines[index + 1].lstrip().startswith('# '), line
+    assert render_v2(v2_document(config.data, source=config.source)) == path.read_text()
+    assert collection_enabled(config)
+    body = config.data['sapiensid']
+    assert body['pose']['detector'] == 'rfdetr_xl'
+    assert body['pose']['backend'] == 'vitpose_plus_large'
+    assert body['identities']['enabled'] is False
+    assert body['global_matching']['enabled'] is False
+    assert config.data['execution']['portrait_ranking_cache_bytes'] == defaults()['execution']['portrait_ranking_cache_bytes']
     assert config.data['models']['detector'] == 'scrfd_10g'
     assert config.data['recognition']['min_identity_support'] == 2
     assert config.data['recognition']['cross_scene_provisional'] is True

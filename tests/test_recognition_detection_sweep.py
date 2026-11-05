@@ -245,3 +245,18 @@ def test_legacy_and_v2_sweep_paths_keep_batch_units_and_independent_rows(tmp_pat
         batches.append((pose['batch_size'], pose.get('vitpose_batch_size', pose['batch_size'])))
     assert batches == [(8, 2), (3, 3), (5, 2), (8, 6), (8, 2)]
     assert variants[-1][0].data['detection']['score_threshold'] == .7
+
+
+def test_sweep_shared_point_quality_respects_local_override(tmp_path):
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.detection_sweep import load_variants
+    path = tmp_path / 'policy.yml'
+    path.write_text('version: 2\npose:\n  point_quality: {min_presence: 0.6}\n'
+                    '  refinement: {min_presence: 0.6}\n')
+    csv = tmp_path / 'points.csv'
+    csv.write_text('parameter,value\npose.point_quality.min_presence,0.2\nsapiensid.pose.refinement.min_visibility,0.1\n')
+    _, (variant, meta), (_, legacy_meta) = load_variants(csv, load(path))
+    pose = variant.data['sapiensid']['pose']
+    assert pose['deduplication']['min_presence'] == .2
+    assert pose['refinement']['min_presence'] == meta['baseline_value'] == .6
+    assert legacy_meta['baseline_value'] == .5

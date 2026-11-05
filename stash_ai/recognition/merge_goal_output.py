@@ -54,8 +54,12 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
         data = export_data(settings, absolute_paths=True)
         if config.document_version == 2:
             from .config_layout import v2_document
-            data = v2_document(data)
-    serialized = yaml.safe_dump(data, sort_keys=config.document_version == 1)
+            data = v2_document(data, source=config.source)
+    if config.document_version == 2:
+        from .config_render import render_v2
+        serialized = render_v2(data)
+    else:
+        serialized = yaml.safe_dump(data, sort_keys=True)
     if mode == 'diff':
         serialized = ('# YAML diff: merge these keys into the input baseline configuration.\n'
                       '# This is not a standalone --face-config document.\n'

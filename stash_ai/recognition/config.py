@@ -318,7 +318,7 @@ class FaceConfig:
         baseline = defaults()
         custom = any(plain(self.data[section]) != baseline[section]
                      for section in ('detection', 'recognition', 'clustering', 'portraits'))
-        return {'version': 1, 'source_sha256': hashlib.sha256(self.source).hexdigest(),
+        return {'version': 1, 'document_version': self.document_version, 'source_sha256': hashlib.sha256(self.source).hexdigest(),
                 'source': self.source.decode('utf-8-sig'), 'effective': plain(self.data),
                 'paths': {'database': str(self.database), 'models': str(self.model_dir),
                           'names': str(self.names_path) if self.names_path else None},
@@ -352,7 +352,13 @@ def effective_data(supplied, *, device=None):
         _merge(data, supplied)
     if device is not None:
         data['models']['device'] = device
-    validate(data)
+    try:
+        validate(data)
+    except ValueError as error:
+        if version == 2:
+            from .config_layout import v2_error
+            raise ValueError(v2_error(error)) from error
+        raise
     return version, data
 
 
