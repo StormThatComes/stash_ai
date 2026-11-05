@@ -682,6 +682,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 values.update(change['proposed'] for name in result['trials']
                     for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
                 tested_hybrid[gate] = sorted(values)
+        phases = ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional',
+                  'refinement', 'restart', 'tightening', 'minimization', 'robustness')
+        if compare_anchor_rules:
+            phases += ('anchor_rules',)
         return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
             feasibility=(dict(format=1, status='interrupted', groups=[], probe_budget=probe_budget,
                 joint_witness_trial=None,
@@ -720,7 +724,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                             for family in ('hybrid', 'face')},
                         baseline_exploration_warmup=BASELINE_WARMUP,
                         executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                            for name in result['trials']) for phase in ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'tightening', 'minimization', 'robustness', 'anchor_rules')},
+                            for name in result['trials']) for phase in phases},
                         tested_hybrid_values=tested_hybrid,
                         budget_exhausted=len(result['trials'])+len(failures) >= maximum,
                         selection_scope='completed_trials_including_baseline',
