@@ -141,7 +141,7 @@ def test_styles_preserve_summary_and_history_without_default_yaml_spam(tmp_path,
     output = capsys.readouterr()
     assert 'Recognition success:' in output.out
     assert ('Performer names starter' in output.out) == (style == 'verbose')
-    assert ('Face references scene 2' in output.out) == (style == 'verbose')
+    assert ('Face references global' in output.out) == (style == 'verbose')
     assert 'VTT scene' not in output.err
     if style == 'off':
         assert output.err == ''

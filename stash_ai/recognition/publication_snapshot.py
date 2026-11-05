@@ -8,7 +8,7 @@ from .dependency_schema import validate_triggers
 class Snapshot:
     def __init__(self, db, scope, namespace, scene, config=None):
         self.db,self.scope,self.namespace,self.scene,self.config=db,scope,namespace,scene,config
-        self.initial_key=self.value=self.schema=None
+        self.initial_key=self.value=self.schema=self.hint=None
 
     def _key(self):
         from .publication_queue import latest, matching_policy, body_policy, current
@@ -44,7 +44,21 @@ class Snapshot:
     def read(self):
         from .publication_queue import snapshot
         from .profiling import count
+        # A rolled-back transaction can reuse dependency generations. Install
+        # the shortcut only when both reads start outside a write transaction.
+        committed=not self.db.in_transaction
         with read_snapshot(self.db):
+            hint=None
+            if committed:
+                from .publication_queue import matching_policy, body_policy
+                config=self.config
+                hint=(self.db.execute('PRAGMA schema_version').fetchone()[0],
+                      self.db.execute('PRAGMA data_version').fetchone()[0],self.db.total_changes,
+                      matching_policy(config) if config is not None else None,
+                      encoded(body_policy(config)) if config is not None else None)
+                if self.value is not None and hint==self.hint:
+                    count('publication_snapshot_hits')
+                    return deepcopy(self.value)
             key=self._key()
             if key is not None and self.value is not None and key==self.initial_key:
                 count('publication_snapshot_hits')
@@ -52,7 +66,7 @@ class Snapshot:
             count('publication_snapshot_reads')
             value=snapshot(self.db,self.scope,self.namespace,self.scene,self.config)
             if self.value is None and key is not None:
-                self.initial_key,self.value=key,deepcopy(value)
+                self.initial_key,self.value,self.hint=key,deepcopy(value),hint
             # Never advance the original certificate: rolled-back transactions
             # may reuse a generation number for different subsequent writes.
             return value

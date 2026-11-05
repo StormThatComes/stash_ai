@@ -31,6 +31,11 @@ def signature(db,selected,config):
         ('candidates','SELECT c.rowid,c.id,c.scan,c.policy,c.person,c.status,c.payload FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=? ORDER BY c.id'),
         ('aliases','SELECT m.source,m.target,m.evidence FROM identity_merges m JOIN people p ON p.id=m.source WHERE p.scope=? AND p.namespace=? ORDER BY m.source'),
         ('origins','SELECT i.sample_key,i.person,i.observation FROM identity_origins i JOIN people p ON p.id=i.person WHERE p.scope=? AND p.namespace=? ORDER BY i.sample_key')]
+    from .body_identity import available as bodies_available
+    if bodies_available(db):
+        queries.append(('body-scope','SELECT b.scan,m.observation,m.person FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan '
+            'WHERE s.scope=? AND s.namespace=? ORDER BY m.observation'))
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
     from .dependencies import cached, supported
     from .dependency_schema import validate_triggers, EXTRA_TRIGGERS, RAW_TRIGGERS
@@ -80,6 +85,12 @@ def apply(database,selected,config,*,compact=False):
                 people=decision['people']
                 scans={r[0] for r in db.execute('SELECT DISTINCT o.scan FROM members m JOIN observations o ON o.id=m.observation '
                     'WHERE m.person IN (SELECT value FROM json_each(?))',(encoded(people),))}
+                from .body_identity import available as bodies_available
+                has_bodies=bodies_available(db)
+                if has_bodies:
+                    scans.update(r[0] for r in db.execute(
+                        'SELECT DISTINCT b.scan FROM body_members m JOIN body_observations b ON b.id=m.observation '
+                        'WHERE m.person IN (SELECT value FROM json_each(?))',(encoded(people),)))
                 if not scans<=selection:
                     pending.append(dict(people=people,required_scans=sorted(scans),
                         missing_scans=sorted(scans-selection),contract=decision['contract']))
@@ -98,6 +109,10 @@ def apply(database,selected,config,*,compact=False):
                 for source in (r['id'] for r in rows[1:]):
                     db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
                     db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
+                    if has_bodies:
+                        db.execute("UPDATE body_members SET person=?,role='auxiliary',"
+                            "proof=json_set(proof,'$.hybrid_merge',json(?)) WHERE person=?",
+                            (target,encoded(dict(source=source,target=target,route='sapiensid_hybrid')),source))
                     # Every accepted historical decision for this source is
                     # downgraded. No latest-row lookup may promote it silently.
                     recorded=dict(route='sapiensid_hybrid',source=source,target=target,
@@ -130,6 +145,7 @@ def rebuild(database,selected,config,ordinary,results):
         key,before=signature(db,selected,config)
     record=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-rebuild:'+key,)).fetchone()
     if record is not None and record[0]==before:
+        database.face_rebuild_mode='warm'
         return results()
     existing={row[0] for row in db.execute('SELECT id FROM people')}
     ordinary()

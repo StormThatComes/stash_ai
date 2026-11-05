@@ -283,10 +283,9 @@ def _execute(args, config, *, services=None):
                         releases += [('unload face models', backend.unload), ('unload face visibility', visibility.close)]
                     gpu.release('vtt', releases)
                     if selected:
-                        last_scene = selected[-1]['scene']
                         def reference_progress(**values):
                             values['peak_bytes'] = max(references.get('peak_bytes', 0), values['peak_bytes'])
-                            references.update(scene=last_scene, recognizer=config.data['models']['recognizer'],
+                            references.update(scene=values.pop('scene',None), recognizer=config.data['models']['recognizer'],
                                               max_samples_per_person=config.data['clustering']['max_samples_per_person'], **values)
                             status(report, references=usage_line(references), reference_people=values['people'],
                                    reference_samples=values['samples'], reference_stage=values['stage'])
@@ -307,7 +306,11 @@ def _execute(args, config, *, services=None):
                                 from .decision_evidence import summary as decision_summary
                                 database.progress(run, 'identity_decisions', decision_summary(
                                     database.connection, matching_policy(config), [s['scan'] for s in selected]))
-                            database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
+                            face_mode=getattr(database,'face_rebuild_mode','cold')
+                            body_mode=getattr(database,'body_rebuild_mode','disabled')
+                            mode=face_mode if body_mode in ('disabled',face_mode) else 'partial'
+                            database.progress(run, 'rebuild', {'mode': mode, 'face_mode':face_mode,'body_mode':body_mode,
+                                                             'selection': getattr(database,'last_rebuild_selection',selected),
                                                              'matching_policy': matching_policy(config)})
                             with ui.phase('Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
                                 _publish_selection(database, client, report, config, scope, model_namespace,
@@ -321,7 +324,7 @@ def _execute(args, config, *, services=None):
                             if references:
                                 database.progress(run, 'references', references)
                                 report.optional('recognition_references', report.detail,
-                                    f'Face references scene {last_scene}: ' + usage_line(references) +
+                                    ('Face references scene '+references['scene'] if references['scene'] else 'Face references global') + ': ' + usage_line(references) +
                                     f" people={references['people']} samples={references['samples']} stage={references['stage']}")
                 with ui.phase('Recognition performer selection', errors=lambda: counts['metadata_failed']):
                     def blocked_metadata(person, error):

@@ -39,7 +39,8 @@ def prepare(db, selected, config, keys):
 
 def match(database, scan, config, base, build):
     if base is None:
-        return build()
+        build()
+        return False
     db=database.connection
     prior=db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='prior_attachment_queries'").fetchone()
     hints=[r[0] for r in db.execute("SELECT q.id FROM prior_attachment_queries q JOIN observations o "
@@ -55,7 +56,7 @@ def match(database, scan, config, base, build):
         people=[list(r) for r in db.execute('SELECT p.* FROM people p WHERE id IN '
             '(SELECT m.person FROM members m JOIN observations o ON o.id=m.observation WHERE o.scan=?) ORDER BY created,id',(scan,))]
         store.put('strict-scene',key,[people,candidates,members])
-        return
+        return False
     people,candidates,members=entry
     for person in people:
         person[3]=database.identity_clock()
@@ -67,6 +68,7 @@ def match(database, scan, config, base, build):
     scope=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(scan,)).fetchone()
     policy=config.data['clustering']
     _groups(db,*scope,policy,usage=ReferenceUsage(policy['max_reference_bytes']),stage='retained')
+    return True
 
 
 def body_key(db, scan, config):

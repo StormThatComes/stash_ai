@@ -341,7 +341,10 @@ def rebuild(database,selected,config,result):
     if not selected or not available(database.connection):return result
     db=database.connection
     from .body_cache import cached,stamp as cache_stamp
-    if cached(db,selected,config):return results(db,selected,result)
+    if cached(db,selected,config):
+        database.body_rebuild_mode='warm' if enabled(config) else 'disabled'
+        return results(db,selected,result)
+    database.body_rebuild_mode='cold' if enabled(config) else 'disabled'
     # Plan every selected scene before replacing any derived state.
     plans=[]
     if enabled(config):

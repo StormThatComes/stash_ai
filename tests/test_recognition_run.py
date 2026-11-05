@@ -189,7 +189,7 @@ def test_reference_run_peak_is_maximum_across_scenes_not_sum(tmp_path, monkeypat
     assert run(config, services, '1', '2') == 0
     with FaceDatabase(config.database) as state:
         summary = json.loads(state.connection.execute('SELECT summary FROM runs').fetchone()[0])['references']
-        assert summary['scene'] == '2'
+        assert summary['scene'] is None
         assert summary['bytes'] == summary['peak_bytes'] == 96
         assert summary['people'] == 1 and summary['samples'] == 6
 
