@@ -167,13 +167,18 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_robustness import confidence
     from .merge_solver_polish import Polisher, allowance
     from .merge_solver_tighten import Tightener
+    from .merge_solver_domains import normalize, support_baseline_changes
+    input_config = config
+    baseline_changes = support_baseline_changes(config)
+    if baseline_changes:
+        config = patched(config, baseline_changes)
     tightening = Tightener(config)
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
     from .solver_progress import heartbeat
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.signature() if runtime else None)),
+        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
@@ -186,7 +191,6 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .hybrid_query_observer import observe_queries
     from .offline_evaluation import _selection
     from .merge_solver_options import compact
-    from .merge_solver_domains import normalize
     from .merge_goal_index import current as goal_index
     inputs = {}
     replay_scope, scans = _selection(db, config, None, goals['scope'], allow_partial=True, diagnostics=inputs)
@@ -225,7 +229,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     initial_changes = tuple(hybrid_changes)
     seen, patches, summaries, ranks = set(), {}, {}, {}
     families, origins, durations = {}, {}, {}
-    transitions = {'baseline': dict(previous_trial=None, changes_from_previous=[])}
+    transitions = {'baseline': dict(previous_trial=None, changes_from_previous=[
+        dict(parameter=key, previous=parameter(input_config.data, key), current=value)
+        for key, value in sorted(baseline_changes.items())])}
     feedback, outcomes = {}, {}
     fallback_references = {}
     query_feedback = QueryFeedback(goals)
@@ -241,6 +247,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     probe_state = None
     def changes_for(name):
         return {c['parameter']:c['proposed'] for c in patches.get(name,{}).get('changes',())}
+    def input_patch(name):
+        # Replays search from the bounded baseline. Export diffs against the user's YAML.
+        if baseline_changes:
+            return proposal(input_config, baseline_changes | changes_for(name))
+        return patches[name] if name in patches else proposal(input_config, {})
     def ranking(name):
         solved = summaries[name]['fully_solved']
         # Hard goals/exclusions are prerequisites. Once solved, stricter matching
@@ -257,7 +268,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             'partial_solution' if status['admissible'] else 'best_effort'),
             fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
             goal_diagnostics=goal_diagnostics(status),
-            **patches.get(name,proposal(config,{})))
+            **input_patch(name))
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline, baseline_outsiders
         status = assess(goals, observations, retained, predicted)
@@ -563,7 +574,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             if journal is not None:
                 journal.record(name, settings, item, dict(failed=True, visits=dict(query_feedback.visits)), None)
             return
-        winner_text=(configuration_document(config,selected(best),inputs,mode=yaml_mode)
+        winner_text=(configuration_document(input_config,selected(best),inputs,mode=yaml_mode)
                      if winner_writer and written_winner!=best else None)
         if journal is not None:
             state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],
@@ -608,7 +619,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             query_feedback.priorities = probe_state['priorities']
         item = dict(reason='resource_limit', error=str(exc), diagnostics=list(getattr(exc, '__notes__', ())),
                     trial_profile=getattr(exc,'trial_profile',None), resource=exc.document(),
-                    stage=stage, **origins[name], **patches[name])
+                    stage=stage, **origins[name], **input_patch(name))
         failures[name] = item
         return item
     with observe_queries(query_feedback):
@@ -631,21 +642,18 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             trial = result['trials'][best]
             trial['independent_person'] = expand(trial['independent_person'],
                 result['trials']['baseline']['independent_person'].get('identities', []))
-        for name, patch in patches.items():
+        if baseline_changes and 'baseline' in result['trials']:
+            result['trials']['baseline'].update(input_patch('baseline'))
+        for name in patches:
             if name in result['trials']:
-                result['trials'][name].update(patch)
+                result['trials'][name].update(input_patch(name))
                 result['trials'][name]['search_family'] = families[name]
                 result['trials'][name].update(origins[name])
         selection = None
         if best is not None:
             status = summaries[best]
-            quality = ('fully_solved' if status['fully_solved'] else
-                       'partial_solution' if status['admissible'] else 'best_effort')
-            selection = dict(trial=best, quality=quality, changed=best != 'baseline',
-                admissible=status['admissible'], fully_solved=status['fully_solved'],
-                unmet_conditions=unmet_conditions(status),
-                goal_diagnostics=goal_diagnostics(status),
-                **patches.get(best, proposal(config, {})))
+            selection = selected(best)
+            selection.update(changed=bool(selection['changes']), admissible=status['admissible'])
         tested_hybrid = {}
         if config.data['sapiensid']['enabled'] and result['trials']:
             for gate in GATES:
@@ -662,7 +670,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 interpretation='Final feasibility aggregation interrupted; completed trial evidence remains available.')
                 if interrupted else feasibility.report(result['trials'], result.get('failed_trials', {}), probe_budget)),
             simulation=result, status=(result.get('stop_reason', 'no_completed_trials') if selection is None else
-                'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
+                'baseline_retained' if not selection['changed'] and selection['quality'] == 'partial_solution' else selection['quality']),
             selected_trial=best, best_result=selection,
             recommendation=selection if selection is not None and selection['changed'] else None,
             interrupted=result.get('interrupted', False),

@@ -33,12 +33,12 @@ UNIT = ('recognition.match_threshold', 'recognition.ambiguity_margin',
 SUPPORT = ('recognition.min_identity_support', 'recognition.min_merge_support',
            'clustering.same_scene_min_support', 'clustering.auxiliary_min_support',
            'clustering.view_min_support', 'clustering.view_attach_min_support', 'sapiensid.matching.min_support')
+MAX_SUPPORT = 8
 
 
 def registry(config):
     result = {k: Domain() for k in UNIT}
-    result.update({k: Domain(int, 2 if k == 'clustering.view_min_support' else 1, 1000) for k in SUPPORT})
-    result['sapiensid.matching.min_support'] = Domain(int, 1, max(1000, config.data['sapiensid']['matching']['min_support']*2))
+    result.update({k: Domain(int, 2 if k == 'clustering.view_min_support' else 1, MAX_SUPPORT) for k in SUPPORT})
     result['clustering.same_scene_match_bonus'] = Domain(high=.1, relax=1)
     result['clustering.anchor_view_matching'] = Domain(bool, relax=1)
     detection = config.data['detection']
@@ -53,13 +53,14 @@ def registry(config):
         result = {k: v for k, v in result.items() if not k.startswith('sapiensid.')}
     from .body_parameters import active
     special={
-        'sapiensid.identities.min_support':Domain(int,2,100000),
-        'sapiensid.identities.attach_min_support':Domain(int,1,100000),
+        'sapiensid.identities.min_support': Domain(int, 2, MAX_SUPPORT),
+        'sapiensid.identities.attach_min_support': Domain(int, 1, MAX_SUPPORT),
         'sapiensid.identities.min_appearance_distance':Domain(int,0,64),
         'sapiensid.identities.anchor_min_keypoints':Domain(int,1,17),
         'sapiensid.identities.anchor_min_sharpness':Domain(high=1000000),
         'sapiensid.identities.anchor_min_person_pixels':Domain(int,1,8192),
-        'sapiensid.global_matching.min_support':Domain(int,1,config.data['sapiensid']['global_matching']['max_references']),
+        'sapiensid.global_matching.min_support': Domain(
+            int, 1, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references'])),
     }
     result.update((key,special.get(key,Domain())) for key in active(config))
     if config.data['sapiensid']['enabled']:
@@ -69,11 +70,18 @@ def registry(config):
     return result
 
 
+def support_baseline_changes(config):
+    """Bring active support counts from older YAMLs into the solver's search space."""
+    return {key: domain.high for key, domain in registry(config).items()
+            if key.endswith('_support') and parameter(config.data, key) > domain.high}
+
+
 def normalize(config, changes):
     domains = registry(config)
     if set(changes)-domains.keys():
         raise ValueError('Solver proposals may only change registered retained-evidence parameters.')
-    patch = {k: (v if v == parameter(config.data, k) else domains[k].project(v)) for k, v in changes.items()}
+    patch = {k: (domains[k].project(v) if k.endswith('_support') or v != parameter(config.data, k) else v)
+             for k, v in changes.items()}
     def value(key):
         return patch.get(key, parameter(config.data, key))
     def ordered(lower, upper):

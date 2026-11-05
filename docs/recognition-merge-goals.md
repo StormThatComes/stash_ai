@@ -15,6 +15,12 @@ the current directory (or built-in defaults if absent). `--yaml-output merged.ym
 only names the result file and never selects an input configuration. Incompatible
 input diagnostics include the resolved configuration and database paths.
 
+The solver caps minimum support counts at **8** for recognition, clustering and
+enabled SapiensID routes. Global body matching also respects `max_references`
+when it is smaller than 8. If an input YAML requests more support, the solver
+uses the capped count starting with the baseline replay and shows the adjustment
+in the trial report and exported YAML diff. This limit applies only to the solver.
+
 Repeated `--performer-id` or `--identity-id` selects one set. The original
 exactly-two-ID diagnostic remains available without `--solve`. Set syntax is
 mutually exclusive with those selectors. Alias overlap across sets is rejected.
