@@ -208,12 +208,16 @@ ALIAS_FORMAT = 1
 def canonicalize(db):
     """Materialize the same verified aliases in a disposable replay."""
     mapping = dict(aliases(db))
-    if not mapping:
+    if not mapping and _active_aliases.get() is None:
         return
-    for row in db.execute('SELECT id,quality FROM observations WHERE rejected IS NULL'):
+    # Local ordering, worker input and the cache signature must see the same
+    # final pixel vote, including a representative outside this selection.
+    for row in db.execute("SELECT id,quality FROM observations WHERE rejected IS NULL "
+                          "AND json_type(quality,'$.evidence_pixel_sha256')='text'"):
         record = dict(metadata(row['quality']))
-        alias = mapping.get(record.get('evidence_pixel_sha256'))
-        if alias is not None:
+        pixel=record['evidence_pixel_sha256']
+        alias=canonical_pixel(mapping.get(pixel,pixel))
+        if alias!=pixel:
             record['evidence_pixel_sha256'] = alias
             db.execute('UPDATE main.observations SET quality=? WHERE id=?',
                        (json.dumps(record, separators=(',', ':')), row['id']))
