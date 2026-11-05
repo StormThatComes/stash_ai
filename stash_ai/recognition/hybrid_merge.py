@@ -63,13 +63,13 @@ def signature(db,selected,config):
     return digest([scope,namespace,selected]),h.hexdigest()
 
 
-def apply(database,selected,config):
+def apply(database,selected,config,*,compact=False):
     from .hybrid_evidence import report
     from .clustering import matching_policy
     from .publication_queue import enqueue
     db=database.connection;policy=matching_policy(config)
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
-    result=report(db,config,scope,namespace)
+    result=report(db,config,scope,namespace,compact=compact)
     selection={x['scan'] for x in selected}
     stored_bytes=0; pending=[]
     queue_key="hybrid-pending:"+digest([scope,namespace])
@@ -137,7 +137,7 @@ def rebuild(database,selected,config,ordinary,results):
     with stage('Consolidate hybrid identities'):
         from .hybrid_queries import recover
         if births:recover(database,selected,config,births=births)
-        apply(database,selected,config)
+        apply(database,selected,config,compact=True)
         recover(database,selected,config)
     with stage('Checkpoint hybrid identity decisions'):
         _,after=signature(db,selected,config)

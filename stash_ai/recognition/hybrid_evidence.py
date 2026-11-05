@@ -103,11 +103,33 @@ def scores(left,right):
     return dict(minimum=low,mean=total/count)
 
 
+def preliminary_blocker(left,right,settings):
+    """Only omit body scoring when merger and rival eligibility are both known."""
+    import numpy as np
+    floor=settings['face_floor']
+    if not len(left.faces) or not len(right.faces):
+        return 'face_contradiction'
+    for a,b in zip(left.faces[:2],right.faces[:2]):
+        if np.dot(a.astype('float64'),b.astype('float64')) < floor-1e-6:
+            return 'face_contradiction'
+    if min(len(left.independent),len(right.independent)) >= settings['min_support']:
+        return None
+    # Under-supported owners can still be rivals. Resolve every face veto
+    # (including inherited witnesses) before omitting their body proof.
+    for a,b in ((left.faces,right.faces),(left.guard_faces,right.faces),
+                (left.faces,right.guard_faces),(left.guard_faces,right.guard_faces)):
+        if a is not None and b is not None:
+            measurement=scores(a,b)
+            if measurement is not None and measurement['minimum']<floor:
+                return 'face_contradiction'
+    return 'insufficient_independent_support'
+
+
 def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
-    face=scores(left.faces,right.faces);person=scores(left.persons,right.persons)
+    face=scores(left.faces,right.faces)
     from .hybrid_modes import covered_score
     mode_score=covered_score(left.body_modes,right.body_modes,settings)
-    if mode_score is not None:person=mode_score
+    person=mode_score if mode_score is not None else scores(left.persons,right.persons)
     blockers=[]
     if left.unsupported_body_modes or right.unsupported_body_modes:
         blockers.append('unsupported_body_mode')
@@ -156,7 +178,7 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
         thresholds=dict(settings),cooccurring=copresent)
 
 
-def plan(db,config,identities,*,focus=None):
+def plan(db,config,identities,*,focus=None,compact=False):
     """Complete frozen components; all outsiders remain competitors.
 
     Candidate nomination accepts either face or person similarity. Exact paired
@@ -169,24 +191,27 @@ def plan(db,config,identities,*,focus=None):
     owned={x.person:x for x in identities};edges={};proofs={}
     limits=config.data['sapiensid']['execution']
     lookup=Lookup([owned[p] for p in sorted(owned)],limits['reference_bytes'])
-    candidates=used=0; nominations=[]
-    with tracking(lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin']),'Nominate hybrid pairs',unit='nominated pair') as pairs:
-        for a,b,face_mean,person_mean in pairs:
-            # A tiny overnomination tolerance protects threshold-edge witnesses
-            # from centroid reduction rounding. Exact witness gates decide.
-            if ((face_mean is None or face_mean+1e-6<settings['face_floor']) and
+    candidates=used=0
+    def nominations():
+        nonlocal candidates
+        stream=lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin'])
+        with tracking(stream,'Nominate hybrid pairs',unit='nominated pair') as pairs:
+            for a,b,face_mean,person_mean in pairs:
+                if ((face_mean is None or face_mean+1e-6<settings['face_floor']) and
                     (person_mean is None or person_mean+1e-6<settings['person_threshold']-settings['ambiguity_margin'])):
-                continue
-            candidates+=1
-            if candidates>limits['max_candidate_pairs']:
-                raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded; no hybrid plan applied.')
-            nominations.append((a,b))
-            if len(nominations)*256>limits['plan_bytes']:
-                raise ResourceLimit('SapiensID plan_bytes budget exceeded by nominations.')
+                    continue
+                candidates+=1
+                if candidates>limits['max_candidate_pairs']:
+                    raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded; no hybrid plan applied.')
+                if min(candidates,64)*256>limits['plan_bytes']:
+                    raise ResourceLimit('SapiensID plan_bytes budget exceeded by nominations.')
+                yield a,b
     from .hybrid_jobs import proofs as exact_proofs
-    for a,b,proof in exact_proofs(db,owned,nominations,config):
-        used+=len(encoded(proof).encode())
-        if used+len(nominations)*256>limits['plan_bytes']:
+    for a,b,proof in exact_proofs(db,owned,nominations(),config,compact=compact):
+        if compact and proof['blockers']:
+            proof=dict(blockers=proof['blockers'])
+        used+=len(encoded(proof).encode())+128
+        if used>limits['plan_bytes']:
             raise ResourceLimit('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
         proofs[a,b]=proof
         if not proof['blockers']:edges[a,b]=proof['person']['mean']
@@ -256,15 +281,15 @@ def plan(db,config,identities,*,focus=None):
             decision.update(outcome='blocked',blockers=['competing_identity'])
     return dict(format=1,kind='hybrid_identity_plan',decisions=decisions,
                 candidate_pairs=candidates,proof_bytes=used,comparison_block=64,
-                pairs=[v for (a,b),v in proofs.items() if focus is None or a in focus or b in focus],
+                pairs=[] if compact else [v for (a,b),v in proofs.items() if focus is None or a in focus or b in focus],
                 identities=len(owned),enabled=config.data['sapiensid']['enabled'])
 
 
-def report(db,config,scope,namespace,*,focus=None):
+def report(db,config,scope,namespace,*,focus=None,compact=False):
     if not config.data['sapiensid']['enabled']:
         return dict(enabled=False)
     from .incomplete_rivals import protect
-    return protect(db,scope,namespace,plan(db,config,catalogue(db,config,scope,namespace),focus=focus))
+    return protect(db,scope,namespace,plan(db,config,catalogue(db,config,scope,namespace),focus=focus,compact=compact))
 
 
 def catalogue(db, config, scope, namespace):

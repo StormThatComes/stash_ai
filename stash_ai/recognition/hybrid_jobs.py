@@ -1,4 +1,5 @@
 """Pure bounded hybrid jobs; SQLite and decisions stay on coordinator."""
+from .profiling import measured,count
 from .compute import current, Work
 from .disk_body_modes import Matrix,resident_bytes
 from stash_ai.runtime.cleanup import closing
@@ -15,6 +16,7 @@ def exact(payload):
     return pair(left,right,settings,copresent=copresent,reflection_threshold=threshold)
 
 
+@measured('hybrid_copresence')
 def copresence(db,pairs,config):
     """One bounded join per nomination block, preserving physical-duplicate rules."""
     from .global_views import _cooccurs
@@ -30,22 +32,38 @@ def copresence(db,pairs,config):
             'JOIN members b ON b.observation=y.id WHERE a.person=pairs.a AND b.person=pairs.b '
             'AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL) FROM pairs',(encoded(pairs),))
         return {(r[0],r[1]):bool(r[2]) for r in rows}
-    # Duplicate verification stays in Python, but close each pair's cursor at
-    # its first conflict instead of exhausting the full co-occurrence join.
-    result={}
-    for a,b in pairs:
-        rows=db.execute('SELECT x.geometry,x.embedding,y.geometry,y.embedding FROM members a '
-            'JOIN observations x ON x.id=a.observation JOIN observations y ON y.scan=x.scan AND y.cue=x.cue '
-            'JOIN members b ON b.observation=y.id WHERE a.person=? AND b.person=? '
-            'AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL',(a,b))
-        try:
-            result[a,b]=any(not duplicate(dict(geometry=r[0],embedding=r[1]),
-                dict(geometry=r[2],embedding=r[3]),True) for r in rows)
-        finally:rows.close()
+    result=dict.fromkeys(pairs,False)
+    rows=db.execute("WITH pairs(a,b) AS (SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]') "
+        "FROM json_each(?)) SELECT pairs.a,pairs.b,x.geometry,x.embedding,y.geometry,y.embedding "
+        "FROM pairs JOIN members a ON a.person=pairs.a JOIN observations x ON x.id=a.observation "
+        "JOIN observations y ON y.scan=x.scan AND y.cue=x.cue "
+        "JOIN members b ON b.observation=y.id AND b.person=pairs.b "
+        "WHERE x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL",(encoded(pairs),))
+    for a,b,gx,ex,gy,ey in rows:
+        if not result[a,b]:
+            result[a,b]=not duplicate(dict(geometry=gx,embedding=ex),dict(geometry=gy,embedding=ey),True)
     return result
 
 
-def proofs(db,owned,nominations,config):
+def cue_index(db,owned,budget):
+    """An overbudget optional index falls back to exact batched SQL."""
+    if db is None or len(owned)<64:return None
+    by_owner={}
+    used=0
+    rows=db.execute('SELECT m.person,o.scan,o.cue FROM members m JOIN observations o ON m.observation=o.id '
+                    'WHERE o.rejected IS NULL GROUP BY m.person,o.scan,o.cue')
+    try:
+        for owner,scan,cue in rows:
+            if owner not in owned:continue
+            used+=256+len(scan)*4
+            if used>budget:return None
+            by_owner.setdefault(owner,set()).add((scan,cue))
+    finally:
+        rows.close()
+    return by_owner
+
+
+def proofs(db,owned,nominations,config,*,compact=False):
     pool=current();settings=dict(config.data['sapiensid']['matching'])
     threshold=config.data['recognition']['cooccurrence_merge_threshold']
     from .run_cache import current as current_cache,MISSING
@@ -53,8 +71,17 @@ def proofs(db,owned,nominations,config):
     from copy import deepcopy
     import hashlib,pickle
     cache=current_cache()
+    from itertools import islice
+    from .profiling import count
+    signatures={}
+    policy=encoded(settings)
+    def signature(identity):
+        if identity.person not in signatures:
+            signatures[identity.person]=hashlib.sha256(pickle.dumps(identity,protocol=5)).digest()
+        return signatures[identity.person]
     def cache_key(payload):
-        return ('hybrid-proof',hashlib.sha256(pickle.dumps(payload,protocol=5)).digest())
+        left,right,_,present,threshold=payload
+        return ('hybrid-proof-v2',signature(left),signature(right),policy,present,threshold)
     def remember(payload,result):
         if cache is not None:cache.put(cache_key(payload),deepcopy(result),2*len(encoded(result).encode())+512)
         return result
@@ -65,15 +92,34 @@ def proofs(db,owned,nominations,config):
         else:
             with closing(pool.ordered(exact,jobs),name='close hybrid proof workers') as stream:
                 for key,job,result in zip(keys,jobs,stream):yield *key,remember(job.payload,result.value)
-    for start in range(0,len(nominations),64):
-        block=nominations[start:start+64];present=copresence(db,block,config)
+    cues=cue_index(db,owned,min(16*1024**2,config.data['sapiensid']['execution']['reference_bytes']//16))
+    pending=iter(nominations)
+    start=0
+    while block:=list(islice(pending,64)):
+        if compact:
+            from .hybrid_evidence import preliminary_blocker
+            remaining=[]
+            for a,b in block:
+                blocker=preliminary_blocker(owned[a],owned[b],settings)
+                if blocker:
+                    count('hybrid_'+blocker)
+                    yield a,b,dict(blockers=[blocker])
+                else:
+                    remaining.append((a,b))
+            block=remaining
+        if not block:continue
+        overlap=(block if cues is None else [(a,b) for a,b in block
+                 if not cues.get(a,set()).isdisjoint(cues.get(b,set()))])
+        present=copresence(db,overlap,config) if overlap else {}
+        count('hybrid_copresence_pairs',len(overlap))
+        count('hybrid_exact_pairs',len(block))
         jobs=[];keys=[]
         for offset,(a,b) in enumerate(block):
             left,right=owned[a],owned[b]
             size=16384+8*sum(resident_bytes(v) for i in (left,right) for v in
                 (i.faces,i.persons,i.guard_faces,i.guard_persons,*i.body_modes) if v is not None)
             if any(isinstance(m,Matrix) for i in (left,right) for m in i.body_modes):size+=4*1024**2
-            payload=left,right,settings,present[a,b],threshold
+            payload=left,right,settings,present.get((a,b),False),threshold
             hit=cache.get(cache_key(payload)) if cache is not None else MISSING
             if hit is not MISSING:
                 yield from drain(jobs,keys);jobs=[];keys=[]
@@ -86,3 +132,4 @@ def proofs(db,owned,nominations,config):
             else:
                 jobs.append(Work(start+offset,'hybrid-frozen',payload,size));keys.append((a,b))
         yield from drain(jobs,keys)
+        start+=len(block)
