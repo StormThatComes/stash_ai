@@ -219,7 +219,7 @@ matching:
         # Maximum selected face references per identity; does not limit stored observations. Range: 2..128.
         max_people_per_lookup: 20000
         # Maximum identities loaded into a face lookup; exceeding it stops the lookup. Range: 1..100000.
-        max_reference_bytes: 134217728
+        max_reference_bytes: 4294967296
         # Face reference byte cap (1 MiB..64 GiB), including views; not a total RAM/VRAM limit. Range:
         # 1048576..68719476736.
     anchors:
@@ -461,90 +461,90 @@ execution:
     # VTT input, scan workers, queues, caches and checkpoints.
     max_cues: 0
     # Maximum VTT cues scanned per selected scene; 0 scans all cues. Range: 0..10000.
-    checkpoint_cues: 32
+    checkpoint_cues: 64
     # Persist scan progress every N cues; memory pressure or body collection may save sooner. Range: 1..1000.
     timeout_seconds: 120.0
     # Stash API/media request timeout in seconds; not a whole-run time limit. Range: 1..600.
-    cpu_workers: 4
+    cpu_workers: 8
     # CPU workers for face quality, alignment and JPEG work; inference has one owner. Range: 1..32.
-    queue_bytes: 268435456
+    queue_bytes: 536870912
     # Byte budget for in-flight scan CPU work; oversized work runs serially. Range: 65536..4294967296.
     detector_batch_size: 1
     # Face detection microbatch; native batching only for compatible dynamic ONNX models, otherwise serial.
     # Range: 1..16.
-    recognizer_batch_size: 1
+    recognizer_batch_size: 8
     # Face embedding microbatch size (1..32); static ONNX models still run one at a time.
-    prefetch_frames: 4
+    prefetch_frames: 16
     # Decoded CPU frames queued ahead of inference; 0 disables frame prefetch. Range: 0..128.
     prefetch_scenes: true
     # Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.
-    prefetch_scene_depth: 3
+    prefetch_scene_depth: 4
     # Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers. Range: 1..16.
-    media_cache_bytes: 1073741824
+    media_cache_bytes: 8589934592
     # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range:
     # 0..68719476736.
-    sprite_cache_bytes: 1073741824
+    sprite_cache_bytes: 4294967296
     # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
   rebuild:
     # Identity rebuild workers, checkpoints and working memory.
     storage: disk
     # Private replay storage: disk (bounded SQLite pages) or memory (legacy RAM image).
-    workers: 1
+    workers: 16
     # Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256. Range: 0..256.
     native_threads: 1
     # Native BLAS threads per compute worker. CPU availability also limits effective workers. Range: 1..16.
-    cohort_backend: threads
+    cohort_backend: processes
     # Scene-local CPU worker backend: threads or processes (spawn).
-    nomination_device: cpu
+    nomination_device: auto
     # Hybrid centroid nomination device: cpu, or auto to benchmark CUDA including transfers.
     prefetch_scenes: false
     # Experimental preloading of the next scene's immutable rebuild inputs.
-    profile: false
+    profile: true
     # Record rebuild SQL, fetch and pipeline timings in run history.
-    memory_bytes: 8589934592
+    memory_bytes: 42949672960
     # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range:
     # 1048576..1099511627776.
-    cache_bytes: 1073741824
+    cache_bytes: 8589934592
     # Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables.
     # Range: 0..68719476736.
-    matrix_cache_bytes: 536870912
+    matrix_cache_bytes: 4294967296
     # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.
-    queue_bytes: 67108864
+    queue_bytes: 1073741824
     # Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.
-    checkpoint_scenes: 0
+    checkpoint_scenes: 250
     # Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range:
     # 0..1000000.
-    checkpoint_bytes: 536870912
+    checkpoint_bytes: 2147483648
     # Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.
-    replay_snapshot_bytes: 68719476736
+    replay_snapshot_bytes: 103079215104
     # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range:
     # 1048576..1099511627776.
-    pixel_index_bytes: 4294967296
+    pixel_index_bytes: 8589934592
     # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range:
     # 1048576..1099511627776.
-    derived_cache_bytes: 4294967296
+    derived_cache_bytes: 8589934592
     # Persistent derived-data disk budget, split between centroids, appearances and plans; 0 disables. Range:
     # 0..1099511627776.
     body:
       # Limits for hybrid and body matching plans.
-      max_candidate_pairs: 100000
+      max_candidate_pairs: 1000000
       # Maximum nominated identity pairs per hybrid/global body plan, not embedding pairs. Range: positive
       # integer.
-      max_witness_comparisons: 1000000
+      max_witness_comparisons: 100000000
       # Maximum exact vector comparisons per body scene/global pass, including face vetoes. Range: positive
       # integer.
-      reference_bytes: 134217728
+      reference_bytes: 4294967296
       # Byte budget for body/hybrid reference banks, metadata and lookup working arrays. Range: positive
       # integer.
-      plan_bytes: 16777216
+      plan_bytes: 2147483648
       # Byte budget for retained body/hybrid matching plans and decision proofs. Range: positive integer.
   portraits:
     # Portrait CPU workers, inference batches and ranking cache.
-    cpu_threads: 0
+    cpu_threads: 16
     # Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.
     faceocc_batch_size: 4
     # Faces per portrait visibility inference batch (1..8); 1 disables batching.
-    ranking_cache_bytes: 16777216
+    ranking_cache_bytes: 268435456
     # Byte cap for completed VTT portrait rankings; 0 disables. Range: 0..68719476736.
     prefetch: true
     # Prepare bounded VTT portrait sources and quality measurements ahead of use.

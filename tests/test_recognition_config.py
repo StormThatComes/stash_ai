@@ -84,8 +84,9 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
     assert load(one).identity('portraits') != load(two).identity('portraits')
 
 
-def test_shipped_template_matches_default_schema():
-    path = Path(__file__).resolve().parents[1] / 'facial_recognition.yml'
+@pytest.mark.parametrize('filename', ['facial_recognition.yml', 'facial_recognition_solver.yml'])
+def test_shipped_template_matches_default_schema(filename):
+    path = Path(__file__).resolve().parents[1] / filename
     # Check the file before load() fills missing fields with defaults.
     supplied = parse_yaml(path.read_bytes())
     def paths(mapping, prefix=''):
@@ -117,7 +118,8 @@ def test_shipped_template_matches_default_schema():
     assert body['pose']['backend'] == 'vitpose_plus_large'
     assert body['identities']['enabled'] is False
     assert body['global_matching']['enabled'] is False
-    assert config.data['execution']['portrait_ranking_cache_bytes'] == defaults()['execution']['portrait_ranking_cache_bytes']
+    run_profile = filename == 'facial_recognition.yml'
+    assert config.data['execution']['portrait_ranking_cache_bytes'] == (256 * 1024**2 if run_profile else 16 * 1024**2)
     assert config.data['models']['detector'] == 'scrfd_10g'
     assert config.data['recognition']['min_identity_support'] == 2
     assert config.data['recognition']['cross_scene_provisional'] is True
@@ -127,7 +129,7 @@ def test_shipped_template_matches_default_schema():
     assert config.data['clustering']['same_scene_min_support'] == 3
     assert config.data['portraits']['source'] == 'vtt'
     assert config.data['portraits']['margin'] == .35
-    assert config.data['execution']['prefetch_frames'] == 4
+    assert config.data['execution']['prefetch_frames'] == (16 if run_profile else 4)
     assert config.data['execution']['prefetch_scenes'] is True
 
 

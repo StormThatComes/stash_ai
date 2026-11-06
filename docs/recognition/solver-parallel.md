@@ -3,6 +3,7 @@
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
 - [Usage](#usage)
+- [Resource profiles](#resource-profiles)
 - [Console progress](#console-progress)
 
 The solver keeps recognition thresholds and retained-input contracts unchanged.
@@ -29,7 +30,7 @@ shared inputs/cache; face/hybrid kernels; complete body proofs and rivals.
 ## Usage
 
 ```powershell
-python stash_ai.py recognition report-merge --performer-set 900,901 --solve --solver-cpus 16 --solver-trials 4 --solver-memory-gib 96 --profile-solver --checkpoint solver.json
+python stash_ai.py recognition report-merge --performer-set 900,901 --solve --face-config facial_recognition_solver.yml --solver-cpus 16 --solver-trials 4 --solver-memory-gib 64 --profile-solver --checkpoint solver.json
 ```
 
 Default execution remains one trial using the existing rebuild settings. Explicit
@@ -49,6 +50,54 @@ Completed worker results are checksummed before application; interruption retain
 finished results, cancels queued work and signals running workers cooperatively.
 Unexpected worker exceptions propagate. Resource-limited trials are reported as
 failed and never become winners. Only the coordinator writes the winning YAML.
+
+## Resource profiles
+
+The repository provides two complete v2 configurations for a host allocating
+16 CPUs and 64 GiB RAM to recognition:
+
+| Setting | `facial_recognition.yml` (run) | `facial_recognition_solver.yml` (solver) |
+| --- | --- | --- |
+| Rebuild working maximum | 40 GiB | 10 GiB per trial |
+| Evidence / matrix cache | 8 / 4 GiB | 2 / 1 GiB per trial |
+| CPU work queue | 1 GiB | 256 MiB per trial |
+| Face / body reference limits | 4 / 4 GiB | 2 / 2 GiB per trial |
+| Body matching plan limit | 2 GiB | 512 MiB per trial |
+| Rebuild workers / cohort backend | 16 / processes | CLI allocation / threads |
+| Hybrid nomination device | measured CPU or CUDA (`auto`) | CPU |
+| Inner replay storage | SSD | SSD; mutable trial history still uses RAM |
+
+The solver YAML does **not** set the number of trials or the total CPU/RAM
+budget. Pass all three flags from the example above. At 16 CPUs and four trials,
+the planner assigns four CPU slots to each trial: a coordinator and three inner
+slots, one of which is used for scene prefetch. Baseline runs alone with the
+larger CPU allocation but the same per-trial memory limit.
+
+The conservative maximum admission is **14.75 GiB per trial**: 10 GiB working,
+2 GiB face references, 2 GiB body references, 0.5 GiB plans and 0.25 GiB queue
+headroom. Four trials therefore admit at most **59 GiB**, leaving 5 GiB of the
+explicit 64 GiB budget unassigned. The 2 GiB evidence cache is already inside
+the working budget, and the 1 GiB matrix cache is inside the evidence cache.
+Admission may reserve less for references when the retained input is small.
+These are not OS RSS caps or a guarantee that every 10,000-scene replay fits.
+If a trial exceeds its working limit, reduce the trial count and raise its
+configured working maximum only within the total machine budget.
+
+Both files are standalone templates with the same model and matching settings;
+neither inherits a locally edited configuration. For an existing tuned setup,
+copy your current YAML to `facial_recognition_solver.yml`, then copy only
+`execution.rebuild` and `matching.face.samples.references.max_reference_bytes`
+from the shipped solver profile. Keep both files in the same directory so
+relative database and model paths keep their meaning. Preserve your model,
+detection, matching and anchor-rule settings when transferring solver results
+back to the run configuration; keep the run resource limits.
+
+The 96 GiB `replay_snapshot_bytes` setting is a per-image disk ceiling. Source
+snapshots, parallel private replay images, caches and the recognition database
+can coexist, so it does not enforce a combined 300 GB SSD budget. Measure disk
+usage on retained subsets before running all 10,000 scenes concurrently.
+Rebuild checkpoints are disabled for solver trials; use `--checkpoint` for
+solver search recovery. `--profile-solver` controls trial profiling.
 
 ## Console progress
 
