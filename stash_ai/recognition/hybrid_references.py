@@ -75,7 +75,11 @@ def catalogue_rows(db,config,scope,namespace,owners):
                 from .body_mode_cache import load,save,witnesses
                 query=_query(db,config,scope,namespace,[owner]) if store else None
                 policy=digest(['body-source-v3',config.data['sapiensid']['matching'],config.data['sapiensid']['identities'],config.data['clustering']])
-                signed=cached(db,'body-source',owner,policy,lambda:fingerprint(db,[query],policy)) if store else None
+                from .local_dependencies import available as local_clocks
+                from .dependencies import version
+                policy=digest([policy,version(db,'heads')]) if store else policy
+                signed=cached(db,'body-source',owner,policy,lambda:fingerprint(db,[query],policy),
+                    dependency='owner' if local_clocks(db) else 'global',dependency_key=owner if local_clocks(db) else '*') if store else None
                 found=load(spool,signed,config) if store else None
                 saved_witnesses=witnesses(signed) if found is not None else None
                 if found is not None and saved_witnesses is None:found=None

@@ -117,21 +117,24 @@ def body_key(db, scan, config):
     for row in db.execute('SELECT DISTINCT m.person FROM body_observations b JOIN members m ON m.observation=b.face '
                           'WHERE b.scan=? AND b.contract=? ORDER BY m.person',(scan,expected)):
         roots.add((row[0],canonical(db,row[0])))
-    from .dependencies import cached
+    from .dependencies import cached,version
     from .dependency_schema import validate_triggers
     audited=db.execute('PRAGMA user_version').fetchone()[0]>=10
     if audited:validate_triggers(db,required=True)
     # Membership, old/new head selection, REPLACE and owner age can span scans.
     # Use the audited global clock for joined inputs. Keep owner digests separate
     # so multiple scene plans reuse a shared veto bank.
-    def signed(kind,key,records):
+    from .local_dependencies import available as local_available,scene_key
+    local_clocks=local_available(db)
+    def signed(kind,key,records,dependency,dependency_key):
         read=lambda:derived_cache.fingerprint(db,records,key)
-        return cached(db,kind,key,'v1',read,checked=True) if audited else read()
+        return cached(db,kind,key,'v3-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
+                      dependency_key=dependency_key if local_clocks else '*') if audited else read()
     banks=[]
     for owner in sorted({root for _,root in roots}):
         banks.append(signed('body-scene-owner',owner,[(
             'SELECT m.person,o.id,o.dimensions,o.embedding FROM observations o JOIN members m '
             'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-            "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))]))
-    local=signed('body-scene-input',digest([scan,expected]),queries)
+            "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))],'owner',owner))
+    local=signed('body-scene-input',digest([scan,expected]),queries,'scene',scene_key(db,scan))
     return digest([scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks])
