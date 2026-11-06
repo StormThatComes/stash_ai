@@ -469,6 +469,9 @@ execution:
     # CPU workers for face quality, alignment and JPEG work; inference has one owner. Range: 1..32.
     queue_bytes: 268435456
     # Byte budget for in-flight scan CPU work; oversized work runs serially. Range: 65536..4294967296.
+    detector_batch_size: 1
+    # Face detection microbatch; native batching only for compatible dynamic ONNX models, otherwise serial.
+    # Range: 1..16.
     recognizer_batch_size: 1
     # Face embedding microbatch size (1..32); static ONNX models still run one at a time.
     prefetch_frames: 4

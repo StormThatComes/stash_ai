@@ -57,7 +57,9 @@ class PersonCollector:
             with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
                 for index,cue,image in frames:
                     with image:
-                        if index in missing:self.collect_frame(db,scan,index,image,seconds=cue.start)
+                        if index in missing:
+                            rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+                            self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
         self.flush()
         from .person_crop_backfill import backfill
         backfill(db,scan,source,self.config)
@@ -91,9 +93,9 @@ class PersonCollector:
         except BaseException:
             self.abort();raise
 
-    def collect_records(self,db,scan,index,image,rows,*,seconds=0.,frame_owner=None):
+    def collect_records(self,db,scan,index,image,rows,*,seconds=0.,frame_owner=None,defer=True,fresh=True):
         """Prepare fresh faces without rereading or committing them per cue."""
-        if self.deferred is None:self.deferred=[]
+        if defer and self.deferred is None:self.deferred=[]
         try:
             if self.config.data['sapiensid']['enabled']:
                 self._load()
@@ -104,12 +106,12 @@ class PersonCollector:
                     if size <= limit:
                         from .frame_ownership import Lease
                         lease = frame_owner.retain(image) if frame_owner is not None else Lease(image.copy())
-                        self.pose_frames.append((db, scan, index, lease.image, rows, seconds, lease))
+                        self.pose_frames.append((db, scan, index, lease.image, rows, seconds, fresh, lease))
                         self.pose_bytes += size
                         if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:
                             self._flush_pose()
                         return
-            return self._collect_frame(db,scan,index,image,rows=rows,seconds=seconds)
+            return self._collect_frame(db,scan,index,image,rows=rows if fresh else None,seconds=seconds)
         except BaseException:
             self.abort();raise
 
@@ -117,10 +119,10 @@ class PersonCollector:
         if not self.pose_frames:return
         try:
             frames = [(image, [checked_detection(json.loads(r['geometry'])) for r in rows])
-                      for _, _, _, image, rows, _, _ in self.pose_frames]
+                      for _, _, _, image, rows, _, _, _ in self.pose_frames]
             self.model.detect_many(frames)
-            for db, scan, index, image, rows, seconds, _ in self.pose_frames:
-                self._collect_frame(db, scan, index, image, rows=rows, seconds=seconds)
+            for db, scan, index, image, rows, seconds, fresh, _ in self.pose_frames:
+                self._collect_frame(db, scan, index, image, rows=rows if fresh else None, seconds=seconds)
         finally:
             self._close_pose_frames()
 

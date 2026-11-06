@@ -91,7 +91,7 @@ _GROUPS = (
     ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram'),
     ('execution.scan', 'execution',
      'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_bytes=scan_queue_bytes '
-     'recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_bytes '
+     'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_bytes '
      'sprite_cache_bytes'),
     ('execution.rebuild', 'execution',
      'storage=rebuild_storage workers=rebuild_workers native_threads=rebuild_native_threads '

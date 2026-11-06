@@ -28,7 +28,7 @@ class ScrfdDetector:
                 config, verified_bytes(paths[key], ASSETS[key]), runtime_info=info)
             inputs, outputs = self.session.get_inputs(), self.session.get_outputs()
             if (len(inputs) != 1 or inputs[0].type != 'tensor(float)'
-                    or len(inputs[0].shape) != 4 or inputs[0].shape[0] not in (1, None)
+                    or len(inputs[0].shape) != 4 or (isinstance(inputs[0].shape[0],int) and inputs[0].shape[0]!=1)
                     or inputs[0].shape[1] != 3
                     or any(isinstance(dim, int) and dim != self.INPUT_SIZE
                            for dim in inputs[0].shape[2:])
@@ -36,6 +36,8 @@ class ScrfdDetector:
                     or any(output.type != 'tensor(float)' or len(output.shape) not in (2, 3)
                            for output in outputs)):
                 raise ValueError('SCRFD KPS ONNX input/output contract did not match the 9-output 640px model.')
+            self.dynamic_batch=(not isinstance(inputs[0].shape[0],int) and
+                all(len(output.shape)==3 and not isinstance(output.shape[0],int) for output in outputs))
             self.input_name = inputs[0].name
             self.output_names = [output.name for output in outputs]
             self.provenance = {
@@ -130,6 +132,16 @@ class ScrfdDetector:
         tensor, scale_x, scale_y = self._blob(bgr)
         outputs = self.session.run(self.output_names, {self.input_name: tensor})
         return self.decode(outputs, scale_x=scale_x, scale_y=scale_y, config=self.config)
+
+    def detect_many(self,images):
+        if not getattr(self,'dynamic_batch',False) or len(images)<=1:return [self.detect(image) for image in images]
+        import numpy as np
+        prepared=[self._blob(image) for image in images]
+        outputs=self.session.run(self.output_names,{self.input_name:np.concatenate([row[0] for row in prepared])})
+        if any(value.ndim!=3 or len(value)!=len(images) for value in outputs):
+            raise ValueError('SCRFD returned an incompatible native batch.')
+        return [self.decode([value[i] for value in outputs],scale_x=sx,scale_y=sy,config=self.config)
+                for i,(_,sx,sy) in enumerate(prepared)]
 
     def close(self):
         self.session = None

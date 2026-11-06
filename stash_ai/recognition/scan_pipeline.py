@@ -324,8 +324,17 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
                     row[5] = row[5].result()['crop']
             yield index,cue,values
     retained=0
-    for index, cue, image in batch:
-        faces = sorted(backend.detect(image),key=lambda face:tuple(face.row))
+    detected=None
+    detect_many=getattr(backend,'detect_faces_many',None)
+    if len(batch)>1 and config.data['execution']['detector_batch_size']>1 and callable(detect_many):
+        detected=[];maximum=config.data['execution']['detector_batch_size']
+        for start in range(0,len(batch),maximum):
+            images=[image for _,_,image in batch[start:start+maximum]]
+            result=detect_many(images)
+            if len(result)!=len(images):raise ValueError('Face detector returned an incompatible output batch.')
+            detected.extend(result)
+    for position,(index, cue, image) in enumerate(batch):
+        faces = sorted(detected[position] if detected is not None else backend.detect(image),key=lambda face:tuple(face.row))
         values=[]
         from stash_ai.runtime.cleanup import closing
         with closing(process(image,faces,backend,visibility,config,cue,

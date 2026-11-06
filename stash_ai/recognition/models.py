@@ -298,6 +298,12 @@ class YuNetDetector:
             from stash_ai.runtime.cleanup import cleanup
             cleanup([('release prepared recognition frame', lambda: self.release_frame(previous))])
 
+    def detect_faces_many(self,images):
+        detector=getattr(self,'ort_detector',None)
+        if detector is not None and callable(getattr(detector,'detect_many',None)):
+            return detector.detect_many([self._bgr(image) for image in images])
+        return [self.detect(image) for image in images]
+
     def detect(self, image):
         data = self._bgr(image)
         if self.ort_detector is not None:

@@ -79,6 +79,11 @@ class _BorrowedBackend:
     def detect(self, image):
         return self._infer('detect', image)
 
+    def detect_faces_many(self,images):
+        if callable(getattr(self.model,'detect_faces_many',None)):
+            return self._infer('detect_faces_many',images)
+        return [self.detect(image) for image in images]
+
     def embed(self, image, face):
         return self._infer('embed', image, face)
 

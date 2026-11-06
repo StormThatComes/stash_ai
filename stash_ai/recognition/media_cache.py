@@ -7,6 +7,15 @@ import sqlite3
 import time
 
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Validator:
+    sha256: str
+    size: int
+
+
 class VerifiedBytes(bytes):
     """Immutable bytes carrying the digest verified at this exact read boundary."""
     def __new__(cls,body,sha=None):
@@ -34,8 +43,10 @@ class MediaCache:
         if not self.limit or not self.path.exists():return None
         try:
             with closing(sqlite3.connect(self.path,timeout=5)) as db:
-                row=db.execute('SELECT etag,sha,length(body) FROM media WHERE key=?',(self.key(url),)).fetchone()
-                if row and strong_etag(row[0]) and isinstance(row[1],str) and type(row[2]) is int and 0<=row[2]<=self.limit:
+                manifest=db.execute("SELECT 1 FROM sqlite_master WHERE name='manifests'").fetchone()
+                row=(db.execute('SELECT etag,sha,size FROM manifests WHERE key=?',(self.key(url),)).fetchone() if manifest else None)
+                if row is None:row=db.execute('SELECT etag,sha,length(body) FROM media WHERE key=?',(self.key(url),)).fetchone()
+                if row and strong_etag(row[0]) and isinstance(row[1],str) and len(row[1])==64 and all(c in '0123456789abcdef' for c in row[1]) and type(row[2]) is int and 0<=row[2]<=self.limit:
                     return row
         except (sqlite3.Error,OSError):pass
         return None
@@ -63,6 +74,9 @@ class MediaCache:
             descriptor=os.open(self.path,os.O_CREAT|os.O_WRONLY,0o600);os.close(descriptor)
             with closing(sqlite3.connect(self.path,timeout=5)) as db,db:
                 db.execute('CREATE TABLE IF NOT EXISTS media(key TEXT PRIMARY KEY,etag TEXT,sha TEXT,body BLOB,touched INTEGER)')
+                db.execute('CREATE INDEX IF NOT EXISTS media_touched ON media(touched,key)')
+                db.execute('CREATE TABLE IF NOT EXISTS manifests(key TEXT PRIMARY KEY,etag TEXT,sha TEXT,size INTEGER,touched INTEGER)')
+                db.execute('CREATE INDEX IF NOT EXISTS manifests_touched ON manifests(touched,key)')
                 db.execute('BEGIN IMMEDIATE')
                 key=self.key(url)
                 db.execute('DELETE FROM media WHERE key=?',(key,))
@@ -70,6 +84,10 @@ class MediaCache:
                 for old,length in db.execute('SELECT key,length(body) FROM media ORDER BY touched,key'):
                     if size+len(body)<=self.limit:break
                     db.execute('DELETE FROM media WHERE key=?',(old,));size-=length
+                sha=body.sha256 if isinstance(body,VerifiedBytes) else hashlib.sha256(body).hexdigest()
+                db.execute('INSERT OR REPLACE INTO manifests VALUES (?,?,?,?,?)',(key,etag,sha,len(body),time.time_ns()))
+                maximum=min(250000,max(1024,self.limit//512))
+                db.execute('DELETE FROM manifests WHERE key IN (SELECT key FROM manifests ORDER BY touched DESC,key LIMIT -1 OFFSET ?)',(maximum,))
                 db.execute('INSERT INTO media VALUES (?,?,?,?,?)',
                     (key,etag,body.sha256 if isinstance(body,VerifiedBytes) else hashlib.sha256(body).hexdigest(),body,time.time_ns()))
         except (sqlite3.Error,OSError):pass # Recomputable transport optimization only.
@@ -79,4 +97,6 @@ class MediaCache:
         try:
             with closing(sqlite3.connect(self.path,timeout=5)) as db,db:
                 db.execute('DELETE FROM media WHERE key=?',(self.key(url),))
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='manifests'").fetchone():
+                    db.execute('DELETE FROM manifests WHERE key=?',(self.key(url),))
         except (sqlite3.Error,OSError):pass
