@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
+import json
 import sqlite3
 import threading
 import numpy as np
@@ -11,13 +12,25 @@ _active=ContextVar('recognition_paged_references',default=None)
 
 
 class Samples(Sequence):
-    def __init__(self,pool,keys,bytes):self.pool,self.keys,self.nbytes=pool,tuple(keys),bytes
+    def __init__(self,pool,keys,bytes,shape=None):
+        self.pool,self.keys,self.nbytes,self.shape=pool,tuple(keys),bytes,shape
     def __len__(self):return len(self.keys)
-    def __getitem__(self,index):
-        if isinstance(index,slice):return tuple(self[i] for i in range(*index.indices(len(self))))
+    def _read(self,keys):
+        # LEFT JOIN preserves order and duplicates and makes corrupt pages explicit.
         with self.pool.lock:
-            row=self.pool.db.execute('SELECT value FROM vectors WHERE id=?',(self.keys[index],)).fetchone()
-        return np.frombuffer(row[0],dtype='<f4')
+            rows=self.pool.db.execute('SELECT v.value FROM json_each(?) k LEFT JOIN vectors v '
+                'ON v.id=k.value ORDER BY CAST(k.key AS INTEGER)',(json.dumps(keys),)).fetchall()
+        for (raw,) in rows:
+            if raw is None:raise ValueError('Recognition reference page is missing.')
+            yield np.frombuffer(raw,dtype='<f4')
+    def __iter__(self):
+        for start in range(0,len(self.keys),256):
+            yield from self._read(self.keys[start:start+256])
+    def __getitem__(self,index):
+        if isinstance(index,slice):
+            keys=self.keys[index]
+            return tuple(v for start in range(0,len(keys),256) for v in self._read(keys[start:start+256]))
+        return next(self._read((self.keys[index],)))
 
 
 class Pool:
@@ -36,16 +49,17 @@ class Pool:
         self.limit=config.data['execution']['replay_snapshot_bytes'];self.used=0
     def pack(self,vectors):
         if isinstance(vectors,Samples):return vectors
-        keys=[];total=0
+        keys=[];total=0;shapes=set()
         for vector in vectors:
-            raw=np.asarray(vector,dtype='<f4').tobytes();key=hashlib.sha256(raw).hexdigest()
+            array=np.asarray(vector,dtype='<f4');raw=array.tobytes();key=hashlib.sha256(raw).hexdigest()
+            shapes.add((array.size,))
             inserted=self.db.execute('INSERT OR IGNORE INTO vectors VALUES (?,?)',(key,raw)).rowcount
             if inserted:self.used+=len(raw)+128
             if self.used>self.limit:
                 from .resource_errors import ResourceLimit
                 raise ResourceLimit('Reference pages exceed execution.replay_snapshot_bytes.')
             keys.append(key);total+=len(raw)
-        return Samples(self,keys,total)
+        return Samples(self,keys,total,next(iter(shapes)) if len(shapes)==1 else None)
     def close(self):
         try:self.db.close()
         finally:self.reservation.set(0)

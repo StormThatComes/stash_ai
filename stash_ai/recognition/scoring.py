@@ -51,12 +51,12 @@ def _prepared(groups, query):
         if found is not MISSING:
             count('reused_packed_bytes',found[0].nbytes)
             return found
-    key = tuple(('tuple', id(group.samples)) if isinstance(group.samples, tuple)
+    key = page_key if paged else tuple(('tuple', id(group.samples)) if isinstance(group.samples, tuple)
                 else tuple(id(sample) for sample in group.samples) for group in groups)
     arrays = [sample for group in groups for sample in group.samples]
-    owners = immutable_samples(arrays) if shared is not None else None
+    owners = immutable_samples(arrays) if shared is not None and not paged else None
     stable = page_key if paged else ('matrix', tuple(len(g.samples) for g in groups), owners, tuple(query.shape))
-    cached = shared.get(stable) if shared is not None and owners is not None else MISSING
+    cached = shared.get(stable) if shared is not None and (paged or owners is not None) else MISSING
     if cached is not MISSING:
         count('reused_packed_bytes', cached[0].nbytes)
         return cached
@@ -79,7 +79,7 @@ def _prepared(groups, query):
     norms = np.linalg.norm(matrix.astype(np.float64), axis=1)
     size = (matrix.nbytes + norms.nbytes + starts.nbytes + lengths.nbytes
             + sum(sample.nbytes for sample in arrays) + 128*len(arrays))
-    if shared is not None and owners is not None:
+    if shared is not None and (paged or owners is not None):
         for array in (matrix, lengths, starts, norms):
             array.flags.writeable = False
         shared.put(stable, (matrix, lengths, starts, norms), size)

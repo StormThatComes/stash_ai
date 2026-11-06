@@ -127,17 +127,18 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
 
 def _similarities(group, query):
     import numpy as np
-    if any(sample.shape != query.shape for sample in group.samples):
+    samples = tuple(group.samples)
+    if any(sample.shape != query.shape for sample in samples):
         raise ValueError('Face namespace contains mixed embedding dimensions.')
     count('group_comparisons')
     count('sample_comparisons', len(group.samples))
     from .run_cache import current, immutable_samples, MISSING
-    cache=current();samples=immutable_samples(group.samples) if cache is not None else None
+    cache=current();vectors=samples;samples=immutable_samples(vectors) if cache is not None else None
     query_key=immutable_samples((query,)) if samples is not None else None
     key=('scalar-query',samples,query_key)
     result=cache.get(key) if query_key is not None else MISSING
     if result is MISSING:
-        scores = np.asarray([float(np.dot(sample, query)) for sample in group.samples])
+        scores = np.asarray([float(np.dot(sample, query)) for sample in vectors])
         result=float(scores.mean()), float(scores.min())
         if query_key is not None:cache.put(key,result,sum(len(v)+128 for v in samples+query_key))
     return result
@@ -425,7 +426,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         by_id.clear()
         ranked.clear()
         group = query = observation = None
-        retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
+        retained = [] if independent else _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
         if not independent and supported_merges(database, scan, config, retained, policy, usage=usage):
             retained.clear()
             retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')

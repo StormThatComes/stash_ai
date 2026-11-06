@@ -81,6 +81,15 @@ class FrozenScores:
                                           else tuple(g.samples)) for g in self.groups)
         self.generation = tuple((g.identifier, g.samples.keys if isinstance(g.samples,Samples) else tuple(id(a) for a in g.samples)) for g in self.references)
 
+        import numpy as np
+        self.layouts = tuple((g.samples.nbytes, g.samples.shape, True) if isinstance(g.samples,Samples)
+            else (sum(a.nbytes for a in g.samples),
+                  g.samples[0].shape if g.samples and all(a.shape==g.samples[0].shape for a in g.samples) else None,
+                  all(isinstance(a,np.ndarray) and a.dtype==np.float32 and a.ndim==1
+                      and not a.flags.writeable and isinstance(a.base,bytes) for a in g.samples))
+            for g in self.references)
+        self.blocks = {}
+
     def valid(self):
         return all(g.identifier == r.identifier and len(g.samples) == len(r.samples)
                    and (g.samples is r.samples or all(a is b for a, b in zip(g.samples, r.samples)))
@@ -90,9 +99,7 @@ class FrozenScores:
         import numpy as np
         pool = current()
         return bool(pool is not None and pool.workers > 1 and len(self.groups) >= 16
-                    and all(isinstance(a, np.ndarray) and a.dtype == np.float32
-                            and a.ndim == 1 and not a.flags.writeable and isinstance(a.base, bytes)
-                            for g in self.references for a in g.samples))
+                    and all(layout[2] for layout in self.layouts))
 
     def score(self, queries, threshold, cohesion=float('-inf')):
         """Return sparse exact contributions, or None for the serial fallback."""
@@ -113,14 +120,16 @@ class FrozenScores:
             pool.fallback('result_admission')
             return None
         target = max(1024, min(524288, pool.limit//(max(2, pool.workers)*12)))
-        blocks, block, size = [], [], 0
-        for group in self.references:
-            required = sum(a.nbytes for a in group.samples)
-            if block and size+required > target:
-                blocks.append(tuple(block)); block, size = [], 0
-            block.append(group); size += required
-        if block:
-            blocks.append(tuple(block))
+        blocks = self.blocks.get(target)
+        if blocks is None:
+            blocks, block, size = [], [], 0
+            for group,layout in zip(self.references,self.layouts):
+                required = layout[0]
+                if block and size+required > target:
+                    blocks.append(tuple(block)); block, size = [], 0
+                block.append(group); size += required
+            if block:blocks.append(tuple(block))
+            self.blocks[target] = blocks
         # Avoid starting a compute pool for one small shard.
         if len(blocks) < 2:
             pool.fallback('single_shard')
@@ -129,24 +138,28 @@ class FrozenScores:
         if any(q.shape != dimension for q in queries):
             pool.fallback('mixed_dimensions')
             return None
+        if any(not g.samples or layout[1]!=dimension for g,layout in zip(self.references,self.layouts)):
+            pool.fallback('layout_or_admission')
+            return None
+        sizes = {id(g):layout[0] for g,layout in zip(self.references,self.layouts)}
         for block in blocks:
             sample_count = sum(len(g.samples) for g in block)
-            raw = sum(a.nbytes for g in block for a in g.samples)
-            if (any(not g.samples or any(a.shape != dimension for a in g.samples) for g in block)
-                    or 6*raw + sample_count*len(queries)*32 + len(block)*len(queries)*320 + 4096 > pool.limit):
+            raw = sum(sizes[id(g)] for g in block)
+            if 6*raw + sample_count*len(queries)*32 + len(block)*len(queries)*320 + 4096 > pool.limit:
                 pool.fallback('layout_or_admission')
                 return None
         def jobs():
             for ordinal, block in enumerate(blocks):
                 with pool.preparing('packing'):
-                    block=tuple(Reference(g.identifier,tuple(g.samples)) for g in block)
                     prepared = _prepared(block, queries[0])
                 if prepared is None:
                     raise RuntimeError('Invalid immutable recognition score shard.')
                 matrix, lengths, starts, norms = prepared
                 for array in prepared:
                     array.flags.writeable = False
-                shard = Shard(block, matrix, lengths, starts, norms)
+                references = tuple(Reference(g.identifier,tuple(matrix[start:start+length]))
+                                   for g,start,length in zip(block,starts,lengths))
+                shard = Shard(references, matrix, lengths, starts, norms)
                 size = 6*matrix.nbytes + len(matrix)*len(queries)*32 + len(block)*len(queries)*320 + 4096
                 yield Work(ordinal, self.generation, (shard, queries, threshold, cohesion), size)
         result = [ExactScores() for _ in queries]
