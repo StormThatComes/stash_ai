@@ -212,16 +212,18 @@ def test_final_auxiliary_reassignment_revokes_early_pool_source(tmp_path):
         assert result[0]=='withheld' and result[2]['reason']=='provisional_pool_source_invalidated'
 
 
-def test_unrelated_malformed_cache_row_does_not_break_confirmation_or_pool_reads(tmp_path):
+@pytest.mark.parametrize('cache',[False,True])
+def test_unrelated_malformed_cache_row_does_not_break_confirmation_or_pool_reads(tmp_path,cache):
     from stash_ai.recognition.historical_references import capture
     from stash_ai.recognition.clustering import matching_policy
     config=changed(configured(tmp_path),clustering={'view_prototypes_enabled':True})
     with FaceDatabase(config.database) as db:
         source=fixture(db,config,'1',[A]*3+[X]*3,range(3,6));rebuild_selected(db,[source],config)
-        before=context(db.connection,[],config,'scope','ns')
+        before=context(db.connection,[],config,'scope','ns',cache=cache)
+        db.connection.commit()
         db.connection.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
             (str(uuid.uuid4()),source['scan'],'damaged-policy',None,'withheld','not-json'));db.connection.commit()
-        assert context(db.connection,[],config,'scope','ns')==before
+        assert context(db.connection,[],config,'scope','ns',cache=cache)==before
         assert any(v.authority=='verified_view' for v in capture(db.connection,[],config,'scope','ns','check').views)
 
 

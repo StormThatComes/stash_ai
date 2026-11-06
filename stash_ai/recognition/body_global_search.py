@@ -116,7 +116,10 @@ class Search:
             self.index=self.stack.enter_context(tempfile.TemporaryFile(prefix='stash-body-means-'))
             self.blocks=OrderedDict()
             self.bounds=OrderedDict()
-            self.entries=[];self.owner_modes={}
+            self.entries=[];self.owner_modes={};self.mean_versions={}
+            from .body_incremental import source_versions,means_key
+            from .derived_cache import current
+            store=current();versions=source_versions(self.db) if store else None
             retained=self.stats['reference_working_bytes']
             from .body_global_modes import references as appearance_references
             with tracking(self.identities,'Index global person means',unit='identity') as people:
@@ -125,18 +128,40 @@ class Search:
                     # temporary mode lists and their output before construction.
                     temporary=1024+512*len(self.bank[person]['cores'][0]) if self.bank[person]['faces'] else 1024
                     self.reservation.set(retained+temporary)
-                    modes=appearance_references(self.bank[person],self.config,self.evidence)
+                    signed=means_key(self.bank[person],self.config,versions)
+                    found=store.get('body-owner-means',signed) if store and signed else None
+                    if found is not None:
+                        by_id={r['id']:r for core in self.bank[person]['cores'] for r in core}
+                        by_id.update((r['id'],r) for r in self.bank[person]['refs'])
+                        modes=[[by_id[i] for i in mode] for mode in found['modes']]
+                        self.stats['centroid_owner_hits']=self.stats.get('centroid_owner_hits',0)+1
+                    else:modes=appearance_references(self.bank[person],self.config,self.evidence)
+                    import hashlib
+                    signature=hashlib.sha256()
+                    allowance=len(modes)*4096*80
+                    keep_means=store is not None and allowance<=min(store.budget//8,limit-retained-temporary)
+                    means=[] if keep_means else None
+                    if keep_means:self.reservation.set(retained+temporary+allowance)
                     extra=512+sum(512+16*len(refs) for refs in modes)
-                    self.reservation.set(retained+temporary+extra)
+                    self.reservation.set(retained+temporary+extra+(allowance if keep_means else 0))
                     retained+=extra
                     self.owner_modes[person]=len(modes)
-                    for refs in modes:
+                    for mode_index,refs in enumerate(modes):
                         ordinal=len(self.entries);self.entries.append((owner,refs))
-                        mean=np.zeros(4096,dtype='<f8')
-                        for row in refs:mean+=self.evidence.feature(row)
-                        if refs:mean/=len(refs)
+                        if found is not None:mean=np.asarray(found['means'][mode_index],dtype='<f8')
+                        else:
+                            mean=np.zeros(4096,dtype='<f8')
+                            for row in refs:mean+=self.evidence.feature(row)
+                            if refs:mean/=len(refs)
+                        if mean.shape!=(4096,) or not np.isfinite(mean).all():raise ValueError('Invalid body centroid cache.')
+                        if means is not None:means.append(mean.tolist())
+                        signature.update(mean.tobytes())
                         self.index.write(mean.tobytes())
-                    del modes
+                    from .config import digest
+                    self.mean_versions[person]=digest([modes,signature.hexdigest()])
+                    if store and signed and found is None and means is not None:
+                        store.put('body-owner-means',signed,dict(modes=[[r['id'] for r in m] for m in modes],means=means))
+                    del modes,means,found
                     self.reservation.set(retained)
             self.stats['reference_working_bytes']=retained
             self.reservation.set(self.stats['reference_working_bytes'])
@@ -195,6 +220,14 @@ class Search:
                 yield i,j,values
 
     def nominations(self,focus):
+        from .derived_cache import current
+        if not focus and current() is not None:
+            from .body_incremental import nominations
+            yield from nominations(self)
+            return
+        yield from self.dense_nominations(focus)
+
+    def dense_nominations(self,focus):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
         wanted=np.array([p in focus for p in self.identities])
         seen=set()

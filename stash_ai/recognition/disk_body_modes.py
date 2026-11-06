@@ -83,8 +83,10 @@ class Records:
             yield pickle.loads(row[0])
 
     def selected(self,ids):
-        wanted=set(ids)
-        return [r for r in self.rows() if r['id'] in wanted]
+        from .database import encoded
+        return [pickle.loads(r[0]) for r in self.db.execute(
+            'SELECT payload FROM records WHERE id IN (SELECT value FROM json_each(?)) ORDER BY ordinal',
+            (encoded(list(ids)),))]
 
     def modes(self,config,budget=None):
         if budget is not None:return self._modes(config,budget)
@@ -93,6 +95,24 @@ class Records:
             return self._modes(config,ComparisonBudget(config,progress))
 
     def _modes(self,config,budget):
+        from collections import OrderedDict
+        self.writers=OrderedDict()
+        try:return self._build_modes(config,budget)
+        finally:
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('close body bank stream',f.close) for f in self.writers.values()])
+            self.writers.clear()
+
+    def _write(self,cluster,blob):
+        target=self.writers.get(cluster)
+        if target is None:
+            if len(self.writers)>=8:self.writers.popitem(last=False)[1].close()
+            target=(self.path/(str(cluster)+'.bin')).open('ab')
+            self.writers[cluster]=target
+        self.writers.move_to_end(cluster)
+        target.write(blob)
+
+    def _build_modes(self,config,budget):
         from .hybrid_references import body_vector
         from .memory_size import size
         threshold=config.data['sapiensid']['matching']['person_threshold']
@@ -110,7 +130,7 @@ class Records:
             else:
                 cluster=len(votes);votes.append(Votes());counts.append(0)
             self.db.execute('INSERT OR IGNORE INTO features VALUES (?,?)',(cluster,blob))
-            with (self.path/(str(cluster)+'.bin')).open('ab') as target:target.write(blob)
+            self._write(cluster,blob)
             self.db.execute('INSERT INTO scored(cluster,stamp,unit) VALUES (?,?,?)',
                             (cluster,pickle.dumps(stamp(row),protocol=5),pickle.dumps(unit(row),protocol=5)))
             votes[cluster].add(row);support.add(row);counts[cluster]+=1
