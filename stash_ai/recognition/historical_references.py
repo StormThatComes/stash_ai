@@ -54,13 +54,44 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace,*,cache=False):
-    if not cache:
-        return _context(db,selected,config,scope,namespace)
-    from .dependencies import cached
+    from .dependencies import cached,supported,snapshot
+    from .dependency_schema import validate_triggers
     from .config import digest
-    key=digest([scope,namespace,selected])
-    return cached(db,'historical-context',key,matching_policy(config),
-                  lambda:_context(db,selected,config,scope,namespace))
+    if not supported(db):return _context(db,selected,config,scope,namespace)
+    validate_triggers(db,required=True)
+    h=hashlib.sha256(b'historical-per-scan-v2')
+    policy=matching_policy(config)
+    queries=[
+        'SELECT id,scene,input_sha,policy_sha,status,cursor,total FROM scans WHERE id=?',
+        'SELECT id,cue,seconds,source,rect,geometry,quality,rejected,dimensions,embedding FROM observations WHERE scan=? ORDER BY id',
+        'SELECT m.observation,m.person FROM members m JOIN observations o ON o.id=m.observation WHERE o.scan=? ORDER BY m.observation',
+        "SELECT c.rowid,c.id,c.scan,c.policy,c.person,c.status,c.payload FROM candidates c WHERE json_valid(c.payload) AND (c.scan=? OR "
+        "CAST(CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,'$.observation') END AS TEXT) IN "
+        '(SELECT id FROM observations WHERE scan=?)) ORDER BY c.rowid']
+    with snapshot(db):
+        scans=db.execute('SELECT id FROM scans WHERE scope=? AND namespace=? AND scene NOT IN '
+                         '(SELECT value FROM json_each(?)) ORDER BY id',
+                         (scope,namespace,encoded([item['scene'] for item in selected])))
+        for (scan,) in scans:
+            def compute():
+                value=hashlib.sha256()
+                for query in queries:
+                    for row in db.execute(query,(scan,)*query.count('?')):_hash_row(value,row)
+                return value.hexdigest()
+            value=(cached(db,'historical-scan',scan,'v2',compute,dependency='scan',dependency_key=scan,checked=True)
+                   if cache else compute())
+            _hash_row(h,(scan,value))
+        from .scan_heads import predicate
+        for row in db.execute('SELECT s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND '+predicate()+
+            ' ORDER BY s.id',(scope,namespace)):_hash_row(h,row)
+        # Ownership metadata and aliases can change admission without changing a
+        # scan. Hash their small scalar records separately from source vectors.
+        for query in (
+            'SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id',
+            'SELECT m.source,m.target,m.evidence FROM identity_merges m JOIN people p ON p.id=m.source WHERE p.scope=? AND p.namespace=? ORDER BY m.source'):
+            for row in db.execute(query,(scope,namespace)):_hash_row(h,row)
+    _hash_row(h,(scope,namespace,policy,scan_identity(config,namespace)))
+    return h.hexdigest()
 
 
 def _context(db,selected,config,scope,namespace):

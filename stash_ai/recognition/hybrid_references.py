@@ -59,10 +59,17 @@ def catalogue_rows(db,config,scope,namespace,owners):
             spool=Records();keep=False
             try:
                 for row in rows:spool.add(row)
-                chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
-                              vector_reader=body_vector,quality_reader=body_quality)
-                selected=BodyRows(spool.selected(i for i,_ in chosen))
-                selected.modes,support=spool.modes(config,budget)
+                from .body_mode_cache import key,load,save
+                signed=key(spool,config);found=load(spool,signed,config)
+                if found is None:
+                    chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
+                                  vector_reader=body_vector,quality_reader=body_quality)
+                    ids=[i for i,_ in chosen]
+                    modes,support=spool.modes(config,budget)
+                    save(spool,signed,modes,support,ids,config)
+                else:modes,support,ids=found
+                selected=BodyRows(spool.selected(ids))
+                selected.modes=modes
                 selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal'))
                 selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
                 votes=Votes()
