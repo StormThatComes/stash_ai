@@ -225,6 +225,7 @@ HELP = {
     'execution.scan.prefetch_scenes': 'Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.',
     'execution.scan.prefetch_scene_depth': 'Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers. Range: 1..16.',
     'execution.scan.media_cache_bytes': 'Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range: 0..68719476736.',
+    'execution.scan.inference_cache_bytes': 'Disk cap for reusable detection/pose/embedding/quality stages keyed by exact pixels; 0 disables. Range: 0..68719476736.',
     'execution.scan.sprite_cache_bytes': 'Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.',
     'execution.rebuild': 'Identity rebuild workers, checkpoints and working memory.',
     'execution.rebuild.workers': 'Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256. Range: 0..256.',

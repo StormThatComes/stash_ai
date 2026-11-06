@@ -88,7 +88,7 @@ class SapiensIDV1Encoder:
     `model` must return (N,4096) numeric torch features, not class logits.
     """
 
-    def __init__(self, model, aligner, *, device='auto', max_batch_size=4):
+    def __init__(self, model, aligner, *, device='auto', max_batch_size=4, cache_contract=None):
         import torch
 
         if not isinstance(model, torch.nn.Module) or (aligner is not None and not isinstance(aligner, torch.nn.Module)):
@@ -98,6 +98,7 @@ class SapiensIDV1Encoder:
         self.torch = torch
         self.device = resolve_device(device)
         self.max_batch_size = max_batch_size
+        self.cache_contract=cache_contract
         self.owner = get_ident()
         # Do not assign `aligner.eval()`: upstream KeypointPredictor.eval()
         # overrides nn.Module.eval() without returning self.
@@ -129,6 +130,15 @@ class SapiensIDV1Encoder:
         return self.embed_prepared(prepared)
 
     def embed_prepared(self, prepared):
+        self._check_owner()
+        if not 1<=len(prepared)<=self.max_batch_size:
+            raise ValueError('SapiensID prepared batch exceeds configured limit.')
+        from .inference_cache import many
+        contract=getattr(self,'cache_contract',None)
+        if contract is None:return self._embed_prepared(prepared)
+        return many('body_embedding',[contract,str(self.device)],prepared,self._embed_prepared)
+
+    def _embed_prepared(self, prepared):
         self._check_owner()
         if not 1<=len(prepared)<=self.max_batch_size:
             raise ValueError('SapiensID prepared batch exceeds configured limit.')

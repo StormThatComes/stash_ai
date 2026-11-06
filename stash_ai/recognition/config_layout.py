@@ -92,7 +92,7 @@ _GROUPS = (
     ('execution.scan', 'execution',
      'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_bytes=scan_queue_bytes '
      'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_bytes '
-     'sprite_cache_bytes'),
+     'sprite_cache_bytes inference_cache_bytes'),
     ('execution.rebuild', 'execution',
      'disk_total_bytes disk_free_bytes sqlite_cache_bytes=rebuild_sqlite_cache_bytes scratch_bytes=rebuild_scratch_bytes scratch_directory=rebuild_scratch_directory '
      'parallel_scenes=rebuild_parallel_scenes storage=rebuild_storage workers=rebuild_workers native_threads=rebuild_native_threads '

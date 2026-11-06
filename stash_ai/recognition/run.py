@@ -153,7 +153,8 @@ def _execute(args, config, *, services=None):
     publication_debt = None
     from .sprite_cache import scope as sprite_scope
     from .disk_budget import scope as disk_scope
-    with disk_scope(config), sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
+    from .inference_cache import scope as inference_scope
+    with disk_scope(config), inference_scope(config), sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report

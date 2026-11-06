@@ -299,12 +299,23 @@ class YuNetDetector:
             cleanup([('release prepared recognition frame', lambda: self.release_frame(previous))])
 
     def detect_faces_many(self,images):
+        from .inference_cache import many,current
+        if current() is None:return self._detect_faces_many(images)
+        from .inference_contracts import face
+        def calculate(values):return [[tuple(f.row) for f in row] for row in self._detect_faces_many(values)]
+        return [[checked_detection(row) for row in values] for values in
+                many('face_detection',[face(self.config),self.provenance],list(images),calculate)]
+
+    def _detect_faces_many(self,images):
         detector=getattr(self,'ort_detector',None)
         if detector is not None and callable(getattr(detector,'detect_many',None)):
             return detector.detect_many([self._bgr(image) for image in images])
-        return [self.detect(image) for image in images]
+        return [self._detect(image) for image in images]
 
     def detect(self, image):
+        return self.detect_faces_many([image])[0]
+
+    def _detect(self, image):
         data = self._bgr(image)
         if self.ort_detector is not None:
             return self.ort_detector.detect(data)
