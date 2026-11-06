@@ -33,20 +33,20 @@ def quality(raw):
         return 0.
 
 
-def select(rows, maximum, *, vector_reader=None, quality_reader=None):
+def select(rows, maximum, *, vector_reader=None, quality_reader=None, state=None):
     import numpy as np
     from .clustering import vector
     from .view_prototypes import pose_view
     if maximum <= 0:
         return []
     vector = vector_reader or vector
-    pool, scene = [], None
+    pool, scene = (list(state.get('pool',[])),state.get('scene')) if state is not None else ([],None)
     # Saturated support keeps only enough metadata to certify a rare look.
     # Frozen pivots prevent gradually changing observations from joining a mode.
     from .independent_evidence import Votes, unit
     def evidence(row):
         return unit(dict(row, scan=row['scan'] if 'scan' in row.keys() else row['scene']))
-    reserves = []
+    reserves = state.get('reserves',[]) if state is not None else []
 
     def reserve(entry):
         order, row, sample, score, pose = entry
@@ -116,7 +116,10 @@ def select(rows, maximum, *, vector_reader=None, quality_reader=None):
             nearest = np.maximum(nearest, matrix @ matrix[winner])
         pool = [pool[i] for i in sorted(chosen, key=lambda i: pool[i][0])]
 
-    for order, row in enumerate(rows):
+    start=state.get('count',0) if state is not None else 0
+    seen=start
+    for order, row in enumerate(rows,start):
+        row=dict(row);seen=order+1
         if scene is not None and scene != row['scene']:
             reduce()
         scene = row['scene']
@@ -134,6 +137,10 @@ def select(rows, maximum, *, vector_reader=None, quality_reader=None):
             pool.append(entry)
         if len(pool) >= 2 * maximum:
             reduce()
+    if state is not None:
+        # Preserve the pre-finalization pool, every reserve and its exact vote graph.
+        # A later scene must see the same boundary reduction as a cold traversal.
+        state.update(pool=list(pool),scene=scene,reserves=reserves,count=seen)
     reduce()
     return [(row['id'], sample) for _, row, sample, _, _ in sorted(pool, key=lambda item: item[0])]
 

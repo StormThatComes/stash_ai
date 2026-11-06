@@ -40,8 +40,8 @@ class IdentityView:
             tuple((self.promotion or {}).get('source_reference_ids',()))))
 
 
-def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,
-              complete=False, minimum=None):
+def _catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,
+              complete=False, minimum=None,owner_filter=None):
     from .scan_heads import predicate as current_scan
     grouping = config.data['clustering']
     condition = '' if policy is None else 'AND c.policy=? AND c.status=\'accepted\' AND c.person=m.person '
@@ -54,6 +54,10 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         parameters.append(policy)
     if scan_policy is not None:
         parameters.append(scan_policy)
+    owner_clause=''
+    if owner_filter is not None:
+        owner_clause=' AND m.person=? '
+        parameters.append(owner_filter)
     rows = db.execute(
         'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,s.scene '
         'FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
@@ -62,7 +66,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND '+current_scan()+' AND ' + anchor_sql('o', grouping) +
-        ' AND ' + strict_sql() + ' ' + condition + scan_condition +
+        ' AND ' + strict_sql() + ' ' + condition + scan_condition + owner_clause +
         'ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', parameters)
     result, owner, slots, cover, scratch = [], None, [], [], 0
     scene_minimum=max(grouping['view_min_support'],config.data['recognition']['min_merge_support'])
@@ -73,9 +77,11 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         maximum=grouping['max_view_prototypes_per_person']
         for slot in supported_cohorts(slots,cover,minimum or grouping['view_min_support'],maximum,complete=complete):
             sample, medoid = slot.medoid()
-            usage.add(slot.examples, kind='Global view evidence')
-            result.append(IdentityView(Group(owner, (sample,), True, (medoid,)), slot.pose,
-                medoid, tuple(slot.observations), len(slot.cues), tuple(slot.examples),
+            from .paged_references import pack
+            examples=pack(slot.examples)
+            usage.add(examples, kind='Global view evidence')
+            result.append(IdentityView(Group(owner, pack([sample]), True, (medoid,)), slot.pose,
+                medoid, tuple(slot.observations), len(slot.cues), examples,
                 source_scenes=tuple(sorted(slot.scene_witnesses)),
                 scene_sources=tuple((scene,tuple(ids)) for scene,ids in sorted(slot.scene_witnesses.items())
                                     if len(ids)>=scene_minimum)[:2]))
@@ -92,6 +98,43 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
                 raise ResourceLimit('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()
     return tuple(result)
+
+
+def catalogue(db,config,scope,namespace,*,usage,policy=None,excluded_scenes=(),scan_policy=None,complete=False,minimum=None):
+    from .derived_cache import current,fingerprint
+    from .local_dependencies import available
+    from .dependencies import cached,version
+    from .config import digest
+    from .view_catalogue_cache import encode,decode
+    store=current()
+    options=dict(policy=policy,excluded_scenes=excluded_scenes,scan_policy=scan_policy,complete=complete,minimum=minimum)
+    if store is None or not available(db):return _catalogue(db,config,scope,namespace,usage=usage,**options)
+    from .evidence_pixels import _active_aliases
+    active=_active_aliases.get()
+    if active is not None:active.get('__prepare_views__','__prepare_views__')
+    selected=[]
+    from .scan_heads import predicate
+    for (owner,) in db.execute('SELECT id FROM people WHERE scope=? AND namespace=? AND NOT EXISTS '
+            '(SELECT 1 FROM identity_merges WHERE source=people.id) AND EXISTS '
+            '(SELECT 1 FROM members WHERE person=people.id) ORDER BY id',(scope,namespace)):
+        inputs=('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,o.rejected,'
+                "s.scene,s.scope,s.namespace,s.policy_sha,s.status,(SELECT representative FROM pixel_catalogue_aliases a WHERE a.scope=s.scope AND a.namespace=s.namespace AND a.fingerprint=json_extract(o.quality,'$.evidence_pixel_sha256')),"+strict_sql()+','+predicate()+
+                ' FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
+                'WHERE m.person=? ORDER BY o.id')
+        contract=digest(['global-views-v2',options,config.data['clustering'],config.data['recognition'],version(db,'heads')])
+        candidate_inputs=('SELECT c.id,c.policy,c.person,c.status,c.payload FROM candidates c JOIN observations o '
+            "ON o.id=CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,'$.observation') END JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY c.id")
+        signed=cached(db,'global-view-input',owner,contract,lambda:fingerprint(db,[(inputs,(owner,)),(candidate_inputs,(owner,))],contract),
+                      dependency='owner',dependency_key=owner)
+        key=digest([owner,signed,contract]);found=store.get('global-views',key)
+        if found is None:
+            views=_catalogue(db,config,scope,namespace,usage=usage,owner_filter=owner,**options)
+            store.put('global-views',key,encode(views))
+        else:
+            views=decode(found)
+            for view in views:usage.add(view.examples,kind='Cached global view evidence')
+        selected.extend(views)
+    return tuple(selected)
 
 
 def rank_person(ranked, entry):

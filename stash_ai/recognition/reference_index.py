@@ -18,6 +18,7 @@ class ReferenceIndex:
     def __init__(self, db, scope, namespace, config):
         self.db, self.scope, self.namespace = db, scope, namespace
         self.members, self.deltas, self.groups = {}, {}, {}
+        self.sampler=None
         self.role_dirty, self.owners = set(), {}
         self.incremental, self.scene_by_id = {}, {}
         from .reference_roles import index
@@ -34,12 +35,16 @@ class ReferenceIndex:
         cache=current()
         available=(cache.working-sum(cache.reservations.values()) if cache is not None and cache.working is not None
                    else config.data['execution']['rebuild_memory_bytes'])
-        self.enabled = total * 512 <= available
+        self.enabled = total * 512 + 524288 <= available
         if self.enabled and cache is not None:
-            cache.reserve(('reference-index',id(self)), total*512)
+            cache.reserve(('reference-index',id(self)), total*512+524288)
         if not self.enabled:
             count('reference_index_budget_fallbacks')
             return
+        import sqlite3
+        self.sampler=sqlite3.connect('')
+        self.sampler.execute('PRAGMA cache_size=-256')
+        self.sampler.execute('CREATE TABLE state(owner TEXT PRIMARY KEY,maximum INTEGER,payload BLOB)')
         rows = db.execute('SELECT o.id,o.quality,s.scope,s.namespace,s.scene,s.status,o.rejected FROM observations o '
             'JOIN scans s ON s.id=o.scan ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,'
             'o.seconds,o.geometry,o.embedding,o.id')
@@ -170,8 +175,14 @@ class ReferenceIndex:
                 from .reference_roles import strict_sql
                 # Full canonical refresh of changed owners: previous bounded
                 # representatives are not a sufficient summary for resampling.
-                rows = self.canonical_rows(person)
-                ids = tuple(identifier for identifier, _ in select(rows, policy['max_samples_per_person']))
+                import pickle
+                added=self.incremental.get(person)
+                saved=self.sampler.execute('SELECT maximum,payload FROM state WHERE owner=?',(person,)).fetchone()
+                state=pickle.loads(saved[1]) if added and saved and saved[0]==policy['max_samples_per_person'] else {}
+                rows = self.canonical_rows(person,ranks=added if state else None)
+                ids = tuple(identifier for identifier, _ in select(rows, policy['max_samples_per_person'],state=state))
+                self.sampler.execute('INSERT OR REPLACE INTO state VALUES (?,?,?)',
+                    (person,policy['max_samples_per_person'],pickle.dumps(state,protocol=5)))
             previous = self.groups.get(person)
             if previous is None or previous[0] != ids:
                 refreshed += 1
@@ -204,7 +215,7 @@ class ReferenceIndex:
         self.cached = identity, tuple(result), usage.bytes, usage.samples
         return result
 
-    def canonical_rows(self, person):
+    def canonical_rows(self, person, *, ranks=None):
         """Use indexed membership ranks and the shared immutable row cache.
 
         Recompute selection from every member, without an SQL sort or correlated
@@ -212,7 +223,7 @@ class ReferenceIndex:
         """
         from .run_cache import current, MISSING
         cache = current()
-        ranks = self.members[person]
+        ranks = self.members[person] if ranks is None else ranks
         for offset in range(0, len(ranks), 256):
             ids = [self.order[rank] for rank in ranks[offset:offset+256]]
             values, missing = {}, []
@@ -235,6 +246,7 @@ class ReferenceIndex:
             yield from (values[identifier] for identifier in ids)
 
     def close(self):
+        if self.sampler is not None:self.sampler.close();self.sampler=None
         if not self.enabled:
             return
         for name in ('insert', 'delete', 'update', 'people', 'alias',
