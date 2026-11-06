@@ -35,3 +35,22 @@ def copy_rows(source,target,rows):
     if not keys:return
     target.executemany('INSERT OR IGNORE INTO evidence_thumbnails VALUES (?,?)',source.execute(
         'SELECT id,pixels FROM evidence_thumbnails WHERE id IN (SELECT value FROM json_each(?))',(encoded(sorted(keys)),)))
+
+
+def integrity(db, scope, namespace):
+    """Certified thumbnail contents, including missing references, for warm runs."""
+    from .dependencies import cached
+    from .config import digest
+    def compute():
+        h=hashlib.sha256()
+        for key,pixels in db.execute(
+            "SELECT DISTINCT json_extract(o.quality,'$.evidence_thumbnail_id'),t.pixels "
+            "FROM observations o JOIN scans s ON s.id=o.scan LEFT JOIN evidence_thumbnails t "
+            "ON t.id=json_extract(o.quality,'$.evidence_thumbnail_id') "
+            "WHERE s.scope=? AND s.namespace=? AND json_extract(o.quality,'$.evidence_thumbnail_id') IS NOT NULL "
+            "ORDER BY 1", (scope,namespace)):
+            if pixels is None or hashlib.sha256(pixels).hexdigest()!=key:
+                raise ValueError('Missing or changed evidence thumbnail.')
+            h.update(key.encode())
+        return h.hexdigest()
+    return cached(db,'thumbnail-integrity',digest([scope,namespace]),'v1',compute)

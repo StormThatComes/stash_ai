@@ -121,10 +121,16 @@ def test_normal_rebuild_excludes_foreign_pixel_index_from_working_budget(tmp_pat
     config.data['clustering']['max_reference_bytes']=49152
     with FaceDatabase(config.database) as state:
         db=state.connection;rng=np.random.default_rng(42)
+        other=db.execute('SELECT o.scan FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? LIMIT 1',(people[1],)).fetchone()[0]
+        # Address-only witness indexes need more foreign rows to exceed the
+        # same budget. Keep the selected scene at eight observations.
+        sample=dict(db.execute('SELECT * FROM observations WHERE scan=? LIMIT 1',(other,)).fetchone())
+        for cue in range(8,64):
+            sample.update(id=f'foreign-witness-{cue}',cue=cue,seconds=float(cue))
+            db.execute('INSERT INTO observations ('+','.join(sample)+') VALUES ('+','.join('?' for _ in sample)+')',tuple(sample.values()))
         for i,row in enumerate(db.execute('SELECT id,quality FROM observations').fetchall()):
             metadata=json.loads(row['quality']);metadata.update(evidence_thumbnail=rng.integers(0,256,3072,dtype='uint8').tobytes().hex(),evidence_pixel_sha256=f'{i:064x}',evidence_aspect=1.)
             db.execute('UPDATE observations SET quality=? WHERE id=?',(encoded(metadata),row['id']))
-        other=db.execute('SELECT o.scan FROM observations o JOIN members m ON m.observation=o.id WHERE m.person=? LIMIT 1',(people[1],)).fetchone()[0]
         db.execute('UPDATE scans SET '+foreign+'=? WHERE id=?',('foreign',other))
         db.execute('UPDATE people SET '+foreign+'=? WHERE id=?',('foreign',people[1]));db.commit()
         with pytest.raises(ValueError,match='budget'):list(aliases(db,budget=49152))
