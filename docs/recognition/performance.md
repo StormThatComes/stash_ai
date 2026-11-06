@@ -570,3 +570,10 @@ uses the bounded scan CPU stage, without moving model or SQLite ownership.
 The global reference index is allocated only on first use after independent local
 matching. Canonical observation UUIDs, membership ranks, flags and interned owners
 use packed storage; insufficient working memory retains the SQL fallback.
+
+Body appearance support uses an exact Hamming-radius tree. It keeps the first
+inserted representative, including strict distance boundaries, so repeated pixels
+and cue votes retain their previous meaning. Co-presence rival checks use bounded
+score screening and stop only after an unchanged scalar score proves separation.
+The optional hybrid cue index spills to budgeted scratch SQLite when its RAM
+allowance is exhausted; exhausted scratch falls back to the original exact SQL.

@@ -45,25 +45,17 @@ def copresence(db,pairs,config):
     return result
 
 
-def cue_index(db,owned,budget):
-    """An overbudget optional index falls back to exact batched SQL."""
-    if db is None or len(owned)<64:return None
-    by_owner={}
-    used=0
-    rows=db.execute('SELECT m.person,o.scan,o.cue FROM members m JOIN observations o ON m.observation=o.id '
-                    'WHERE o.rejected IS NULL GROUP BY m.person,o.scan,o.cue')
-    try:
-        for owner,scan,cue in rows:
-            if owner not in owned:continue
-            used+=256+len(scan)*4
-            if used>budget:return None
-            by_owner.setdefault(owner,set()).add((scan,cue))
-    finally:
-        rows.close()
-    return by_owner
+from .cue_presence import build as cue_index
 
 
 def proofs(db,owned,nominations,config,*,compact=False):
+    cues=cue_index(db,owned,min(16*1024**2,config.data['sapiensid']['execution']['reference_bytes']//16))
+    try:yield from _proofs(db,owned,nominations,config,compact=compact,cues=cues)
+    finally:
+        if cues is not None:cues.close()
+
+
+def _proofs(db,owned,nominations,config,*,compact=False,cues=None):
     pool=current();settings=dict(config.data['sapiensid']['matching'])
     threshold=config.data['recognition']['cooccurrence_merge_threshold']
     from .run_cache import current as current_cache,MISSING
@@ -106,7 +98,6 @@ def proofs(db,owned,nominations,config,*,compact=False):
         else:
             with closing(pool.ordered(exact,jobs),name='close hybrid proof workers') as stream:
                 for key,job,result in zip(keys,jobs,stream):yield *key,remember(job.payload,result.value)
-    cues=cue_index(db,owned,min(16*1024**2,config.data['sapiensid']['execution']['reference_bytes']//16))
     pending=timed_stream('hybrid_nomination',nominations)
     start=0
     while block:=list(islice(pending,64)):
@@ -122,8 +113,7 @@ def proofs(db,owned,nominations,config,*,compact=False):
                     remaining.append((a,b))
             block=remaining
         if not block:continue
-        overlap=(block if cues is None else [(a,b) for a,b in block
-                 if not cues.get(a,set()).isdisjoint(cues.get(b,set()))])
+        overlap=block if cues is None else cues.overlap(block)
         present=copresence(db,overlap,config) if overlap else {}
         count('hybrid_copresence_pairs',len(overlap))
         count('hybrid_exact_pairs',len(block))
