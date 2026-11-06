@@ -261,6 +261,7 @@ HELP = {
     'execution.portraits.prefetch': 'Prepare bounded VTT portrait sources and quality measurements ahead of use.',
     'storage': 'Recognition database, retained images and retention policy.',
     'storage.database': 'Recognition SQLite database path, relative to this YAML.',
+    'storage.crop_policy': 'all retains every eligible crop; selected skips image encoding until portrait/report demand. Reports need --restore-crops for omitted images. Values: all, selected.',
     'storage.max_crop_bytes': 'Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit. Range: 1024..8388608.',
     'storage.retain_person_crops': 'Keep body crops for inspection/portraits, subject to storage.max_crop_bytes.',
     'storage.retention': 'Evidence pruning after successful recognition runs.',

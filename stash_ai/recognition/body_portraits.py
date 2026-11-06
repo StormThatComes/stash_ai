@@ -27,7 +27,7 @@ def score(quality):
             min(quality.get('width',0),quality.get('height',0)))
 
 
-def choose(database, config, scope, target):
+def choose(database, config, scope, target, *, crops=None):
     from PIL import Image
     from .portraits import policy_identity
     from .quality import encode_portrait
@@ -38,7 +38,7 @@ def choose(database, config, scope, target):
     for item in sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])):
         rows=db.execute("SELECT b.id,b.quality,b.geometry,b.seconds,m.role FROM body_observations b "
             "JOIN body_members m ON m.observation=b.id WHERE b.scan=? AND m.person=? "
-            "AND b.crop IS NOT NULL ORDER BY b.seconds,b.id",(item['scan'],target['person']))
+            "AND (b.crop IS NOT NULL OR ?=1) ORDER BY b.seconds,b.id",(item['scan'],target['person'],int(crops is not None)))
         for row in rows:
             if not eligible(db,config,target['person'],row['id']):continue
             quality=json.loads(row['quality']).get('quality',{})
@@ -47,6 +47,10 @@ def choose(database, config, scope, target):
             blob=db.execute('SELECT crop FROM body_observations WHERE id=?',(row['id'],)).fetchone()[0]
             from .cold_payloads import get
             blob=get(db,blob)
+            if blob is None and crops is not None:
+                try:blob=crops.body(row['id'])
+                except (ValueError,OSError):continue
+            if blob is None:continue
             details={}
             try:
                 with Image.open(BytesIO(blob)) as source,source.convert('RGB') as rgb:
@@ -80,13 +84,20 @@ def current_prior(database, prior, config, target):
 def choose_kind(database,client,config,scope,target,paths,backend_factory,decoder_factory,source_factory,**kwargs):
     from .portraits import choose as face_choose
     kind=config.data['portraits']['kind']
-    if kind=='person':return choose(database,config,scope,target)
+    from .demand_crops import Crops
+    from stash_ai.runtime.cleanup import closing
+    def body_choose():
+        if config.data['storage']['crop_policy']!='selected' or not config.data['sapiensid']['storage']['retain_person_crops']:
+            return choose(database,config,scope,target)
+        with closing(Crops(database.connection,config,client,source_factory)) as crops:
+            return choose(database,config,scope,target,crops=crops)
+    if kind=='person':return body_choose()
     if kind=='face':
         return face_choose(database,client,config,scope,target,paths,
                            backend_factory,decoder_factory,source_factory,**kwargs)
     for category in config.data['portraits']['auto_precedence']:
         if category=='pose':
-            winner=choose(database,config,scope,target)
+            winner=body_choose()
         else:
             winner=face_choose(database,client,config,scope,target,paths,
                 backend_factory,decoder_factory,source_factory,category=category,**kwargs)

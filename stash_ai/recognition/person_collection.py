@@ -17,6 +17,8 @@ class PersonCollector:
         self.deferred_bytes = 0
         self.pose_frames = []
         self.pose_bytes = 0
+        self.resume_rows=None
+        self.resume_bytes=self.resume_cues=0
 
     def _close_pose_frames(self):
         frames, self.pose_frames = self.pose_frames, []
@@ -53,14 +55,21 @@ class PersonCollector:
             return
         self._load()
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
-        with closing(frames,name='close person source frames') as stream:
-            with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
-                for index,cue,image in frames:
-                    with image:
-                        if index in missing:
-                            rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
-                            self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
-        self.flush()
+        self.resume_rows=[]
+        try:
+            with closing(frames,name='close person source frames') as stream:
+                with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
+                    for index,cue,image in frames:
+                        with image:
+                            if index in missing:
+                                rows=list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+                                self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
+            self.flush()
+        finally:
+            # Only sealed, completely inferred cues enter this buffer. Preserve
+            # them even when a later inference fails; never publish partial cues.
+            try:self._flush_resume(db)
+            finally:self.resume_rows=None
         from .person_crop_backfill import backfill
         backfill(db,scan,source,self.config)
 
@@ -111,7 +120,7 @@ class PersonCollector:
                         if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:
                             self._flush_pose()
                         return
-            return self._collect_frame(db,scan,index,image,rows=rows if fresh else None,seconds=seconds)
+            return self._collect_frame(db,scan,index,image,rows=rows,fresh=fresh,seconds=seconds)
         except BaseException:
             self.abort();raise
 
@@ -122,7 +131,7 @@ class PersonCollector:
                       for _, _, _, image, rows, _, _, _ in self.pose_frames]
             self.model.detect_many(frames)
             for db, scan, index, image, rows, seconds, fresh, _ in self.pose_frames:
-                self._collect_frame(db, scan, index, image, rows=rows if fresh else None, seconds=seconds)
+                self._collect_frame(db, scan, index, image, rows=rows,fresh=fresh, seconds=seconds)
         finally:
             self._close_pose_frames()
 
@@ -136,6 +145,12 @@ class PersonCollector:
         self.deferred_bytes=0
         return records
 
+    def _flush_resume(self,db):
+        if self.resume_rows:
+            with db:self.write_records(db,self.resume_rows)
+            self.resume_rows.clear()
+        self.resume_bytes=self.resume_cues=0
+
     def _write(self,db,rows):
         if self.deferred is not None:
             for row in rows:
@@ -143,6 +158,13 @@ class PersonCollector:
                 self.deferred_bytes+=(len(crop or b'')+getattr(vector,'nbytes',len(vector) if isinstance(vector,bytes) else 0)
                                       +len(str(metadata))+256)
                 self.deferred.append(row)
+        elif self.resume_rows is not None:
+            self.resume_rows.extend(rows);self.resume_cues+=1
+            self.resume_bytes+=sum(len(crop or b'')+getattr(vector,'nbytes',0)+len(str(metadata))+256
+                                   for _,metadata,vector,crop in rows)
+            if (self.resume_cues>=self.config.data['execution']['checkpoint_cues'] or
+                    self.resume_bytes>=self.config.data['execution']['scan_queue_bytes']//4):
+                self._flush_resume(db)
         else:
             with db:
                 self.write_records(db,rows)
@@ -151,9 +173,8 @@ class PersonCollector:
         from .body_observations import save_records
         save_records(db,self.config,rows)
 
-    def _collect_frame(self,db,scan,index,image,*,rows=None,seconds=0.):
+    def _collect_frame(self,db,scan,index,image,*,rows=None,fresh=False,seconds=0.):
         if not self.config.data['sapiensid']['enabled']:return
-        fresh=rows is not None
         from .body_observations import enabled,contract as body_contract,repair_projections
         if enabled(self.config) and not fresh and db.execute(
                 'SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
@@ -161,7 +182,7 @@ class PersonCollector:
             with db:repair_projections(db,self.config,scan,cue=index)
             return
         self._load();expected=contract(self.config)
-        if rows is None:rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+        if rows is None:rows=list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
@@ -190,7 +211,7 @@ class PersonCollector:
             vector=crop=None
             if metadata['identity_rejection'] is None:
                 eligible.append((len(pending),face))
-                if self.config.data['sapiensid']['storage']['retain_person_crops']:
+                if self.config.data['sapiensid']['storage']['retain_person_crops'] and self.config.data['storage']['crop_policy']=='all':
                     with image.crop(metadata['person']['bounds']) as person:
                         output=BytesIO();person.save(output,format='PNG')
                         if output.tell()<=self.config.data['storage']['max_crop_bytes']:
@@ -244,7 +265,7 @@ def _audit_prepared(image,face,details,prepared,path):
                 normalized_keypoints=normalized_points,**annotations)
 
 
-def retained_report(db,observation,config,directory,name,*,geometry):
+def retained_report(db,observation,config,directory,name,*,geometry,crops=None):
     from .person_signal import read
     from .identity_report import _image
     from .retained_annotations import export as annotate
@@ -253,6 +274,11 @@ def retained_report(db,observation,config,directory,name,*,geometry):
     if row is None:
         return dict(status='missing_current_evidence',contract=expected)
     metadata=json.loads(row['metadata'])
+    if row['crop'] is None and crops is not None:
+        from .body_observations import contract as body_contract
+        source=db.execute('SELECT id FROM body_observations WHERE face=? AND contract=? ORDER BY id LIMIT 1',(observation,body_contract(config))).fetchone()
+        if source:
+            row=dict(row);row['crop']=crops.body(source[0])
     from .person_anchor import pixel_gate
     def annotations(rgb,path):
         person=metadata.get('person')

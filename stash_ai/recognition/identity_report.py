@@ -143,13 +143,15 @@ def _image(blob, path, *, annotate=None):
             **({'annotations': annotations} if annotations is not None else {})}
 
 
-def export(config, output_dir, *, identity_id=None, performer_id=None, scope=None):
+def export(config, output_dir, *, identity_id=None, performer_id=None, scope=None, client=None, source_factory=None):
     """Export every membership, never capped by the recognition reference limit."""
     directory = Path(output_dir).expanduser()
     if directory.exists():
         raise FileExistsError(f'Identity report output directory already exists: {directory}')
     policy, model_namespace = matching_policy(config), namespace(config)
-    with closing(_open_readonly(config.database)) as db:
+    from .demand_crops import Crops
+    from .media import SpriteInput
+    with closing(_open_readonly(config.database)) as db, closing(Crops(db,config,client,source_factory or SpriteInput)) as crops:
         requested, person = _select(db, model_namespace, identity_id, performer_id, scope)
         policies = admission_report.Policies(db, config, person['scope'], model_namespace)
         family, merges = _merges(db, person)
@@ -208,7 +210,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             name = f'scene-{int(scene)}_cue-{cue:06d}_{assignment["category"]}_face-{index:06d}.png'
             geometry = json.loads(row['geometry'])
             from .retained_annotations import export as annotate
-            image = _image(cold_crop(db,row['crop']), directory / name,
+            image = _image(cold_crop(db,row['crop']) if row['crop'] is not None or client is None else crops.face(row['id']), directory / name,
                            annotate=lambda rgb, path: annotate(rgb, path, geometry, quality.get('crop_bounds')))
             eligible = assignment['category'] != 'hybrid-attachment' and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
             reference_count += int(eligible)
@@ -227,7 +229,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'image': image,
             }
             from .person_collection import retained_report
-            sample['person_evidence'] = retained_report(db,row['id'],config,directory,name,geometry=geometry)
+            sample['person_evidence'] = retained_report(db,row['id'],config,directory,name,geometry=geometry,crops=crops if client else None)
             sample['admission'] = admission_report.face(quality, geometry, config, policies, row['detection_policy'])
             image['thresholds'] = admission_panel.export(image, sample['admission'], directory, name,
                 observation=row['id'], role=assignment['role'], rejection=row['rejected'])
@@ -241,7 +243,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             counts[image['status']] += 1
             counts[assignment['role']] += 1
         from .body_reports import export_members
-        for sample in export_members(db,config,person,directory,policies=policies):
+        for sample in export_members(db,config,person,directory,policies=policies,crops=crops):
             report['samples'].append(sample)
             counts[sample['image']['status']]+=1
             counts[sample['assignment']['role']]+=1
@@ -257,8 +259,14 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
 
 
 def execute(args, config):
-    result = export(config, args.output_dir, identity_id=args.identity_id,
-                    performer_id=args.performer_id, scope=args.scope)
+    from contextlib import nullcontext
+    import os
+    from .stash import RecognitionStash
+    client=(RecognitionStash(url=os.getenv('STASH_URL','http://localhost:9999'),api_key=os.getenv('STASH_API_KEY',''))
+            if getattr(args,'restore_crops',False) else None)
+    with closing(client) if client is not None else nullcontext():
+        result = export(config, args.output_dir, identity_id=args.identity_id,
+                        performer_id=args.performer_id, scope=args.scope,client=client)
     summary = result['summary']
     print(f'Identity report written: {Path(args.output_dir).expanduser() / "manifest.json"} '
           f'({summary["pngs_exported"]}/{summary["members"]} sample PNGs)')

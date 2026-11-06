@@ -21,7 +21,7 @@ class PreparedCollector:
         with image.crop(bounds) as crop:
             prepared=prepare_person_input(crop,points)
             encoded=None;omitted=False
-            if self.config.data['sapiensid']['storage']['retain_person_crops']:
+            if self.config.data['sapiensid']['storage']['retain_person_crops'] and self.config.data['storage']['crop_policy']=='all':
                 output=BytesIO();crop.save(output,format='PNG')
                 if output.tell()<=self.config.data['storage']['max_crop_bytes']:encoded=output.getvalue()
                 else:omitted=True

@@ -126,7 +126,7 @@ def rejection(quality, policy):
 
 
 @pipeline_stage('crop_encoding')
-def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
+def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None, retain=True):
     x, y, width, height = detection.box
     bounds = (max(0, int(x - width * margin)), max(0, int(y - height * margin)),
               min(image.width, math.ceil(x + width * (1 + margin))),
@@ -139,7 +139,7 @@ def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
             with rgb.resize((32, 32)) as thumbnail:
                 details['evidence_thumbnail'] = thumbnail.tobytes().hex()
             details['evidence_aspect'] = rgb.width / rgb.height
-        data = encode_portrait(rgb, {'jpeg_quality': 90}, limit=limit, details=details)
+        data = encode_portrait(rgb, {'jpeg_quality': 90}, limit=limit, details=details) if retain else None
     return data, list(bounds)
 
 

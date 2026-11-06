@@ -231,6 +231,7 @@ def parser():
     selector = identity.add_mutually_exclusive_group(required=True)
     selector.add_argument('--identity-id', help='Internal face identity ID, as shown by recognition report.')
     selector.add_argument('--performer-id', type=stash_id, help='Stash performer ID linked to the identity.')
+    identity.add_argument('--restore-crops', action='store_true', help='Read verified VTT from Stash for omitted image crops; never rerun inference.')
     identity.add_argument('--output-dir', type=Path, required=True,
         help='New local directory for all retained face PNGs and manifest.json.')
     identity.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer namespace.')

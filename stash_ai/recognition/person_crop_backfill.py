@@ -27,7 +27,7 @@ def rows(db,scan,config,cue=None):
 
 
 def backfill(db,scan,source,config):
-    if not config.data['sapiensid']['storage']['retain_person_crops']:return
+    if not config.data['sapiensid']['storage']['retain_person_crops'] or config.data['storage']['crop_policy']=='selected':return
     cues=sorted({row['cue'] for _,row in rows(db,scan,config)})
     if not cues:return
     frames=source.frames_indices(cues) if hasattr(source,'frames_indices') else source.frames(min(cues))

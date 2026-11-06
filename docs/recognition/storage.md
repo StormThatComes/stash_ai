@@ -260,3 +260,25 @@ Rebuilt durable candidates share policy and resource-admission documents in
 `decision_contexts`. Reports expand the original document, and cache validation
 compares the original limits. Schema migration creates the access paths without
 rewriting all retained image data or starting a full VACUUM.
+
+For libraries with millions of detections, `storage.crop_policy: selected` skips
+JPEG/PNG encoding during collection while retaining the same embeddings,
+geometry, raw pixel signatures and duplicate-evidence thumbnails. The default
+`all` preserves fully offline image reports. Portrait selection can reconstruct
+an omitted body crop from the verified VTT source without loading a model.
+Switching back to `all` backfills missing crops when a scene is reused.
+
+To reconstruct omitted images only for one requested identity report:
+
+```powershell
+python stash_ai.py recognition report-identity --performer-id 123 --output-dir report-123 --restore-crops
+```
+
+This flag reads the configured Stash instance. The report still leaves SQLite
+unchanged; source scope, VTT fingerprint, cue and retained pixel signatures must
+match. Without the flag, reports remain offline and mark omitted crops missing.
+A changed or unavailable source cannot substitute new pixels for old evidence.
+
+Supplementary collection checkpoints completed cues together using
+`execution.scan.checkpoint_cues` and the scan queue byte budget. If a later cue
+fails, only earlier completely inferred cues are committed and reused on retry.
