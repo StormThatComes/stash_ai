@@ -88,7 +88,7 @@ _GROUPS = (
 
     ('execution.models', 'models', 'directory download_missing'),
     ('execution.gpu', 'models', 'device'),
-    ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram sequential_scene_batch_size'),
+    ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram sequential_scene_batch_size rfdetr_precision vitpose_precision'),
     ('execution.scan', 'execution',
      'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_bytes=scan_queue_bytes '
      'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_bytes '

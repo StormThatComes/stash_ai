@@ -23,6 +23,9 @@ def assets(config):
 
 
 def load(config, device):
+    from .inference_precision import validate
+    precision=config.data['execution'].get('vitpose_precision','fp32')
+    validate(device,precision)
     # Transformers imports these conditionally, then uses them unconditionally
     # during affine crops/heatmap decoding. Check before downloading any assets.
     try:
@@ -51,13 +54,16 @@ def load(config, device):
     model = model.float().to(device).eval()
     settings = config.data['sapiensid']['pose']
     return ViTPoseLarge(model, processor, device=device,
-                        batch_size=settings.get('vitpose_batch_size', settings['batch_size']))
+                        batch_size=settings.get('vitpose_batch_size', settings['batch_size']),precision=precision)
 
 
 class ViTPoseLarge:
     """Preserve box order and image coordinates; bound work by people per batch."""
 
-    def __init__(self, model, processor, *, device, batch_size):
+    def __init__(self, model, processor, *, device, batch_size,precision='fp32'):
+        from .inference_precision import validate
+        validate(device,precision)
+        self.precision=precision
         self.model, self.processor = model, processor
         self.device, self.batch_size = device, batch_size
         self._preparer=self._decoder=None
@@ -113,7 +119,10 @@ class ViTPoseLarge:
                         preparing=self._preparer.submit(prepare,following)
                     inputs=inputs.to(self.device)
                     dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
-                    outputs = self.model(**inputs,dataset_index=dataset_index)
+                    from .inference_precision import autocast
+                    with autocast(self.device,self.precision):
+                        outputs = self.model(**inputs,dataset_index=dataset_index)
+                    if self.precision!='fp32':outputs=SimpleNamespace(heatmaps=outputs.heatmaps.float())
                     if decoder is None:
                         apply(batch,self._decode(outputs,boxes,len(batch)))
                     else:

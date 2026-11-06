@@ -11,9 +11,11 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 RECOGNITION_MATRIX = (
-    {'os': 'ubuntu-latest', 'suite': 'models'},
-    {'os': 'windows-latest', 'suite': 'core'},
-    {'os': 'windows-latest', 'suite': 'video'},
+    {'os': 'ubuntu-latest', 'suite': 'models', 'shard': 1},
+    {'os': 'windows-latest', 'suite': 'core', 'shard': 1},
+    {'os': 'windows-latest', 'suite': 'core', 'shard': 2},
+    {'os': 'windows-latest', 'suite': 'video', 'shard': 1},
+    {'os': 'windows-latest', 'suite': 'video', 'shard': 2},
 )
 # These modules use the numeric/replay contracts exercised by the full Linux suite.
 # Unlisted recognition modules also run both Windows lifecycle groups and model smoke.
@@ -30,7 +32,7 @@ def full_plan(reason):
 
 
 def plan(selected, reasons):
-    matrix = [dict(row, smoke='models' in selected) for row in RECOGNITION_MATRIX
+    matrix = [dict(row, smoke='models' in selected and row['shard'] == 1) for row in RECOGNITION_MATRIX
               if row['suite'] in selected]
     return dict(pytest='pytest' in selected, updater='updater' in selected,
                 dependencies='dependencies' in selected, recognition=bool(matrix),
@@ -71,8 +73,8 @@ def test_dependencies(paths, root):
 def select_jobs(changes, root=ROOT):
     if not changes:
         return full_plan('Empty PR diff; run all checks')
-    windows = {row['suite']: test_dependencies((root / '.github/ci' / f"windows-{row['suite']}.txt").read_text().splitlines(), root)
-               for row in RECOGNITION_MATRIX if row['os'] == 'windows-latest'}
+    windows = {suite: test_dependencies((root / '.github/ci' / f"windows-{suite}.txt").read_text().splitlines(), root)
+               for suite in {row['suite'] for row in RECOGNITION_MATRIX if row['os'] == 'windows-latest'}}
     model_tests = test_dependencies(['tests/test_recognition_model_smoke.py'], root)
     solver_tests = test_dependencies(['tests/test_recognition_solver_concurrency.py'], root)
     selected, reasons = set(), set()
@@ -177,7 +179,7 @@ def main():
         for key in ('pytest', 'updater', 'dependencies'):
             summary.write(f'- {key} — {"run" if result[key] else "skip"}\n')
         for row in result['matrix']['include']:
-            summary.write(f'- recognition CPU — {row["os"]}, {row["suite"]}\n')
+            summary.write(f'- recognition CPU — {row["os"]}, {row["suite"]}, shard {row["shard"]}\n')
         summary.write('\n' + '\n'.join(result['reasons']) + '\n')
 
 

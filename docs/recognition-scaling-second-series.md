@@ -93,3 +93,15 @@ RF-DETR transfers equal-sized input frames together and copies only person logit
 to CPU, after validating every output class for nonfinite values.
 Validation: 145 inference/config/lifecycle tests passed, 1 optional dependency test
 skipped. Scheduling tests simulate device ownership; no real CUDA speedup measured.
+
+## Optional mixed precision
+
+`execution.gpu.rfdetr_precision` and `vitpose_precision` independently select fp32,
+fp16 or bf16. Defaults remain fp32. Reduced precision requires its corresponding
+backend and an available CUDA device; unsupported bf16 is rejected explicitly.
+Forward autocast changes activations while weights remain float32, and output
+geometry/decoding returns to float32. Non-default precision is part of retained
+body/person evidence contracts; historical fp32 fingerprints remain unchanged.
+Validation: 108 model/config/inference tests plus 7 precision contract/admission
+checks passed on CPU. No real CUDA throughput or detection-quality calibration
+was available; enable reduced precision only after comparing detection audits.

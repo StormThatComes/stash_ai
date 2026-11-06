@@ -71,19 +71,28 @@ def test_inconclusive_certificate_cannot_hide_original_outlier_or_threshold_edge
     assert not scores.certifies(query,[sample],.85)
 
 
-def test_disk_mode_budget_is_enforced_before_next_dot_and_reports_completed_work(tmp_path):
+@pytest.mark.parametrize('threshold', [.8, .999])
+def test_disk_mode_budget_is_enforced_before_next_dot_and_reports_completed_work(tmp_path, threshold):
     from stash_ai.recognition.disk_body_modes import Records,ComparisonBudget
     from types import SimpleNamespace
     config=configuration(tmp_path);config.data['sapiensid']['execution']['max_witness_comparisons']=1
+    # The loose threshold is certified without scalar witness comparisons. The
+    # tight one requires exact dots even though all ten vectors are compatible.
+    config.data['sapiensid']['matching']['person_threshold']=threshold
     progress=[];budget=ComparisonBudget(config,SimpleNamespace(advance=lambda:progress.append(1)))
     spool=Records();directory=spool.path
     try:
         for i in range(10):
             vector=np.zeros(4096,dtype='<f4');vector[:2]=[math.cos(i*.001),math.sin(i*.001)]
             spool.add(dict(id=str(i),scan='s',seconds=float(i),quality='{}',embedding=vector.tobytes()))
-        with pytest.raises(ValueError,match='max_witness_comparisons'):
-            spool.modes(config,budget)
-        assert budget.count==len(progress)==1
+        if threshold == .8:
+            modes,support=spool.modes(config,budget)
+            assert len(modes)==1 and support==10 and len(modes[0])==10
+            assert budget.count==len(progress)==0
+        else:
+            with pytest.raises(ValueError,match='max_witness_comparisons'):
+                spool.modes(config,budget)
+            assert budget.count==len(progress)==1
     finally:spool.close()
     assert not directory.exists()
 
@@ -93,6 +102,9 @@ def test_disk_mode_comparison_budget_is_shared_across_owners(tmp_path):
     from stash_ai.recognition.hybrid_references import catalogue_rows
     config,people=prepared(tmp_path)
     config.data['sapiensid']['execution']['max_witness_comparisons']=4
+    # Force the exact path: otherwise the complete-link certificate correctly
+    # accepts these coherent banks without consuming the comparison budget.
+    config.data['sapiensid']['matching']['person_threshold']=.999
     with FaceDatabase(config.database) as state:
         db=state.connection
         for person in people:

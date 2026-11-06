@@ -52,7 +52,7 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
+        'execution': {'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
                       'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'detector_batch_size': 1, 'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
@@ -228,6 +228,15 @@ def validate(data):
         raise ValueError('execution.rebuild_scratch_directory must be a path or null.')
     if data['execution']['rebuild_storage'] not in ('disk','memory'):
         raise ValueError('execution.rebuild_storage must be disk or memory.')
+    for name,active in (('rfdetr_precision',data['sapiensid']['pose']['detector']=='rfdetr_xl'),
+                        ('vitpose_precision',data['sapiensid']['pose']['backend']=='vitpose_plus_large')):
+        value=data['execution'][name]
+        if value not in ('fp32','fp16','bf16'):
+            raise ValueError('execution.'+name+' must be fp32, fp16 or bf16.')
+        if value!='fp32' and not active:
+            raise ValueError('execution.'+name+' requires its corresponding RF-DETR/ViTPose backend.')
+        if value!='fp32' and data['models']['device']=='cpu':
+            raise ValueError('execution.'+name+' requires CUDA; use fp32 with CPU.')
     if data['execution']['gpu_model_policy'] not in ('phase', 'sequential', 'retain'):
         raise ValueError('execution.gpu_model_policy must be phase, sequential or retain.')
     if type(data['execution']['log_vram']) is not bool:
