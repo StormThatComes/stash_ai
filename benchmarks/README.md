@@ -256,3 +256,17 @@ Hybrid SapiensID nomination: `python -m benchmarks.benchmark_hybrid_lookup
 witness means and blocked centroid means at 4096 dimensions, with one BLAS
 thread. See `results/hybrid_lookup_2026-10-25.json`; this excludes exact merge
 gates, model inference, media and SQLite and is not an accuracy benchmark.
+
+### Recognition scale III: manual performance runs
+
+`benchmark_recognition_retained` now preserves face quality, independent body
+observations, shared person evidence and body membership. It excludes all crops,
+uses private disk databases, and checks both face and body decisions. The source
+is read-only. Start with a small explicit scene selection and `--workers 1 2`;
+100/1,000/10,000-scene runs require deliberate local invocation with sufficient
+SSD space. No large benchmark is added to CI, including main-branch CI.
+
+CI exercises only tiny semantic/resource fixtures. It asserts outcomes, bounded
+storage and transaction behavior, never wall-clock speed. No new GPU/model
+smoke or downloaded asset is required. Production timings need a separate run on
+the intended hardware; synthetic tests do not predict GPU throughput.

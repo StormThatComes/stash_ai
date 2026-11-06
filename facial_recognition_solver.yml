@@ -496,6 +496,12 @@ execution:
     # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
   rebuild:
     # Identity rebuild workers, checkpoints and working memory.
+    disk_total_bytes: 322122547200
+    # Maximum combined recognition database, caches, checkpoints and scratch bytes per volume; 0 disables.
+    # Range: 0..10995116277760.
+    disk_free_bytes: 1073741824
+    # Free disk reserve per volume, also covering unattributed SQLite sort files and other applications; 0
+    # disables. Range: 0..1099511627776.
     sqlite_cache_bytes: 67108864
     # SQLite page-cache ceiling per replay/reference store, additionally constrained by the shared RAM budget.
     # Range: 32768..1073741824.

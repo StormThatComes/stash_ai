@@ -18,7 +18,7 @@ from .pose_policy import query_sql
 from .reference_roles import observation_sql
 
 
-def _recover(database, selected, config, *, births=()):
+def _recover(database, selected, config, claims, *, births=()):
     if not selected:return 0
     db=database.connection
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
@@ -35,14 +35,13 @@ def _recover(database, selected, config, *, births=()):
     index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
     from .hybrid_query_observer import query_observer, query_decision
     observe=query_observer(db,banks,config,births,selected)
-    policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
+    policy=matching_policy(config)
     rows=db.execute(f'SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,{body_embedding} AS body,e.metadata AS person_metadata,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
         " LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? AND e.status='ready' "
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
         'AND o.scan IN (SELECT value FROM json_each(?)) AND '+query_sql('o',config.data['clustering'])+
         ' ORDER BY o.scan,o.cue,o.id',(contract(config),policy,encoded(list(births)),encoded([s['scan'] for s in selected])))
-    used=0;claim_rows=[]
     source_counts=dict(db.execute('SELECT person,COUNT(*) FROM members WHERE person IN '
         '(SELECT value FROM json_each(?)) GROUP BY person',(encoded(list(births)),)))
     def queries():
@@ -98,59 +97,37 @@ def _recover(database, selected, config, *, births=()):
         from .independent_evidence import body_vote
         vote=(body_vote(row) if signal=='face_and_body' else
               {k:row[k] for k in ('scan','seconds','quality')})
-        used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
-        if used>config.data['sapiensid']['execution']['plan_bytes']:
-            raise ResourceLimit('SapiensID query plan_bytes budget exceeded.')
-        claim_rows.append(dict(row,person=owner))
-        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],vote))
+        claim=(row['candidate'],row['id'],owner,proof,row['prior_owner'],vote)
+        family=((owner,'face') if signal=='face' else
+                (owner,'face_and_body',tuple(proof['core_observations']),proof['body_mode']))
+        claims.add(row,claim,family)
     # Resolve against every new claim and existing accepted face in each cue,
     # even when the winning queries used different original merged cores.
     from .decision_resolution import conflicting_claims
-    pending={r['id'] for r in claim_rows}
-    for scan,cue in sorted({(r['scan'],r['cue']) for r in claim_rows}):
+    for scan,cue in claims.db.execute('SELECT scan,cue FROM cues ORDER BY scan,cue'):
         for row in db.execute('SELECT o.id,o.scan,o.cue,o.geometry,o.dimensions,o.embedding,m.person '
                 'FROM observations o JOIN members m ON m.observation=o.id '
                 'WHERE o.scan=? AND o.cue=? AND o.rejected IS NULL',(scan,cue)):
-            if row['id'] not in pending:claim_rows.append(dict(row))
+            claims.conflict(row)
     threshold=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
-    blocked={r['id'] for r in conflicting_claims(sorted(claim_rows,key=lambda r:(r['person'],r['scan'],r['cue'],r['id'])),
-        threshold,deduplicate=config.data['clustering'].get('deduplicate_detections',False))}
-    claims=[c for c in claims if c[1] not in blocked]
+    for row in conflicting_claims(claims.db.execute('SELECT * FROM conflicts ORDER BY person,scan,cue,id'),
+            threshold,deduplicate=config.data['clustering'].get('deduplicate_detections',False)):
+        claims.db.execute('DELETE FROM claims WHERE observation=?',(row['id'],))
     accepted=0
-    birth_claims=defaultdict(list)
-    for claim in claims:
-        if claim[4] in births:birth_claims[claim[4]].append(claim)
-    admissible_births={source for source,items in birth_claims.items()
-        if len(items)==source_counts.get(source,0) and len({c[2] for c in items})==1}
     def family(claim):
         _,_,owner,proof,_,_=claim
         return ((owner,'face') if proof['signal']=='face' else
                 (owner,'face_and_body',tuple(proof['core_observations']),proof['body_mode']))
     def minimum(claim):
         return config.data['clustering']['auxiliary_min_support'] if claim[3]['signal']=='face' else settings['min_support']
-    active=[c for c in claims if c[4] not in births or c[4] in admissible_births]
-    # Birth reassignment remains all-or-nothing even when its face and body
-    # claims have different support requirements. Removing a birth's votes may
-    # invalidate other claims, so resolve the frozen support to a fixed point.
-    while True:
-        votes=defaultdict(Votes)
-        for claim in active:votes[family(claim)].add(claim[5])
-        supported=[c for c in active if len(votes[family(c)])>=minimum(c)]
-        birth_claims=defaultdict(list)
-        for claim in supported:
-            if claim[4] in births:birth_claims[claim[4]].append(claim)
-        complete={p for p,items in birth_claims.items() if len(items)==source_counts[p] and len({c[2] for c in items})==1}
-        reduced=[c for c in supported if c[4] not in births or c[4] in complete]
-        if len(reduced)==len(active):break
-        active=reduced
-    eligible={c[1] for c in active}
+    complete=claims.resolve(source_counts,minimum)
     with db:
-        for candidate,observation,owner,proof,prior,row in claims:
+        for candidate,observation,owner,proof,prior,row in claims.rows():
             if prior in births and prior not in complete:
                 if observe is not None:query_decision(observation,'birth','incomplete_birth_claim',owner=owner)
                 continue
-            support=len(votes[family((candidate,observation,owner,proof,prior,row))])
-            if observation not in eligible:
+            support=claims.support(family((candidate,observation,owner,proof,prior,row)))
+            if not claims.accepted(observation):
                 if observe is not None:query_decision(observation,'support',
                     'auxiliary_insufficient_support' if proof['signal']=='face' else 'query_support',
                     owner=owner,support=support)
@@ -170,8 +147,9 @@ def recover(database, selected, config, *, births=()):
     if not selected:return 0
     context=database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     if context is None:raise ValueError('Missing selected recognition scan.')
-    with alias_scope(database.connection,*context,budget=config.data['clustering']['max_reference_bytes']):
-        return _recover(database, selected, config, births=births)
+    from .query_claims import Claims
+    with alias_scope(database.connection,*context,budget=config.data['clustering']['max_reference_bytes']), Claims(config) as claims:
+        return _recover(database, selected, config, claims, births=births)
 
 
 def choose(choices,margin):

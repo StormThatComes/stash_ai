@@ -1,4 +1,4 @@
-"""Read-only retained-evidence input; cold/cached benchmark copies stay in RAM."""
+"""Read-only retained-evidence input; cold/cached benchmark copies use bounded disk storage."""
 import argparse
 from contextlib import closing, contextmanager
 from dataclasses import replace
@@ -59,6 +59,17 @@ def _ram(config):
     return db
 
 
+@contextmanager
+def _working(config):
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='recognition-benchmark-') as directory:
+        with closing(sqlite3.connect(Path(directory)/'evidence.sqlite3')) as db:
+            db.row_factory=sqlite3.Row
+            db.execute('PRAGMA cache_size=-32768')
+            db.execute('PRAGMA temp_store=FILE')
+            yield db
+
+
 def _selection(source, scenes, all_scenes, scope, namespace):
     if bool(scenes) == bool(all_scenes):
         raise ValueError('Choose scene IDs or all scenes explicitly.')
@@ -89,14 +100,14 @@ def _selection(source, scenes, all_scenes, scope, namespace):
 
 
 def _snapshot(source, seed, scope, namespace):
-    """Known schema/columns only. Do not read quality, crops, portraits or runs."""
+    """Preserve matching evidence and quality; never copy crops, portraits or runs."""
     seed.executescript(SCHEMA)
     owner = SimpleNamespace(connection=source)
     installation = FaceDatabase.installation.fget(owner)
     seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
     statements = {
         'scans': ('SELECT * FROM scans WHERE scope=? AND namespace=? ORDER BY rowid', (scope, namespace)),
-        'observations': ("SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'{}',o.rejected,"
+        'observations': ("SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,o.rejected,"
             'o.dimensions,o.embedding,NULL FROM observations o JOIN scans s ON s.id=o.scan '
             'WHERE s.scope=? AND s.namespace=? ORDER BY s.rowid,o.cue,o.id', (scope, namespace)),
         'people': ('SELECT * FROM people WHERE scope=? AND namespace=? ORDER BY created,id', (scope, namespace)),
@@ -107,6 +118,21 @@ def _snapshot(source, seed, scope, namespace):
         'identity_origins': ('SELECT o.* FROM identity_origins o JOIN people p ON p.id=o.person '
             'WHERE p.scope=? AND p.namespace=? ORDER BY o.sample_key', (scope, namespace)),
     }
+    statements.update({
+        'candidates': ('SELECT c.* FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+        'evidence_thumbnails': ('SELECT t.* FROM evidence_thumbnails t WHERE t.id IN '
+            "(SELECT json_extract(o.quality,'$.evidence_thumbnail_id') FROM observations o JOIN scans s ON s.id=o.scan "
+            'WHERE s.scope=? AND s.namespace=?)',(scope,namespace)),
+        'body_observations': ('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,NULL '
+            'FROM body_observations b JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+        'body_cues': ('SELECT b.* FROM body_cues b JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+        'person_evidence': ('SELECT e.observation,e.contract,e.status,e.metadata,e.embedding,NULL FROM person_evidence e '
+            'JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+        'body_members': ('SELECT m.* FROM body_members m JOIN body_observations b ON b.id=m.observation '
+            'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+        'body_origins': ('SELECT m.* FROM body_origins m JOIN body_observations b ON b.id=m.observation '
+            'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
+    })
     for table, (sql, args) in statements.items():
         rows = source.execute(sql, args)
         columns = len(rows.description)
@@ -115,13 +141,20 @@ def _snapshot(source, seed, scope, namespace):
     return installation
 
 
+def semantic_hash(db):
+    h=hashlib.sha256(state_hash(db).encode())
+    for table in ('body_members','body_origins'):
+        for row in db.execute(f'SELECT * FROM {table} ORDER BY observation'):_hash_row(h,row)
+    return h.hexdigest()
+
+
 def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
-        workers=(1, 8, 16, 20), repeats=1, database=None):
+        workers=(1, 2), repeats=1, database=None):
     if repeats < 1 or not workers or len(workers) != len(set(workers)):
         raise ValueError('Require positive repeats and distinct worker budgets.')
     namespace = namespace or model_namespace(config)
     started = time.perf_counter()
-    with closing(_ram(config)) as seed:
+    with _working(config) as seed:
         with closing(_open_readonly(database or config.database)) as source:
             # Validate via the existing read-only schema checker; never construct
             # FaceDatabase, acquire its writer lock or run orphan recovery.
@@ -130,7 +163,7 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
             scope, selected, skipped = _selection(source, scenes, all_scenes, scope, namespace)
             installation = _snapshot(source, seed, scope, namespace)
         input_hash = hashlib.sha256()
-        for table in ('scans', 'observations', 'people', 'members', 'identity_merges', 'identity_origins'):
+        for table in ('scans', 'observations', 'people', 'members', 'identity_merges', 'identity_origins', 'candidates', 'body_observations', 'body_cues', 'body_members', 'body_origins', 'person_evidence', 'evidence_thumbnails'):
             for row in seed.execute(f'SELECT * FROM {table} ORDER BY 1'):
                 _hash_row(input_hash, row)
         dimensions = [dict(dimensions=r[0], observations=r[1]) for r in seed.execute(
@@ -143,6 +176,7 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
                         selected_observations=selected_counts[0], selected_accepted_observations=selected_counts[1] or 0,
                         retained_embedding_bytes=seed.execute('SELECT COALESCE(SUM(length(embedding)),0) FROM observations').fetchone()[0],
                         retained_scans=seed.execute('SELECT COUNT(*) FROM scans').fetchone()[0],
+                        retained_body_observations=seed.execute('SELECT COUNT(*) FROM body_observations').fetchone()[0],
                         retained_observations=seed.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
                         historical_people=seed.execute('SELECT COUNT(*) FROM people').fetchone()[0], dimensions=dimensions,
                         config_sha256=digest(config.data))
@@ -154,7 +188,7 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
                 data['execution'].update(rebuild_workers=requested, profile_rebuild=True, rebuild_checkpoint_scenes=0)
                 validate(data)
                 trial_config = replace(config, data=data)
-                with closing(_ram(config)) as target:
+                with _working(config) as target:
                     seed.backup(target)
                     state = SimpleNamespace(connection=target, installation=installation)
                     for mode in ('cold', 'cached'):
@@ -164,9 +198,9 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
                             wall, used = time.perf_counter()-start, time.process_time()-cpu
                         trials.append(dict(requested_workers=requested, repeat=repeat, mode=mode,
                             wall_seconds=wall, process_cpu_seconds=used, memory=memory,
-                            semantic_sha256=state_hash(target), profile=state.last_rebuild_profile))
+                            semantic_sha256=semantic_hash(target), profile=state.last_rebuild_profile))
         return dict(format=1, scope='local-retained-evidence-rebuild-only', manifest=manifest,
-            source_read_only=True, working_storage='RAM', snapshot_seconds=snapshot_seconds,
+            source_read_only=True, working_storage='disk', snapshot_seconds=snapshot_seconds,
             environment=dict(python=platform.python_version(), numpy=np.__version__, platform=platform.platform(),
                 native_libraries=[{k: library.get(k) for k in ('internal_api', 'prefix', 'version')}
                                   for library in threadpool_info()],
@@ -184,7 +218,7 @@ def main():
     selection.add_argument('--all-scenes', action='store_true')
     parser.add_argument('--scope')
     parser.add_argument('--namespace')
-    parser.add_argument('--workers', type=int, nargs='+', default=[1, 8, 16, 20])
+    parser.add_argument('--workers', type=int, nargs='+', default=[1, 2])
     parser.add_argument('--repeats', type=int, default=1)
     args = parser.parse_args()
     try:
