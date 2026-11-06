@@ -7,6 +7,14 @@ import sqlite3
 import time
 
 
+class VerifiedBytes(bytes):
+    """Immutable bytes carrying the digest verified at this exact read boundary."""
+    def __new__(cls,body,sha=None):
+        value=super().__new__(cls,body)
+        value.sha256=sha if sha is not None else hashlib.sha256(body).hexdigest()
+        return value
+
+
 def strong_etag(value):
     return (isinstance(value,str) and len(value)<=4096 and len(value)>=2
             and value[0]==value[-1]=='"' and all(32<=ord(c)<127 for c in value))
@@ -43,7 +51,7 @@ class MediaCache:
                         or hashlib.sha256(body).hexdigest()!=sha):
                     db.execute('DELETE FROM media WHERE key=?',(self.key(url),));return None
                 db.execute('UPDATE media SET touched=? WHERE key=?',(time.time_ns(),self.key(url)))
-                return etag,body
+                return etag,VerifiedBytes(body,sha)
         except (sqlite3.Error,OSError):return None
 
     def put(self,url,etag,body):
@@ -63,7 +71,7 @@ class MediaCache:
                     if size+len(body)<=self.limit:break
                     db.execute('DELETE FROM media WHERE key=?',(old,));size-=length
                 db.execute('INSERT INTO media VALUES (?,?,?,?,?)',
-                    (key,etag,hashlib.sha256(body).hexdigest(),body,time.time_ns()))
+                    (key,etag,body.sha256 if isinstance(body,VerifiedBytes) else hashlib.sha256(body).hexdigest(),body,time.time_ns()))
         except (sqlite3.Error,OSError):pass # Recomputable transport optimization only.
 
     def discard(self,url):

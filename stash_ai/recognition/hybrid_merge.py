@@ -21,7 +21,8 @@ def signature(db,selected,config):
     if first is None:raise ValueError('Hybrid rebuild requires an existing scan.')
     scope,namespace=first
     h=hashlib.sha256(encoded(plain(["hybrid-v4",selected,matching_policy(config),config.data['sapiensid']['execution'],
-        config.data['clustering'],config.data['execution']])).encode())
+        config.data['clustering'],
+        {k:v for k,v in config.data['execution'].items() if k in ('rebuild_memory_bytes','replay_snapshot_bytes')}])).encode())
     from .pixel_storage import integrity
     h.update(integrity(db,scope,namespace).encode())
     queries=[
@@ -39,7 +40,7 @@ def signature(db,selected,config):
             'LEFT JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
             'WHERE s.scope=? AND s.namespace=? ORDER BY b.id'))
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
-    from .dependencies import cached, supported
+    from .dependencies import cached, supported, cached_many
     from .dependency_schema import validate_triggers, EXTRA_TRIGGERS, RAW_TRIGGERS
     installed={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
     cacheable=supported(db) and set(EXTRA_TRIGGERS)<=installed
@@ -56,12 +57,11 @@ def signature(db,selected,config):
         h.update(name.encode())
         if name in ('observations','person'):
             before,order=query.rsplit(' ORDER BY ',1)
-            for scan in scans:
-                compute=lambda:rows_digest(before+' AND o.scan=? ORDER BY '+order,(scope,namespace,scan))
-                dependency='raw-'+name if set(RAW_TRIGGERS)<=installed else 'scan'
-                value=(cached(db,'hybrid-'+name,scan,'v3-'+dependency,compute,dependency=dependency,dependency_key=scan,checked=True)
-                       if cacheable else compute())
-                h.update(encoded([scan,value]).encode())
+            dependency='raw-'+name if set(RAW_TRIGGERS)<=installed else 'scan'
+            compute=lambda scan:rows_digest(before+' AND o.scan=? ORDER BY '+order,(scope,namespace,scan))
+            values=(cached_many(db,'hybrid-'+name,scans,'v3-'+dependency,compute,dependency=dependency)
+                    if cacheable else {scan:compute(scan) for scan in scans})
+            for scan in scans:h.update(encoded([scan,values[scan]]).encode())
         else:
             compute=lambda:rows_digest(query,(scope,namespace))
             value=(cached(db,'hybrid-'+name,digest([scope,namespace]),'v3',compute,checked=True)

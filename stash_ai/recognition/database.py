@@ -182,7 +182,8 @@ class FaceDatabase(AbstractContextManager):
                 self.lock = acquire_writer_lock(self.path)
             except RuntimeError as error:
                 raise RuntimeError('Another recognition writer owns this SQLite database.') from error
-            self.connection = sqlite3.connect(self.path, timeout=30)
+            from .dependency_schema import AuditedConnection
+            self.connection = sqlite3.connect(self.path, timeout=30, factory=AuditedConnection)
             self._sqlite_connection = self.connection
             self.connection.row_factory = sqlite3.Row
             self.connection.execute('PRAGMA foreign_keys=ON')
