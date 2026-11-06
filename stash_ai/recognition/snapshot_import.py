@@ -11,8 +11,11 @@ def bulk(target):
         for name, _ in triggers:
             target.execute('DROP TRIGGER main."'+name.replace('"', '""')+'"')
         yield
-        for _, sql in triggers:
-            target.execute(sql)
+        for name, sql in triggers:
+            # A replay may shadow observations with a TEMP vector-source view.
+            # Bind restored triggers to the trusted main schema explicitly.
+            target.execute(sql.replace('CREATE TRIGGER '+name,
+                'CREATE TRIGGER main.'+name, 1))
         # Fresh private generations have no inherited fingerprint consumers.
         target.execute('DELETE FROM evidence_fingerprints')
         target.execute('RELEASE snapshot_import')

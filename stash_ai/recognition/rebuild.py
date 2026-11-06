@@ -86,11 +86,18 @@ def _apply_members(db, replay, mapping, changed=None):
     rows = replay.execute('SELECT m.observation,m.person,k.sample_key FROM members m '
                           'JOIN sample_keys k ON k.observation=m.observation')
     for batch in _batches(rows):
-        for row in batch:
-            updated=db.execute('INSERT INTO members VALUES (?,?) ON CONFLICT(observation) DO UPDATE SET person=excluded.person '
-                'WHERE members.person IS NOT excluded.person',(row['observation'],mapping[row['person']])).rowcount
-            if updated and changed is not None:
-                changed.add(db.execute('SELECT s.scene FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',(row['observation'],)).fetchone()[0])
+        proposed = encoded([[r['observation'], mapping[r['person']]] for r in batch])
+        source = ("SELECT json_extract(value,'$[0]') AS observation, "
+                  "json_extract(value,'$[1]') AS person FROM json_each(?)")
+        if changed is not None:
+            changed.update(row[0] for row in db.execute(
+                'WITH proposed AS ('+source+') SELECT DISTINCT s.scene FROM proposed p '
+                'JOIN observations o ON o.id=p.observation JOIN scans s ON s.id=o.scan '
+                'LEFT JOIN members m ON m.observation=p.observation WHERE m.person IS NOT p.person',
+                (proposed,)))
+        db.execute('INSERT INTO members SELECT observation,person FROM ('+source+') WHERE 1 '
+                   'ON CONFLICT(observation) DO UPDATE SET person=excluded.person '
+                   'WHERE members.person IS NOT excluded.person', (proposed,))
         db.executemany('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
                        ((row['sample_key'], mapping[row['person']], row['observation']) for row in batch))
         yield from batch
@@ -122,63 +129,65 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
     ''')
     from .replay_vector_inputs import prepare
     shared_vectors = prepare(db, replay)
-    with tracking(
-        db.execute(
-            'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
-            'FROM people WHERE scope=? AND namespace=?',
-            (scope, namespace),
-        ),
-        'Copy historical identity labels',
-        unit='person',
-        position=0,
-        total=lambda: db.execute(
-            'SELECT COUNT(*) FROM people WHERE scope=? AND namespace=?',
-            (scope, namespace),
-        ).fetchone()[0],
-    ) as tracked:
-        for row in tracked:
-            replay.execute('INSERT INTO old_people VALUES (?,?,?,?)', tuple(row))
-    with tracking(
-        selected,
-        'Copy selected evidence',
-        unit='scene',
-        position=0,
-    ) as tracked:
-        for item in tracked:
-            record = db.execute('SELECT * FROM scans WHERE id=?', (item['scan'],)).fetchone()
-            if (record is None or record['status'] != 'complete' or record['scope'] != scope
-                    or record['namespace'] != namespace or record['scene'] != item['scene']):
-                raise ValueError('Identity rebuild requires complete compatible selected scans.')
-            replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
-            with tracking(
-                _copy_observations(db, replay, item['scan'], retain_pose=retain_pose, share_vectors=shared_vectors),
-                'Copy face observations',
-                unit='observation',
-                total=lambda: db.execute(
-                    'SELECT COUNT(*) FROM observations WHERE scan=?',
-                    (item['scan'],),
-                ).fetchone()[0],
-            ) as tracked:
+    from .snapshot_import import bulk
+    with bulk(replay):
+        with tracking(
+            db.execute(
+                'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
+                'FROM people WHERE scope=? AND namespace=?',
+                (scope, namespace),
+            ),
+            'Copy historical identity labels',
+            unit='person',
+            position=0,
+            total=lambda: db.execute(
+                'SELECT COUNT(*) FROM people WHERE scope=? AND namespace=?',
+                (scope, namespace),
+            ).fetchone()[0],
+        ) as tracked:
+            for row in tracked:
+                replay.execute('INSERT INTO old_people VALUES (?,?,?,?)', tuple(row))
+        with tracking(
+            selected,
+            'Copy selected evidence',
+            unit='scene',
+            position=0,
+        ) as tracked:
+            for item in tracked:
+                record = db.execute('SELECT * FROM scans WHERE id=?', (item['scan'],)).fetchone()
+                if (record is None or record['status'] != 'complete' or record['scope'] != scope
+                        or record['namespace'] != namespace or record['scene'] != item['scene']):
+                    raise ValueError('Identity rebuild requires complete compatible selected scans.')
+                replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
+                with tracking(
+                    _copy_observations(db, replay, item['scan'], retain_pose=retain_pose, share_vectors=shared_vectors),
+                    'Copy face observations',
+                    unit='observation',
+                    total=lambda: db.execute(
+                        'SELECT COUNT(*) FROM observations WHERE scan=?',
+                        (item['scan'],),
+                    ).fetchone()[0],
+                ) as tracked:
+                    for row in tracked:
+                        pass  # The bounded copy iterator has completed both inserts.
+        # Physical keys include the scene, so batching scene traversal preserves
+        # first-origin precedence within each historical scan/cue/observation order.
+        for batch in _batches(selected):
+            scenes = encoded([item['scene'] for item in batch])
+            historical = db.execute('SELECT o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,'
+                's.scope,s.namespace,s.scene,s.input_sha,m.person FROM members m '
+                'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
+                'WHERE s.scope=? AND s.namespace=? AND s.scene IN (SELECT value FROM json_each(?)) '
+                'ORDER BY s.rowid,o.cue,o.id', (scope,namespace,scenes))
+            with tracking(_inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
+                    ((sample_key(row),row['person'],row['id']) for row in historical)),
+                    'Read historical sample ownership', unit='member') as tracked:
                 for row in tracked:
-                    pass  # The bounded copy iterator has completed both inserts.
-    # Physical keys include the scene, so batching scene traversal preserves
-    # first-origin precedence within each historical scan/cue/observation order.
-    for batch in _batches(selected):
-        scenes = encoded([item['scene'] for item in batch])
-        historical = db.execute('SELECT o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,'
-            's.scope,s.namespace,s.scene,s.input_sha,m.person FROM members m '
-            'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
-            'WHERE s.scope=? AND s.namespace=? AND s.scene IN (SELECT value FROM json_each(?)) '
-            'ORDER BY s.rowid,o.cue,o.id', (scope,namespace,scenes))
-        with tracking(_inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
-                ((sample_key(row),row['person'],row['id']) for row in historical)),
-                'Read historical sample ownership', unit='member') as tracked:
+                    pass
+        with tracking(_restore_origins(db,replay), 'Restore original sample ownership',
+                      unit='observation') as tracked:
             for row in tracked:
                 pass
-    with tracking(_restore_origins(db,replay), 'Restore original sample ownership',
-                  unit='observation') as tracked:
-        for row in tracked:
-            pass
     with work('Commit replay evidence', 1, unit='transaction', position=0) as committed:
         replay.commit()
         committed.advance()

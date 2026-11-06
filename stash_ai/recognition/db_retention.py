@@ -72,7 +72,7 @@ def _apply(db):
     # Only collect thumbnails made unreferenced by this plan, including sharing
     # with other scenes/model namespaces. Never touch matching RGB signatures.
     add('Delete unreferenced thumbnails', 'DELETE FROM evidence_thumbnails WHERE id IN (SELECT id FROM retention_thumbnails) '
-               "AND NOT EXISTS (SELECT 1 FROM observations o WHERE json_extract(o.quality,'$.evidence_thumbnail_id')=evidence_thumbnails.id)")
+               "AND NOT EXISTS (SELECT 1 FROM observations o WHERE CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.evidence_thumbnail_id') END=+evidence_thumbnails.id)")
     for table in ('evidence_versions', 'evidence_fingerprints'):
         kinds="'scan','raw-observations','raw-person','raw-body','scene-face-vectors','hybrid-observations','hybrid-person','vtt-scan-decisions'"
         add(f'Delete obsolete bookkeeping: {table}', f"DELETE FROM {table} WHERE kind IN ({kinds}) "
