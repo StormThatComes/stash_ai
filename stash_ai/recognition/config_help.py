@@ -232,6 +232,7 @@ HELP = {
     'execution.rebuild.profile': 'Record rebuild SQL, fetch and pipeline timings in run history.',
     'execution.rebuild.memory_bytes': 'Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range: 1048576..1099511627776.',
     'execution.rebuild.cache_bytes': 'Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables. Range: 0..68719476736.',
+    'execution.rebuild.derived_cache_bytes': 'Persistent derived-data disk budget, split between centroids, appearances and plans; 0 disables. Range: 0..1099511627776.',
     'execution.rebuild.storage': 'Private replay storage: disk (bounded SQLite pages) or memory (legacy RAM image).',
     'execution.rebuild.pixel_index_bytes': 'Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range: 1048576..1099511627776.',
     'execution.rebuild.matrix_cache_bytes': 'Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.',

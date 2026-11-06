@@ -138,7 +138,7 @@ class Search:
                     else:modes=appearance_references(self.bank[person],self.config,self.evidence)
                     import hashlib
                     signature=hashlib.sha256()
-                    allowance=len(modes)*4096*80
+                    allowance=len(modes)*4096*16
                     keep_means=store is not None and allowance<=min(store.budget//8,limit-retained-temporary)
                     means=[] if keep_means else None
                     if keep_means:self.reservation.set(retained+temporary+allowance)
@@ -148,13 +148,18 @@ class Search:
                     self.owner_modes[person]=len(modes)
                     for mode_index,refs in enumerate(modes):
                         ordinal=len(self.entries);self.entries.append((owner,refs))
-                        if found is not None:mean=np.asarray(found['means'][mode_index],dtype='<f8')
+                        if found is not None:
+                            import base64
+                            raw=found['means'][mode_index]
+                            mean=(np.frombuffer(base64.b64decode(raw,validate=True),dtype='<f8') if isinstance(raw,str) else np.asarray(raw,dtype='<f8'))
                         else:
                             mean=np.zeros(4096,dtype='<f8')
                             for row in refs:mean+=self.evidence.feature(row)
                             if refs:mean/=len(refs)
                         if mean.shape!=(4096,) or not np.isfinite(mean).all():raise ValueError('Invalid body centroid cache.')
-                        if means is not None:means.append(mean.tolist())
+                        if means is not None:
+                            import base64
+                            means.append(base64.b64encode(mean.tobytes()).decode('ascii'))
                         signature.update(mean.tobytes())
                         self.index.write(mean.tobytes())
                     from .config import digest

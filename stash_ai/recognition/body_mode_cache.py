@@ -14,7 +14,7 @@ def key(spool,config):
                    config.data['clustering']['max_samples_per_person']])
 
 
-def load(spool,signed,config):
+def _legacy_load(spool,signed,config):
     store=current()
     record=store.get('body-appearances',signed) if store else None
     if record is None:return None
@@ -39,7 +39,7 @@ def load(spool,signed,config):
             for path in written:path.unlink(missing_ok=True)
 
 
-def save(spool,signed,modes,support,selected,config):
+def _legacy_save(spool,signed,modes,support,selected,config):
     store=current()
     if store is None:return
     maximum=min(store.budget//32,config.data['sapiensid']['execution']['reference_bytes']//8)
@@ -50,3 +50,63 @@ def save(spool,signed,modes,support,selected,config):
         from pathlib import Path
         values.append([len(mode),pack(Path(mode.path)),pack(Path(mode.weights_path))])
     store.put('body-appearances',signed,dict(modes=values,support=support,selected=selected))
+
+
+CHUNK=1024*1024
+
+
+def load(spool,signed,config):
+    store=current()
+    record=store.get('body-appearances',signed) if store else None
+    if record is None:return None
+    if record.get('format')!=3:return _legacy_load(spool,signed,config)
+    written=[];modes=[];complete=False
+    try:
+        for index,(count,values,weights) in enumerate(record['modes']):
+            if type(count) is not int or count<0:return None
+            paths=[]
+            for suffix,parts,expected in (('.bin',values,count*16384),('.weights',weights,count)):
+                path=spool.path/(str(index)+suffix);written.append(path);paths.append(path);total=0
+                with path.open('wb') as output:
+                    for key,length in parts:
+                        if not 0<=length<=CHUNK:return None
+                        data=store.get_bytes('body-appearance-chunk',key)
+                        if data is None or len(data)!=length:return None
+                        total+=len(data)
+                        if total>expected:return None
+                        output.write(data)
+                if total!=expected:return None
+            modes.append(Matrix(paths[0],count,spool.directory,paths[1]))
+        complete=True
+        return tuple(modes),record['support'],record['selected']
+    except (ValueError,KeyError,TypeError):return None
+    finally:
+        if not complete:
+            for path in written:path.unlink(missing_ok=True)
+
+
+def save(spool,signed,modes,support,selected,config):
+    store=current()
+    if store is None:return
+    if not hasattr(store,'put_bytes'):return _legacy_save(spool,signed,modes,support,selected,config)
+    capacity=store.capacity('body-appearances') if hasattr(store,'capacity') else store.budget
+    if sum(len(mode)*16385 for mode in modes)>capacity//2:return
+    values=[]
+    for mode in modes:
+        packed=[]
+        for path in (mode.path,mode.weights_path):
+            parts=[]
+            with open(path,'rb') as source:
+                while chunk:=source.read(CHUNK):
+                    key=hashlib.sha256(chunk).hexdigest()
+                    store.put_bytes('body-appearance-chunk',key,chunk);parts.append([key,len(chunk)])
+            packed.append(parts)
+        values.append([len(mode),*packed])
+    witnesses=[row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal')]
+    # Publish the manifest only after all chunks. A missing chunk is a miss.
+    store.put('body-appearances',signed,dict(format=3,modes=values,support=support,selected=selected,witnesses=witnesses))
+
+
+def witnesses(signed):
+    store=current();record=store.get('body-appearances',signed) if store else None
+    return record.get('witnesses') if record else None

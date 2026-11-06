@@ -19,7 +19,7 @@ def body_vector(row):
     return value
 
 
-def _rows(db, config, scope, namespace, owners):
+def _query(db, config, scope, namespace, owners,ids=None):
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                   compatibility=fallback_sql(db,config,namespace))
     sql=(f"SELECT 'person' AS evidence_kind,m.person AS owner,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,{body_embedding} AS embedding,e.metadata AS person_metadata "
@@ -29,6 +29,14 @@ def _rows(db, config, scope, namespace, owners):
         "AND o.rejected IS NULL AND e.status='ready' AND "+strict_sql()+' AND '+admission+
         ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     args=(contract(config),encoded(list(owners)),scope,namespace)
+    if ids is not None:
+        sql=sql.replace(' ORDER BY m.person', ' AND o.id IN (SELECT value FROM json_each(?)) ORDER BY m.person')
+        args+= (encoded(ids),)
+    return sql,args
+
+
+def _rows(db,config,scope,namespace,owners,ids=None):
+    sql,args=_query(db,config,scope,namespace,owners,ids)
     from .person_anchor import anchor_gate
     rows=db.execute(sql,args)
     return (row for row in rows if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
@@ -57,22 +65,31 @@ def catalogue_rows(db,config,scope,namespace,owners):
     result={};used=0
     with work('Build complete body appearances',unit='comparison') as progress:
         budget=ComparisonBudget(config,progress)
-        for owner,rows in groupby(_rows(db,config,scope,namespace,owners),key=lambda r:r['owner']):
+        from .dependencies import cached
+        from .derived_cache import current,fingerprint
+        from .config import digest
+        store=current()
+        for owner in sorted(owners):
             spool=Records();keep=False
             try:
-                for row in rows:spool.add(row)
-                from .body_mode_cache import key,load,save
-                signed=key(spool,config);found=load(spool,signed,config)
+                from .body_mode_cache import load,save,witnesses
+                query=_query(db,config,scope,namespace,[owner]) if store else None
+                policy=digest(['body-source-v3',config.data['sapiensid']['matching'],config.data['sapiensid']['identities'],config.data['clustering']])
+                signed=cached(db,'body-source',owner,policy,lambda:fingerprint(db,[query],policy)) if store else None
+                found=load(spool,signed,config) if store else None
+                saved_witnesses=witnesses(signed) if found is not None else None
+                if found is not None and saved_witnesses is None:found=None
                 if found is None:
+                    for row in _rows(db,config,scope,namespace,[owner]):spool.add(row)
                     chosen=select(spool.rows(),config.data['clustering']['max_samples_per_person'],
                                   vector_reader=body_vector,quality_reader=body_quality)
                     ids=[i for i,_ in chosen]
                     modes,support=spool.modes(config,budget)
                     save(spool,signed,modes,support,ids,config)
                 else:modes,support,ids=found
-                selected=BodyRows(spool.selected(ids))
+                selected=BodyRows(spool.selected(ids) if found is None else _rows(db,config,scope,namespace,[owner],ids))
                 selected.modes=modes
-                selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal'))
+                selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal')) if found is None else tuple(saved_witnesses)
                 selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
                 votes=Votes()
                 for row in selected:votes.add(row)

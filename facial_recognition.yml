@@ -519,6 +519,9 @@ execution:
     pixel_index_bytes: 4294967296
     # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range:
     # 1048576..1099511627776.
+    derived_cache_bytes: 4294967296
+    # Persistent derived-data disk budget, split between centroids, appearances and plans; 0 disables. Range:
+    # 0..1099511627776.
     body:
       # Limits for hybrid and body matching plans.
       max_candidate_pairs: 100000
