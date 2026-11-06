@@ -79,3 +79,17 @@ or corrupt inputs fall back to cold import. The optional image uses the smaller 
 checkpoint_bytes and replay_snapshot_bytes; it is separate from transient scratch.
 Tests cover interrupted disk/RAM replay, corrupt images, raw mutations, changed
 bindings, checkpoint corruption and the existing full-vs-resumed decision oracle.
+
+## Inference pipeline
+
+Sequential GPU policy can process bounded scene groups before switching from face
+to body models (`execution.gpu.sequential_scene_batch_size`; legacy default 1,
+shipped profiles 4). Inputs retain explicit ownership and share the run sprite
+budget. FaceOcc batches eligible faces across owned cue frames without reassessing
+quality; dense frames keep bounded per-cue preparation. ViTPose reuses CPU workers
+and prepares the next batch while the coordinator infers the current batch; model
+calls/device transfers stay on the coordinator and cleanup joins outstanding work.
+RF-DETR transfers equal-sized input frames together and copies only person logits
+to CPU, after validating every output class for nonfinite values.
+Validation: 145 inference/config/lifecycle tests passed, 1 optional dependency test
+skipped. Scheduling tests simulate device ownership; no real CUDA speedup measured.

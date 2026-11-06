@@ -230,62 +230,78 @@ def _execute(args, config, *, services=None):
                     inputs = ScenePrefetch(client, config, services.source, report=report)
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
                     with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
-                        for position, identifier in enumerate(ordered):
-                            following = ordered[position + 1] if position + 1 < len(ordered) else None
-                            scene_work = False
-                            try:
-                                with activity(report, 'prepare VTT input', scene=identifier):
-                                    prepared = inputs.take(identifier)
-                                with prepared:
-                                    scene, source = prepared.scene, prepared.source
-                                    inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
-                                    def progress(**values):
-                                        database.progress(run, 'scan', values)
-                                    with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
-                                        scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
-                                            backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
-                                            on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] and not sequential else None)
-                                    scene_work = not reused
-                                    if sequential and (backend.model is not None or visibility.model is not None):
-                                        gpu.release('faces', [('unload face models', backend.unload),
-                                            ('unload face visibility', visibility.close)], scene=identifier)
-                                    person_collector.flush()
-                                    person_collector.enrich(database.connection, scan, source)
-                                counts['scenes_reused' if reused else 'scenes_scanned'] += 1
-                                from .rejection_summary import summary as rejection_summary
-                                rejected=rejection_summary(database.connection,scan,config)
-                                counts['observations_rejected']+=sum(rejected['face'].values())
-                                counts['face_observations_rejected']+=sum(rejected['face'].values())
-                                counts['body_observations_rejected']+=sum(rejected['body'].values())
-                                counts['person_evidence_unavailable']+=sum(rejected['person_evidence_unavailable'].values())
-                                for kind,reasons in rejected.items():rejection_totals[kind].update(reasons)
-                                database.progress(run,'detection',dict(scene=identifier,scan=scan,
-                                    rejected=rejected['face'],body_rejected=rejected['body'],
-                                    person_evidence_unavailable=rejected['person_evidence_unavailable'],reused=reused))
-                                for kind,reasons in rejected.items():
-                                    if reasons:
-                                        report.optional('recognition_quality',report.detail,
-                                            f'Recognition quality scene {identifier} ({kind}): '+
-                                            ' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items())))
-                                selected.append({'scene': identifier, 'scan': scan})
-                            except KeyboardInterrupt:
-                                scene_work = True
-                                raise
-                            except Exception as error:
-                                scene_work = True
-                                counts['scenes_failed'] += 1
-                                report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
-                                                safe_error(error, key))
-                            finally:
-                                if sequential and (scene_work or backend.model is not None or
-                                                   visibility.model is not None or person_collector.model is not None):
-                                    cleanup([('release scene GPU models', lambda: gpu.release('scene', [
-                                        ('close person models', person_collector.close),
-                                        ('unload face models', backend.unload),
-                                        ('unload face visibility', visibility.close)], scene=identifier))], report=report)
-                            scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
-                            inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
-                            database.progress(run, 'run', dict(counts))
+                        from .scene_batches import Batches
+                        batch_size=config.data['execution']['sequential_scene_batch_size'] if sequential else 1
+                        def release_faces():
+                            if backend.model is None and visibility.model is None:return
+                            gpu.release('faces',[('unload face models',backend.unload),('unload face visibility',visibility.close)])
+                        def release_all():
+                            if backend.model is None and visibility.model is None and person_collector.model is None:return
+                            gpu.release('scene',[('close person models',person_collector.close),
+                                ('unload face models',backend.unload),('unload face visibility',visibility.close)])
+                        batches=Batches(ordered,batch_size,release_faces,release_all)
+                        with closing(batches.events(),name='close scene batches') as events:
+                            for pass_kind,position,identifier in events:
+                                following = ordered[position + 1] if position + 1 < len(ordered) else None
+                                scene_work = False
+                                try:
+                                    with activity(report, 'prepare VTT input', scene=identifier):
+                                        prepared = batches.take(pass_kind,position,identifier,inputs)
+                                    with prepared:
+                                        scene, source = prepared.scene, prepared.source
+                                        if pass_kind!='body':inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
+                                        def progress(**values):
+                                            database.progress(run, 'scan', values)
+                                        if pass_kind=='body':scan,reused=batches.results[position]
+                                        else:
+                                            with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
+                                                scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
+                                                    backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
+                                                    on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] and not sequential else None)
+                                        scene_work = not reused
+                                        if pass_kind=='face':
+                                            batches.results[position]=(scan,reused)
+                                            continue
+                                        if sequential and batch_size==1 and (backend.model is not None or visibility.model is not None):
+                                            gpu.release('faces', [('unload face models', backend.unload),
+                                                ('unload face visibility', visibility.close)], scene=identifier)
+                                        person_collector.flush()
+                                        person_collector.enrich(database.connection, scan, source)
+                                    counts['scenes_reused' if reused else 'scenes_scanned'] += 1
+                                    from .rejection_summary import summary as rejection_summary
+                                    rejected=rejection_summary(database.connection,scan,config)
+                                    counts['observations_rejected']+=sum(rejected['face'].values())
+                                    counts['face_observations_rejected']+=sum(rejected['face'].values())
+                                    counts['body_observations_rejected']+=sum(rejected['body'].values())
+                                    counts['person_evidence_unavailable']+=sum(rejected['person_evidence_unavailable'].values())
+                                    for kind,reasons in rejected.items():rejection_totals[kind].update(reasons)
+                                    database.progress(run,'detection',dict(scene=identifier,scan=scan,
+                                        rejected=rejected['face'],body_rejected=rejected['body'],
+                                        person_evidence_unavailable=rejected['person_evidence_unavailable'],reused=reused))
+                                    for kind,reasons in rejected.items():
+                                        if reasons:
+                                            report.optional('recognition_quality',report.detail,
+                                                f'Recognition quality scene {identifier} ({kind}): '+
+                                                ' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items())))
+                                    selected.append({'scene': identifier, 'scan': scan})
+                                except KeyboardInterrupt:
+                                    scene_work = True
+                                    raise
+                                except Exception as error:
+                                    scene_work = True
+                                    counts['scenes_failed'] += 1
+                                    report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
+                                                    safe_error(error, key))
+                                finally:
+                                    if sequential and batch_size==1 and (scene_work or backend.model is not None or
+                                                       visibility.model is not None or person_collector.model is not None):
+                                        cleanup([('release scene GPU models', lambda: gpu.release('scene', [
+                                            ('close person models', person_collector.close),
+                                            ('unload face models', backend.unload),
+                                            ('unload face visibility', visibility.close)], scene=identifier))], report=report)
+                                scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
+                                if pass_kind!='body':inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
+                                database.progress(run, 'run', dict(counts))
                     inputs.close()
                     person_collector.flush()
                     releases = [('close person models', person_collector.close)]

@@ -54,10 +54,11 @@ def test_pose_decode_overlaps_next_inference_and_preserves_order(monkeypatch):
     zeros=torch.zeros
     monkeypatch.setattr(torch,'zeros',lambda *args,**kw:zeros(*args,**dict(kw,device='cpu')))
     class Inputs(dict):
-        def to(self,device):return self
+        def to(self,device):
+            assert get_ident()==owner
+            return self
     class Processor:
         def __call__(self,*,images,boxes,return_tensors):
-            assert get_ident()==owner
             return Inputs(pixel_values=zeros(sum(map(len,boxes)),3,4,4))
         def post_process_pose_estimation(self,outputs,*,boxes,threshold):
             threads.append(get_ident());started.set()
@@ -78,6 +79,7 @@ def test_pose_decode_overlaps_next_inference_and_preserves_order(monkeypatch):
     with Image.new('RGB',(100,100)) as image:
         result=refiner.predict_many([(image,[[0,0,10,10],[10,20,30,40]]),(image,[]),
                                     (image,[[30,40,50,60]])])
+    refiner.close()
     assert len(calls)==2 and all(t!=owner for t in threads)
     np.testing.assert_array_equal(result[0][0][:,0],[[1,2],[11,22]])
     np.testing.assert_array_equal(result[2][0][:,0],[[31,42]])

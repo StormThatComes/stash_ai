@@ -130,7 +130,59 @@ class CpuStage:
         with self.lock:self.pending.clear();self.bytes=0
 
 
-def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False):
+def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
+    index,face=pair
+    quality=assess(image,face);quality['geometry_contract']=geometry_contract(face,cue)
+    reason=('face_detection_score' if face.score<=config.data['detection']['score_threshold']
+            else rejection(quality,config.data['detection']))
+    return dict(index=index,face=face,quality=quality,reason=reason,tensor=None,
+                visibility_input=None,vector=None,crop=None)
+
+
+class CueVisibility:
+    """Small inference results keyed by owned cue pixels and original detection."""
+    def __init__(self,values):self.values=values
+    def measure_many(self,items):return [self.values[id(image),id(face)] for image,face in items]
+    def measure(self,image,face):return self.values[id(image),id(face)]
+
+
+def cue_visibility(frames,prepared,visibility,config,stage):
+    from .pose_policy import measurement_required
+    from .visibility import prepare,VisibilityGeometryError,VisibilityError
+    if not measurement_required(config) or visibility is None:return visibility
+    requests=[(image,e['face']) for (_,_,image),entries in zip(frames,prepared) for e in entries if e['reason'] is None]
+    if not requests:return visibility
+    values={}
+    many=getattr(visibility,'measure_many',None)
+    prepared_many=getattr(visibility,'measure_prepared_many',None)
+    supports=getattr(visibility,'supports_prepared',None)
+    use_prepared=callable(prepared_many) and (not callable(supports) or supports())
+    step=max(1,min(8,stage.limit//(4*256*256*4+4096)))
+    def pixels(image,face):
+        try:return prepare(image,face)
+        except VisibilityGeometryError as error:return error
+    for start in range(0,len(requests),step):
+        chunk=requests[start:start+step]
+        if use_prepared:
+            pending=[];inputs=[]
+            for image,face in chunk:
+                if not stage.can_submit(image,extra=4*256*256*4):
+                    inputs.extend(f.result() for f in pending);pending=[]
+                pending.append(stage.submit(pixels,image,face,extra=4*256*256*4))
+            inputs.extend(f.result() for f in pending)
+            measured=prepared_many(inputs)
+        elif callable(many):measured=many(chunk)
+        else:
+            measured=[]
+            for image,face in chunk:
+                try:measured.append(visibility.measure(image,face))
+                except VisibilityGeometryError as error:measured.append(error)
+        if len(measured)!=len(chunk):raise VisibilityError('Recognition visibility returned an incompatible batch.')
+        values.update(((id(image),id(face)),value) for (image,face),value in zip(chunk,measured))
+    return CueVisibility(values)
+
+
+def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False, prepared_records=None):
     """Yield complete face records; caller checkpoints only after the whole cue."""
     from .models import normalized_embedding
     from .pose_policy import measurement_required
@@ -145,15 +197,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
     prepared_visibility = callable(getattr(visibility,'measure_prepared_many',None))
 
     def prepare(pixels, pair):
-        index, face = pair
-        quality = assess(pixels, face)
-        quality['geometry_contract'] = geometry_contract(face, cue)
-        reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
-                  else rejection(quality, config.data['detection']))
-        visibility_input = None
-        tensor = None  # Alignment runs only after the visibility admission gate.
-        return dict(index=index, face=face, quality=quality, reason=reason, tensor=tensor,
-                    visibility_input=visibility_input, vector=None, crop=None)
+        return prepare_record(pixels,pair,config,cue,assess,rejection,geometry_contract)
 
     def visibility_pixels(pixels, entry):
         from .visibility import prepare as prepare_visibility
@@ -193,7 +237,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
         return pending
 
     try:
-        with closing(stage.ordered(prepare, image, enumerate(faces), extra=4*256*256*4 if prepared_visibility else 0), name='close scan preparation') as stream:
+        with closing((entry for entry in prepared_records) if prepared_records is not None else stage.ordered(prepare, image, enumerate(faces), extra=4*256*256*4 if prepared_visibility else 0), name='close scan preparation') as stream:
             batch_size = max(1, min(32, max(settings['scan_cpu_workers']*2, settings['recognizer_batch_size']),
                 stage.limit//(3*112*112*4 + config.data['storage']['max_crop_bytes'] + 4096)))
             while batch := list(islice(stream, batch_size)):
@@ -333,13 +377,26 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
             result=detect_many(images)
             if len(result)!=len(images):raise ValueError('Face detector returned an incompatible output batch.')
             detected.extend(result)
+    faces_by_frame=[]
+    for position,(_,_,image) in enumerate(batch):
+        faces_by_frame.append(sorted(detected[position] if detected is not None else backend.detect(image),key=lambda face:tuple(face.row)))
+    prepared=[None]*len(batch)
+    # Dense frames retain the existing bounded per-cue quality path.
+    if len(batch)>1 and sum(map(len,faces_by_frame))*4096<=config.data['execution']['scan_queue_bytes']//4:
+        from stash_ai.runtime.cleanup import closing
+        for position,(index,cue,image) in enumerate(batch):
+            def prepare_face(pixels,pair):
+                return prepare_record(pixels,pair,config,cue,callbacks['assess'],callbacks['rejection'],callbacks['geometry_contract'])
+            with closing(stage.ordered(prepare_face,image,enumerate(faces_by_frame[position])),name='close cross-cue quality') as entries:
+                prepared[position]=list(entries)
+        visibility=cue_visibility(batch,prepared,visibility,config,stage)
     for position,(index, cue, image) in enumerate(batch):
-        faces = sorted(detected[position] if detected is not None else backend.detect(image),key=lambda face:tuple(face.row))
+        faces=faces_by_frame[position]
         values=[]
         from stash_ai.runtime.cleanup import closing
         with closing(process(image,faces,backend,visibility,config,cue,
-                     stage=stage,defer_embeddings=supported,defer_encoding=True,**callbacks),name='close deferred cue') as prepared:
-            for result in prepared:
+                     stage=stage,defer_embeddings=supported,defer_encoding=True,prepared_records=prepared[position],**callbacks),name='close deferred cue') as cue_records:
+            for result in cue_records:
                 row=list(result);values.append(row)
                 retained+=(config.data['storage']['max_crop_bytes'] if row[3] is None else 0)+4096
                 if supported and row[3] is None:

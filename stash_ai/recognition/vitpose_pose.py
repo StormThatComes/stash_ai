@@ -60,6 +60,8 @@ class ViTPoseLarge:
     def __init__(self, model, processor, *, device, batch_size):
         self.model, self.processor = model, processor
         self.device, self.batch_size = device, batch_size
+        self._preparer=self._decoder=None
+        self.closed=False
 
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
@@ -68,6 +70,7 @@ class ViTPoseLarge:
         """Batch people across frames without changing their image coordinates."""
         import numpy as np
         import torch
+        if self.closed:raise RuntimeError('ViTPose adapter is closed.')
         result, jobs = [], []
         for frame, (image, bounds) in enumerate(frames):
             count = len(bounds)
@@ -79,7 +82,6 @@ class ViTPoseLarge:
             boxes[:,2:] -= boxes[:,:2]
             jobs.extend((frame, index, box) for index,box in enumerate(boxes))
         from concurrent.futures import ThreadPoolExecutor
-        from contextlib import nullcontext
         from types import SimpleNamespace
         overlap = str(self.device).split(':')[0] in ('cuda','mps','xpu')
         def apply(batch, decoded):
@@ -90,16 +92,26 @@ class ViTPoseLarge:
                 result[frame][1][index]=np.clip(confidence[offset,order],0.,1.)
         # At most one decode runs alongside the next inference. Only CPU-owned
         # heatmaps cross threads; the model and all device transfers stay here.
-        pending=None
-        with (ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-pose-decode') if overlap and jobs else nullcontext(None)) as decoder:
+        pending=preparing=None
+        if overlap and jobs and self._decoder is None:
+            self._decoder=ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-pose-decode')
+            self._preparer=ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-pose-prepare')
+        decoder=self._decoder if overlap else None
+        def prepare(batch):
+            owners=list(dict.fromkeys(frame for frame,_,_ in batch))
+            images=[frames[frame][0] for frame in owners]
+            boxes=[np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
+            return self.processor(images=images[0] if len(images)==1 else images,boxes=boxes,return_tensors='pt'),boxes
+        try:
             with torch.inference_mode():
                 for start in range(0,len(jobs),self.batch_size):
                     batch = jobs[start:start+self.batch_size]
-                    owners = list(dict.fromkeys(frame for frame,_,_ in batch))
-                    images = [frames[frame][0] for frame in owners]
-                    boxes = [np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
-                    inputs = self.processor(images=images[0] if len(images)==1 else images,
-                        boxes=boxes,return_tensors='pt').to(self.device)
+                    inputs,boxes=preparing.result() if preparing is not None else prepare(batch)
+                    preparing=None
+                    if overlap and start+self.batch_size<len(jobs):
+                        following=jobs[start+self.batch_size:start+2*self.batch_size]
+                        preparing=self._preparer.submit(prepare,following)
+                    inputs=inputs.to(self.device)
                     dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
                     outputs = self.model(**inputs,dataset_index=dataset_index)
                     if decoder is None:
@@ -114,8 +126,23 @@ class ViTPoseLarge:
                 if pending is not None:
                     batch,future=pending
                     apply(batch,future.result())
+        finally:
+            from stash_ai.runtime.cleanup import cleanup
+            actions=[]
+            if preparing is not None:actions.append(('finish pose preparation',preparing.result))
+            if pending is not None:actions.append(('finish pose decoding',pending[1].result))
+            cleanup(actions)
         return result
 
+    def close(self):
+        if self.closed:return
+        self.closed=True
+        from stash_ai.runtime.cleanup import cleanup
+        from stash_ai.runtime.shutdown import call
+        pools=[p for p in (self._preparer,self._decoder) if p is not None]
+        cleanup([('stop pose CPU workers',lambda p=p:call(lambda:p.shutdown(wait=True,cancel_futures=True),self)) for p in pools])
+        self._preparer=self._decoder=None
+        self.model=None
 
     def _decode(self, outputs, boxes, count):
         import numpy as np
