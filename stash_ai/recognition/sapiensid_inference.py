@@ -99,6 +99,8 @@ class SapiensIDV1Encoder:
         self.device = resolve_device(device)
         self.max_batch_size = max_batch_size
         self.cache_contract=cache_contract
+        from .adaptive_gpu import Batches
+        self.batches=Batches(max_batch_size,'SapiensID')
         self.owner = get_ident()
         # Do not assign `aligner.eval()`: upstream KeypointPredictor.eval()
         # overrides nn.Module.eval() without returning self.
@@ -135,14 +137,16 @@ class SapiensIDV1Encoder:
             raise ValueError('SapiensID prepared batch exceeds configured limit.')
         from .inference_cache import many
         contract=getattr(self,'cache_contract',None)
-        if contract is None:return self._embed_prepared(prepared)
-        return many('body_embedding',[contract,str(self.device)],prepared,self._embed_prepared)
+        calculate=lambda values:self.batches.run(values,self._embed_prepared,self.device)
+        if contract is None:return calculate(prepared)
+        return many('body_embedding',[contract,str(self.device)],prepared,calculate)
 
     def _embed_prepared(self, prepared):
         self._check_owner()
         if not 1<=len(prepared)<=self.max_batch_size:
             raise ValueError('SapiensID prepared batch exceeds configured limit.')
-        tensors=[self.torch.cat(parts,dim=0).to(self.device) for parts in zip(*prepared)]
+        from .gpu_transfers import to_device
+        tensors=[to_device(self.torch.cat(parts,dim=0),self.device) for parts in zip(*prepared)]
         return self._encode(*tensors)
 
     def _check_owner(self):
@@ -160,7 +164,8 @@ class SapiensIDV1Encoder:
             raise RuntimeError('SapiensID encoder is closed.')
         if not isinstance(images, (list, tuple)) or not 1 <= len(images) <= self.max_batch_size:
             raise ValueError('SapiensID expects 1..max_batch_size person image crops.')
-        batch = torch.cat([preprocess(image) for image in images], dim=0).to(self.device)
+        from .gpu_transfers import to_device
+        batch = to_device(torch.cat([preprocess(image) for image in images], dim=0),self.device)
         if batch.shape != (len(images), 3, *INPUT_SIZE) or batch.dtype != torch.float32:
             raise ValueError('Invalid SapiensID input tensor.')
         if self.aligner is None:

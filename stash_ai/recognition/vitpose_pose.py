@@ -68,6 +68,9 @@ class ViTPoseLarge:
         self.device, self.batch_size = device, batch_size
         self._preparer=self._decoder=None
         self.closed=False
+        from .adaptive_gpu import Batches
+        from .gpu_transfers import Transfers
+        self.batches=Batches(batch_size,'ViTPose');self.transfers=Transfers(device)
 
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
@@ -108,38 +111,46 @@ class ViTPoseLarge:
             images=[frames[frame][0] for frame in owners]
             boxes=[np.asarray([box for frame,_,box in batch if frame==owner]) for owner in owners]
             return self.processor(images=images[0] if len(images)==1 else images,boxes=boxes,return_tensors='pt'),boxes
+        def infer(batch,prepared=None):
+            from .gpu_transfers import to_device
+            inputs,boxes=prepared if prepared is not None else prepare(batch)
+            # Transfer fields separately so pinned CPU storage is used by both
+            # BatchFeature and ordinary mapping processors.
+            inputs={key:to_device(value,self.device) for key,value in inputs.items()}
+            dataset_index=torch.zeros(len(batch),dtype=torch.long,device=self.device)
+            from .inference_precision import autocast
+            with autocast(self.device,self.precision):outputs=self.model(**inputs,dataset_index=dataset_index)
+            if self.precision!='fp32':outputs=SimpleNamespace(heatmaps=outputs.heatmaps.float())
+            if decoder is None:return [(batch,outputs,boxes)]
+            return [(batch,self.transfers.read(outputs.heatmaps),boxes)]
+        def decode(readback,boxes,count):
+            return self._decode(SimpleNamespace(heatmaps=readback.wait()),boxes,count)
         try:
             with torch.inference_mode():
                 for start in range(0,len(jobs),self.batch_size):
-                    batch = jobs[start:start+self.batch_size]
-                    inputs,boxes=preparing.result() if preparing is not None else prepare(batch)
+                    batch=jobs[start:start+self.batch_size]
+                    prepared=preparing.result() if preparing is not None else prepare(batch)
                     preparing=None
                     if overlap and start+self.batch_size<len(jobs):
                         following=jobs[start+self.batch_size:start+2*self.batch_size]
                         preparing=self._preparer.submit(prepare,following)
-                    inputs=inputs.to(self.device)
-                    dataset_index = torch.zeros(len(batch),dtype=torch.long,device=self.device)
-                    from .inference_precision import autocast
-                    with autocast(self.device,self.precision):
-                        outputs = self.model(**inputs,dataset_index=dataset_index)
-                    if self.precision!='fp32':outputs=SimpleNamespace(heatmaps=outputs.heatmaps.float())
-                    if decoder is None:
-                        apply(batch,self._decode(outputs,boxes,len(batch)))
-                    else:
-                        cpu = SimpleNamespace(heatmaps=outputs.heatmaps.detach().cpu())
-                        if pending is not None:
-                            previous,future=pending
-                            apply(previous,future.result())
-                        pending=batch,decoder.submit(self._decode,cpu,boxes,len(batch))
-                    del inputs, outputs
+                    records=self.batches.run(batch,lambda chunk:infer(chunk,prepared if len(chunk)==len(batch) else None),self.device)
+                    for chunk,outputs,boxes in records:
+                        if decoder is None:apply(chunk,self._decode(outputs,boxes,len(chunk)))
+                        else:
+                            if pending is not None:
+                                previous,future=pending;apply(previous,future.result())
+                            pending=chunk,decoder.submit(decode,outputs,boxes,len(chunk))
+                    del records,outputs,prepared
                 if pending is not None:
-                    batch,future=pending
-                    apply(batch,future.result())
+                    batch,future=pending;apply(batch,future.result())
+
         finally:
             from stash_ai.runtime.cleanup import cleanup
             actions=[]
             if preparing is not None:actions.append(('finish pose preparation',preparing.result))
             if pending is not None:actions.append(('finish pose decoding',pending[1].result))
+            actions.append(('finish pose readbacks',self.transfers.drain))
             cleanup(actions)
         return result
 
@@ -151,6 +162,7 @@ class ViTPoseLarge:
         pools=[p for p in (self._preparer,self._decoder) if p is not None]
         cleanup([('stop pose CPU workers',lambda p=p:call(lambda:p.shutdown(wait=True,cancel_futures=True),self)) for p in pools])
         self._preparer=self._decoder=None
+        self.transfers.close()
         self.model=None
 
     def _decode(self, outputs, boxes, count):

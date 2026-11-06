@@ -592,3 +592,17 @@ vote; cache entries never store assignments or support counts. Values are copied
 on reuse. Checksums reject corrupt entries, payload/page limits bound storage,
 and cold inference remains available after eviction. Very small budgets below
 64 KiB disable the optional cache. The file contains arrays/JSON, never pickle.
+
+RF-DETR, ViTPose and prepared SapiensID inference retry CUDA OOM by halving only
+the failed batch, preserving order and remembering the smaller size for the model
+lifetime. A single-item OOM fails explicitly; CPU errors and other kernel errors
+are never retried or converted to CPU inference. Retry counts appear in pipeline
+profiling and each capacity reduction is logged.
+
+CUDA inputs use pinned host tensors with nonblocking transfers. ViTPose heatmaps
+use a dedicated copy stream and an event before CPU decoding; one previous
+readback can overlap the current inference. Pending readbacks are drained on
+success, error and close. CPU/MPS retain their ordinary transfer path. The small
+CI fixtures simulate OOM and transfer events without a GPU. Measure throughput,
+peak VRAM and output tolerance on a real CUDA machine with the manual benchmark;
+no full 10,000-scene inference is part of CI.

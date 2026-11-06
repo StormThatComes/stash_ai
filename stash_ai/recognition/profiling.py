@@ -214,6 +214,13 @@ def pipeline_scope(enabled):
         _pipeline.reset(token)
 
 
+def pipeline_count(name,amount=1):
+    active=_pipeline.get()
+    if active is not None:
+        counts=active[0].setdefault('counts',{})
+        counts[name]=counts.get(name,0)+amount
+
+
 def pipeline_snapshot():
     active = _pipeline.get()
     if active is None:
