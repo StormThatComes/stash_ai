@@ -11,6 +11,6 @@ for testing the current version or a current CI report.
 - [Occurrence](validation_occurrences.txt)
 - [Diagnostics](validation_diagnostics.txt)
 
-For current instructions, see [tests](../../README.md#tests-and-ci)
+For current instructions, see [tests](../development.md)
 and [benchmarks](../../benchmarks/README.md). Historical measurements
 are available in [benchmark results](../../benchmarks/results/README.md).

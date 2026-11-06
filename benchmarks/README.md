@@ -81,7 +81,7 @@ giving pre-detachment an optimistic cost. Fixture cloning and
 hash verification are excluded from the timed portion.
 The database uses WAL/NORMAL and immediate write transactions,
 matching Stash v0.31.1. See
-[cleanup performance](../docs/cleanup_performance.md) for the
+[cleanup performance](../docs/archive/cleanup-performance.md) for the
 results and the selected cleanup strategy.
 
 `benchmark_merge_pipeline` reports the JSON and compressed
