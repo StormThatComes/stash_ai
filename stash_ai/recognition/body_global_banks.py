@@ -50,21 +50,30 @@ def _banks(db,config,scope,namespace):
         target=canonical(db,row['target'])
         if target in owners:proofs.setdefault(target,[]).append(row['source'])
     for person,aliases in owners.items():
-        rows=[];working=0
-        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
-            'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',(*args,encoded(aliases))):
-            if raw['bytes']!=16384:raise ValueError('Invalid retained person embedding.')
-            row=dict(raw);working+=size(row);reserve(working);rows.append(row)
-        witnesses=independent(rows,settings)
+        def source_rows():
+            for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
+                'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',(*args,encoded(aliases))):
+                if raw['bytes']!=16384:raise ValueError('Invalid retained person embedding.')
+                yield dict(raw)
+        rows=page_rows(source_rows())
+        witnesses=independent(rows,settings,presorted=True,paged=True,reserve=reserve)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
         if not selected and rows:selected=rows[:1]
-        core=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows]
-        by_id={r['id']:r for r in core}
-        bank=dict(refs=[by_id[r['id']] for r in selected],cores=[page_rows(core)],missing_original=False,
-            support=len(witnesses),faces=[],face_ids=[],cues=page_cues(),witnesses=page_rows(witnesses),
+        core=page_rows(dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows)
+        selected_ids={r['id'] for r in selected}
+        references={r['id']:r for r in core if r['id'] in selected_ids}
+        bank=dict(refs=[references[r['id']] for r in selected],cores=[core],missing_original=False,
+            support=len(witnesses),faces=[],face_ids=[],cues=page_cues(),witnesses=witnesses,
             provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
-        signatures={digest([r['id'] for r in core]):bank['cores'][0]}
-        rows=core=by_id=witnesses=None
+        # Hash the ordered identifiers incrementally, matching digest(list(ids)).
+        import hashlib
+        signature=hashlib.sha256();signature.update(b'[')
+        for index,row in enumerate(core):
+            if index:signature.update(b',')
+            signature.update(encoded(row['id']).encode())
+        signature.update(b']')
+        signatures={signature.hexdigest():core}
+        reserve(size(bank));rows=core=witnesses=None
         face_ids=set();confirmation=set()
         for merge in db.execute('SELECT evidence FROM identity_merges WHERE source IN (SELECT value FROM json_each(?))',
                                 (encoded(proofs.get(person,[])),)):

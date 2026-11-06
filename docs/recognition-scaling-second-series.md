@@ -53,3 +53,17 @@ and owned files are removed on close/exit. Persistent caches, checkpoints and SQ
 internal sort files remain separately budgeted (not covered by this scratch limit).
 Validation covers aggregate admission, rejected-write position, rollback, cleanup,
 configuration roundtrips, cold replay, checkpoint restore and global body matching.
+
+## Body matching
+
+Complete-link appearance construction now accepts a cluster through a conservative
+sphere lower bound only when every original float32 dot is provably above the
+threshold. Borderline cases retain scalar comparisons. All original witnesses and
+independent support remain present. Rival search prunes centroid subtrees against
+current exact-search maxima with a rounding envelope; weak rivals remain eligible.
+Compact planning evaluates metadata vetoes before embeddings and marks uncomputed
+measurements explicitly; full reports retain complete scoring. Owner metadata and
+witness selection are paged without building a full owner ID-to-row map.
+Validation: 71 body/hybrid/scaling/parallel tests, including the exhaustive oracle.
+A 180-vector coherent mode retains every vector with fewer than 180 scalar dots
+instead of 16110; no end-to-end GPU speedup is claimed.

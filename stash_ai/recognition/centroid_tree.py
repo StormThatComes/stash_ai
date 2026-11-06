@@ -51,7 +51,8 @@ class Tree:
         while pending:
             a,b=pending.pop();x,y=self.nodes[a],self.nodes[b]
             if prefix is not None and prefix[x[1]]==prefix[x[0]] and prefix[y[1]]==prefix[y[0]]:continue
-            if floor is not None and upper(x[2],y[2])+self.search.rounding<floor:
+            required=floor(x[0],x[1],y[0],y[1]) if callable(floor) else floor
+            if required is not None and upper(x[2],y[2])+self.search.rounding<required:
                 self.search.stats['centroid_subtrees_excluded']=self.search.stats.get('centroid_subtrees_excluded',0)+1
                 continue
             if not x[3] and not y[3]:yield x[0],y[0];continue

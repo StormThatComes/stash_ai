@@ -73,6 +73,7 @@ class Records:
         self.db.execute('PRAGMA cache_size=-512')
         self.db.execute('PRAGMA journal_mode=OFF')
         self.db.execute('CREATE TABLE records (ordinal INTEGER PRIMARY KEY,id TEXT UNIQUE,payload BLOB)')
+        self.db.execute('CREATE TABLE bounds(cluster INTEGER PRIMARY KEY,center BLOB,radius REAL,max_norm REAL)')
         self.db.execute('CREATE TABLE features (cluster INTEGER,embedding BLOB,PRIMARY KEY(cluster,embedding))')
         self.db.execute('CREATE TABLE scored (ordinal INTEGER PRIMARY KEY,cluster INTEGER,stamp BLOB,unit BLOB)')
 
@@ -123,15 +124,27 @@ class Records:
         votes=[];counts=[];support=Votes();charge=0;seen=0
         for row in self.rows():
             value=body_vector(row);blob=value.tobytes();compatible=[]
+            wide=value.astype('float64');norm=float(np.linalg.norm(wide))
             for cluster in range(len(votes)):
                 if self.db.execute('SELECT 1 FROM features WHERE cluster=? AND embedding=?',(cluster,blob)).fetchone():
                     compatible.append(cluster);continue
+                center,radius,max_norm=self.db.execute('SELECT center,radius,max_norm FROM bounds WHERE cluster=?',(cluster,)).fetchone()
+                center=np.frombuffer(center,dtype='<f8')
+                slack=8*len(value)*np.finfo(np.float32).eps*max(1.,norm*max_norm)
+                lower=float(np.dot(wide,center))-norm*radius-slack
+                if np.isfinite(lower) and lower>=threshold:
+                    from .profiling import count
+                    count('body_mode_acceptance_certificates');compatible.append(cluster);continue
                 if all(budget.score(value,np.frombuffer(r[0],dtype='<f4'))>=threshold
                        for r in self.db.execute('SELECT embedding FROM features WHERE cluster=?',(cluster,))):
                     compatible.append(cluster)
             if len(compatible)==1:cluster=compatible[0]
             else:
                 cluster=len(votes);votes.append(Votes());counts.append(0)
+                self.db.execute('INSERT INTO bounds VALUES (?,?,?,?)',(cluster,wide.astype('<f8').tobytes(),0.,norm))
+            center,radius,max_norm=self.db.execute('SELECT center,radius,max_norm FROM bounds WHERE cluster=?',(cluster,)).fetchone()
+            radius=max(radius,float(np.linalg.norm(wide-np.frombuffer(center,dtype='<f8')))+1e-12)
+            self.db.execute('UPDATE bounds SET radius=?,max_norm=? WHERE cluster=?',(radius,max(max_norm,norm),cluster))
             self.db.execute('INSERT OR IGNORE INTO features VALUES (?,?)',(cluster,blob))
             self._write(cluster,blob)
             self.db.execute('INSERT INTO scored(cluster,stamp,unit) VALUES (?,?,?)',

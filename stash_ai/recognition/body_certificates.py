@@ -32,6 +32,11 @@ def pairs(candidates,bank,config,evidence):
     settings=config.data['sapiensid']['global_matching']
     for a,b in candidates:
         first,second=bank[a],bank[b]
+        gates=_pair_result(a,b,bank,config,mean=None,minimum=None,face_min=None,core_blocked=False)
+        if gates['blockers']:
+            gates['measurements']='not_computed_metadata_veto'
+            evidence.stats['metadata_pair_vetoes']=evidence.stats.get('metadata_pair_vetoes',0)+1
+            yield gates;continue
         mean,minimum=evidence.compare(first['refs'],second['refs']);blocked=False;bounded=False
         for left in first['cores']:
             for right in second['cores']:
