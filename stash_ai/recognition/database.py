@@ -12,7 +12,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -128,6 +128,11 @@ TABLES+=PIXEL_INDEX_TABLES
 SCHEMA_V12,TABLES_V12=SCHEMA,TABLES
 from .local_dependencies import SCHEMA as LOCAL_SCHEMA
 SCHEMA+=LOCAL_SCHEMA
+SCHEMA_V13,TABLES_V13=SCHEMA,TABLES
+from .cold_payloads import SCHEMA as COLD_SCHEMA
+from .decision_contexts import SCHEMA as CONTEXT_SCHEMA
+SCHEMA+=COLD_SCHEMA+CONTEXT_SCHEMA
+TABLES+=('crop_payloads','decision_contexts')
 
 
 def encoded(value):
@@ -227,9 +232,9 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12),13: (SCHEMA_V13,TABLES_V13)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
@@ -247,7 +252,10 @@ class FaceDatabase(AbstractContextManager):
                     for sql in PIXEL_INDEX_SCHEMA.split(';'):
                         if sql.strip():db.execute(sql)
                 from .local_dependencies import TRIGGERS as local_triggers
-                for sql in local_triggers.values():db.execute(sql)
+                if version<=12:
+                    for sql in local_triggers.values():db.execute(sql)
+                for sql in (COLD_SCHEMA+CONTEXT_SCHEMA).split(';'):
+                    if sql.strip():db.execute(sql)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:

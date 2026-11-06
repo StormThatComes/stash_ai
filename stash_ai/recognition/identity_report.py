@@ -3,6 +3,7 @@
 Read one consistent SQLite snapshot. Never infer assignments from present-day
 similarities, fetch media, load models, or modify recognition/Stash state.
 """
+from .cold_payloads import get as cold_crop
 from collections import Counter, defaultdict
 from contextlib import closing
 from io import BytesIO
@@ -87,7 +88,8 @@ def _decisions(db, person, family, policy):
         'JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY c.policy,c.id',
         (person['id'],))
     for row in rows:
-        payload = _object(row['payload'])
+        from .decision_contexts import unpack
+        payload = unpack(db,row['payload'])
         result[payload['observation']].append({
             'candidate_id': row['id'], 'policy': row['policy'],
             'matches_current_policy': row['policy'] == policy,
@@ -206,7 +208,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             name = f'scene-{int(scene)}_cue-{cue:06d}_{assignment["category"]}_face-{index:06d}.png'
             geometry = json.loads(row['geometry'])
             from .retained_annotations import export as annotate
-            image = _image(row['crop'], directory / name,
+            image = _image(cold_crop(db,row['crop']), directory / name,
                            annotate=lambda rgb, path: annotate(rgb, path, geometry, quality.get('crop_bounds')))
             eligible = assignment['category'] != 'hybrid-attachment' and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
             reference_count += int(eligible)

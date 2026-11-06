@@ -59,6 +59,8 @@ def save_records(db, config, records):
     from .models import normalized_embedding
     from .person_signal import save, contract as person_contract
     from .shared_person_evidence import project, available as shared_available
+    from .cold_payloads import put,available as cold_available
+    cold=cold_available(db)
     projection = person_contract(config)
     shared = shared_available(db)
     for identity,metadata,vector,crop in records:
@@ -76,7 +78,7 @@ def save_records(db, config, records):
             'ON CONFLICT(id) DO UPDATE SET face=excluded.face,geometry=excluded.geometry,'
             'quality=excluded.quality,rejected=excluded.rejected,embedding=excluded.embedding,crop=excluded.crop',
             (identity,body['scan'],body['cue'],body['seconds'],body['contract'],body['face'],
-             encoded(metadata['person']),encoded(public),body['rejected'],feature,crop))
+             encoded(metadata['person']),encoded(public),body['rejected'],feature,put(db,crop,supported=cold)))
         if body['face_accepted']:
             # Compatibility projection uses the SAME inferred feature. Never
             # invoke the encoder again for a face-associated person.

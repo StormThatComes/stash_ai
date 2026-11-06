@@ -33,6 +33,8 @@ def test_valid_crop_budgets_complete_scans_with_honest_encoding_metadata(tmp_pat
         assert not reused and backend.calls == 3
         assert db.connection.execute('SELECT cursor,status FROM scans').fetchone()[:] == (3, 'complete')
         for row in db.connection.execute('SELECT * FROM observations'):
+            from stash_ai.recognition.cold_payloads import get
+            row=dict(row);row['crop']=get(db.connection,row['crop'])
             quality = json.loads(row['quality'])
             assert row['rejected'] is None and row['embedding'] and len(row['crop']) <= limit
             with Image.open(BytesIO(row['crop'])) as crop:
@@ -207,6 +209,8 @@ def test_downscaled_retained_crop_maps_landmarks_to_encoded_pixels(tmp_path):
         row = dict(db.connection.execute('SELECT * FROM observations WHERE scan=? LIMIT 1', (identifier,)).fetchone())
         quality = json.loads(row['quality'])
         assert quality['crop_encoding']['downscaled']
+        from stash_ai.recognition.portrait_availability import crop_row
+        row=crop_row(db.connection,row)
         image, face = retained_image(row)
         with image:
             bounds = quality['crop_bounds']

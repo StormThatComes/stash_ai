@@ -83,6 +83,10 @@ def _apply(db):
         for label, sql, parameters in steps:
             with stage(label):
                 db.execute(sql, parameters)
+    from .cold_payloads import collect
+    collect(db)
+    from .decision_contexts import collect
+    collect(db)
     with stage('Validate retained identity references'):
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('Retention would break identity references; changes rolled back.')

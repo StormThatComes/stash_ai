@@ -337,7 +337,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
                                 [bounds[2]-bounds[0],bounds[3]-bounds[1]])
                         size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
-                        data,metadata=encodings.call(retained_portrait,dict(row),deepcopy(metadata),policy,
+                        data,metadata=encodings.call(retained_portrait,crop_row(db,row),deepcopy(metadata),policy,
                             config.data['storage']['max_crop_bytes'],size=size)
                 except Exception:
                     metadata['reason'] = 'portrait_source_unavailable'

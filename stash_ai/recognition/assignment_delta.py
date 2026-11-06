@@ -24,6 +24,7 @@ def prune(db,replay,selected,scope,namespace,policy):
 
 def candidates(db,rows,changed):
     from .reference_roles import observation_sql
+    from .decision_contexts import unpack,pack
     for row in rows:
         old=db.execute('SELECT * FROM candidates WHERE id=?',(row[0],)).fetchone()
         fresh=json.loads(row[5]);observation=fresh['observation']
@@ -31,7 +32,7 @@ def candidates(db,rows,changed):
         same=False
         if old is not None and tuple(old)[:5]==row[:5]:
             try:
-                prior=json.loads(old['payload'])
+                prior=unpack(db,old['payload'])
                 for key in ('reference_context','reference_selected'):
                     prior.pop(key,None);fresh.pop(key,None)
                 same=prior==fresh
@@ -39,7 +40,7 @@ def candidates(db,rows,changed):
         # Refresh precedence across policies even when the payload is identical.
         if not same or not latest or latest[0]!=row[0]:
             db.execute('DELETE FROM candidates WHERE id=?',(row[0],))
-            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',row)
+            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(*row[:5],pack(db,row[5])))
             changed.add(db.execute('SELECT scene FROM scans WHERE id=?',(row[1],)).fetchone()[0])
         yield row
 

@@ -71,6 +71,8 @@ def resolve(db, row):
                               (value[5:].decode('utf8'),)).fetchone()
             if source is None:raise ValueError('Missing shared body evidence.')
             result[column]=source[0]
+    from .cold_payloads import get
+    result['crop']=get(db,result['crop'])
     return result
 
 

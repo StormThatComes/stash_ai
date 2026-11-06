@@ -61,7 +61,7 @@ def explanation(payload):
 
 def summary(db, policy, scans, *, examples=3):
     """Counts and bounded original evidence; never reconstruct a past decision."""
-    import json
+    from .decision_contexts import unpack
     from .database import encoded
     from .reference_roles import observation_sql
     condition = 'policy=? AND scan IN (SELECT value FROM json_each(?))'
@@ -69,7 +69,7 @@ def summary(db, policy, scans, *, examples=3):
     groups = []
     for row in db.execute("SELECT status,json_extract(payload,'$.reason') AS reason,COUNT(*) AS total "
                           'FROM candidates WHERE ' + condition + ' GROUP BY status,reason ORDER BY total DESC,status,reason', args):
-        evidence = [recorded(json.loads(r[0])) for r in db.execute('SELECT payload FROM candidates WHERE ' + condition +
+        evidence = [recorded(unpack(db,r[0])) for r in db.execute('SELECT payload FROM candidates WHERE ' + condition +
             " AND status=? AND json_extract(payload,'$.reason') IS ? ORDER BY " + observation_sql('candidates') + ' LIMIT ?',
             args + (row['status'], row['reason'], examples))]
         groups.append(dict(status=row['status'], reason=row['reason'], count=row['total'], examples=evidence))

@@ -212,8 +212,9 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
                         'FROM candidates WHERE scan=? AND policy=?', (scan, policy)).fetchone()
     if tuple(totals) != (count, count):
         return False
+    from .decision_contexts import limits_sql
     rows = db.execute("SELECT c.id,c.person,c.status,json_extract(c.payload,'$.observation') AS observation,"
-        "json_extract(c.payload,'$.reference_context') AS context,json_extract(c.payload,'$.resource_limits') AS limits,"
+        "json_extract(c.payload,'$.reference_context') AS context,"+limits_sql(db)+" AS limits,"
         "o.scan,o.rejected,m.person AS member "
         "FROM candidates c LEFT JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
         'LEFT JOIN members m ON m.observation=o.id WHERE c.scan=? AND c.policy=?', (scan, policy))

@@ -35,6 +35,8 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
             'WHERE o.id=?', (identifier,)).fetchone()
         if record is None or record['scope'] != context['scope'] or record['scene'] not in selection:
             raise ValueError('Pilot observations must belong to this declared selected-scene scope.')
+        from .cold_payloads import get
+        record=dict(record);record['crop']=get(database.connection,record['crop'])
         retained += len(record['crop'] or b'')
         if retained > 33554432:
             raise ValueError('Pilot retained crop byte budget exceeded.')

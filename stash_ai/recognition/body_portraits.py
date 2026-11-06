@@ -45,6 +45,8 @@ def choose(database, config, scope, target):
             key=(*score(quality),-row['seconds'],row['id'])
             if best is not None and key<=best:continue
             blob=db.execute('SELECT crop FROM body_observations WHERE id=?',(row['id'],)).fetchone()[0]
+            from .cold_payloads import get
+            blob=get(db,blob)
             details={}
             try:
                 with Image.open(BytesIO(blob)) as source,source.convert('RGB') as rgb:

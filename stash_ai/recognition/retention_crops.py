@@ -8,6 +8,7 @@ from .quality import crop_bytes
 
 
 def restore(db, scan, source, config):
+    from .cold_payloads import put
     marker = FACE_CROPS + scan
     if not db.execute('SELECT 1 FROM metadata WHERE key=?', (marker,)).fetchone():
         return
@@ -29,7 +30,7 @@ def restore(db, scan, source, config):
                             previous = json.loads(row['quality']).get('crop_bounds')
                             if previous is not None and list(previous) != bounds:
                                 raise ValueError('Archived face crop geometry changed; refusing mismatched pixels.')
-                            db.execute('UPDATE observations SET crop=? WHERE id=?', (crop, row['id']))
+                            db.execute('UPDATE observations SET crop=? WHERE id=?', (put(db,crop), row['id']))
                     wanted.remove(index)
         if wanted:
             raise ValueError('VTT input ended before archived face crops were restored.')

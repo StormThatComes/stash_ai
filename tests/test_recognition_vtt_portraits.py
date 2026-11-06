@@ -77,7 +77,8 @@ def test_default_vtt_portrait_is_wider_than_recognition_crop_without_extra_infer
     assert stash.media_calls.count('http://stash/sprite/1.jpg') == 2  # one scan, one shared portrait source
     with FaceDatabase(config.database) as db:
         observations = db.connection.execute('SELECT * FROM observations').fetchall()
-        assert all(image_size(row['crop']) == (130, 130) for row in observations)
+        from stash_ai.recognition.cold_payloads import get
+        assert all(image_size(get(db.connection,row['crop'])) == (130, 130) for row in observations)
         portrait = db.connection.execute("SELECT * FROM portraits WHERE status='published'").fetchone()
         metadata = json.loads(portrait['metadata'])
         observation = next(row for row in observations if row['id'] == metadata['observation'])

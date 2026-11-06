@@ -200,13 +200,14 @@ def read(db, observation, expected):
 def save(db, observation, expected, metadata, vector=None, crop=None):
     """Caller owns the transaction; unavailable input is distinct from inference failure."""
     from .database import encoded
+    from .cold_payloads import put
     if vector is not None:
         from .models import normalized_embedding
         vector=normalized_embedding(vector,DIMENSIONS).astype('<f4').tobytes()
     db.execute('INSERT INTO person_evidence VALUES (?,?,?,?,?,?) '
                'ON CONFLICT(observation,contract) DO UPDATE SET status=excluded.status,'
                'metadata=excluded.metadata,embedding=excluded.embedding,crop=excluded.crop',
-               (observation,expected,'ready' if vector is not None else 'unavailable',encoded(metadata),vector,crop))
+               (observation,expected,'ready' if vector is not None else 'unavailable',encoded(metadata),vector,put(db,crop)))
     # Older replay schemas need the observation trigger fallback. Current
     # schemas stamp person evidence directly without invalidating face vectors.
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='recognition_version_person_evidence_insert'").fetchone():

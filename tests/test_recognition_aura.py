@@ -145,6 +145,8 @@ def test_pilot_scales_landmarks_for_downscaled_retained_crops(tmp_path, monkeypa
             db.connection.execute('UPDATE observations SET quality=? WHERE id=?', (json.dumps(quality), row['id']))
             db.connection.commit()
             row = db.connection.execute('SELECT * FROM observations WHERE id=?', (row['id'],)).fetchone()
+        from stash_ai.recognition.portrait_availability import crop_row
+        row=crop_row(db.connection,row)
         with retained_image(row)[0] as image:
             expected_size = image.size
         expected_image,expected_face = retained_image(row)

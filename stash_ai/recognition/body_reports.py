@@ -1,4 +1,5 @@
 """Typed body evidence shared by offline consumers; never fabricate face rows."""
+from .cold_payloads import get as cold_crop
 import json
 from collections import Counter
 
@@ -87,7 +88,7 @@ def export_members(db,config,person,directory,*,policies=None):
             with rgb.copy() as copy:
                 drawn=_draw(copy,(0,0,rgb.width,rgb.height),shifted);_png(copy,target)
             return dict(status='exported',file=target.name,drawn_indices=drawn)
-        image=_image(row['crop'],directory/name,annotate=annotate)
+        image=_image(cold_crop(db,row['crop']),directory/name,annotate=annotate)
         admission=admission_report.person(quality,config,policies,row['contract'],independent=True)
         image['thresholds']=admission_panel.export(image,admission,directory,name,
             observation=row['id'],role=row['role'],rejection=row['rejected'])
