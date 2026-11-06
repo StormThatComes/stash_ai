@@ -37,3 +37,25 @@ def test_capacity_failure_leaves_transaction_rollback_available(tmp_path):
             db.rollback()
             assert db.execute('SELECT COUNT(*) FROM values_').fetchone()[0]==0
         finally:db.close()
+
+
+def test_private_database_closes_retained_cursors_before_unlink(tmp_path):
+    config=configured(rebuild_scratch_directory=str(tmp_path),rebuild_scratch_bytes=32*1024**2)
+    with scratch_space.scope(config):
+        db=scratch_space.connect();path=Path(db.owned_path)
+        db.execute('CREATE TABLE values_(value INTEGER)')
+        db.executemany('INSERT INTO values_ VALUES (?)',[(1,),(2,)])
+        cursor=db.execute('SELECT * FROM values_');assert cursor.fetchone()==(1,)
+        db.close()
+        assert not path.exists()
+
+
+def test_vector_growth_checks_free_space_per_block_not_per_witness(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    calls=[]
+    monkeypatch.setattr(scratch_space.shutil,'disk_usage',lambda path:calls.append(path) or SimpleNamespace(free=10**9))
+    config=configured(rebuild_scratch_directory=str(tmp_path),rebuild_scratch_bytes=32*1024**2)
+    with scratch_space.scope(config) as budget:
+        for _ in range(32):scratch_space.grow(Path(budget.directory)/'vectors',16384)
+        assert len(calls)<=2
+        assert budget.used>=32*16384
