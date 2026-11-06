@@ -89,6 +89,7 @@ class Evidence:
 
 
 class Search:
+    rounding=ROUNDING
     """Disk-backed means; only two small tiles and a bounded vector LRU in RAM."""
     def __init__(self,db,config,bank):
         self.bank=bank;self.identities=sorted(bank);self.config=config;self.db=db
@@ -173,6 +174,9 @@ class Search:
             self.mode_owners=np.asarray([owner for owner,_ in self.entries],dtype='int64')
             self.stats['appearance_centroids']=len(self.entries)
             self.index.flush();self.stats['centroid_disk_bytes']=self.index.tell()
+            from .centroid_tree import reorder
+            reorder(self)
+            self.tree=None
             return self
         except BaseException:
             self.stack.close();raise
@@ -204,17 +208,28 @@ class Search:
             self.bounds.move_to_end(start)
             return self.bounds[start]
         from .parallel_numeric import matrix_tiles
+        leaves=(count+block-1)//block
+        tree_bytes=max(0,2*leaves-1)*(4096*8+512)
+        if self.tree is None and tree_bytes+self.stats['reference_working_bytes']<self.config.data['sapiensid']['execution']['reference_bytes'] and leaves:
+            from .centroid_tree import Tree
+            self.reservation.set(self.stats['reference_working_bytes']+tree_bytes)
+            self.tree=Tree(self,read)
+        def offsets():
+            if self.tree is not None:
+                yield from self.tree.pairs(active,floor)
+            else:
+                active_blocks=None if active is None else {i for i in range(0,count,block) if active[i:i+block].any()}
+                for i in range(0,count,block):
+                    for j in range(i,count,block):
+                        if active_blocks is None or i in active_blocks or j in active_blocks:yield i,j
         def inputs():
-            for i in range(0,count,block):
+            for i,j in offsets():
                 left=read(i);left.flags.writeable=False
-                for j in range(i,count,block):
-                    if active is not None and not (active[i:i+block].any() or active[j:j+block].any()):continue
-                    right=left if j==i else read(j)
-                    right.flags.writeable=False
-                    if floor is not None and upper(bound(i,left),bound(j,right))+ROUNDING<floor:
-                        self.stats['centroid_blocks_excluded']=self.stats.get('centroid_blocks_excluded',0)+1
-                        continue
-                    yield (i,j), ((left,right),)
+                right=left if j==i else read(j);right.flags.writeable=False
+                if self.tree is None and floor is not None and upper(bound(i,left),bound(j,right))+ROUNDING<floor:
+                    self.stats['centroid_blocks_excluded']=self.stats.get('centroid_blocks_excluded',0)+1
+                    continue
+                yield (i,j),((left,right),)
         blocks=(count+block-1)//block
         inactive=(sum(not active[i:i+block].any() for i in range(0,count,block)) if active is not None else 0)
         total=blocks*(blocks+1)//2-inactive*(inactive+1)//2
@@ -238,10 +253,11 @@ class Search:
         seen=set()
         for i,j,values in self.tiles(floor=None if focus else floor):
             rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
-            mask=(rows[:,None]<cols[None,:]) & ((values+ROUNDING>=floor) |
+            mask=(rows[:,None]!=cols[None,:]) & ((values+ROUNDING>=floor) |
                   (wanted[rows,None] & wanted[None,cols]))
+            if i==j:mask &= np.arange(len(rows))[:,None]<np.arange(len(cols))[None,:]
             for a,b in zip(*np.nonzero(mask)):
-                pair=self.identities[rows[a]],self.identities[cols[b]]
+                pair=tuple(sorted((self.identities[rows[a]],self.identities[cols[b]])))
                 if pair in seen:continue
                 seen.add(pair)
                 if len(seen)*256>self.config.data['sapiensid']['execution']['plan_bytes']:
@@ -372,8 +388,12 @@ def exact_pair(a,b,bank,config,evidence):
     return list(exact_pairs(((a,b),),bank,config,evidence))[0]
 
 
-def exact_pairs(pairs,bank,config,evidence):
+def exact_pairs(pairs,bank,config,evidence,*,compact=False):
     """Batch complete proofs across candidates, original cores and face vetoes."""
+    if compact:
+        from .body_certificates import pairs as certified_pairs
+        yield from certified_pairs(pairs,bank,config,evidence)
+        return
     from .body_parallel import comparisons
     def requests():
         for a,b in pairs:
