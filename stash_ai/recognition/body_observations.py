@@ -58,6 +58,9 @@ def save_records(db, config, records):
     from .database import encoded
     from .models import normalized_embedding
     from .person_signal import save, contract as person_contract
+    from .shared_person_evidence import project, available as shared_available
+    projection = person_contract(config)
+    shared = shared_available(db)
     for identity,metadata,vector,crop in records:
         marker=metadata.get('_body_cue')
         if marker is not None:
@@ -77,10 +80,10 @@ def save_records(db, config, records):
         if body['face_accepted']:
             # Compatibility projection uses the SAME inferred feature. Never
             # invoke the encoder again for a face-associated person.
-            save(db,body['face'],person_contract(config),dict(public,identity_rejection=body['rejected']),
-                 vector if body['rejected'] is None else None,crop)
-            from .shared_person_evidence import share
-            share(db,body['face'],person_contract(config),identity)
+            metadata = dict(public,identity_rejection=body['rejected'])
+            if not project(db,body['face'],projection,identity,metadata,supported=shared):
+                save(db,body['face'],projection,metadata,
+                     vector if body['rejected'] is None else None,crop)
 
 
 def coverage(db,config,scans):
@@ -115,6 +118,8 @@ def repair_projections(db,config,scan,*,cue=None):
     import json
     import numpy as np
     from .person_signal import save,contract as person_contract
+    from .shared_person_evidence import project, available as shared_available
+    shared = shared_available(db)
     expected=contract(config);projection=person_contract(config)
     condition='' if cue is None else ' AND o.cue=?'
     parameters=(expected,projection,scan)+(() if cue is None else (cue,))
@@ -122,13 +127,17 @@ def repair_projections(db,config,scan,*,cue=None):
         'AND c.cue=o.cue AND c.contract=? LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
         'WHERE o.scan=? AND o.rejected IS NULL AND e.observation IS NULL'+condition,parameters).fetchall()
     for row in rows:
-        bodies=db.execute('SELECT quality,rejected,embedding,crop FROM body_observations '
+        bodies=db.execute('SELECT id,quality,rejected FROM body_observations '
             'WHERE scan=? AND cue=? AND contract=? AND face=? LIMIT 2',
             (scan,row['cue'],expected,row['id'])).fetchall()
         metadata=dict(person=None,identity_rejection='person_face_association_unavailable')
         feature=crop=None
         if len(bodies)==1:
             body=bodies[0];metadata=dict(json.loads(body['quality']),identity_rejection=body['rejected'])
+            if project(db,row['id'],projection,body['id'],metadata,supported=shared,
+                       retain_crop=config.data['sapiensid']['storage']['retain_person_crops'],validate_feature=True):
+                continue
+            body=db.execute('SELECT embedding,crop,rejected FROM body_observations WHERE id=?',(body['id'],)).fetchone()
             crop=body['crop'] if config.data['sapiensid']['storage']['retain_person_crops'] else None
             if body['rejected'] is None:
                 if body['embedding'] is None:raise ValueError('Completed body cue is missing its retained feature.')

@@ -8,6 +8,52 @@ PREFIX = b"body:"
 TAG = "X'626f64793a'"
 
 
+def available(db):
+    return bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_shared_body_delete'").fetchone())
+
+
+def project(db, observation, contract, body, metadata, *, retain_crop=True, supported=None, validate_feature=False):
+    """Publish the authoritative body address without writing duplicate BLOBs.
+
+    Return False for legacy schemas; callers retain their inline fallback.
+    The body and projection must be written in the same caller transaction.
+    """
+    if not (available(db) if supported is None else supported):
+        return False
+    from .database import encoded
+    row = db.execute('SELECT face,rejected,length(embedding),crop IS NOT NULL '
+                     'FROM body_observations WHERE id=?', (body,)).fetchone()
+    if row is None or row[0] != observation:
+        raise ValueError('Shared body projection requires an authoritative face association.')
+    ready = row[1] is None and row[2] is not None
+    if validate_feature and row[1] is None:
+        if row[2] is None:
+            raise ValueError('Completed body cue is missing its retained feature.')
+        from .models import normalized_embedding
+        import numpy as np
+        raw=db.execute('SELECT embedding FROM body_observations WHERE id=?',(body,)).fetchone()[0]
+        normalized_embedding(np.frombuffer(raw,dtype='<f4'),4096)
+    if ready and row[2] != 16384:
+        raise ValueError('Invalid shared body embedding length.')
+    tag = PREFIX + body.encode()
+    db.execute('INSERT INTO person_evidence VALUES (?,?,?,?,?,?) '
+        'ON CONFLICT(observation,contract) DO UPDATE SET status=excluded.status,'
+        'metadata=excluded.metadata,embedding=excluded.embedding,crop=excluded.crop',
+        (observation,contract,'ready' if ready else 'unavailable',encoded(metadata),
+         tag if ready else None,tag if retain_crop and row[3] else None))
+    return True
+
+
+def compact_cue(db, scan, cue, body_contract, person_contract):
+    """Re-share only byte-identical restored payloads; retain old projections."""
+    if not available(db):return
+    for observation, body in db.execute('SELECT e.observation,b.id FROM person_evidence e '
+        'JOIN body_observations b ON b.face=e.observation '
+        'WHERE b.scan=? AND b.cue=? AND b.contract=? AND e.contract=? ORDER BY b.id',
+        (scan,cue,body_contract,person_contract)):
+        share(db,observation,person_contract,body)
+
+
 def expression(column, alias='e'):
     value=f'{alias}.{column}'
     return (f"CASE WHEN substr({value},1,5)={TAG} THEN "
@@ -30,7 +76,7 @@ def resolve(db, row):
 
 def share(db, observation, contract, body):
     # Disposable historical schemas retain the inline representation.
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_shared_body_delete'").fetchone():return
+    if not available(db):return
     tag=PREFIX+body.encode()
     db.execute('UPDATE person_evidence SET embedding=CASE WHEN person_evidence.embedding=b.embedding THEN ? ELSE person_evidence.embedding END,'
         'crop=CASE WHEN person_evidence.crop=b.crop AND person_evidence.crop IS NOT NULL THEN ? ELSE person_evidence.crop END FROM body_observations b '

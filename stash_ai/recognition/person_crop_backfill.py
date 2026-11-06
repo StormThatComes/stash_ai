@@ -59,3 +59,5 @@ def backfill(db,scan,source,config):
                         db.execute(f"UPDATE {table} SET crop=?,{field}=json_set({field},'$.crop_status',?,"
                             "'$.crop_attempt_limit',?) WHERE "+identity+'=? AND contract=?',
                             (crop,status,limit,row['id'],expected))
+                    from .shared_person_evidence import compact_cue
+                    compact_cue(db,scan,index,body_contract(config),contract(config))

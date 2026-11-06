@@ -20,3 +20,12 @@ first-write-wins and the complete rebuild keeps its atomic commit boundary.
 Thumbnail reclamation uses the exact indexed JSON expression. The correlated
 lookup also removes the right-hand column's SQLite affinity so the expression
 index can perform a search rather than scanning every observation.
+
+## Shared face/body projections
+
+Fresh face-associated bodies write their person projection directly as a body
+address. Repair uses the same representation after validating retained features.
+Crop backfill re-shares byte-identical images and vectors, including projections
+materialized by copy-on-write triggers. Replacing or deleting a body still
+materializes its old projections before the change; legacy schemas keep inline
+payloads. No additional encoder inference is involved.
