@@ -55,7 +55,9 @@ def _nominations(payload):
 def _selected(payload,face,body):
     left,right,diagonal,face_floor,body_floor=payload
     labels,others=left[3],right[3]
-    mask=(face+1e-6>=face_floor)|(body+1e-6>=body_floor)
+    faces=np.asarray([v[1] for v in labels])[:,None] & np.asarray([v[1] for v in others])[None,:]
+    bodies=np.asarray([v[2] for v in labels])[:,None] & np.asarray([v[2] for v in others])[None,:]
+    mask=((face+1e-6>=face_floor)&faces)|((body+1e-6>=body_floor)&bodies)
     if diagonal:mask=np.triu(mask,1)
     return [(labels[i][0],others[j][0],float(face[i,j]) if labels[i][1] and others[j][1] else None,
              float(body[i,j]) if labels[i][2] and others[j][2] else None) for i,j in zip(*np.nonzero(mask))]
@@ -90,7 +92,7 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
     # A completed catalogue certifies empty comparisons as well as hits. Only
     # positive old block pairs need individual tile records. If one was evicted
     # or damaged it is recomputed before this run can certify a successor.
-    catalogue_key=digest(['hybrid-block-catalogue-v1',face_floor,body_floor])
+    catalogue_key=digest(['hybrid-block-catalogue-v2',face_floor,body_floor])
     previous=store.get('hybrid-catalogue',catalogue_key) if store else None
     positions={block[0]:i for i,block in enumerate(blocks)}
     previous_ids=set(previous[0]) if previous else set()
@@ -118,7 +120,7 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
             for j in neighbours:
                 count('hybrid_block_pairs_visited')
                 second=blocks[j]
-                key=digest([first[0],second[0],i==j,face_floor,body_floor])
+                key=digest(['modalities-v2',first[0],second[0],i==j,face_floor,body_floor])
                 payload=(first,second,i==j,face_floor,body_floor)
                 if (upper(bounds[i][0],bounds[j][0])+1e-6<face_floor and
                     upper(bounds[i][1],bounds[j][1])+1e-6<body_floor):

@@ -46,10 +46,15 @@ class Lookup:
             if not active.any():return
             if active.all():active=None
         from .parallel_numeric import matrix_tiles
+        active_blocks=(None if active is None else
+                       [start for start in range(0,count,64) if active[start:start+64].any()])
+        from bisect import bisect_left
         def tiles():
             for start in range(0,count,64):
                 rows=np.arange(start,min(start+64,count))
-                for other in range(start,count,64):
+                others=(range(start,count,64) if active_blocks is None or active[start:start+64].any()
+                        else active_blocks[bisect_left(active_blocks,start):])
+                for other in others:
                     cols=np.arange(other,min(other+64,count))
                     if active is None or active[rows].all() or active[cols].all():
                         yield (rows,cols), ((self.faces[start:start+64],self.faces[other:other+64]),
@@ -65,12 +70,14 @@ class Lookup:
                         run=run[run<columns[-1]]
                         yield (run,columns), ((self.faces[run],self.faces[columns]),
                                               (self.persons[run],self.persons[columns]))
+        has_face=np.array([bool(len(i.faces)) for i in self.identities])
+        has_body=np.array([bool(len(i.persons)) for i in self.identities])
         for (rows,columns),(faces,persons) in matrix_tiles(tiles(),kind='hybrid_nomination'):
             mask=rows[:,None]<columns[None,:]
             if face_floor is not None or person_floor is not None:
                 nominated=np.zeros_like(mask)
-                if face_floor is not None:nominated |= faces+1e-6>=face_floor
-                if person_floor is not None:nominated |= persons+1e-6>=person_floor
+                if face_floor is not None:nominated |= (faces+1e-6>=face_floor) & has_face[rows,None] & has_face[None,columns]
+                if person_floor is not None:nominated |= (persons+1e-6>=person_floor) & has_body[rows,None] & has_body[None,columns]
                 mask &= nominated
             for i,j in zip(*np.nonzero(mask)):
                 left,right=self.identities[rows[i]],self.identities[columns[j]]
