@@ -111,17 +111,22 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
     ranking=Ranking(db,config,scope,target,person['namespace'],context,policy_sha,
                     enabled=policy['source']=='vtt' and fallback_reason is None,category=category)
     cached=ranking.load()
+    scene_rankings=ranking.load_scenes() if cached is None else {}
     preparation=portrait_pipeline()
     if preparation is not None:preparation.begin_ranking(target,groups,context)
     ranked=cached if cached is not None else []
     def finish(result):
         flush(db)
+        ranking.save_scenes(all_ranks)
         ranking.save(all_ranks)
         return result
     with closing(Sources(client, config, source_factory), name='close VTT portrait source') as sources:
         if cached is None:
             for selected in sorted(target['scans'], key=lambda item: (item['scene'], item['scan'])):
                 scene = selected['scene']
+                if selected['scan'] in scene_rankings:
+                    ranked.extend(scene_rankings[selected['scan']])
+                    continue
                 rows = db.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,
                   o.dimensions,o.embedding,s.input_sha FROM observations o
                   JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
