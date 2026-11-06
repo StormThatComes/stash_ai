@@ -93,7 +93,18 @@ def test_pr_diff_uses_merge_base_and_includes_both_sides_of_rename(tmp_path):
 def test_post_merge_and_manual_runs_always_run_the_full_matrix(event):
     result = event_plan(event, {})
     assert all(result[key] for key in ('pytest', 'updater', 'dependencies', 'recognition'))
-    assert len(result['matrix']['include']) == 3
+    assert len(result['matrix']['include']) == 5
+
+
+def test_windows_partitions_keep_scope_and_only_one_model_smoke_per_platform():
+    matrix = select_jobs([('M', 'stash_ai/recognition/scanning.py')])['matrix']['include']
+    windows = [row for row in matrix if row['os'] == 'windows-latest']
+    assert {(row['suite'], row['shard']) for row in windows} == {
+        ('core', 1), ('core', 2), ('video', 1), ('video', 2)}
+    assert [row['shard'] for row in windows if row['suite'] == 'core' and row['smoke']] == [1]
+    solver = select_jobs([('M', 'stash_ai/recognition/merge_solver.py')])['matrix']['include']
+    assert {(row['suite'], row['shard']) for row in solver} == {('core', 1), ('core', 2)}
+    assert not any(row['smoke'] for row in solver)
 
 
 def test_unavailable_pr_diff_falls_back_to_full_validation():

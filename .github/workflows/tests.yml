@@ -141,7 +141,7 @@ jobs:
   recognition-models:
     needs: plan
     if: needs.plan.outputs.recognition == 'true'
-    name: recognition CPU (${{ matrix.os }}, ${{ matrix.suite }})
+    name: recognition CPU (${{ matrix.os }}, ${{ matrix.suite }} ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -154,7 +154,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install complete application CPU profile
-        run: uv pip install --system -r requirements-dev.txt -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+        run: uv pip install --system pytest -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
       - name: Load pinned CPU models
         if: matrix.smoke && matrix.suite != 'video'
         env:
@@ -162,7 +162,7 @@ jobs:
           STASH_API_KEY: ''
         run: python -m pytest -q tests/test_recognition_model_smoke.py --tb=short
       - name: Verify simultaneous solver trials with the complete CPU profile
-        if: matrix.suite != 'video'
+        if: matrix.suite != 'video' && matrix.shard == 1
         run: python -m pytest -q tests/test_recognition_solver_concurrency.py --tb=short
       - name: Install FFmpeg on Windows for tiny-video fixtures
         if: matrix.suite == 'video'
@@ -170,20 +170,19 @@ jobs:
       - name: Run Windows lifecycle tests
         if: runner.os == 'Windows'
         env:
-          # Two independent pytest workers; each module keeps its fixture order.
-          # Native libraries and solver subprocesses inherit a bounded baseline.
+          # Each partition has its own runner; subprocesses inherit bounded
+          # native thread defaults while explicit application budgets still apply.
           OMP_NUM_THREADS: '1'
           MKL_NUM_THREADS: '1'
           OPENBLAS_NUM_THREADS: '1'
         run: >-
-          python -m pytest -q "@.github/ci/windows-${{ matrix.suite }}.txt"
-          -n 2 --dist=loadfile --max-worker-restart=0
+          python -m tests.ci_windows ${{ matrix.suite }} ${{ matrix.shard }}
           --tb=short --maxfail=1 --durations=20 --junitxml="${{ runner.temp }}/lifecycle.xml"
       - name: Save Windows lifecycle durations
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-windows-${{ matrix.suite }}
+          name: pytest-windows-${{ matrix.suite }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/lifecycle.xml
           retention-days: 7
 

@@ -26,13 +26,17 @@ def test_linux_matrix_covers_every_test_module_once():
 
 def test_windows_lifecycle_lists_are_disjoint_and_resolve_to_test_modules():
     from tests.ci_jobs import full_plan
+    from tests.ci_windows import selected
 
     root = Path(__file__).resolve().parents[1]
     matrix = full_plan('test')['matrix']['include']
     files = []
     for row in matrix:
         if row['os'] == 'windows-latest':
-            paths = (root / '.github/ci' / f"windows-{row['suite']}.txt").read_text().splitlines()
+            paths = selected(row['suite'], row['shard'], root)
             assert paths and all((root / path).is_file() for path in paths)
             files.extend(paths)
     assert files and len(files) == len(set(files))
+    manifests = [path for suite in ('core', 'video') for path in
+                 (root / '.github/ci' / f'windows-{suite}.txt').read_text().splitlines()]
+    assert sorted(files) == sorted(manifests)

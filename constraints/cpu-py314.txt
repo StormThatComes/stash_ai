@@ -44,8 +44,6 @@ easydict==1.13
     # via -r requirements-cpu.txt
 einops==0.8.2
     # via -r requirements-cpu.txt
-execnet==2.1.2
-    # via pytest-xdist
 filelock==4.0.12
     # via
     #   huggingface-hub
@@ -192,10 +190,6 @@ pygments==2.21.0
 pyparsing==3.3.3
     # via matplotlib
 pytest==9.1.1
-    # via
-    #   -r requirements-dev.txt
-    #   pytest-xdist
-pytest-xdist==3.8.0
     # via -r requirements-dev.txt
 python-dateutil==4.0.0
     # via
