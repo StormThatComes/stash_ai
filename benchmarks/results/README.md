@@ -43,4 +43,4 @@ relationships, and Stash v0.31.1-compatible WAL/NORMAL behavior.
 Pre-detaching relationships in batches reduced the longest
 transaction but increased total time by 37–49%, even without
 API calls, hooks or object loading. Retained-state hashes
-were identical. See the [analysis and decision](../../docs/cleanup_performance.md).
+were identical. See the [analysis and decision](../../docs/archive/cleanup-performance.md).

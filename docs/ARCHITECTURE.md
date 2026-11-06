@@ -403,7 +403,7 @@ process status. Metadata format 1 remains compatible
 with the previous updater; none of these classes
 requires importing the application package.
 For legacy updater migration, see
-[the main README](../README.md#updating-the-application).
+[legacy installation migrations](maintenance/legacy-migrations.md).
 
 YAML configuration, the default
 `tagger_sources.sqlite3` database, and `models/`
