@@ -107,6 +107,10 @@ def parser():
     root = RecognitionParser(prog='stash_ai.py recognition', allow_abbrev=False,
                                    description='On-demand facial recognition independent of tagging.')
     commands = root.add_subparsers(dest='command', required=True)
+    migration = commands.add_parser('migrate-config', allow_abbrev=False,
+        help='Write a complete v2 recognition YAML from the effective input policy (offline).')
+    migration.add_argument('--face-config', type=Path, required=True, help='Existing recognition YAML.')
+    migration.add_argument('--output', type=Path, required=True, help='New v2 YAML file.')
     for name, aliases, help_text in (
             ('db-status', ['db-report'], 'Inspect recognition database health, table sizes and estimated VACUUM savings (offline).'),
             ('db-vacuum', ['db-compact'], 'Compact the idle recognition database without changing evidence or history (offline).'),
@@ -309,6 +313,9 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command == 'migrate-config':
+        from .config_export import migrate
+        return migrate(config, args.output)
     if args.command == 'db-prune':
         from .db_retention import execute
         return execute(args, config)

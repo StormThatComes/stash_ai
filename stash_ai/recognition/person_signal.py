@@ -149,7 +149,7 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
     variant=s['model']['variant'];model=MODELS[variant]
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items()
-              if k not in ('refinement','deduplication','path','backend','vitpose_directory','batch_size',
+              if k not in ('refinement','deduplication','path','backend','vitpose_directory','batch_size','vitpose_batch_size',
                            'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory','rfdetr_directory',
                            'pmpose_directory','pmpose_batch_size','pmpose_presence_threshold','pmpose_visibility_threshold')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:

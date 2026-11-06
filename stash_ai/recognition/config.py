@@ -312,6 +312,7 @@ class FaceConfig:
     database: Path
     model_dir: Path
     names_path: Path | None
+    document_version: int = 1
 
     def snapshot(self):
         baseline = defaults()
@@ -329,6 +330,32 @@ class FaceConfig:
         return digest({name: self.data[name] for name in sections})
 
 
+def effective_data(supplied, *, device=None):
+    version = supplied.get('version', 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError('facial_recognition.yml version must be 1 or 2.')
+    data = defaults()
+    if version == 2:
+        from .config_layout import apply_v2
+        apply_v2(data, supplied)
+    else:
+        # Keep older local YAML configurations valid without silently weakening
+        # their existing identity/merge policies.
+        old = supplied.get('recognition', {})
+        if isinstance(old, dict) and 'min_support' in old:
+            if 'min_identity_support' in old or 'min_merge_support' in old:
+                raise ValueError('recognition.min_support cannot be combined with split support settings.')
+            supplied = dict(supplied)
+            supplied['recognition'] = dict(old)
+            support = supplied['recognition'].pop('min_support')
+            supplied['recognition'].update(min_identity_support=support, min_merge_support=support)
+        _merge(data, supplied)
+    if device is not None:
+        data['models']['device'] = device
+    validate(data)
+    return version, data
+
+
 def load(path=None, *, database=None, device=None, root=None):
     root = Path.cwd() if root is None else Path(root)
     selected = Path(path).expanduser().resolve() if path is not None else root / 'facial_recognition.yml'
@@ -342,25 +369,11 @@ def load(path=None, *, database=None, device=None, root=None):
         base = selected.parent
     else:
         raw, supplied, base, selected = b'', {}, root.resolve(), None
-    # Keep older local YAML configurations valid without silently weakening
-    # their existing identity/merge policies.
-    old = supplied.get('recognition', {}) if isinstance(supplied, dict) else {}
-    if isinstance(old, dict) and 'min_support' in old:
-        if 'min_identity_support' in old or 'min_merge_support' in old:
-            raise ValueError('recognition.min_support cannot be combined with split support settings.')
-        supplied = dict(supplied)
-        supplied['recognition'] = dict(old)
-        support = supplied['recognition'].pop('min_support')
-        supplied['recognition'].update(min_identity_support=support, min_merge_support=support)
-    data = defaults()
-    _merge(data, supplied)
-    if device is not None:
-        data['models']['device'] = device
-    validate(data)
+    version, data = effective_data(supplied, device=device)
     def resolve(value):
         p = Path(value).expanduser()
         return (base / p).resolve() if not p.is_absolute() else p.resolve()
     return FaceConfig(_freeze(data), raw, selected,
                       Path(database).expanduser().resolve() if database is not None else resolve(data['storage']['database']),
                       resolve(data['models']['directory']),
-                      resolve(data['names']['file']) if data['names']['file'] else None)
+                      resolve(data['names']['file']) if data['names']['file'] else None, version)
