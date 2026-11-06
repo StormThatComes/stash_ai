@@ -40,7 +40,7 @@ def planned(db, items, config):
             with closing(pool.ordered(_worker,jobs),name='finish body scene plans') as results:
                 for result in results:
                     record,rows,decisions=result.value
-                    store.put('body-scene',result.generation,decisions)
+                    if store:store.put('body-scene',result.generation,decisions)
                     yield record,rows,decisions
             batch.clear()
 
@@ -53,7 +53,7 @@ def planned(db, items, config):
             yield db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone(),[{'id':i} for i in cached],cached
             continue
         size=0
-        if store and pool and pool.workers>1:
+        if _observer.get() is None and pool and pool.workers>1:
             # Budget for packed input, local scoring banks, output and guard cache.
             raw=db.execute('SELECT COALESCE(SUM(length(embedding)+length(quality)+length(geometry)+8192),0) '
                            'FROM body_observations WHERE scan=?',(scan,)).fetchone()[0]
