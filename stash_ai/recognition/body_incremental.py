@@ -15,10 +15,15 @@ def source_versions(db):
 
 def means_key(bank,config,versions):
     if versions is None:return None
-    rows=list(bank['refs'])+[r for core in bank['cores'] for r in core]
-    return digest(['body-means-v1',bank['refs'],bank['cores'],bool(bank['faces']),
-        [r['id'] for r in bank['witnesses']],config.data['sapiensid']['global_matching'],
-        sorted({(r['scan'],versions.get(r['scan'],0)) for r in rows})])
+    import hashlib
+    from .rebuild_cache import _hash_row
+    h=hashlib.sha256(digest(['body-means-v2',bool(bank['faces']),
+                            config.data['sapiensid']['global_matching']]).encode())
+    for group in [bank['refs'],*bank['cores']]:
+        h.update(b'group')
+        for row in group:_hash_row(h,[row,versions.get(row['scan'],0)])
+    for row in bank['witnesses']:_hash_row(h,[row['id']])
+    return h.hexdigest()
 
 
 def nominations(search):

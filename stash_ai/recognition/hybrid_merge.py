@@ -76,7 +76,8 @@ def apply(database,selected,config,*,compact=False):
     from .publication_queue import enqueue
     db=database.connection;policy=matching_policy(config)
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
-    result=report(db,config,scope,namespace,compact=compact)
+    from .stage_checkpoints import report as checkpoint_report
+    result=checkpoint_report(db,selected,config,'hybrid',lambda:report(db,config,scope,namespace,compact=compact))
     selection={x['scan'] for x in selected}
     stored_bytes=0; pending=[]
     queue_key="hybrid-pending:"+digest([scope,namespace])

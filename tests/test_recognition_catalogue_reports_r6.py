@@ -28,7 +28,8 @@ def test_owner_metadata_batch_and_pair_report_plan_are_reused(tmp_path):
         queries=[];db.set_trace_callback(queries.append)
         bank=body_global_banks.banks(db,config,'scope',namespace(config))
         assert len(bank)==3
-        assert sum(q.startswith('SELECT m.person AS owner') for q in queries)==1
+        assert sum(q.startswith('SELECT DISTINCT m.person') for q in queries)==1
+        assert sum(q.startswith('SELECT b.id,b.scan,b.cue,b.quality,m.policy') for q in queries)==len(bank)
     with patch.object(body_global,'_report',wraps=body_global._report) as calls:
         report=build(config,people[0],people[1])
         assert report['independent_person']['enabled']

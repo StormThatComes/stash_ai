@@ -28,11 +28,12 @@ def banks(db,config,scope,namespace):
 
 
 def _banks(db,config,scope,namespace):
+    from .paged_references import rows as page_rows,cues as page_cues
+    from .config import digest
+    from .reference_roles import strict_sql
+    from .pose_policy import anchor_sql
     expected=contract(config);settings=config.data['sapiensid']['identities']
-    limit=config.data['sapiensid']['execution']['reference_bytes'];used=0
-    def reserve(extra):
-        if used+extra>limit:
-            raise ResourceLimit('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
+    limit=config.data['sapiensid']['execution']['reference_bytes']
     where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL "
            "AND m.status IN ('accepted','provisional') AND m.role='anchor' AND "+current_scan())
     args=(scope,namespace,encoded(compatible_contracts(config)))
@@ -40,138 +41,78 @@ def _banks(db,config,scope,namespace):
     owners={}
     for row in db.execute('SELECT DISTINCT m.person'+source+'WHERE '+where,args):
         owners.setdefault(canonical(db,row[0]),[]).append(row[0])
-    used=size(owners);reserve(0);output={}
-    # Bounded owner batches eliminate a metadata query for every identity.
-    def owner_batch(batch):
-        from contextlib import closing
-        aliases={alias:person for person in batch for alias in owners[person]}
-        groups={person:[] for person in batch};working=0
-        retry=False
-        try:
-            with closing(db.execute('SELECT m.person AS owner,b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
-                'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',
-                (*args,encoded(list(aliases))))) as cursor:
-                for raw in cursor:
-                    if raw['bytes']!=4096*4:raise ValueError('Invalid retained person embedding.')
-                    row=dict(raw);person=aliases[row.pop('owner')]
-                    working+=size(row);reserve(working);groups[person].append(row)
-        except ResourceLimit:
-            if len(batch)==1:raise
-            retry=True
-        if retry:
-            # Batch buffering must not reject a catalogue whose individual
-            # identity working sets fit. Release the failed batch before retry.
-            groups.clear();row=raw=None
-            middle=len(batch)//2
-            yield from owner_batch(batch[:middle])
-            yield from owner_batch(batch[middle:])
-            return
-        for index,person in enumerate(batch):
-            rows=groups.pop(person)
-            working-=sum(size(r) for r in rows)
-            yield person,rows
-            rows=row=raw=None
-            if groups and used+working>limit:
-                # Materialized banks now own more memory than the input rows
-                # they replaced. Drop speculative remaining rows and read again.
-                groups.clear()
-                yield from owner_batch(batch[index+1:])
-                return
-    def owner_rows():
-        people=list(owners)
-        for start in range(0,len(people),32):
-            yield from owner_batch(people[start:start+32])
-    for person,rows in owner_rows():
+    output={};retained=size(owners)
+    def reserve(extra):
+        if retained+extra>limit:raise ResourceLimit('Global body reference metadata exceeds sapiensid.execution.reference_bytes.')
+    # Resolve merge targets once; per-owner proof reads use the target index.
+    proofs={}
+    for row in db.execute('SELECT source,target FROM identity_merges'):
+        target=canonical(db,row['target'])
+        if target in owners:proofs.setdefault(target,[]).append(row['source'])
+    for person,aliases in owners.items():
+        rows=[];working=0
+        for raw in db.execute('SELECT b.id,b.scan,b.cue,b.quality,m.policy,m.status,length(b.embedding) AS bytes'+source+
+            'WHERE '+where+' AND m.person IN (SELECT value FROM json_each(?)) ORDER BY b.scan,b.cue,b.id',(*args,encoded(aliases))):
+            if raw['bytes']!=16384:raise ValueError('Invalid retained person embedding.')
+            row=dict(raw);working+=size(row);reserve(working);rows.append(row)
         witnesses=independent(rows,settings)
         selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
         if not selected and rows:selected=rows[:1]
-        # Deduplication controls support, never an outlier's veto authority.
         core=[dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows]
         by_id={r['id']:r for r in core}
-        refs=[by_id[r['id']] for r in selected]
-        output[person]=dict(refs=refs,cores=[core],missing_original=False,support=len(witnesses),
-                            faces=[],face_ids=[],cues=set(),witnesses=witnesses,provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
-        used+=size(output[person])+size(person)+128;reserve(0)
-        rows=None  # Only independent witnesses remain owned by the final bank.
-
-    def bodies(identifiers):
-        yield from metadata_rows(db,identifiers,body=True,contracts=compatible_contracts(config),reserve=reserve)
-
-    # Preserve proof multiplicity for future replays, while identical cores
-    # share metadata storage and the exact-score cache.
-    signatures={p:{tuple(r['id'] for r in b['cores'][0]):b['cores'][0]} for p,b in output.items()}
-    original_faces={p:set() for p in output}
-    confirmation_witnesses={p:set() for p in output}
-    for alias in db.execute('SELECT target,evidence FROM identity_merges'):
-        proof=json.loads(alias['evidence']);target=canonical(db,alias['target'])
-        if proof.get('route') not in ROUTES or target not in output:continue
-        bank=output[target]
-        if proof.get('provisional_confirmation'):
-            confirmation_witnesses[target].update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
-        for owner,ids in proof.get('cores',{}).items():
-            if proof.get('body_witness_format',0)<2:
-                # Earlier proofs retained a capped or independence-filtered core.
-                # Original anchor roles remain in attachment decision payloads.
-                extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b '
-                    'JOIN body_members m ON m.observation=b.id WHERE b.contract IN (SELECT value FROM json_each(?)) '
-                    "AND json_extract(m.proof,'$.global_merge.source')=? "
-                    "AND json_extract(m.proof,'$.role')='anchor'",(encoded(compatible_contracts(config)),owner))]
-                ids=list(dict.fromkeys([*ids,*extra]))
-            signature=tuple(ids)
-            if signature in signatures[target]:
-                if signatures[target][signature]:bank['cores'].append(signatures[target][signature])
-                used+=16;reserve(0);continue
-            core=[]
-            for row in bodies(ids):
-                if row is None:bank['missing_original']=True;continue
-                used+=size(row)+16;reserve(0);core.append(row)
-            if core:bank['cores'].append(core)
-            signatures[target][signature]=core
-        for ids in proof.get('face_witnesses',{}).values():original_faces[target].update(ids)
-
-    from .reference_roles import strict_sql
-    from .pose_policy import anchor_sql
-    selected_owners=encoded(list(output))
-    for raw in db.execute('SELECT m.person,o.id FROM observations o JOIN members m ON m.observation=o.id '
-        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
-        'AND o.rejected IS NULL AND '+strict_sql()+' AND '+
-        anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(selected_owners,)):
-        original_faces[raw['person']].add(raw['id'])
-    # Linked unassigned faces retain their veto authority as before.
-    for raw in db.execute('SELECT m.person,b.face FROM body_observations b '
-        'JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
-        'JOIN observations o ON o.id=b.face WHERE m.person IN (SELECT value FROM json_each(?)) '
-        'AND b.rejected IS NULL AND o.rejected IS NULL AND '+current_scan(),(selected_owners,)):
-        original_faces[raw['person']].add(raw['face'])
-    used+=size(original_faces);reserve(0)
-    def cue(person,scan,index):
-        nonlocal used
-        cues=output[person]['cues'];value=(scan,index)
-        if value not in cues:
-            used+=size(value)+64;reserve(0);cues.add(value)
-    for person,bank in output.items():
-        face_ids=original_faces[person]
+        bank=dict(refs=[by_id[r['id']] for r in selected],cores=[page_rows(core)],missing_original=False,
+            support=len(witnesses),faces=[],face_ids=[],cues=page_cues(),witnesses=page_rows(witnesses),
+            provisional=all(r['status']=='provisional' for r in rows),stale_policy=any(r['policy']!=policy(config) for r in rows))
+        signatures={digest([r['id'] for r in core]):bank['cores'][0]}
+        rows=core=by_id=witnesses=None
+        face_ids=set();confirmation=set()
+        for merge in db.execute('SELECT evidence FROM identity_merges WHERE source IN (SELECT value FROM json_each(?))',
+                                (encoded(proofs.get(person,[])),)):
+            proof=json.loads(merge[0])
+            if proof.get('route') not in ROUTES:continue
+            if proof.get('provisional_confirmation'):
+                confirmation.update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
+            for owner,ids in proof.get('cores',{}).items():
+                if proof.get('body_witness_format',0)<2:
+                    extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b JOIN body_members m ON m.observation=b.id '
+                        'WHERE b.contract IN (SELECT value FROM json_each(?)) AND json_extract(m.proof,\'$.global_merge.source\')=? '
+                        "AND json_extract(m.proof,'$.role')='anchor'",(encoded(compatible_contracts(config)),owner))]
+                    ids=list(dict.fromkeys([*ids,*extra]))
+                signature=digest(ids)
+                if signature in signatures:
+                    if signatures[signature]:bank['cores'].append(signatures[signature])
+                    continue
+                core=[]
+                for row in metadata_rows(db,ids,body=True,contracts=compatible_contracts(config),reserve=reserve):
+                    if row is None:bank['missing_original']=True
+                    else:core.append(row)
+                signatures[signature]=page_rows(core)
+                if core:bank['cores'].append(signatures[signature])
+            for ids in proof.get('face_witnesses',{}).values():face_ids.update(ids)
+        face_ids.update(r[0] for r in db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
+            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+strict_sql()+' AND '+
+            anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(person,)))
+        face_ids.update(r[0] for r in db.execute('SELECT b.face FROM body_observations b JOIN body_members m ON m.observation=b.id '
+            'JOIN scans s ON s.id=b.scan JOIN observations o ON o.id=b.face WHERE m.person=? '
+            'AND b.rejected IS NULL AND o.rejected IS NULL AND '+current_scan(),(person,)))
+        reserve(size(face_ids))
         for raw in metadata_rows(db,sorted(face_ids),body=False,reserve=reserve):
-            if raw is None:bank['missing_original']=True;continue
-            row=dict(raw);used+=size(row)+64;reserve(0)
-            bank['faces'].append(row);bank['face_ids'].append(row['id'])
-        # Original cores still supply independent support after consolidation.
+            if raw is None:bank['missing_original']=True
+            else:bank['faces'].append(dict(raw));bank['face_ids'].append(raw['id'])
+        bank['faces']=page_rows(bank['faces']);bank['face_ids']=page_rows(bank['face_ids'])
         extra=[]
-        for row in bodies(sorted(confirmation_witnesses[person])):
+        for row in metadata_rows(db,sorted(confirmation),body=True,contracts=compatible_contracts(config),reserve=reserve):
             if row is None:bank['missing_original']=True
-            else:extra.append(row);used+=size(row)+16;reserve(0)
-        bank['witnesses']=independent(bank['witnesses']+extra,settings)
+            else:extra.append(row)
+        if extra:bank['witnesses']=page_rows(independent(bank['witnesses']+extra,settings))
         bank['support']=len(bank['witnesses'])
         for core in bank['cores']:
-            for row in core:cue(person,row['scan'],row['cue'])
-    for row in db.execute('SELECT m.person,b.scan,b.cue FROM body_observations b JOIN body_members m ON m.observation=b.id '
-        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
-        "AND m.status='accepted' AND "+current_scan(),(selected_owners,)):
-        cue(row['person'],row['scan'],row['cue'])
-    for row in db.execute('SELECT m.person,o.scan,o.cue FROM observations o JOIN members m ON m.observation=o.id '
-        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
-        'AND o.rejected IS NULL AND '+current_scan(),(selected_owners,)):
-        cue(row['person'],row['scan'],row['cue'])
+            for row in core:bank['cues'].add((row['scan'],row['cue']))
+        for table,address,condition in (('body_observations','body_members',"m.status='accepted'"),('observations','members','b.rejected IS NULL')):
+            for scan,cue in db.execute(f'SELECT b.scan,b.cue FROM {table} b JOIN {address} m ON m.observation=b.id '
+                'JOIN scans s ON s.id=b.scan WHERE m.person=? AND '+condition+' AND '+current_scan(),(person,)):
+                bank['cues'].add((scan,cue))
+        retained+=size(bank)+size(person)+128;reserve(0);output[person]=bank
     return output
 
 

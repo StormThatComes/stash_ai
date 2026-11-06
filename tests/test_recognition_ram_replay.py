@@ -15,6 +15,7 @@ from tests.test_recognition_clustering import setup,scan
 
 def enabled(config,**execution):
     data=plain(config.data)
+    data['execution'].update(rebuild_storage='memory')
     data['execution'].update(execution)
     return replace(config,data=data)
 

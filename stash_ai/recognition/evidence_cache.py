@@ -112,6 +112,14 @@ class Evidence:
 
     def scores(self, group, query, observation):
         from .clustering import _similarities
+        from .paged_references import Samples
+        if isinstance(group.samples,Samples):
+            key=('paged-scores',observation,group.samples.keys)
+            value=self.cache.get(key)
+            if value is MISSING:
+                value=_similarities(group,query)
+                self.cache.put(key,value,len(group.samples)*128+256)
+            return value
         # Only immutable byte-backed representatives can own cached scores.
         layout = getattr(group, '_evidence_layout', None)
         if isinstance(group.samples, tuple) and layout is not None and layout[0] is group.samples:
@@ -135,6 +143,10 @@ class Evidence:
 
     def remember_scores(self, group, observation, scores):
         """Import a verified immutable worker result on the coordinator only."""
+        from .paged_references import Samples
+        if isinstance(group.samples,Samples):
+            self.cache.put(('paged-scores',observation,group.samples.keys),scores,len(group.samples)*128+256)
+            return
         if not all(not sample.flags.writeable and isinstance(sample.base, bytes)
                    for sample in group.samples):
             return

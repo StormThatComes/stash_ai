@@ -150,7 +150,9 @@ class ReferenceIndex:
         if self.cached is not None and self.cached[0] == identity:
             if not self.dirty:
                 _, groups, size, samples = self.cached
-                usage.add_counts(size, samples, people=len(groups), kind='Retained')
+                from .paged_references import Samples
+                usage.add_counts(size, samples, people=len(groups), kind='Retained',
+                                 paged=all(isinstance(g.samples,Samples) for g in groups))
                 self.dirty.clear()
                 count('reference_snapshot_reuses')
                 return list(groups)
@@ -174,27 +176,22 @@ class ReferenceIndex:
             if previous is None or previous[0] != ids:
                 refreshed += 1
             wanted[person] = ids
-        desired = {identifier for ids in wanted.values() for identifier in ids}
-        unchanged = {person: self.groups[person] for person, ids in wanted.items()
-                     if person in self.groups and self.groups[person][0] == ids}
-        # Reuse unchanged vectors and release obsolete representatives before
-        # allocating replacements. Never hold two complete reference sets.
-        values = {identifier: value for ids, samples in self.groups.values()
-                  for identifier, value in zip(ids, samples) if identifier in desired}
-        self.groups.clear()
-        usage.add(list(values.values()), kind='Retained')
-        # One bounded vector fetch per group batch; never fetch full history.
-        identifiers = list(dict.fromkeys(identifier for ids in wanted.values() for identifier in ids
-                                        if identifier not in values))
-        for offset in range(0, len(identifiers), 256):
-            for row in self.db.execute('SELECT id,dimensions,embedding FROM observations WHERE id IN '
-                    '(SELECT value FROM json_each(?))', (encoded(identifiers[offset:offset+256]),)):
-                value = vector(row)
-                usage.add([value], kind='Retained')
-                values[row['id']] = value
-        for person, ids in wanted.items():
-            self.groups[person] = unchanged.get(person) or (ids, tuple(values[identifier] for identifier in ids))
-        self.groups = {person: self.groups[person] for person in people}
+        from .paged_references import pack
+        previous_groups=self.groups
+        self.groups={}
+        for person,ids in wanted.items():
+            previous=previous_groups.pop(person,None)
+            if previous is not None and previous[0]==ids:
+                samples=previous[1]
+            else:
+                values={}
+                for offset in range(0,len(ids),256):
+                    for row in self.db.execute('SELECT id,dimensions,embedding FROM observations WHERE id IN '
+                        '(SELECT value FROM json_each(?))',(encoded(ids[offset:offset+256]),)):
+                        values[row['id']]=vector(row)
+                samples=pack(values[i] for i in ids)
+            usage.add(samples,kind='Retained')
+            self.groups[person]=(ids,samples)
         self.dirty.clear()
         self.incremental.clear()
         result = []

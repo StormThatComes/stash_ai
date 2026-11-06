@@ -9,6 +9,8 @@ def size(value, seen=None):
     if id(value) in seen:
         return 0
     seen.add(id(value))
+    from .paged_references import Samples
+    if isinstance(value,Samples):return sys.getsizeof(value)+size(value.keys,seen)
     total=sys.getsizeof(value)
     if isinstance(value,Mapping):
         total+=sum(size(k,seen)+size(v,seen) for k,v in value.items())

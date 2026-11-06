@@ -84,7 +84,11 @@ def test_history_records_fatal_model_cleanup_failure(tmp_path, monkeypatch):
 def test_rebuild_scratch_close_preserves_primary_failure(tmp_path, monkeypatch):
     import stash_ai.recognition.rebuild as rebuild
     from stash_ai.recognition import ram_database
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
     config = cluster_config(tmp_path)
+    data=plain(config.data);data['execution']['rebuild_storage']='memory'
+    config=replace(config,data=data)
     with FaceDatabase(config.database) as db:
         selected, _ = scan(db, config, '1')
         closed = []
