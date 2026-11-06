@@ -300,7 +300,7 @@ class Search:
             if key in excluded:return True
             known=pairs.get(key)
             blocked=bool(hard.intersection(known['blockers'])) if known else False
-            if known is None:
+            if known is None or known.get('measurements')=='not_computed_metadata_veto':
                 left,right=self.bank[a],self.bank[b]
                 blocked=not left['cues'].isdisjoint(right['cues'])
                 if not blocked and left['faces'] and right['faces']:
