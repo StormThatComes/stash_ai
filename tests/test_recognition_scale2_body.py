@@ -33,3 +33,24 @@ def test_metadata_veto_does_not_read_vectors():
     result=list(pairs([('a','b')],bank,config,SimpleNamespace(compare=unexpected,stats={})))
     assert result[0]['blockers']==['person_copresence']
     assert result[0]['score'] is None and result[0]['measurements']=='not_computed_metadata_veto'
+
+
+def test_metadata_veto_keeps_unmeasured_face_contradictions_out_of_rivals(tmp_path,monkeypatch):
+    from tests.test_recognition_body_scaling import fixture
+    from stash_ai.recognition.body_global_banks import banks
+    from stash_ai.recognition.body_global_search import Search,Evidence,exact_pairs
+    config,state=fixture(tmp_path,[[1,0]]*3)
+    try:
+        bank=banks(state.connection,config,'scope','ns');a,b,rival=sorted(bank)
+        for person in bank:bank[person]['faces']=[dict(id=person,dimensions=2)]
+        bank[rival]['support']=0
+        original=Evidence.feature
+        def feature(self,row,kind='body'):
+            if kind=='face':return np.array([-1 if row['id']==rival else 1,0],dtype=np.float32)
+            return original(self,row,kind)
+        monkeypatch.setattr(Evidence,'feature',feature)
+        with Search(state.connection,config,bank) as search:
+            measured={tuple(p['people']):p for p in exact_pairs([(a,rival),(b,rival)],bank,config,search.evidence,compact=True)}
+            assert all(p['score'] is None for p in measured.values())
+            assert search.nearest([{a:0,b:0}],measured)==[{}]
+    finally:state.__exit__(None,None,None)

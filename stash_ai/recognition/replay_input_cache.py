@@ -45,12 +45,13 @@ class InputCache:
         try:
             from .database import FaceDatabase
             from .dependencies import version
+            from .replay_checkpoint import ENGINE
             from .dependency_schema import validate_triggers
             if not isinstance(database,FaceDatabase) or database.lock is None:return
             validate_triggers(database.connection,required=True)
             self.limit=min(config.data['execution']['rebuild_checkpoint_bytes'],config.data['execution']['replay_snapshot_bytes'])
             self.owner=dict(format=1,installation=database.installation,path=str(database.path))
-            self.key=digest([self.owner,selected,scope,namespace,version(database.connection),
+            self.key=digest([ENGINE,self.owner,selected,scope,namespace,version(database.connection),
                 digest(expected_schema()),config.data['clustering']['max_anchor_pose_deviation'] is not None])
             self.directory=database.path.with_name(database.path.name+'.rebuild-input')
             self.directory.mkdir(mode=0o700,exist_ok=True)
