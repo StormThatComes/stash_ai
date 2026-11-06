@@ -173,14 +173,16 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
         mean, minimum = cache.scores(group, other, peer['id']) if cache is not None else _similarities(group, other)
         if mean < peer_threshold or minimum < cohesion_threshold:
             continue
-        best = mean
-        for rival in groups:
-            if rival.identifier == group.identifier:continue
-            rival_mean, rival_minimum = (cache.scores(rival, other, peer['id']) if cache is not None
-                                          else _similarities(rival, other))
-            if rival_minimum >= cohesion_threshold:
-                best = max(best, rival_mean)
-        if best - mean >= settings['ambiguity_margin'] and best > mean:
+        from .scoring import comparisons
+        exact = (lambda rival,query: cache.scores(rival,query,peer['id'])) if cache is not None else _similarities
+        # Screen conservatively at mean (not mean+margin, whose rounding can
+        # discard a boundary rival). Scalar scores retain the original decision.
+        rivals=(r for r in groups if r.identifier!=group.identifier)
+        separated=any(rival_mean>mean and rival_mean-mean>=settings['ambiguity_margin']
+                      and rival_minimum>=cohesion_threshold
+                      for _,rival_mean,rival_minimum in comparisons(
+                          rivals,other,mean,cohesion_threshold,exact=exact,catalogue_size=len(groups)))
+        if separated:
             continue
         query_minimum = (cache.scores(group, query, observation['id'])[1] if cache is not None
                          else _similarities(group, query)[1])

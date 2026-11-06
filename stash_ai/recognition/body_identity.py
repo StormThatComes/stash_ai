@@ -54,7 +54,8 @@ def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:Non
     """At most one witness per scan/cue; repeated pixels cannot add support."""
     from .independent_evidence import body_vote,unit,Votes,stamp
     from .paged_references import rows as page_rows
-    votes=Votes();hashes=[];pixels={};seen=set()
+    from .appearance_index import AppearanceIndex
+    votes=Votes();hashes=AppearanceIndex();pixels={};seen=set()
     save=page_rows if paged else list
     def candidates():
         charge=0;count=0
@@ -67,18 +68,17 @@ def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:Non
             hashed=int(hashed,16) if hashed else None
             fingerprint=pixels.get(physical)
             if fingerprint is None and hashed is not None:
-                fingerprint=next((key for other,key in hashes
-                    if (hashed^other).bit_count()<settings['min_appearance_distance']),None)
+                fingerprint=hashes.first(hashed,settings['min_appearance_distance'])
             if fingerprint is None:
                 fingerprint=encoded(physical)
-                if hashed is not None:hashes.append((hashed,fingerprint))
+                if hashed is not None and settings['min_appearance_distance']>0:hashes.add(hashed,fingerprint)
             pixels[physical]=fingerprint
             # Retain every cue edge of an appearance. A greedy representative can
             # consume the sole cue of a different, otherwise independent crop.
             vote=dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}}))
             votes.add(vote);count+=1
             from .memory_size import size
-            charge=size([vars(votes),hashes,pixels,seen]) if count & (count-1)==0 else charge+2048
+            charge=size([vars(votes),hashes.nodes,pixels,seen]) if count & (count-1)==0 else charge+2048
             reserve(charge)
             yield dict(row=row,pixel=unit(vote),stamp=stamp(vote))
     candidates=save(candidates())
