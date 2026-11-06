@@ -133,7 +133,7 @@ def test_missing_scipy_fails_before_downloading_models(tmp_path, monkeypatch, mi
         pytest.fail('Missing dependencies must be reported before model downloads')
     monkeypatch.setattr(builtins, '__import__', without_scipy)
     monkeypatch.setattr(vitpose_pose, 'assets', unexpected_download)
-    with pytest.raises(RuntimeError, match='requires SciPy.*install requirements-sapiensid.txt') as caught:
+    with pytest.raises(RuntimeError, match='requires SciPy.*install requirements-cpu.txt or requirements-gpu.txt') as caught:
         vitpose_pose.load(configuration(tmp_path), 'cpu')
     assert isinstance(caught.value.__cause__, ModuleNotFoundError)
 

@@ -34,8 +34,6 @@ class Remote(updater.GitHub):
             "requirements-cpu.txt": b"package==1\n",
             "requirements-gpu.txt": b"package==2\n",
             "requirements-dev.txt": b"pytest>=8\n",
-            "requirements-sapiensid.txt": b"timm>=0.9.7,<2\n",
-            "requirements-rfdetr.txt": b"rfdetr==1.11.2\n",
             "constraints/cpu-py314.txt": b"package==1\n",
             "constraints/gpu-py314.txt": b"package==2\n",
             "constraints/README.md": b"Install requirements with the matching constraints.\n",
@@ -107,7 +105,7 @@ def test_dependency_profile_changes_are_planned_without_preview_downloads(tmp_pa
 
 DEPENDENCY_FILES = (
     'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
-    'requirements-dev.txt', 'requirements-sapiensid.txt', 'requirements-rfdetr.txt', 'constraints/cpu-py314.txt',
+    'requirements-dev.txt', 'constraints/cpu-py314.txt',
     'constraints/gpu-py314.txt', 'constraints/README.md',
 )
 
@@ -253,6 +251,38 @@ def installed(root, remote):
         "upstream": version.files, "requirements": version.requirements,
         "requirement_profiles": version.requirement_profiles}))
     remote.calls.clear()
+
+
+@pytest.mark.parametrize('name', sorted(updater.RETIRED_REQUIREMENT_PROFILES))
+@pytest.mark.parametrize('modified', [False, True])
+def test_retired_dependency_profiles_migrate_with_local_edit_protection(tmp_path, name, modified):
+    remote = Remote()
+    installed(tmp_path, remote)
+    original = b'old inference dependencies\n'
+    path = tmp_path / name
+    path.write_bytes(original)
+    state = updater.load_state(tmp_path)
+    for key in ('baseline', 'upstream', 'requirement_profiles'):
+        state[key][name] = updater.blob_sha(original)
+    updater.atomic_write(tmp_path / updater.STATE, updater.json_bytes(state))
+    if modified:
+        path.write_bytes(b'locally adjusted dependencies\n')
+    before = path.read_bytes()
+    # Even a stale remote tree must not reintroduce retired profiles.
+    remote.files[name] = original
+    assert name not in remote.snapshot().files
+    plan = updater.plan_update(tmp_path, updater.load_state(tmp_path), remote.snapshot())
+    assert (name in plan.conflicts) == modified
+    if modified:
+        with pytest.raises(updater.UpdateError, match='force-code'):
+            updater.update(tmp_path, remote)
+        assert path.read_bytes() == before
+    assert updater.update(tmp_path, remote, force_code=modified) == 0
+    assert not path.exists()
+    migrated = updater.load_state(tmp_path)
+    assert all(name not in migrated[key] for key in ('baseline', 'upstream', 'requirement_profiles'))
+    assert before in [backup.read_bytes() for backup in
+                      (tmp_path / updater.META / 'transactions').glob('*/old-*')]
 
 
 def stage(root, remote, **kwargs):
@@ -1393,10 +1423,10 @@ def test_documentation_installs_refreshes_and_protects_edits(tmp_path, name):
     assert (tmp_path/name).read_bytes() == remote.files[name]
 
 
-def test_existing_installation_gains_docs_and_sapiensid(tmp_path):
+def test_existing_installation_gains_docs_and_dev_profile(tmp_path):
     remote = Remote()
     additions = {name: data for name, data in remote.files.items()
-                 if name == 'README.md' or name.startswith('docs/') or name == 'requirements-sapiensid.txt'}
+                 if name == 'README.md' or name.startswith('docs/') or name == 'requirements-dev.txt'}
     for name in additions:del remote.files[name]
     assert updater.update(tmp_path, remote) == 0
     remote.files.update(additions)

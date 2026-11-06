@@ -49,7 +49,7 @@ def load(config):
         from torchvision.ops import nms
     except ImportError as error:
         raise RuntimeError('D-FINE requires transformers>=4.53 and torchvision; '
-                           'install requirements-sapiensid.txt in the CPU/GPU environment.') from error
+                           'install requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.') from error
     from .sapiensid_inference import resolve_device
     from .sapiensid_loading import checked_bytes
     settings = config.data['sapiensid']['pose']
@@ -68,7 +68,7 @@ def load(config):
         trust_remote_code=False, output_loading_info=True)
     if any(loading.get(key) for key in ('missing_keys', 'unexpected_keys', 'mismatched_keys', 'error_msgs')):
         raise ValueError('D-FINE checkpoint does not match the Transformers architecture; '
-                         'install requirements-sapiensid.txt in the CPU/GPU environment.')
+                         'install requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.')
     device = resolve_device(config.data['models']['device'])
     return DFineDetector(model.float().to(device).eval(), processor, device=device,
                          batch_size=settings['batch_size'])

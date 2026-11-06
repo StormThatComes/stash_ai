@@ -35,9 +35,13 @@ LOCK = ".stash-ai.install.lock"
 MAX_FILE_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
-                                  'requirements-sapiensid.txt', 'requirements-rfdetr.txt'})
+                                  'requirements-dev.txt'})
+# Accept old installed-file histories and recovery journals so tracked, unchanged
+# feature profiles can be retired through the normal conflict/backup mechanism.
+RETIRED_REQUIREMENT_PROFILES = frozenset({'requirements-sapiensid.txt', 'requirements-rfdetr.txt',
+                                          'requirements-solver.txt'})
 DEPENDENCY_FILES = REQUIREMENT_PROFILES | frozenset({
-    'requirements-dev.txt', 'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
+    'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
     'constraints/README.md',
 })
 PREPARING = 'preparing.json'
@@ -89,7 +93,7 @@ class Phase(StrEnum):
 
 def allowed(name):
     """Install application files, dependency manifests, documentation and licenses."""
-    return name in DEPENDENCY_FILES or bool(re.fullmatch(
+    return name in DEPENDENCY_FILES | RETIRED_REQUIREMENT_PROFILES or bool(re.fullmatch(
         r"(?:LICENSE|README\.md|THIRD_PARTY_NOTICES\.md|stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
         r"docs/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:md|txt)|"
         r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
@@ -329,7 +333,7 @@ class GitHub:
             files, profiles = {}, {}
             for entry in tree["tree"]:
                 name = entry["path"]
-                if not allowed(name):
+                if name in RETIRED_REQUIREMENT_PROFILES or not allowed(name):
                     continue
                 if (entry["type"] != "blob" or entry["mode"] not in ("100644", "100755")
                         or not SHA.fullmatch(entry["sha"])
@@ -376,7 +380,8 @@ def load_state(root):
         state.setdefault('requirement_profiles',
             {'requirements.txt': state['requirements']} if state.get('requirements') else {})
         if (not isinstance(state['requirement_profiles'], dict) or
-                any(name not in REQUIREMENT_PROFILES or not isinstance(sha, str) or not SHA.fullmatch(sha)
+                any(name not in REQUIREMENT_PROFILES | RETIRED_REQUIREMENT_PROFILES
+                    or not isinstance(sha, str) or not SHA.fullmatch(sha)
                     for name, sha in state['requirement_profiles'].items())):
             raise ValueError
     except (KeyError, TypeError, ValueError):
@@ -690,7 +695,8 @@ def describe_plan(state, snapshot, plan):
     current = plan.next_state['requirement_profiles']
     changed = sorted({name for name in previous.keys() | current.keys()
                       if previous.get(name) != current.get(name)}
-                     | {entry.path for entry in plan.actions if entry.path in DEPENDENCY_FILES})
+                     | {entry.path for entry in plan.actions
+                        if entry.path in DEPENDENCY_FILES | RETIRED_REQUIREMENT_PROFILES})
     if changed:
         print(', '.join(changed) + " changed or has no recorded baseline. Review dependencies manually; "
               "dependency files are included in the update, but the updater does not run pip.")

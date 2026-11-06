@@ -18,8 +18,8 @@ For an older file, use [configuration migration](../facial-recognition.md#recogn
 
 ## ViTPose++ Large keypoints
 
-For a separate top-down pose estimator, install the updated
-`requirements-sapiensid.txt` and select:
+For a separate top-down pose estimator, install the updated CPU/GPU profile
+and select:
 
 ```yaml
 version: 2
@@ -38,7 +38,7 @@ pose:
 The dependency file includes SciPy, required by the Transformers processor for
 affine crops and heatmap decoding. If an existing installation reports
 `NameError: name 'inv' is not defined`, reinstall the updated
-`requirements-sapiensid.txt` in the active CPU/GPU environment and restart the
+CPU/GPU profile in the active environment and restart the
 process. Missing SciPy is now reported before ViTPose assets are downloaded.
 
 The shipped v2 configuration uses RF-DETR-XL boxes. To use YOLO boxes, select
@@ -147,8 +147,7 @@ The default directory is `execution.models.directory/pmpose_b/<revision>`.
 `execution.models.download_missing: false`, place the matching checkpoint there first.
 The inference adapter uses the existing PyTorch/NumPy/OpenCV dependencies;
 MMCV, MMEngine and MMPose are not runtime requirements. Install the usual
-CPU/GPU profile and `requirements-sapiensid.txt` for your selected detector
-and identity backend.
+CPU/GPU profile for your selected detector and identity backend.
 
 Inference follows the pinned upstream architecture in FP32, on `execution.gpu.device`,
 with 192x256 RGB crops, padding 1.25, horizontal flip averaging and DARK/UDP
@@ -172,7 +171,7 @@ and decoder with the same bbox-only input and flip averaging. Set
 
 ## SAM-pose2seg masks, second PMPose pass and tight-box recovery
 
-Enable this optional path with the updated `requirements-sapiensid.txt`:
+Both CPU/GPU profiles include the dependencies for this optional path:
 
 ```yaml
 version: 2
@@ -349,8 +348,8 @@ offline identity-solver parameters.
 
 `pose.estimator.backend: sapiens` selects Meta's **Sapiens v1 Pose** as another
 top-down pose estimator. It is separate from the SapiensID identity encoder and
-from Sapiens2. Install the existing `requirements-sapiensid.txt` alongside your
-CPU/GPU requirements; no MMPose/MMCV installation is needed.
+from Sapiens2. Its dependencies are included in both CPU/GPU profiles;
+no MMPose/MMCV installation is needed.
 
 ```yaml
 version: 2
@@ -448,7 +447,7 @@ pose:
 | `dfine_l` | [D-FINE-L Objects365 -> COCO E25](https://huggingface.co/ustc-community/dfine-large-obj2coco-e25/tree/c89de47153e338c07cddc81fc21a776b97cbf75e) | 126 MB |
 | `dfine_x` | [D-FINE-X Objects365 -> COCO](https://huggingface.co/ustc-community/dfine-xlarge-obj2coco/tree/15f18d917eaddcedf9e3ffb082adcfb97a0b2d4d) | 252 MB |
 
-Install the updated `requirements-sapiensid.txt` (Transformers >=4.53).
+Install the updated CPU/GPU profile (Transformers >=4.53).
 First use downloads `config.json`, `preprocessor_config.json` and
 `model.safetensors` into `execution.models.directory/<detector>/<revision>/`.
 Every file is checked against a pinned size and SHA256, including cached files.
@@ -499,12 +498,8 @@ Set `STASH_AI_DFINE_MODEL_DIRECTORY` to reuse the parent model cache directory.
 `vitpose_plus_large` or `sapiens`. It supplies person boxes to the existing pose
 pipeline, including optional PMPose deduplication and SAM refinement.
 
-Install the optional runtime into the same CPU/GPU environment, after its normal
-SapiensID dependencies:
-
-```bash
-python -m pip install -r requirements-rfdetr.txt
-```
+RF-DETR dependencies are included in `requirements-cpu.txt` and
+`requirements-gpu.txt`; no additional installation profile is needed.
 
 ```yaml
 version: 2
@@ -522,10 +517,11 @@ pose:
       directory: ''  # optional folder containing rf-detr-xlarge.pth
 ```
 
-The integration pins `rfdetr==1.11.2` and `rfdetr-plus==1.1.0`. The extra profile
-does not install training/export extras or replace the selected torch build.
-The application updater includes this profile but does not run pip. Other
-detectors do not import or require either package. YOLO remains the default.
+The integration pins `rfdetr==1.11.2` and `rfdetr-plus==1.1.0` in both runtime
+profiles, without requesting training/export extras or replacing the selected
+torch build. The application updater refreshes the manifests but does not run
+pip. Other detectors do not import either package. The v2 template defaults to
+RF-DETR-XL; version 1 configurations keep their existing defaults.
 
 First use downloads the official **505,646,472-byte** checkpoint to
 `execution.models.directory/rfdetr_xl/<SHA256>/rf-detr-xlarge.pth`. The Google Storage

@@ -30,12 +30,12 @@ def load(config, device):
         import scipy.ndimage
     except ImportError as error:
         raise RuntimeError('ViTPose++ Large requires SciPy for image preprocessing and pose decoding; '
-                           'install requirements-sapiensid.txt in the CPU/GPU environment.') from error
+                           'install requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.') from error
     try:
         from transformers import VitPoseConfig, VitPoseImageProcessor, VitPoseForPoseEstimation
     except ImportError as error:
         raise RuntimeError('ViTPose++ Large requires transformers>=4.49; '
-                           'install requirements-sapiensid.txt in the CPU/GPU environment.') from error
+                           'install requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.') from error
     from .sapiensid_loading import checked_bytes
     directory = assets(config)
     def document(name):
@@ -47,7 +47,7 @@ def load(config, device):
         use_safetensors=True, trust_remote_code=False, output_loading_info=True)
     if any(loading.get(key) for key in ('missing_keys', 'unexpected_keys', 'mismatched_keys', 'error_msgs')):
         raise ValueError('ViTPose++ checkpoint does not match the Transformers architecture; '
-                         'install requirements-sapiensid.txt in the CPU/GPU environment.')
+                         'install requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.')
     model = model.float().to(device).eval()
     settings = config.data['sapiensid']['pose']
     return ViTPoseLarge(model, processor, device=device,

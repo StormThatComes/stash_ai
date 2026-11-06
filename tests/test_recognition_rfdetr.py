@@ -110,7 +110,7 @@ def test_missing_or_unvalidated_runtime_fails_before_download(tmp_path, monkeypa
         return 'unvalidated-version'
     monkeypatch.setattr(rf, 'version', version)
     monkeypatch.setattr(rf, 'assets', lambda _: pytest.fail('download before runtime validation'))
-    with pytest.raises(RuntimeError, match='RF-DETR-XL requires.*requirements-rfdetr'):
+    with pytest.raises(RuntimeError, match='RF-DETR-XL requires.*requirements-cpu'):
         rf.load(configuration(tmp_path))
 
 

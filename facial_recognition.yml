@@ -62,7 +62,7 @@ pose:
       # Local assets for RF-DETR-XL person detection.
       directory: ''
       # RF-DETR-XL weight folder; empty uses execution.models.directory/rfdetr_xl/<SHA256>. Requires
-      # requirements-rfdetr.txt.
+      # requirements-cpu.txt or requirements-gpu.txt.
   estimator:
     # Select the keypoint model operating on the detected people.
     backend: vitpose_plus_large
@@ -160,8 +160,7 @@ pose:
 body:
   # SapiensID evidence for people with or without accepted faces.
   enabled: true
-  # Enable SapiensID and the person/pose scan. Install requirements-sapiensid.txt and, for RF-DETR-XL,
-  # requirements-rfdetr.txt.
+  # Enable SapiensID and the person/pose scan. Dependencies are included in the CPU/GPU profiles.
   encoder:
     # SapiensID weights and person embedding batch.
     variant: wb12m

@@ -210,9 +210,9 @@ the global trial limit and do not prove robustness on future media.
 
 ## Optional learned proposals
 
-Install `pip install -r requirements-solver.txt` and add
-`--solver-sampler tpe --solver-seed 42`. Default `heuristic` mode has no Optuna
-dependency. After 13 warmup trials, TPE initially proposes one candidate per
+Optuna is included in both CPU/GPU profiles. Enable learned proposals with
+`--solver-sampler tpe --solver-seed 42`. Default `heuristic` mode does not import
+Optuna. After 13 warmup trials, TPE initially proposes one candidate per
 five completed trials. Recent improvements shorten the interval to two; four
 unsuccessful proposals extend it to eight. Other candidates continue to come
 from the guided search; a due TPE slot takes precedence over the alternate lane.

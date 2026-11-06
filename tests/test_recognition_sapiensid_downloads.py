@@ -326,7 +326,7 @@ def test_pose_requires_runtime_with_explicit_nms_head_selection(upstream,monkeyp
     import sys
     def unexpected(*args,**kwargs):pytest.fail('incompatible runtime loaded weights')
     monkeypatch.setitem(sys.modules,'ultralytics',SimpleNamespace(YOLO=unexpected,__version__=version))
-    with pytest.raises(RuntimeError,match='install requirements-sapiensid.txt'):
+    with pytest.raises(RuntimeError,match='install requirements-cpu.txt or requirements-gpu.txt'):
         load_pose(upstream.config)
 
 

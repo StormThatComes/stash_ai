@@ -19,8 +19,21 @@ scene links, and selects portraits. Video decoding is optional and used only for
 - CUDA is the default for recognition. CPU installations must use `--device cpu`
   or `execution.gpu.device: cpu` in recognition YAML.
 
-Keep exactly one ONNX Runtime distribution installed. Model-specific extras and
-weight terms are described in the [recognition setup guide](docs/facial-recognition.md).
+Both runtime profiles include tagging, face/body recognition, all supported pose
+backends (including RF-DETR-XL and ViTPose++), and the TPE solver. Keep exactly one
+ONNX Runtime distribution installed.
+
+| File | Purpose |
+| --- | --- |
+| `requirements.txt` | Default GPU installation; includes `requirements-gpu.txt`. |
+| `requirements-gpu.txt` | Complete runtime with CUDA PyTorch and GPU ONNX Runtime. |
+| `requirements-cpu.txt` | Complete runtime with CPU PyTorch and CPU ONNX Runtime. |
+| `requirements-dev.txt` | Test tools; add to either CPU or GPU profile. |
+
+No model-specific requirements files are needed. Model downloads and feature
+activation still follow the YAML and CLI settings. See the [recognition setup
+guide](docs/facial-recognition.md), [development setup](docs/development.md) and
+[dependency upgrade instructions](docs/maintenance/updating.md#refresh-python-dependencies).
 
 ## Quick start
 
@@ -65,7 +78,6 @@ python .\stash_ai.py --db-report
 For recognition with the shipped RF-DETR-XL and ViTPose++ Large configuration:
 
 ```powershell
-python -m pip install -r requirements-sapiensid.txt -r requirements-rfdetr.txt
 python .\stash_ai.py recognition run --scene-id 123
 python .\stash_ai.py recognition portraits --performer-id 456
 ```

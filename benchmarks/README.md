@@ -1,7 +1,7 @@
 # Offline benchmarks
 
 Run these scripts from the repository root after installing
-`requirements-dev.txt`. In CI, all twelve scripts pass smoke tests
+`requirements-cpu.txt` plus `requirements-dev.txt`. In CI, all twelve scripts pass smoke tests
 against small datasets. Fixtures use the current analysis format
 and complete metadata. Benchmarks operate on synthetic data,
 temporary local databases, or a Stash mock: they do **not**

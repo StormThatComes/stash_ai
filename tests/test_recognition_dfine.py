@@ -148,7 +148,7 @@ def test_missing_runtime_fails_before_download(tmp_path, monkeypatch):
         return original(name, *args, **kwargs)
     monkeypatch.setattr(builtins, '__import__', missing)
     monkeypatch.setattr(dfine, 'assets', lambda _: pytest.fail('download before runtime check'))
-    with pytest.raises(RuntimeError, match='D-FINE requires.*requirements-sapiensid'):
+    with pytest.raises(RuntimeError, match='D-FINE requires.*requirements-cpu'):
         dfine.load(configuration(tmp_path))
 
 

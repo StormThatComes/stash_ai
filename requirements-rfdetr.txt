@@ -1,5 +1,0 @@
-# Optional RF-DETR-XL person boxes. Install after the CPU/GPU and SapiensID profiles.
-# Reuse the installed torch/torchvision build; no training or export extras.
-# XL weights and rfdetr-plus use Roboflow PML-1.0; see docs/sapiensid-hybrid.md.
-rfdetr==1.11.2
-rfdetr-plus==1.1.0

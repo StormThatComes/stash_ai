@@ -20,8 +20,8 @@ Scene-local body identity creation and cross-scene body merging are separate opt
 
 ## Configure collection
 
-Install `requirements-sapiensid.txt` and `requirements-rfdetr.txt` alongside
-the CPU/GPU profile. On first use, `execution.models.download_missing: true`
+Install `requirements-cpu.txt` or `requirements-gpu.txt`; both include the
+inference dependencies for every supported body/person/pose backend. On first use, `execution.models.download_missing: true`
 allows pinned assets for the selected models to download. Relative asset paths
 resolve from the YAML location. The [v2 template](../facial_recognition.yml)
 lists every supported setting and its range or choices where applicable.
@@ -73,7 +73,7 @@ YOLO26m-pose comes from the official
 [Ultralytics v8.4.0 release](https://github.com/ultralytics/assets/releases/tag/v8.4.0).
 Its 49,036,866-byte checkpoint is pinned by `pose.detector.yolo.sha256`
 in the [configuration template](../facial_recognition.yml). Install the
-updated `requirements-sapiensid.txt` (`ultralytics>=8.4.189,<9`): inference explicitly
+updated CPU/GPU profile (`ultralytics>=8.4.189,<9`): inference explicitly
 selects the one-to-many head with NMS, so `pose.detector.nms_threshold` remains effective.
 Both models supply COCO17 points; SapiensID still receives 17 pose points plus
 the five face landmarks, with the same 384x384 preparation and audit overlays.

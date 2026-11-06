@@ -90,7 +90,7 @@ def load(config, device):
         from hydra.utils import instantiate
         from omegaconf import OmegaConf
     except ImportError as error:
-        raise RuntimeError('SAM-pose2seg requires requirements-sapiensid.txt in the CPU/GPU environment.') from error
+        raise RuntimeError('SAM-pose2seg requires requirements-cpu.txt or requirements-gpu.txt in the CPU/GPU environment.') from error
     sources, path = assets(config)
     from .sapiensid_inference import load_verified_weights
     with source_imports(sources):

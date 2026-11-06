@@ -145,10 +145,10 @@ no effect on detector thresholds, face/person matching or recognition.
 The command uses `face.detector.backend` and `sapiensid.pose` from the current YAML,
 including confidence, NMS, result-count and keypoint thresholds. **Both
 detectors always run**, even if `body.enabled` or independent collection
-is disabled. The usual pose runtime dependencies from
-`requirements-sapiensid.txt` and the configured pose weights are required.
-RF-DETR-XL person boxes (`pose.detector.backend: rfdetr_xl`) additionally need
-`requirements-rfdetr.txt`. Its verified weights download on first use; see
+is disabled. Both CPU/GPU profiles include the required pose runtime
+dependencies, including RF-DETR-XL (`pose.detector.backend: rfdetr_xl`).
+Configured pose weights are still required and verified weights download on
+first use; see
 [RF-DETR-XL setup and model terms](pose-backends.md#rf-detr-xl-person-detector).
 Weights follow the existing `execution.models.download_missing` policy. Face and body
 recognition encoders are not loaded. `--device cpu` is an optional override.
