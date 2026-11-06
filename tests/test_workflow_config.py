@@ -25,9 +25,10 @@ def test_linux_matrix_covers_every_test_module_once():
 
 
 def test_windows_lifecycle_lists_are_disjoint_and_resolve_to_test_modules():
+    from tests.ci_jobs import full_plan
+
     root = Path(__file__).resolve().parents[1]
-    workflow = yaml.safe_load((root / '.github/workflows/tests.yml').read_text())
-    matrix = workflow['jobs']['recognition-models']['strategy']['matrix']['include']
+    matrix = full_plan('test')['matrix']['include']
     files = []
     for row in matrix:
         if row['os'] == 'windows-latest':
