@@ -130,3 +130,17 @@ def test_sapiens_prepared_retry_keeps_input_order(monkeypatch):
     encoder._embed_prepared=calculate
     assert encoder.embed_prepared([1,2,3,4])==[11,12,13,14]
     assert calls==[[1,2,3,4],[1,2],[3,4]]
+
+
+def test_nonfinite_person_detection_is_not_retained_in_cache(tmp_path):
+    from contextlib import closing
+    from stash_ai.recognition.cached_pose import detections
+    from stash_ai.recognition.inference_cache import Store,using
+    from stash_ai.recognition.config import defaults
+    from PIL import Image
+    owner=SimpleNamespace(config=SimpleNamespace(data=defaults()),device='cpu')
+    def calculate(images):
+        return [SimpleNamespace(boxes=SimpleNamespace(xyxy=torch.tensor([[float('nan'),0,10,10]]),conf=torch.tensor([.9]))) for _ in images]
+    with closing(Store(tmp_path/'cache.sqlite',1024**2)) as store,using(store),Image.new('RGB',(16,16)) as image:
+        with pytest.raises(ValueError,match='not cached'):detections(owner,[image],calculate)
+        assert store.db.execute('SELECT COUNT(*) FROM entries').fetchone()[0]==0
