@@ -540,3 +540,21 @@ binding and publication journal writes do not rescan every embedding. Evidence
 changes, writes through another database connection or executable schema changes
 require fresh validation; a certificate is never advanced after a changed or
 rolled-back generation.
+
+The shipped profiles use `execution.rebuild.checkpoint_mode: incremental` for
+strict local replay. The first checkpoint stores a base; later checkpoints store
+only transactionally changed rows and deletions. Immutable segments are published
+by an atomic manifest switch and verified before import. Every 16 generations a
+new base compacts the chain. A failed write retains the preceding committed
+prefix. Late/ready phase checkpoints are still independent full images.
+
+`checkpoint_bytes` bounds the current strict chain (the shipped profiles allow
+8 GiB); old/new generations can coexist during publication, and the shared
+per-volume disk budget includes that temporary overlap. `snapshot` retains the
+previous full-prefix format. Large benchmarks remain manual.
+
+The raw replay input cache uses selected raw-observation and pixel dependency
+stamps, rather than the global decision clock. It contains no frozen ownership:
+performer labels and historical origins are refreshed from authoritative SQLite
+before matching, including on a cache hit. Its byte limit is
+`replay_snapshot_bytes`, independent of the derived checkpoint size.

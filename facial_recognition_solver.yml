@@ -536,10 +536,13 @@ execution:
     # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.
     queue_bytes: 268435456
     # Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.
+    checkpoint_mode: incremental
+    # incremental writes committed row deltas and compacts every 16 generations; snapshot writes full strict
+    # prefixes. Values: snapshot, incremental.
     checkpoint_scenes: 0
     # Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range:
     # 0..1000000.
-    checkpoint_bytes: 536870912
+    checkpoint_bytes: 8589934592
     # Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.
     replay_snapshot_bytes: 103079215104
     # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range:

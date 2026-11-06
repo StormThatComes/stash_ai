@@ -241,6 +241,7 @@ HELP = {
     'execution.rebuild.pixel_index_bytes': 'Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range: 1048576..1099511627776.',
     'execution.rebuild.matrix_cache_bytes': 'Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.',
     'execution.rebuild.queue_bytes': 'Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.',
+    'execution.rebuild.checkpoint_mode': 'incremental writes committed row deltas and compacts every 16 generations; snapshot writes full strict prefixes. Values: snapshot, incremental.',
     'execution.rebuild.checkpoint_scenes': 'Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range: 0..1000000.',
     'execution.rebuild.checkpoint_bytes': 'Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.',
     'execution.rebuild.sqlite_cache_bytes': 'SQLite page-cache ceiling per replay/reference store, additionally constrained by the shared RAM budget. Range: 32768..1073741824.',
