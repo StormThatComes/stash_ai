@@ -114,7 +114,8 @@ class Search:
             self.stack.callback(self.reservation.set,0)
             self.stats['reference_working_bytes']=metadata+working+cache_bytes+1024**2
             self.evidence=Evidence(self.db,self.config,cache_bytes,self.stats)
-            self.index=self.stack.enter_context(tempfile.TemporaryFile(prefix='stash-body-means-'))
+            from .scratch_space import file
+            self.index=self.stack.enter_context(file(prefix='stash-body-means-'))
             self.blocks=OrderedDict()
             self.bounds=OrderedDict()
             self.entries=[];self.owner_modes={};self.mean_versions={}

@@ -418,7 +418,8 @@ def rebuild_selected(database, selected, config, *, progress=None):
     from . import derived_cache
     from .paged_references import scope as reference_pages
     from .stage_checkpoints import scope as stage_checkpoints
-    with stage_checkpoints(database,config), atomic(database), derived_cache.scope(database,config), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), reference_pages(config), compute_scope(config), score_scope(), physical_keys(database, config):
+    from .scratch_space import scope as scratch_scope
+    with scratch_scope(config), stage_checkpoints(database,config), atomic(database), derived_cache.scope(database,config), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), reference_pages(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
         from .consolidation_queue import expand
         selected=expand(database.connection,selected,config)

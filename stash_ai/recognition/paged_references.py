@@ -38,9 +38,10 @@ class Pool:
         from .memory_size import Reservation
         from .run_cache import current
         cache=current();limit=cache.working if cache and cache.working is not None else config.data['execution']['rebuild_memory_bytes']
-        pages=min(512*1024,max(16384,limit//32))
+        pages=min(config.data['execution']['rebuild_sqlite_cache_bytes'],max(16384,limit//32))
         self.reservation=Reservation(limit,label='reference-pages');self.reservation.set(pages*2)
-        self.db=sqlite3.connect('',check_same_thread=False);self.lock=threading.Lock()
+        from .scratch_space import connect
+        self.db=connect(check_same_thread=False);self.lock=threading.Lock()
         self.db.execute('PRAGMA cache_size=-'+str(pages//1024))
         self.db.execute('PRAGMA temp_store=FILE')
         self.db.execute('CREATE TABLE vectors(id TEXT PRIMARY KEY,value BLOB)')
