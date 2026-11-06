@@ -18,6 +18,7 @@ class Ranking:
     def __init__(self,db,config,scope,target,namespace,context,policy_sha,enabled=True,category=None):
         self.db,self.config,self.scope,self.target=db,config,scope,target
         self.namespace,self.context,self.policy=namespace,context,policy_sha
+        self.category=category
         self.limit=config.data['execution']['portrait_ranking_cache_bytes']
         self.enabled=enabled and self.limit>0
         from .portrait_precedence import pose_contract
@@ -26,6 +27,21 @@ class Ranking:
         self.key='vtt-ranking-cache:'+digest([scope,target['person'],policy_sha,category,
             sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])),target.get('matching',{})])
         self.hit=False
+
+    def scene_rankings(self):
+        """Compose independent scene caches under the exact same global context."""
+        for item in self.target['scans']:
+            target=dict(self.target,scans=[item],matching={item['scan']:self.target.get('matching',{}).get(item['scan'],{})})
+            yield item['scan'],Ranking(self.db,self.config,self.scope,target,self.namespace,self.context,
+                self.policy,enabled=self.enabled,category=self.category)
+
+    def load_scenes(self):
+        return {scan:ranks for scan,part in self.scene_rankings() if (ranks:=part.load()) is not None}
+
+    def save_scenes(self,ranks):
+        by_scene={}
+        for rank in ranks:by_scene.setdefault(rank[2],[]).append(rank)
+        for _,part in self.scene_rankings():part.save(by_scene.get(part.target['scans'][0]['scene'],[]))
 
     def scan_inputs(self,scan):
         from .dependencies import cached

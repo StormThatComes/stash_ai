@@ -59,7 +59,10 @@ class Services:
 
 def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress,*,guard=None):
     db = database.connection
-    for item in selected:
+    from .publication_probe import Probe
+    probe=Probe(database,client,scope,namespace)
+    for position,item in enumerate(selected):
+        if position%32==0:probe.prepare(selected[position:position+32],rebuilt)
         scene, scan = item['scene'], item['scan']
         groups = rebuilt[scan]
         accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
@@ -82,11 +85,17 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                 if guard is not None:guard(item)
             check()
             from .publication_batch import ensure_people,publish_people
-            # Resolve all desired identities before unlinking old model profiles.
-            with work('Prepare scene identities',len(accepted),unit='person') as prepared:
-                targets=ensure_people(database,client,report,scope,scene,accepted,guard=check,progress=prepared.advance)
-            with activity(report,'publish scene identities',scene=scene):
-                publish_people(database,client,report,scope,scene,targets,guard=check)
+            targets=probe.unchanged(scene,accepted)
+            unchanged=targets is not None
+            if unchanged:
+                counts['scenes_publication_reused'] += 1
+            else:
+                probe.clear()
+                # Resolve all identities before unlinking old model profiles.
+                with work('Prepare scene identities',len(accepted),unit='person') as prepared:
+                    targets=ensure_people(database,client,report,scope,scene,accepted,guard=check,progress=prepared.advance)
+                with activity(report,'publish scene identities',scene=scene):
+                    publish_people(database,client,report,scope,scene,targets,guard=check)
             with tracking(
                 targets.items(),
                 'Link scene identities',
@@ -102,10 +111,11 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                     if evidence:
                         target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
                                                                   'reference_context': evidence[0], 'person': person}
-            counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
-                                                                 set(targets.values()), namespace,guard=check)
-            counts['other_model_links_removed'] += remove_other_model_links(
-                database, client, report, scope, scene, set(targets.values()), namespace,guard=check)
+            if not unchanged:
+                counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
+                                                                     set(targets.values()), namespace,guard=check)
+                counts['other_model_links_removed'] += remove_other_model_links(
+                    database, client, report, scope, scene, set(targets.values()), namespace,guard=check)
             if check:check()
             with db:acknowledge(db,scope,namespace,scene,revision)
             counts['scenes_processed'] += 1
