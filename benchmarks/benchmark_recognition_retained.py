@@ -119,6 +119,7 @@ def _snapshot(source, seed, scope, namespace):
             'WHERE p.scope=? AND p.namespace=? ORDER BY o.sample_key', (scope, namespace)),
     }
     statements.update({
+        'decision_contexts': ('SELECT * FROM decision_contexts',()),
         'candidates': ('SELECT c.* FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=?',(scope,namespace)),
         'evidence_thumbnails': ('SELECT t.* FROM evidence_thumbnails t WHERE t.id IN '
             "(SELECT json_extract(o.quality,'$.evidence_thumbnail_id') FROM observations o JOIN scans s ON s.id=o.scan "

@@ -92,6 +92,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             raise ValueError('Incomplete recognition scan marked complete.')
         from .retention_crops import restore
         restore(db, identifier, source, config)
+        from .cold_payloads import pack_scene
+        with db:pack_scene(db,identifier)
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True
@@ -114,9 +116,11 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         supplemental=collector.take_records() if grouped else []
         with db:
             from .pixel_storage import compact
+            from .cold_payloads import put,available
+            cold=available(db)
             compacted=[]
             for row in pending:
-                row=list(row);row[7]=compact(db,row[7]);compacted.append(row)
+                row=list(row);row[7]=compact(db,row[7]);row[11]=put(db,row[11],supported=cold);compacted.append(row)
             db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', compacted)
             if supplemental:
                 collector.write_records(db,supplemental)

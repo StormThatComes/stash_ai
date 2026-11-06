@@ -361,8 +361,10 @@ class Pipeline:
             size+=cost
             result.append((scene,owned,quality,missing,approximate,identity,context))
         # Read fallback JPEGs only in bounded ordered sets, never in a worker.
+        from .cold_payloads import get,length_sql,available
         ids=[]
-        for row in db.execute('SELECT o.id,LENGTH(o.crop) AS bytes FROM json_each(?) chosen '
+        length=length_sql('o.crop') if available(db) else 'LENGTH(o.crop)'
+        for row in db.execute('SELECT o.id,'+length+' AS bytes FROM json_each(?) chosen '
             'JOIN observations o ON o.id=chosen.value ORDER BY chosen.key',
             (encoded([item[1]['id'] for item in result]),)):
             cost=row['bytes'] or 0
@@ -370,7 +372,7 @@ class Pipeline:
             size+=cost;ids.append(row['id'])
         allowed=set(ids)
         result=[item for item in result if item[1]['id'] in allowed]
-        crops={row['id']:row['crop'] for row in db.execute('SELECT id,crop FROM observations WHERE id IN '
+        crops={row['id']:get(db,row['crop']) for row in db.execute('SELECT id,crop FROM observations WHERE id IN '
             '(SELECT value FROM json_each(?))',(encoded(ids),))}
         for item in result:item[1]['crop']=crops[item[1]['id']]
         return result

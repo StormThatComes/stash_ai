@@ -117,10 +117,10 @@ def candidate_observations(db, rows, scan, policy, *, prepare=False):
 
 
 def crop_row(db, row):
-    if 'crop' in row.keys():
-        return row
+    from .cold_payloads import get
     result = dict(row)
-    result['crop'] = db.execute('SELECT crop FROM observations WHERE id=?', (row['id'],)).fetchone()[0]
+    value=row['crop'] if 'crop' in row.keys() else db.execute('SELECT crop FROM observations WHERE id=?', (row['id'],)).fetchone()[0]
+    result['crop'] = get(db,value)
     return result
 
 

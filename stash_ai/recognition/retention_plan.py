@@ -262,13 +262,15 @@ def _contracts(db, config):
 
 
 def summarize(db):
+    from .cold_payloads import length_sql,available
+    crop_size=length_sql('o.crop') if available(db) else 'length(o.crop)'
     tables = []
     for table, address in (('observations', 'id'), ('body_observations', 'id'), ('person_evidence', 'observation')):
         join = f'a.id=o.{address}' + (' AND a.contract=o.contract' if table == 'person_evidence' else '')
         columns = [r[1] for r in db.execute(f'PRAGMA table_info({table})')]
         size = '+'.join(f'COALESCE(length(CAST(o.{c} AS BLOB)),0)' for c in columns)
         for action, count, size in db.execute(
-                f'SELECT a.action,COUNT(*),SUM(CASE WHEN a.action=\'clear_crop\' THEN length(o.crop) ELSE {size} END) '
+                f'SELECT a.action,COUNT(*),SUM(CASE WHEN a.action=\'clear_crop\' THEN {crop_size} ELSE {size} END) '
                 f'FROM {table} o JOIN retention_actions a ON {join} WHERE a.table_name=? GROUP BY a.action', (table,)):
             tables.append(dict(table=table, action=action, rows=count, logical_bytes=size or 0))
     return dict(scans=dict(db.execute('SELECT action,COUNT(*) FROM retention_scans GROUP BY action')),

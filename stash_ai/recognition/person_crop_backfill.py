@@ -31,6 +31,7 @@ def backfill(db,scan,source,config):
     cues=sorted({row['cue'] for _,row in rows(db,scan,config)})
     if not cues:return
     frames=source.frames_indices(cues) if hasattr(source,'frames_indices') else source.frames(min(cues))
+    from .cold_payloads import put
     limit=config.data['storage']['max_crop_bytes'];wanted=set(cues)
     with closing(frames,name='close person crop backfill frames') as frames:
         for index,_,image in frames:
@@ -58,6 +59,6 @@ def backfill(db,scan,source,config):
                         expected=contract(config) if table=='person_evidence' else body_contract(config)
                         db.execute(f"UPDATE {table} SET crop=?,{field}=json_set({field},'$.crop_status',?,"
                             "'$.crop_attempt_limit',?) WHERE "+identity+'=? AND contract=?',
-                            (crop,status,limit,row['id'],expected))
+                            (put(db,crop),status,limit,row['id'],expected))
                     from .shared_person_evidence import compact_cue
                     compact_cue(db,scan,index,body_contract(config),contract(config))

@@ -247,3 +247,16 @@ unrecognized details, or with *any* identity token / performer binding still in
 that database, are protected. Each deletion is checked against fresh Stash data
 and recorded as a durable operation; uncertain dispatch is never blindly retried.
 The dry run and apply record their counts in the face database's run history.
+
+Schema 14 separates retained image payloads from frequently read face/body rows.
+New crops use immutable SHA-256 addresses in `crop_payloads`; identical bytes are
+stored once. Existing inline images remain readable and are relocated when their
+scene is reused, without inference. Reports and portrait fallback resolve and
+verify the address. Body projections keep their existing copy-on-write behavior.
+Pruning collects unreferenced image payloads; reclaiming SQLite file space still
+uses the explicit maintenance/VACUUM action.
+
+Rebuilt durable candidates share policy and resource-admission documents in
+`decision_contexts`. Reports expand the original document, and cache validation
+compares the original limits. Schema migration creates the access paths without
+rewriting all retained image data or starting a full VACUUM.
