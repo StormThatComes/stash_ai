@@ -5,8 +5,8 @@ import numpy as np
 from .body_observations import contract, identifier
 
 
-def quality(image,person,people,settings):
-    bounds=person['bounds'];left,top,right,bottom=bounds
+def _pixels(image,bounds):
+    left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
         lap=(4*values[1:-1,1:-1]-values[:-2,1:-1]-values[2:,1:-1]
@@ -17,6 +17,14 @@ def quality(image,person,people,settings):
             small=np.asarray(thumb)
             bits=(small[:,1:]>small[:,:-1]).flatten()
             appearance_hash=format(sum(int(v)<<i for i,v in enumerate(bits)),'016x')
+    return sharpness,pixel_digest,appearance_hash
+
+
+def quality(image,person,people,settings):
+    from .inference_cache import many
+    bounds=person['bounds'];left,top,right,bottom=bounds
+    sharpness,pixel_digest,appearance_hash=many('body_quality','body-pixels-v1',[(image,bounds)],
+        lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     overlap=0.
     for other in people:
         if other is person:continue

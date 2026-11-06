@@ -110,6 +110,9 @@ class SapiensIDFaces(YuNetDetector):
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'pmpose':
                 from .pmpose_pose import load
                 self.pose_refiner = load(config, self.device)
+            if self.pose_refiner is not None:
+                from .cached_pose import Pose
+                self.pose_refiner=Pose(self.pose_refiner,config,self.device)
             self.provenance['recognizer'] = identity_contract(config)
         except BaseException:
             self.close()
@@ -243,6 +246,12 @@ class SapiensIDFaces(YuNetDetector):
         return people
 
     def _predict_pose(self, source):
+        from .inference_cache import current
+        if current() is None:return self._predict_pose_raw(source)
+        from .cached_pose import detections
+        return detections(self,source if isinstance(source,list) else [source],self._predict_pose_raw)
+
+    def _predict_pose_raw(self, source):
         settings = self.config.data['sapiensid']['pose']
         from .profiling import count
         count('person_detector_batches')

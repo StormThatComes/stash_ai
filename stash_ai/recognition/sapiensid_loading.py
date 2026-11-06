@@ -101,8 +101,9 @@ def load_encoder(config):
             cfg.update(start_from='', pretrained_path='', freeze=True)
             model = model_type.from_config(OmegaConf.create(cfg))
         load_verified_weights(model, directory / 'model.pth', **integrity)
+        from .inference_contracts import body_encoder
         return SapiensIDV1Encoder(model, None, device=config.data['models']['device'],
-            max_batch_size=config.data['sapiensid']['execution']['batch_size'])
+            max_batch_size=config.data['sapiensid']['execution']['batch_size'],cache_contract=body_encoder(config))
     except ImportError as error:
         raise RuntimeError('Install requirements-cpu.txt or requirements-gpu.txt in the existing CPU/GPU environment.') from error
 

@@ -494,6 +494,9 @@ execution:
     # 0..68719476736.
     sprite_cache_bytes: 1073741824
     # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
+    inference_cache_bytes: 8589934592
+    # Disk cap for reusable detection/pose/embedding/quality stages keyed by exact pixels; 0 disables. Range:
+    # 0..68719476736.
   rebuild:
     # Identity rebuild workers, checkpoints and working memory.
     disk_total_bytes: 322122547200

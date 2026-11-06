@@ -74,7 +74,14 @@ def pose_measurements(landmarks):
 
 
 @pipeline_stage('quality')
-def assess(image, detection):
+def assess(image,detection):
+    from .inference_cache import many,current
+    if current() is None:return _assess(image,detection)
+    return many('face_quality','face-quality-v1',[(image,tuple(detection.row))],
+        lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
+
+
+def _assess(image, detection):
     import numpy as np
     x, y, width, height = detection.box
     complete = x >= 0 and y >= 0 and x + width <= image.width and y + height <= image.height

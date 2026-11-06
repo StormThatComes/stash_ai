@@ -51,9 +51,10 @@ class CpuStage:
             if not entry[2]:
                 del self.images[key];self.bytes-=entry[3];entry[1].close()
 
-    def _call(self, function, image, value, key):
+    def _call(self, function, image, value, key, cache):
         try:
-            with use(self.cancel):
+            from .inference_cache import using
+            with use(self.cancel),using(cache):
                 return function(image, value)
         finally:
             self._release_image(key)
@@ -78,7 +79,8 @@ class CpuStage:
             self.bytes+=extra+4096
             self.peak_bytes=max(self.peak_bytes,self.bytes)
         try:
-            job = self.executor.submit(self._call,function,owned,value,key)
+            from .inference_cache import current
+            job = self.executor.submit(self._call,function,owned,value,key,current())
         except BaseException:
             self._release_image(key)
             self.retire(future)

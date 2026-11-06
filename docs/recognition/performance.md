@@ -577,3 +577,18 @@ and cue votes retain their previous meaning. Co-presence rival checks use bounde
 score screening and stop only after an unchanged scalar score proves separation.
 The optional hybrid cue index spills to budgeted scratch SQLite when its RAM
 allowance is exhausted; exhausted scratch falls back to the original exact SQL.
+
+`execution.scan.inference_cache_bytes` enables a disposable SQLite cache next to
+the recognition database (shipped: 8 GiB; legacy/default configuration: disabled).
+Detection, top-down pose, prepared face/body embeddings, and measured quality
+have separate versioned keys. Quality/identity thresholds are reapplied to cached
+measurements. A key includes exact pixels or prepared tensors, geometry, model
+checksums, active precision/device and runtime versions. Changing a body encoder
+therefore does not rerun pose inference for the same image and boxes.
+
+Identical inputs share inference, including within a microbatch. Every cue still
+produces its own observation, timestamp, geometry contract and independent-evidence
+vote; cache entries never store assignments or support counts. Values are copied
+on reuse. Checksums reject corrupt entries, payload/page limits bound storage,
+and cold inference remains available after eviction. Very small budgets below
+64 KiB disable the optional cache. The file contains arrays/JSON, never pickle.
