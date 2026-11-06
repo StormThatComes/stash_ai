@@ -261,7 +261,7 @@ def test_failed_apply_keeps_transaction_progress_zero_and_rolls_back_assignments
         def __init__(self, path):
             super().__init__(path)
             self.connection.set_authorizer(lambda action, table, *args:
-                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT and table == 'metadata'
+                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT and table == 'members'
                 else sqlite3.SQLITE_OK)
     monkeypatch.setattr('stash_ai.recognition.run.FaceDatabase', RejectRebuild)
     capsys.readouterr()

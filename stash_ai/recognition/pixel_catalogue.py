@@ -88,6 +88,7 @@ def prepare(db,scope,namespace,*,disk_bytes):
     db.execute('CREATE TEMP TABLE IF NOT EXISTS current_pixel_witnesses(fingerprint TEXT PRIMARY KEY,observation TEXT)')
     for (bucket,) in db.execute('SELECT signature FROM dirty_pixel_buckets ORDER BY signature'):
         count('pixel_index_dirty_buckets')
+        old_aliases=[tuple(r) for r in db.execute('SELECT fingerprint,representative FROM pixel_catalogue_aliases WHERE scope=? AND namespace=? AND signature=? ORDER BY fingerprint',args+(bucket,))]
         db.execute('DELETE FROM current_pixel_witnesses')
         db.execute('DELETE FROM pixel_catalogue_aliases WHERE scope=? AND namespace=? AND signature=?',args+(bucket,))
         for oid,fingerprint in db.execute('SELECT observation,fingerprint FROM pixel_catalogue_rows '
@@ -103,6 +104,11 @@ def prepare(db,scope,namespace,*,disk_bytes):
                     alias=other;break
             if alias is None:db.execute('INSERT OR IGNORE INTO current_pixel_witnesses VALUES (?,?)',(fingerprint,oid))
             elif alias!=fingerprint:db.execute('INSERT OR REPLACE INTO pixel_catalogue_aliases VALUES (?,?,?,?,?)',args+(bucket,fingerprint,alias))
+        new_aliases=[tuple(r) for r in db.execute('SELECT fingerprint,representative FROM pixel_catalogue_aliases WHERE scope=? AND namespace=? AND signature=? ORDER BY fingerprint',args+(bucket,))]
+        if old_aliases!=new_aliases:
+            db.execute("INSERT INTO evidence_versions SELECT 'owner',m.person,1 FROM members m JOIN pixel_catalogue_rows r "
+                'ON r.observation=m.observation WHERE r.scope=? AND r.namespace=? AND r.signature=? GROUP BY m.person '
+                'ON CONFLICT(kind,key) DO UPDATE SET version=version+1',args+(bucket,))
     # Other consumers may have an active evidence cursor on this connection.
     # Reuse temp tables instead of issuing DDL underneath that cursor.
     db.execute('DELETE FROM current_pixel_witnesses');db.execute('DELETE FROM dirty_pixel_buckets')
