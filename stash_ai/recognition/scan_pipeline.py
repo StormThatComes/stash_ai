@@ -214,11 +214,13 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
     def encode(pixels, entry):
         if entry['reason'] is None:
             details = {}
-            entry['crop'], bounds = crop_bytes(pixels, entry['face'], limit=config.data['storage']['max_crop_bytes'], details=details)
+            options={'retain':False} if config.data['storage']['crop_policy']=='selected' else {}
+            entry['crop'], bounds = crop_bytes(pixels, entry['face'], limit=config.data['storage']['max_crop_bytes'], details=details,**options)
             entry['quality'].update({key: details.pop(key) for key in tuple(details) if key.startswith('evidence_')})
             entry['quality'].update(crop_bounds=bounds, crop_encoding=details)
             import hashlib
-            entry['quality']['evidence_crop_sha256'] = hashlib.sha256(entry['crop']).hexdigest()
+            if entry['crop'] is not None:entry['quality']['evidence_crop_sha256'] = hashlib.sha256(entry['crop']).hexdigest()
+            else:entry['quality']['crop_status']='on_demand'
         return entry
 
     def encode_jobs(entries):

@@ -57,7 +57,7 @@ def report(db,config,scans):
     return dict(result,assignments=dict(counts),reasons=dict(reasons),identities=identities)
 
 
-def export_members(db,config,person,directory,*,policies=None):
+def export_members(db,config,person,directory,*,policies=None,crops=None):
     from .identity_report import _image
     from .person_audit import _draw
     from .alignment_audit import _png
@@ -88,7 +88,7 @@ def export_members(db,config,person,directory,*,policies=None):
             with rgb.copy() as copy:
                 drawn=_draw(copy,(0,0,rgb.width,rgb.height),shifted);_png(copy,target)
             return dict(status='exported',file=target.name,drawn_indices=drawn)
-        image=_image(cold_crop(db,row['crop']),directory/name,annotate=annotate)
+        image=_image(crops.body(row['id']) if row['crop'] is None and crops is not None and crops.client is not None else cold_crop(db,row['crop']),directory/name,annotate=annotate)
         admission=admission_report.person(quality,config,policies,row['contract'],independent=True)
         image['thresholds']=admission_panel.export(image,admission,directory,name,
             observation=row['id'],role=row['role'],rejection=row['rejected'])

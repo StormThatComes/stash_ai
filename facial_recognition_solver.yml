@@ -580,6 +580,9 @@ storage:
   # Recognition SQLite database path, relative to this YAML.
   max_crop_bytes: 1048576
   # Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit. Range: 1024..8388608.
+  crop_policy: all
+  # all retains every eligible crop; selected skips image encoding until portrait/report demand. Reports need
+  # --restore-crops for omitted images. Values: all, selected.
   retain_person_crops: true
   # Keep body crops for inspection/portraits, subject to storage.max_crop_bytes.
   retention:

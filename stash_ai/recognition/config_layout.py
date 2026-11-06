@@ -107,7 +107,7 @@ _GROUPS = (
      'cpu_threads=portrait_cpu_threads faceocc_batch_size=portrait_faceocc_batch_size '
      'ranking_cache_bytes=portrait_ranking_cache_bytes prefetch=prefetch_portraits'),
 
-    ('storage', 'storage', 'database max_crop_bytes'),
+    ('storage', 'storage', 'database max_crop_bytes crop_policy'),
     ('storage', 'sapiensid.storage', 'retain_person_crops'),
     ('storage.retention', 'storage.retention',
      'auto_prune keep_previous_scans keep_previous_person_contracts prune_obsolete_crops'),
