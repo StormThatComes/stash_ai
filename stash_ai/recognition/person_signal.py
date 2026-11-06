@@ -180,6 +180,8 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
     if not legacy_association and not legacy_boundaries:
         from .person_association import policy
         evidence['face_person_association'] = policy()
+    from .inference_precision import contract as precision_contract
+    evidence.update(precision_contract(config))
     return digest(evidence)
 
 

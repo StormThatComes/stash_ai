@@ -71,6 +71,9 @@ def load(config):
         raise RuntimeError(hint) from error
     from .sapiensid_inference import load_verified_weights, resolve_device
     device = resolve_device(config.data['models']['device'])
+    from .inference_precision import validate
+    precision=config.data['execution'].get('rfdetr_precision','fp32')
+    validate(device,precision)
     path = assets(config)
     # The builder constructs architecture only. A non-null pretrain_weights
     # disables backbone downloads; our verified loader owns all weight I/O.
@@ -85,14 +88,17 @@ def load(config):
     model.register_buffer('_kp_active_mask', mask, persistent=False)
     load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     return RFDETRDetector(model.float().to(device).eval(), device=device,
-                          batch_size=config.data['sapiensid']['pose']['batch_size'])
+                          batch_size=config.data['sapiensid']['pose']['batch_size'],precision=precision)
 
 
 class RFDETRDetector:
     """Person-only result tensors in original-image coordinates, on the CPU."""
     task = 'detect'
 
-    def __init__(self, model, *, device, batch_size):
+    def __init__(self, model, *, device, batch_size,precision='fp32'):
+        from .inference_precision import validate
+        validate(device,precision)
+        self.precision=precision
         self.model, self.device, self.batch_size = model, device, batch_size
 
     def predict(self, source, *, conf, iou, max_det, device=None, verbose=False, nms=True):
@@ -124,7 +130,8 @@ class RFDETRDetector:
                 inputs = torch.stack([transforms.resize(transforms.to_tensor(image).to(self.device),
                     [registry.RESOLUTION, registry.RESOLUTION], antialias=False) for image in rgb])
             inputs = transforms.normalize(inputs, registry.MEAN, registry.STD)
-            with torch.autocast(device_type=torch.device(self.device).type, enabled=False):
+            from .inference_precision import autocast
+            with autocast(self.device,self.precision):
                 return self.model(inputs.float())
 
     @staticmethod

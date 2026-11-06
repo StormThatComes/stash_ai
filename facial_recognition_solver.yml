@@ -460,6 +460,12 @@ execution:
     sequential_scene_batch_size: 4
     # Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range:
     # 1..16.
+    rfdetr_precision: fp32
+    # RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body
+    # evidence. Validate detection quality before enabling.
+    vitpose_precision: fp32
+    # ViTPose++ forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decoding uses float32. Changing
+    # this invalidates body evidence; validate keypoint quality.
   scan:
     # VTT input, scan workers, queues, caches and checkpoints.
     max_cues: 0

@@ -55,6 +55,8 @@ def identity_contract(config):
     elif settings['pose'].get('backend', 'yolo') == 'pmpose':
         from .pmpose_registry import contract as pmpose_contract
         result['pose_refiner'] = pmpose_contract(settings['pose'])
+    from .inference_precision import contract as precision_contract
+    result.update(precision_contract(config))
     return result
 
 
