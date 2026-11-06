@@ -222,6 +222,7 @@ def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeyp
     capsys.readouterr()
     config = replace(config, data=plain(config.data))
     config.data['clustering']['max_reference_bytes'] = 64
+    config.data['execution']['rebuild_storage'] = 'memory'
     assert run(config, services, '2') == 1
     output = capsys.readouterr().out
     # Pixel addresses use their disk budget; this failure comes from face RAM.

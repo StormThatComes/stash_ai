@@ -6,7 +6,7 @@ from stash_ai.runtime.cleanup import closing
 from .compute import current, Work
 from .evidence_cache import current as evidence, MISSING
 from .merge_cache import cached_cross, cross_identity, find_cross, save_cross
-from .parallel_scores import FrozenScores
+from .parallel_scores import FrozenScores, Reference
 from .profiling import count
 
 
@@ -38,11 +38,24 @@ def _cross(payload):
 
 def _immutable(plan):
     import numpy as np
-    samples = [a for g in plan.references for a in g.samples]
-    return bool(samples and all(g.samples for g in plan.references)
-                and all(isinstance(a, np.ndarray) and a.dtype == np.float32
-                        and a.ndim == 1 and a.shape == samples[0].shape
-                        and not a.flags.writeable and isinstance(a.base, bytes) for a in samples))
+    shape=None
+    for group in plan.references:
+        if not group.samples:return False
+        for sample in group.samples:
+            if shape is None:shape=sample.shape
+            if (not isinstance(sample,np.ndarray) or sample.dtype!=np.float32 or sample.ndim!=1
+                    or sample.shape!=shape or sample.flags.writeable or not isinstance(sample.base,bytes)):
+                return False
+    return shape is not None
+
+
+def _packed_jobs(jobs):
+    # Materialize only the next admitted pair on the coordinator. Worker kernels
+    # never receive a disk-backed sequence or a live SQLite owner.
+    for job in jobs:
+        first,second,threshold,cohesion=job.payload
+        payload=(Reference(first.identifier,tuple(first.samples)),Reference(second.identifier,tuple(second.samples)),threshold,cohesion)
+        yield Work(job.ordinal,job.generation,payload,job.size)
 
 
 def cross_pairs(first, second, config, serial):
@@ -94,7 +107,7 @@ def cross_pairs(first, second, config, serial):
                                  (a, b, threshold, cohesion), size))
             values.append((True, demanded[key]))
         completed = []
-        with closing(pool.ordered(_cross, jobs), name='close parallel constituent proofs') as stream:
+        with closing(pool.ordered(_cross, _packed_jobs(jobs)), name='close parallel constituent proofs') as stream:
             for result in stream:
                 scores, groups, samples = result.value
                 completed.append(scores)
@@ -187,6 +200,7 @@ def matching_rows(rows, components, config):
         for row in rows:
             yield row, None
         return
+    frozen=tuple(tuple(Reference(g.identifier,tuple(g.samples)) for g in component) for component in frozen)
     batch_size = min(256, max(2, pool.workers)*block_size,
                      max(1, pool.limit//(per_query*2)))
     iterator = iter(rows)

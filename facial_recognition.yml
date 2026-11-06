@@ -484,6 +484,8 @@ execution:
     # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
   rebuild:
     # Identity rebuild workers, checkpoints and working memory.
+    storage: disk
+    # Private replay storage: disk (bounded SQLite pages) or memory (legacy RAM image).
     workers: 1
     # Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256. Range: 0..256.
     native_threads: 1
@@ -507,7 +509,8 @@ execution:
     queue_bytes: 67108864
     # Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.
     checkpoint_scenes: 0
-    # Save strict rebuild recovery checkpoints every N scenes; 0 disables. Range: 0..1000000.
+    # Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range:
+    # 0..1000000.
     checkpoint_bytes: 536870912
     # Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.
     replay_snapshot_bytes: 68719476736

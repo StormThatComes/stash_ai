@@ -76,13 +76,14 @@ class FrozenScores:
     """One fixed reference generation, reused for bounded query batches."""
     def __init__(self, groups):
         self.groups = tuple(groups)
-        self.references = tuple(Reference(g.identifier, g.samples if isinstance(g.samples, tuple)
+        from .paged_references import Samples
+        self.references = tuple(Reference(g.identifier, g.samples if isinstance(g.samples, (tuple,Samples))
                                           else tuple(g.samples)) for g in self.groups)
-        self.generation = tuple((g.identifier, tuple(id(a) for a in g.samples)) for g in self.references)
+        self.generation = tuple((g.identifier, g.samples.keys if isinstance(g.samples,Samples) else tuple(id(a) for a in g.samples)) for g in self.references)
 
     def valid(self):
         return all(g.identifier == r.identifier and len(g.samples) == len(r.samples)
-                   and all(a is b for a, b in zip(g.samples, r.samples))
+                   and (g.samples is r.samples or all(a is b for a, b in zip(g.samples, r.samples)))
                    for g, r in zip(self.groups, self.references))
 
     def eligible(self):
@@ -138,6 +139,7 @@ class FrozenScores:
         def jobs():
             for ordinal, block in enumerate(blocks):
                 with pool.preparing('packing'):
+                    block=tuple(Reference(g.identifier,tuple(g.samples)) for g in block)
                     prepared = _prepared(block, queries[0])
                 if prepared is None:
                     raise RuntimeError('Invalid immutable recognition score shard.')

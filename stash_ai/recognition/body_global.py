@@ -116,7 +116,7 @@ def plan(db,config,bank,*,focus=None,compact=False):
                         blockers.append('body_ambiguity')
                 decision=dict(people=people,outcome='blocked' if blockers else 'merge',blockers=blockers,
                     nearest_rival=nearest,cores={p:[r['id'] for core in bank[p]['cores'] for r in core] for p in people},
-                    face_witnesses={p:bank[p]['face_ids'] for p in people})
+                    face_witnesses={p:list(bank[p]['face_ids']) for p in people})
                 if any(bank[p].get('provisional') for p in people):
                     decision['confirmation_witnesses']={p:[r['id'] for r in bank[p]['witnesses']] for p in people}
                 reserve(size(decision));result['decisions'].append(decision)
@@ -161,8 +161,9 @@ def reconcile(database,selected,config):
                 'WHERE person=? AND observation IN (SELECT id FROM body_observations WHERE scan IN (SELECT value FROM json_each(?)))',
                 (encoded(dict(reason='body_alias_requires_complete_selection',source=row['source'])),row['source'],encoded([s['scan'] for s in selected])))
     from .solver_execution import current as solver
+    from .stage_checkpoints import report as checkpoint_report
     result=(report(db,config,scope,namespace) if solver() is not None else
-            _report(db,config,scope,namespace,compact=True))
+            checkpoint_report(db,selected,config,'body-global',lambda:_report(db,config,scope,namespace,compact=True)))
     from .publication_queue import enqueue
     proof_bytes=0
     for decision in result['decisions']:

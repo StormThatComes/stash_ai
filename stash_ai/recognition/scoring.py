@@ -43,11 +43,19 @@ def _prepared(groups, query):
     from .run_cache import current, immutable_samples, MISSING
     shared = current()
     state = None if shared is not None else _blocks.get()
+    from .paged_references import Samples
+    paged=all(isinstance(g.samples,Samples) for g in groups)
+    page_key=('paged-matrix',tuple(g.samples.keys for g in groups),tuple(query.shape)) if paged else None
+    if shared is not None and paged:
+        found=shared.get(page_key)
+        if found is not MISSING:
+            count('reused_packed_bytes',found[0].nbytes)
+            return found
     key = tuple(('tuple', id(group.samples)) if isinstance(group.samples, tuple)
                 else tuple(id(sample) for sample in group.samples) for group in groups)
     arrays = [sample for group in groups for sample in group.samples]
     owners = immutable_samples(arrays) if shared is not None else None
-    stable = ('matrix', tuple(len(g.samples) for g in groups), owners, tuple(query.shape))
+    stable = page_key if paged else ('matrix', tuple(len(g.samples) for g in groups), owners, tuple(query.shape))
     cached = shared.get(stable) if shared is not None and owners is not None else MISSING
     if cached is not MISSING:
         count('reused_packed_bytes', cached[0].nbytes)
@@ -142,7 +150,8 @@ def comparisons(groups, query, threshold=float('-inf'), cohesion=float('-inf'), 
         if isinstance(group.samples, tuple) and layout is not None and layout[0] is group.samples:
             required = layout[1]
         else:
-            required = sum(sample.nbytes for sample in group.samples)
+            from .paged_references import Samples
+            required = group.samples.nbytes if isinstance(group.samples,Samples) else sum(sample.nbytes for sample in group.samples)
             if isinstance(group.samples, tuple):
                 group._score_layout = group.samples, required
         if block and size + required > _MAX_BLOCK:

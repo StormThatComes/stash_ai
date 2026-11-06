@@ -13,7 +13,7 @@ class ReferenceUsage:
     """Account at existing budget checks; throttle optional console snapshots."""
     def __init__(self, limit, progress=None):
         self.limit, self.progress = limit, progress
-        self.bytes = self.people = self.samples = self.peak = self.metadata_bytes = 0
+        self.resident = self.bytes = self.people = self.samples = self.peak = self.metadata_bytes = 0
         self.stage, self.last_report = 'loading', None
         self.last_values = None
         from .run_cache import current
@@ -25,35 +25,40 @@ class ReferenceUsage:
     def begin(self, stage, *, reset=False, report=True):
         self.stage = stage
         if reset:
-            self.bytes = self.people = self.samples = self.metadata_bytes = 0
+            self.resident = self.bytes = self.people = self.samples = self.metadata_bytes = 0
             if self.cache is not None:
                 self.cache.reserve(('bank',id(self)),0)
         if report:
             self.emit(force=True)
 
     def add(self, vectors, *, people=0, kind):
-        self.add_counts(sum(vector.nbytes for vector in vectors), len(vectors), people=people, kind=kind)
+        from .paged_references import Samples
+        if isinstance(vectors,Samples):
+            # The shared page pool owns vectors. This bank owns only keys.
+            self.add_counts(vectors.nbytes,len(vectors),people=people,kind=kind,paged=True)
+        else:self.add_counts(sum(vector.nbytes for vector in vectors), len(vectors), people=people, kind=kind)
 
-    def add_counts(self, size, samples, *, people=0, kind):
+    def add_counts(self, size, samples, *, people=0, kind, paged=False):
         """Reuse exact accounting for an already validated immutable snapshot."""
         self.bytes += size
+        self.resident += 0 if paged else size
         self.people += people
         self.samples += samples
         self.peak = max(self.peak, self.bytes)
-        if self.bytes > self.limit:
+        if self.resident > self.limit:
             self.emit(force=True)
             raise ValueError(
                 f'{kind} face references exceed the configured RAM budget: '
                 f'required={self.bytes} bytes, limit={self.limit} bytes '
                 f'(clustering.max_reference_bytes), people={self.people}, samples={self.samples}.')
         if self.cache is not None:
-            self.cache.reserve(('bank',id(self)),self.bytes+self.samples*128+self.people*256+self.metadata_bytes)
+            self.cache.reserve(('bank',id(self)),self.resident+self.samples*128+self.people*256+self.metadata_bytes)
         self.emit()
 
     def add_metadata(self, size):
         self.metadata_bytes += size
         if self.cache is not None:
-            self.cache.reserve(('bank',id(self)),self.bytes+self.samples*128+self.people*256+self.metadata_bytes)
+            self.cache.reserve(('bank',id(self)),self.resident+self.samples*128+self.people*256+self.metadata_bytes)
 
     def emit(self, *, force=False):
         if self.progress is None:

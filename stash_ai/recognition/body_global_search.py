@@ -279,7 +279,7 @@ class Search:
             blocked=bool(hard.intersection(known['blockers'])) if known else False
             if known is None:
                 left,right=self.bank[a],self.bank[b]
-                blocked=bool(left['cues'] & right['cues'])
+                blocked=not left['cues'].isdisjoint(right['cues'])
                 if not blocked and left['faces'] and right['faces']:
                     blocked=self.evidence.compare(left['faces'],right['faces'],'face')[1]<self.config.data['sapiensid']['matching']['face_floor']
             if blocked:exclude(a,b)
@@ -409,7 +409,7 @@ def _pair_result(a,b,bank,config,*,mean,minimum,face_min,core_blocked):
                 min(first['support'],second['support'])<local['attach_min_support']):
             blockers.append('independent_support')
     elif min(first['support'],second['support'])<settings['min_support']:blockers.append('independent_support')
-    if first['cues']&second['cues']:blockers.append('person_copresence')
+    if not first['cues'].isdisjoint(second['cues']):blockers.append('person_copresence')
     if first['missing_original'] or second['missing_original']:blockers.append('missing_original_body_witness')
     if first.get('stale_policy') or second.get('stale_policy'):
         blockers.append('historical_body_policy_requires_rebuild')

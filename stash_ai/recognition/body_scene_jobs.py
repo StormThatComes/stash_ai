@@ -32,6 +32,11 @@ def planned(db, items, config):
     from .body_identity import scene_plan, _load_scene, _plan
     from .hybrid_query_observer import _observer
     store=current() if _observer.get() is None else None
+    from .stage_checkpoints import current as stage_current
+    checkpoints=stage_current() if _observer.get() is None else None
+    def save(key,decisions):
+        if store:store.put('body-scene',key,decisions)
+        if checkpoints:checkpoints.put('body-scene',key,decisions)
     pool=compute()
     batch=[]
     def drain():
@@ -40,14 +45,15 @@ def planned(db, items, config):
             with closing(pool.ordered(_worker,jobs),name='finish body scene plans') as results:
                 for result in results:
                     record,rows,decisions=result.value
-                    if store:store.put('body-scene',result.generation,decisions)
+                    save(result.generation,decisions)
                     yield record,rows,decisions
             batch.clear()
 
     for item in items:
         scan=item['scan']
-        key=body_key(db,scan,config) if store else None
+        key=body_key(db,scan,config) if store or checkpoints else None
         cached=store.get('body-scene',key) if store else None
+        if cached is None and checkpoints:cached=checkpoints.get('body-scene',key)
         if cached is not None:
             yield from drain()
             yield db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone(),[{'id':i} for i in cached],cached
@@ -79,6 +85,6 @@ def planned(db, items, config):
         else:
             yield from drain()
             plan=scene_plan(db,scan,config)
-        if store:store.put('body-scene',key,plan[2])
+        save(key,plan[2])
         yield plan
     yield from drain()

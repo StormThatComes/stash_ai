@@ -18,6 +18,10 @@ MISSING = object()
 def memory_replay(config):
     from .ram_database import connect
     from .run_cache import scope
+    if config.data['execution'].get('rebuild_storage','disk')=='disk':
+        from .disk_replay import replay
+        with scope(config),replay(config) as state:yield state
+        return
     uri = 'file:recognition-replay-' + uuid.uuid4().hex + '?mode=memory&cache=shared'
     with scope(config), closing(connect(config, uri, label='sqlite-rebuild'), name='close RAM replay') as db:
         db.row_factory = sqlite3.Row

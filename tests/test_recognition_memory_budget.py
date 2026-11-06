@@ -109,6 +109,7 @@ def test_sqlite_growth_evicts_optional_cache_and_rollback_releases_pages(tmp_pat
 def test_solver_divides_large_yaml_limit_and_enforces_effective_worker_budget(tmp_path, monkeypatch):
     from stash_ai.recognition import solver_execution
     config = settings(tmp_path, 30*GIB)
+    config.data['execution']['rebuild_storage'] = 'memory'
     monkeypatch.setattr(solver_execution.os, 'process_cpu_count', lambda: 16, raising=False)
     monkeypatch.setattr(solver_execution, 'available_memory', lambda: 80*GIB)
     runtime = solver_execution.plan(config, dict(cpus=16, trials=4))
@@ -131,6 +132,7 @@ def test_effective_solver_cap_also_limits_the_baseline_and_ram_pages(tmp_path, m
     from stash_ai.recognition.offline_evaluation import _ram
     from stash_ai.recognition.replay_memory import memory_replay
     config = settings(tmp_path, 30*GIB)
+    config.data['execution']['rebuild_storage'] = 'memory'
     monkeypatch.setattr(solver_execution.os, 'process_cpu_count', lambda: 4, raising=False)
     overhead_plan = solver_execution.plan(config, dict(cpus=4, trials=4, memory_bytes=200*GIB))
     overhead = overhead_plan.trial_bytes - overhead_plan.rebuild_memory_bytes

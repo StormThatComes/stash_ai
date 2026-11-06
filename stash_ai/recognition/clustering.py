@@ -116,8 +116,10 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
                 if not selected:
                     continue
                 ids, vectors = zip(*selected)
+                from .paged_references import pack
+                vectors=pack(vectors)
                 usage.add(vectors, people=1, kind='Retained')
-                result.append(Group(person['id'], tuple(vectors), True, tuple(ids)))
+                result.append(Group(person['id'], vectors, True, tuple(ids)))
 
     usage.emit(force=True)
     return result
