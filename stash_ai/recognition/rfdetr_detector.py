@@ -59,7 +59,7 @@ def assets(config):
 
 def load(config):
     hint = ('RF-DETR-XL requires rfdetr==' + registry.VERSION + ' and rfdetr-plus==' + registry.PLUS_VERSION +
-            '; install requirements-rfdetr.txt in the existing CPU/GPU environment.')
+            '; install requirements-cpu.txt or requirements-gpu.txt in the existing CPU/GPU environment.')
     try:
         if version('rfdetr') != registry.VERSION or version('rfdetr-plus') != registry.PLUS_VERSION:
             raise RuntimeError(hint)

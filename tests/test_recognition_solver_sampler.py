@@ -13,7 +13,7 @@ def test_optional_import_and_clear_dependency_error(monkeypatch):
         return original(name,*args,**kwargs)
     monkeypatch.setattr(builtins,'__import__',missing)
     assert create('heuristic',0) is None
-    with pytest.raises(ValueError,match='requirements-solver'):create('tpe',0)
+    with pytest.raises(ValueError,match='requirements-cpu'):create('tpe',0)
     with pytest.raises(ValueError,match='seed'):create('heuristic',-1)
 
 

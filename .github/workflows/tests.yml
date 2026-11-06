@@ -59,12 +59,11 @@ jobs:
           cache-dependency-glob: |
             requirements-dev.txt
             requirements-cpu.txt
-            requirements-solver.txt
             constraints/*.txt
 
       - name: Install test dependencies
         run: |
-          uv pip install --system -r requirements-cpu.txt -r requirements-dev.txt -r requirements-solver.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+          uv pip install --system -r requirements-cpu.txt -r requirements-dev.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 
       - name: Diagnostic overhead benchmark
         if: matrix.shard == 1
@@ -105,12 +104,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.2.0
-      - name: Resolve pinned wheels without installing GPU packages
+      - name: Resolve complete profiles without installing GPU packages
         run: >-
           uv pip compile requirements-${{ matrix.variant }}.txt requirements-dev.txt
           -c constraints/${{ matrix.variant }}-py314.txt --python-version 3.14.7
           --python-platform ${{ matrix.platform }} --index-strategy unsafe-best-match
-          --only-binary :all: -o /tmp/resolved.txt
+          --only-binary :all: --no-binary iopath --no-binary antlr4-python3-runtime
+          -o /tmp/resolved.txt
 
   recognition-models:
     name: recognition CPU (${{ matrix.os }}, ${{ matrix.suite }})
@@ -140,7 +140,7 @@ jobs:
           STASH_AI_RECOGNITION_SMOKE: '1'
           STASH_API_KEY: ''
         run: python -m pytest -q tests/test_recognition_model_smoke.py --tb=short
-      - name: Verify simultaneous solver trials without optional solver packages
+      - name: Verify simultaneous solver trials with the complete CPU profile
         if: matrix.suite != 'video'
         run: python -m pytest -q tests/test_recognition_solver_concurrency.py --tb=short
       - name: Install FFmpeg on Windows for tiny-video fixtures

@@ -1,10 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
-# Complete application: taggers and facial recognition (YuNet/SFace/AuraFace/FaceOcc).
+# Complete runtime: tagging, face/body recognition, all pose backends and solver.
+# Install exactly one CPU/GPU profile; add requirements-dev.txt for tests.
 
 # JoyTag
 torch==2.14.0+cu126
 torchvision==0.29.0+cu126
-transformers>=4.36.2
+transformers>=4.53,<6
 einops>=0.7.0
 safetensors>=0.4.1
 Pillow>=9.4.0
@@ -12,7 +13,7 @@ Pillow>=9.4.0
 # Stash / HTTP / progress
 requests>=2.31.0
 urllib3>=2.0.0
-tqdm>=4.66.0
+tqdm>=4.66,<5
 
 # Editable tag hierarchy (safe YAML loader).
 PyYAML>=6.0
@@ -21,10 +22,32 @@ PyYAML>=6.0
 # ORT 1.21+ supplies preload_dlls for CUDA library setup.
 # CPU installations use requirements-cpu.txt instead.
 numpy>=2,<3
-opencv-python-headless>=4.10,<5
+# Ultralytics requires this distribution; avoid two packages sharing cv2.
+opencv-python>=4.10,<5
 onnx>=1.21,<2
 onnxruntime-gpu==1.26.0
 huggingface_hub>=0.26,<2
 
 # Scoped portrait CPU/BLAS thread budgets.
 threadpoolctl>=3.6,<4
+
+# Body recognition and all supported person/pose backends (inference only).
+timm>=0.9.7,<2
+omegaconf>=2.3,<3
+easydict>=1.10,<2
+pandas>=2.2,<4
+matplotlib>=3.8,<4
+# YOLO26 requires explicit NMS-head support.
+ultralytics>=8.4.189,<9
+packaging>=23.0
+# ViTPose affine crops and heatmap postprocessing.
+scipy>=1.10,<2
+# SAM-pose2seg downloads its pinned inference source on first use.
+hydra-core>=1.3,<2
+iopath>=0.1.10,<0.2
+# RF-DETR-XL weights/rfdetr-plus use PML-1.0; see docs/sapiensid-hybrid.md.
+rfdetr==1.11.2
+rfdetr-plus==1.1.0
+
+# Learned merge-solver proposals (activated with --solver-sampler tpe).
+optuna==5.0.0

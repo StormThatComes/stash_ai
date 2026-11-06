@@ -104,7 +104,7 @@ def load_encoder(config):
         return SapiensIDV1Encoder(model, None, device=config.data['models']['device'],
             max_batch_size=config.data['sapiensid']['execution']['batch_size'])
     except ImportError as error:
-        raise RuntimeError('Install requirements-sapiensid.txt in the existing CPU/GPU environment.') from error
+        raise RuntimeError('Install requirements-cpu.txt or requirements-gpu.txt in the existing CPU/GPU environment.') from error
 
 
 def load_pose(config):
@@ -123,7 +123,7 @@ def load_pose(config):
     from packaging.version import Version
     # Require the runtime validated for explicit YOLO26 NMS-head selection.
     if Version(__version__) < Version('8.4.189'):
-        raise RuntimeError('YOLO26 pose requires ultralytics>=8.4.189; install requirements-sapiensid.txt.')
+        raise RuntimeError('YOLO26 pose requires ultralytics>=8.4.189; install requirements-cpu.txt or requirements-gpu.txt.')
     with tempfile.TemporaryDirectory(prefix='stash-sapiensid-pose-') as temp:
         path = Path(temp) / 'pose.pt'
         path.write_bytes(data)

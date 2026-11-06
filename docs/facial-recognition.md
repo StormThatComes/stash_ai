@@ -6,11 +6,10 @@ Optional video decoding is used only for portraits. It is never started by `--mo
 
 ## Run recognition
 
-Install the [CPU or GPU application profile](../constraints/README.md), then the extras
-used by the shipped RF-DETR-XL and ViTPose++ Large configuration:
+Install the [CPU or GPU application profile](../constraints/README.md). Both
+include the dependencies used by the shipped RF-DETR-XL and ViTPose++ Large configuration:
 
 ```powershell
-python -m pip install -r requirements-sapiensid.txt -r requirements-rfdetr.txt
 python stash_ai.py recognition run --scene-id 123
 python stash_ai.py recognition run --scene-id 123 --scene-id 456
 python stash_ai.py recognition run --all-scenes

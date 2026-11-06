@@ -1,12 +1,16 @@
 # Development and validation
 
 Use Python **3.14.7**, the version pinned by the [CI workflow](../.github/workflows/tests.yml).
-From the repository root, install the CPU application, development and solver dependencies:
+From the repository root, install the CPU application and development tools:
 
 ```powershell
-uv pip install -r requirements-cpu.txt -r requirements-dev.txt -r requirements-solver.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+uv pip install -r requirements-cpu.txt -r requirements-dev.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 python -m pytest -q
 ```
+
+`requirements-dev.txt` is a tools-only overlay: replace the CPU profile and
+constraints with their GPU counterparts to develop in a CUDA environment.
+The runtime profiles already include Optuna and all inference dependencies.
 
 Most tests use mocked Stash and model backends. Optional real-model smoke tests
 need their dependencies/assets and explicit environment flags; a production Stash server is not required.

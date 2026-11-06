@@ -25,8 +25,8 @@ def load(config, device):
         import cv2
         import torch
     except ImportError as error:
-        raise RuntimeError('Sapiens Pose requires PyTorch and OpenCV; install requirements-sapiensid.txt '
-                           'alongside the CPU/GPU requirements.') from error
+        raise RuntimeError('Sapiens Pose requires PyTorch and OpenCV; install requirements-cpu.txt or requirements-gpu.txt '
+                           'for the selected runtime.') from error
     # TorchScript is executable model code: only the exact pinned, hash-checked
     # upstream export is admitted. Remap saved CUDA tensors before moving it.
     model = torch.jit.load(str(asset(config)), map_location='cpu').float().eval().to(device)

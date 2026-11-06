@@ -284,7 +284,7 @@ def parser():
     merge_report.add_argument('--solver-scheduling', choices=('batch', 'async'), default='batch', help='Deterministic batches or completion-driven search; both support checkpoint resume.')
     merge_report.add_argument('--profile-solver', '--profile-report', dest='profile_solver', action='store_true',
         help='Profile report execution and optional solver trials; final output cost is included in the stderr summary.')
-    merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
+    merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE uses Optuna included in the CPU/GPU profiles.')
     merge_report.add_argument('--compare-anchor-rules', action='store_true',
         help='Reserve up to two trials to compare whole regional anchor rules with the best configured-rule trial.')
     merge_report.add_argument('--solver-report', choices=('compact', 'full'),
