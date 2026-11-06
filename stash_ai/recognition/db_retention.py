@@ -28,6 +28,11 @@ def _validate(db):
 
 
 def _apply(db):
+    if not any(db.execute(sql).fetchone() for sql in (
+        'SELECT 1 FROM retention_actions LIMIT 1',
+        "SELECT 1 FROM retention_scans WHERE action='delete' LIMIT 1",
+        'SELECT 1 FROM retention_contracts LIMIT 1')):
+        return
     statements = []
     def add(label, sql, parameters=()):
         statements.append((label, sql, parameters))
@@ -47,19 +52,22 @@ def _apply(db):
         if metadata:
             # Existing person backfill can rehydrate these pixels on reuse.
             update += f",{metadata}=json_set({metadata},'$.crop_status','retention_pruned','$.crop_attempt_limit',0)"
-        add(f'Clear obsolete crops: {table}', f'UPDATE {table} SET {update} WHERE EXISTS (SELECT 1 FROM retention_actions a '
-                   f"WHERE a.table_name=? AND a.action='clear_crop' AND {match})", (table,))
+        add(f'Clear obsolete crops: {table}', f'UPDATE {table} SET {update} WHERE {address} IN (SELECT id FROM retention_actions '
+                   f"WHERE table_name=? AND action='clear_crop') AND EXISTS (SELECT 1 FROM retention_actions a "
+                   f"WHERE a.table_name=? AND a.action='clear_crop' AND {match})", (table,table))
     # Delete references before their parents. Pins include SQL and JSON roots.
     add('Delete obsolete candidates', "DELETE FROM candidates WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
-    add('Delete obsolete body cues', "DELETE FROM body_cues WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete') "
-               "OR EXISTS (SELECT 1 FROM retention_contracts c WHERE c.kind='body' AND c.scan=body_cues.scan "
-               "AND c.contract=body_cues.contract AND NOT EXISTS (SELECT 1 FROM body_observations b "
-               "WHERE b.scan=c.scan AND b.contract=c.contract AND NOT EXISTS (SELECT 1 FROM retention_actions a "
-               "WHERE a.table_name='body_observations' AND a.id=b.id AND a.action='delete')))")
+    add('Delete obsolete body cues', "DELETE FROM body_cues WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
+    add('Delete obsolete body contracts', "DELETE FROM body_cues WHERE (scan,contract) IN ("
+        "SELECT c.scan,c.contract FROM retention_contracts c WHERE c.kind='body' "
+        "AND NOT EXISTS (SELECT 1 FROM body_observations b WHERE b.scan=c.scan AND b.contract=c.contract "
+        "AND NOT EXISTS (SELECT 1 FROM retention_actions a WHERE a.table_name='body_observations' "
+        "AND a.id=b.id AND a.action='delete')))")
     for table, address in (('person_evidence', 'observation'), ('body_observations', 'id'), ('observations', 'id')):
         match = f'a.id={table}.{address}' + (f' AND a.contract={table}.contract' if table == 'person_evidence' else '')
-        add(f'Delete obsolete evidence: {table}', f'DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM retention_actions a '
-                   f"WHERE a.table_name=? AND a.action='delete' AND {match})", (table,))
+        add(f'Delete obsolete evidence: {table}', f'DELETE FROM {table} WHERE {address} IN (SELECT id FROM retention_actions '
+                   f"WHERE table_name=? AND action='delete') AND EXISTS (SELECT 1 FROM retention_actions a "
+                   f"WHERE a.table_name=? AND a.action='delete' AND {match})", (table,table))
     add('Delete obsolete scans', "DELETE FROM scans WHERE id IN (SELECT id FROM retention_scans WHERE action='delete')")
     # Only collect thumbnails made unreferenced by this plan, including sharing
     # with other scenes/model namespaces. Never touch matching RGB signatures.
