@@ -84,7 +84,8 @@ def recover(db, policy, history, config):
             body_domains=[]
             complete=True
             for row,options in zip(cue,domains):
-                stored=db.execute("SELECT embedding FROM person_evidence WHERE observation=? AND contract=? AND status='ready'",
+                from .shared_person_evidence import expression
+                stored=db.execute("SELECT "+expression("embedding","person_evidence")+" FROM person_evidence WHERE observation=? AND contract=? AND status='ready'",
                                   (row['id'],contract(config))).fetchone()
                 if stored is None:complete=False;break
                 query=np.frombuffer(stored[0],dtype='<f4');choices=[]

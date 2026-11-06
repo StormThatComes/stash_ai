@@ -42,15 +42,19 @@ def integrity(db, scope, namespace):
     from .dependencies import cached
     from .config import digest
     def compute():
+        from .dependencies import supported
+        audited=supported(db) and db.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_pixel_update'").fetchone()
         h=hashlib.sha256()
-        for key,pixels in db.execute(
-            "SELECT DISTINCT json_extract(o.quality,'$.evidence_thumbnail_id'),t.pixels "
-            "FROM observations o JOIN scans s ON s.id=o.scan LEFT JOIN evidence_thumbnails t "
-            "ON t.id=json_extract(o.quality,'$.evidence_thumbnail_id') "
+        for (key,) in db.execute(
+            "SELECT DISTINCT json_extract(o.quality,'$.evidence_thumbnail_id') "
+            "FROM observations o JOIN scans s ON s.id=o.scan "
             "WHERE s.scope=? AND s.namespace=? AND json_extract(o.quality,'$.evidence_thumbnail_id') IS NOT NULL "
             "ORDER BY 1", (scope,namespace)):
-            if pixels is None or hashlib.sha256(pixels).hexdigest()!=key:
-                raise ValueError('Missing or changed evidence thumbnail.')
-            h.update(key.encode())
+            def verify():
+                read(db,dict(evidence_thumbnail_id=key))
+                return key
+            signed=(cached(db,'thumbnail',key,'v1',verify,dependency='thumbnail',dependency_key=key,checked=True)
+                    if audited else verify())
+            h.update(signed.encode())
         return h.hexdigest()
-    return cached(db,'thumbnail-integrity',digest([scope,namespace]),'v1',compute)
+    return cached(db,'thumbnail-integrity',digest([scope,namespace]),'v2',compute)

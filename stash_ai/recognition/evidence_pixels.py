@@ -130,7 +130,9 @@ def _generation(db,scope,namespace):
     for row in db.execute("SELECT s.id,COALESCE(v.version,0) FROM scans s LEFT JOIN evidence_versions v "
         "ON v.kind='raw-observations' AND v.key=s.id WHERE (? IS NULL OR s.scope=?) "
         "AND (? IS NULL OR s.namespace=?) ORDER BY s.id",args):_hash_row(h,row)
-    for row in db.execute("SELECT t.id,t.pixels FROM evidence_thumbnails t WHERE t.id IN ("
+    audited=db.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_pixel_update'").fetchone()
+    fields="t.id,COALESCE(v.version,0)" if audited else "t.id,t.pixels"
+    for row in db.execute("SELECT "+fields+" FROM evidence_thumbnails t LEFT JOIN evidence_versions v ON v.kind='thumbnail' AND v.key=t.id WHERE t.id IN ("
         "SELECT json_extract(o.quality,'$.evidence_thumbnail_id') FROM observations o JOIN scans s ON s.id=o.scan "
         "WHERE (? IS NULL OR s.scope=?) AND (? IS NULL OR s.namespace=?)) ORDER BY t.id",args):_hash_row(h,row)
     return h.hexdigest()
@@ -231,6 +233,7 @@ def canonicalize(db):
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+_disk_budget = ContextVar('recognition_pixel_disk_budget',default=4*1024**3)
 _active_aliases = ContextVar('recognition_pixel_aliases', default=None)
 
 
@@ -241,7 +244,12 @@ class _LazyAliases:
 
     def get(self,value,default):
         if value is None:return default
-        if self.mapping is None:self.mapping=dict(aliases(self.db,self.scope,self.namespace,budget=self.budget,persist=self.persist))
+        if self.mapping is None:
+            from .pixel_catalogue import ready,prepare
+            from .dependencies import _writable
+            if self.persist and _writable.get() and ready(self.db,self.scope,self.namespace):
+                self.mapping=prepare(self.db,self.scope,self.namespace,disk_bytes=_disk_budget.get())
+            else:self.mapping=dict(aliases(self.db,self.scope,self.namespace,budget=self.budget,persist=self.persist))
         return self.mapping.get(value,default)
 
 
@@ -251,7 +259,7 @@ def canonical_pixel(value):
 
 
 @contextmanager
-def alias_scope(db,scope=None,namespace=None,*,budget=67108864,persist=False):
+def alias_scope(db,scope=None,namespace=None,*,budget=67108864,persist=False,disk_bytes=4294967296):
     """Read-only input snapshot shared by face, body, and report votes.
 
     Persistent entries require the same transactional evidence generation;
@@ -262,8 +270,10 @@ def alias_scope(db,scope=None,namespace=None,*,budget=67108864,persist=False):
         return
     # Warm certificate validation may never count a vote. Do not read every
     # retained thumbnail until the first physical evidence key is requested.
+    disk_token=_disk_budget.set(disk_bytes)
     token = _active_aliases.set(_LazyAliases(db,scope,namespace,budget,persist))
     try:
         yield
     finally:
         _active_aliases.reset(token)
+        _disk_budget.reset(disk_token)

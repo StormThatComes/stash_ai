@@ -513,6 +513,9 @@ execution:
     replay_snapshot_bytes: 68719476736
     # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range:
     # 1048576..1099511627776.
+    pixel_index_bytes: 4294967296
+    # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range:
+    # 1048576..1099511627776.
     body:
       # Limits for hybrid and body matching plans.
       max_candidate_pairs: 100000

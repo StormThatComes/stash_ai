@@ -224,11 +224,9 @@ def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeyp
     config.data['clustering']['max_reference_bytes'] = 64
     assert run(config, services, '2') == 1
     output = capsys.readouterr().out
-    if with_thumbnails:
-        assert 'Pixel witness index exceeds recognition evidence budget' in output
-    else:
-        assert 'required=96 bytes, limit=64 bytes' in output
-        assert 'samples=6 stage=selected_and_historical' in output
+    # Pixel addresses use their disk budget; this failure comes from face RAM.
+    assert 'required=96 bytes, limit=64 bytes' in output
+    assert 'samples=6 stage=selected_and_historical' in output
     assert client.writes == writes
     with FaceDatabase(config.database) as state:
         summary = json.loads(state.connection.execute('SELECT summary FROM runs ORDER BY started DESC').fetchone()[0])

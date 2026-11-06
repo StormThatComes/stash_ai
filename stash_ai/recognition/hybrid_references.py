@@ -1,3 +1,5 @@
+from .shared_person_evidence import expression
+body_embedding = expression('embedding')
 """Independent body selection; face quality/ownership remain admission gates."""
 from .resource_errors import ResourceLimit
 from .person_signal import contract
@@ -20,7 +22,7 @@ def body_vector(row):
 def _rows(db, config, scope, namespace, owners):
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                   compatibility=fallback_sql(db,config,namespace))
-    sql=("SELECT 'person' AS evidence_kind,m.person AS owner,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,e.embedding,e.metadata AS person_metadata "
+    sql=(f"SELECT 'person' AS evidence_kind,m.person AS owner,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,{body_embedding} AS embedding,e.metadata AS person_metadata "
         'FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
         'JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
         "WHERE m.person IN (SELECT value FROM json_each(?)) AND s.scope=? AND s.namespace=? AND s.status='complete' "

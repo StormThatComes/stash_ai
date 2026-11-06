@@ -232,6 +232,7 @@ HELP = {
     'execution.rebuild.profile': 'Record rebuild SQL, fetch and pipeline timings in run history.',
     'execution.rebuild.memory_bytes': 'Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range: 1048576..1099511627776.',
     'execution.rebuild.cache_bytes': 'Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables. Range: 0..68719476736.',
+    'execution.rebuild.pixel_index_bytes': 'Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range: 1048576..1099511627776.',
     'execution.rebuild.matrix_cache_bytes': 'Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.',
     'execution.rebuild.queue_bytes': 'Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.',
     'execution.rebuild.checkpoint_scenes': 'Save strict rebuild recovery checkpoints every N scenes; 0 disables. Range: 0..1000000.',

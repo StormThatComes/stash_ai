@@ -1,3 +1,5 @@
+from .shared_person_evidence import expression
+body_embedding = expression('embedding')
 """Original merged cores veto later merges without acquiring reference authority."""
 from .resource_errors import ResourceLimit
 from collections import defaultdict
@@ -67,7 +69,7 @@ def retain(db,config,scope,namespace,identities):
         body_map=dict(zip(identity.person_observations,identity.persons))
         wanted=sorted(set(ids)|set(body_ids)|set(identity.person_observations))
         retained={row['id']:row for row in db.execute(
-            'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding,e.metadata AS person_metadata FROM observations o '
+            f'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,e.status AS person_status,{body_embedding} AS person_embedding,e.metadata AS person_metadata FROM observations o '
             'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
             'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
             "WHERE o.id IN (SELECT value FROM json_each(?)) AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "

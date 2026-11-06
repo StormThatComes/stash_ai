@@ -415,7 +415,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
             from .body_aliases import prepare_replay
             prepare_replay(database,selected,config)
             excluded=set()
-            with alias_scope(database.connection,*(first or (None,None)),budget=config.data['clustering']['max_reference_bytes'],persist=True):
+            with alias_scope(database.connection,*(first or (None,None)),budget=config.data['clustering']['max_reference_bytes'],persist=True,disk_bytes=config.data['execution']['pixel_index_bytes']):
                 for attempt in range(2):
                     try:
                         from .hybrid_merge import rebuild as hybrid_rebuild

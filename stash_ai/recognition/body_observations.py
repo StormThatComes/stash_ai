@@ -79,6 +79,8 @@ def save_records(db, config, records):
             # invoke the encoder again for a face-associated person.
             save(db,body['face'],person_contract(config),dict(public,identity_rejection=body['rejected']),
                  vector if body['rejected'] is None else None,crop)
+            from .shared_person_evidence import share
+            share(db,body['face'],person_contract(config),identity)
 
 
 def coverage(db,config,scans):

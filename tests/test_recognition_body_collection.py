@@ -55,8 +55,9 @@ def test_shared_pass_one_pose_per_frame_one_feature_per_person(tmp_path):
         assert (model.calls,model.embedded)==(3,6)
         assert coverage(state.connection,c,[scan])['ready']==6
         assert state.connection.execute('SELECT COUNT(*) FROM person_evidence').fetchone()[0]==3
-        for b in state.connection.execute('SELECT b.embedding,p.embedding FROM body_observations b JOIN person_evidence p ON p.observation=b.face'):
-            assert b[0]==b[1]
+        from stash_ai.recognition.person_signal import read,contract as projection_contract
+        for b in state.connection.execute('SELECT face,embedding FROM body_observations WHERE face IS NOT NULL'):
+            assert b['embedding']==read(state.connection,b['face'],projection_contract(c))['embedding']
         collector.enrich(state.connection,scan,source)
         assert (model.calls,model.embedded)==(3,6)
         assert any((points[0,17:]==-1).all() for _,points,_ in model.inputs)
