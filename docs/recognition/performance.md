@@ -558,3 +558,15 @@ stamps, rather than the global decision clock. It contains no frozen ownership:
 performer labels and historical origins are refreshed from authoritative SQLite
 before matching, including on a cache hit. Its byte limit is
 `replay_snapshot_bytes`, independent of the derived checkpoint size.
+
+Independent strict face scenes can run as complete CPU jobs with
+`execution.rebuild.parallel_scenes` (default true). It requires anchor/view
+matching and more than one rebuild worker. Each worker owns a private database;
+only the coordinator publishes decisions in canonical scene order. Queue admission
+includes a conservative scene working allowance; oversized scenes use the serial
+path. Threads and spawned processes share this contract. Body crop quality also
+uses the bounded scan CPU stage, without moving model or SQLite ownership.
+
+The global reference index is allocated only on first use after independent local
+matching. Canonical observation UUIDs, membership ranks, flags and interned owners
+use packed storage; insufficient working memory retains the SQL fallback.

@@ -42,6 +42,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
     matches=model.face_matches
     from .sapiensid_backend import association_choices
     choices=association_choices(faces,people)
+    settings=config.data['sapiensid']['collection']
+    if len(people)>1 and config.data['execution']['scan_cpu_workers']>1:
+        measurements=list(pipeline.stage.ordered(lambda pixels,person:quality(pixels,person,people,settings),image,people,extra=16384))
+    else:measurements=[quality(image,person,people,settings) for person in people]
     items=[]
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):
@@ -51,7 +55,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
         associated=next((i for i,m in enumerate(matches) if m==index),None)
         face=faces[associated] if associated is not None else None
         row=rows[associated] if associated is not None else None
-        measured,reason=quality(image,person,people,config.data['sapiensid']['collection'])
+        measured,reason=measurements[index]
         ambiguous=associated is None and any(index in candidates for candidates in choices)
         if ambiguous:reason='person_face_association_ambiguous'
         face_accepted=row is not None and row['rejected'] is None

@@ -95,7 +95,7 @@ _GROUPS = (
      'sprite_cache_bytes'),
     ('execution.rebuild', 'execution',
      'disk_total_bytes disk_free_bytes sqlite_cache_bytes=rebuild_sqlite_cache_bytes scratch_bytes=rebuild_scratch_bytes scratch_directory=rebuild_scratch_directory '
-     'storage=rebuild_storage workers=rebuild_workers native_threads=rebuild_native_threads '
+     'parallel_scenes=rebuild_parallel_scenes storage=rebuild_storage workers=rebuild_workers native_threads=rebuild_native_threads '
      'cohort_backend=rebuild_cohort_backend nomination_device=rebuild_nomination_device '
      'prefetch_scenes=rebuild_prefetch_scenes profile=profile_rebuild memory_bytes=rebuild_memory_bytes '
      'cache_bytes=rebuild_cache_bytes matrix_cache_bytes=rebuild_matrix_cache_bytes '

@@ -576,37 +576,50 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             early, deferred_hints = decode_late(replay, late.restored_payload)
         else:
             with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
-                with Lookahead(replay_uri, config) as lookahead:
-                    # Prime the first remaining scene as well: with explicit
-                    # prefetch enabled no selected scene may silently go serial.
-                    def prepare_local(index):
-                        if index>=len(selected):return None
-                        scan=selected[index]['scan']
-                        prepared=scene_artifacts.lookup(temporary,scan,config,local_keys.get(scan))
-                        if prepared[1] is None:lookahead.submit(scan)
-                        return prepared
-                    prepared=prepare_local(cursor)
-                    with tracking(
-                        selected[cursor:],
-                        'Rebuild selected identities',
-                        total=len(selected), initial=cursor,
-                        unit='scene',
-                        position=0,
-                    ) as tracked:
-                        for index, item in enumerate(tracked, start=cursor):
-                            with stage('Match selected scene', scene=item['scene']):
-                                current_prepared=prepared
-                                if current_prepared[1] is None:lookahead.take(item['scan'])
-                                else:lookahead.release_prepared()
-                                prepared=prepare_local(index+1)
-                                local_progress=(lambda **values: progress(scene=item['scene'],**values)) if progress else None
-                                reused=scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
-                                    lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True),
-                                    prepared=current_prepared)
+                pool=compute_current()
+                parallel=(config.data['execution']['rebuild_parallel_scenes'] and pool.workers>1
+                          and config.data['clustering']['anchor_view_matching'])
+                if parallel:
+                    from .local_scene_jobs import matches
+                    with closing(matches(temporary,selected,cursor,config,local_keys,pool,
+                            lambda item:cluster_scene(temporary,item['scan'],config,_cold_replay=True))) as results:
+                        with tracking(results,'Rebuild selected identities',total=len(selected),initial=cursor,unit='scene') as tracked:
+                            for index,item,reused in tracked:
                                 if reused:database.face_rebuild_mode='partial'
-                                compute_current().scenes_applied += 1
-                                compute_current().publish()
-                                checkpoints.save(replay, index+1, clock.value)
+                                pool.scenes_applied+=1;pool.publish()
+                                checkpoints.save(replay,index+1,clock.value)
+                else:
+                    with Lookahead(replay_uri, config) as lookahead:
+                        # Prime the first remaining scene as well: with explicit
+                        # prefetch enabled no selected scene may silently go serial.
+                        def prepare_local(index):
+                            if index>=len(selected):return None
+                            scan=selected[index]['scan']
+                            prepared=scene_artifacts.lookup(temporary,scan,config,local_keys.get(scan))
+                            if prepared[1] is None:lookahead.submit(scan)
+                            return prepared
+                        prepared=prepare_local(cursor)
+                        with tracking(
+                            selected[cursor:],
+                            'Rebuild selected identities',
+                            total=len(selected), initial=cursor,
+                            unit='scene',
+                            position=0,
+                        ) as tracked:
+                            for index, item in enumerate(tracked, start=cursor):
+                                with stage('Match selected scene', scene=item['scene']):
+                                    current_prepared=prepared
+                                    if current_prepared[1] is None:lookahead.take(item['scan'])
+                                    else:lookahead.release_prepared()
+                                    prepared=prepare_local(index+1)
+                                    local_progress=(lambda **values: progress(scene=item['scene'],**values)) if progress else None
+                                    reused=scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
+                                        lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True),
+                                        prepared=current_prepared)
+                                    if reused:database.face_rebuild_mode='partial'
+                                    compute_current().scenes_applied += 1
+                                    compute_current().publish()
+                                    checkpoints.save(replay, index+1, clock.value)
                 # Freeze strict references after every selected scene has matched and
                 # merged. Contextual attachments cannot become another scene's anchors
                 # or bridge identities during the replay.
