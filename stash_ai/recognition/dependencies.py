@@ -95,15 +95,19 @@ def certified(db, scope, namespace, state):
     return bool(row and tuple(row)==(version(db),digest(state)))
 
 
-def cached_many(db,kind,keys,policy,compute,*,dependency):
+def cached_many(db,kind,keys,policy,compute,*,dependency,dependency_keys=None):
     """Batch audited per-key clocks and digests under the caller's snapshot."""
     from .database import encoded
     result={}
     for offset in range(0,len(keys),256):
-        rows=db.execute('SELECT k.value,COALESCE(v.version,0),f.version,f.digest FROM json_each(?) k '
-            'LEFT JOIN evidence_versions v ON v.kind=? AND v.key=k.value '
-            'LEFT JOIN evidence_fingerprints f ON f.kind=? AND f.key=k.value AND f.policy=?',
-            (encoded(keys[offset:offset+256]),dependency,kind,policy))
+        key_sql="json_extract(k.value,'$[0]')" if dependency_keys is not None else 'k.value'
+        dependency_sql="json_extract(k.value,'$[1]')" if dependency_keys is not None else 'k.value'
+        chunk=keys[offset:offset+256]
+        values=[[key,dependency_keys[key]] for key in chunk] if dependency_keys is not None else chunk
+        rows=db.execute(f'SELECT {key_sql},COALESCE(v.version,0),f.version,f.digest FROM json_each(?) k '
+            f'LEFT JOIN evidence_versions v ON v.kind=? AND v.key={dependency_sql} '
+            f'LEFT JOIN evidence_fingerprints f ON f.kind=? AND f.key={key_sql} AND f.policy=?',
+            (encoded(values),dependency,kind,policy))
         for key,generation,stored,value in rows:
             if type(generation) is not int or generation<0:raise ValueError('Invalid recognition dependency version.')
             if stored==generation and isinstance(value,str) and re.fullmatch('[0-9a-f]{64}',value):

@@ -20,7 +20,7 @@ def signature(db,selected,config):
     first=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     if first is None:raise ValueError('Hybrid rebuild requires an existing scan.')
     scope,namespace=first
-    h=hashlib.sha256(encoded(plain(["hybrid-v4",selected,matching_policy(config),config.data['sapiensid']['execution'],
+    h=hashlib.sha256(encoded(plain(["hybrid-v5",selected,matching_policy(config),config.data['sapiensid']['execution'],
         config.data['clustering'],
         {k:v for k,v in config.data['execution'].items() if k in ('rebuild_memory_bytes','replay_snapshot_bytes')}])).encode())
     from .pixel_storage import integrity
@@ -53,6 +53,12 @@ def signature(db,selected,config):
                 out.update(len(data).to_bytes(8,'big'));out.update(data)
         return out.hexdigest()
     scans=[r[0] for r in db.execute('SELECT id FROM scans WHERE scope=? AND namespace=? ORDER BY id',(scope,namespace))]
+    from .local_dependencies import available as local_available
+    local=cacheable and local_available(db)
+    addresses=dict(db.execute('SELECT id,json_array(scope,namespace,scene) FROM scans WHERE scope=? AND namespace=?',(scope,namespace))) if local else {}
+    filters={'scans':'id=?','scan-heads':'s.id=?','members':'m.observation IN (SELECT id FROM observations WHERE scan=?)',
+        'candidates':'c.scan=?','origins':'i.observation IN (SELECT id FROM observations WHERE scan=?)','body-scope':'b.scan=?'}
+    from .dependencies import version
     for name,query in queries:
         h.update(name.encode())
         if name in ('observations','person'):
@@ -61,6 +67,11 @@ def signature(db,selected,config):
             compute=lambda scan:rows_digest(before+' AND o.scan=? ORDER BY '+order,(scope,namespace,scan))
             values=(cached_many(db,'hybrid-'+name,scans,'v3-'+dependency,compute,dependency=dependency)
                     if cacheable else {scan:compute(scan) for scan in scans})
+            for scan in scans:h.update(encoded([scan,values[scan]]).encode())
+        elif local and name in filters:
+            before,order=query.rsplit(' ORDER BY ',1)
+            compute=lambda scan:rows_digest(before+' AND '+filters[name]+' ORDER BY '+order,(scope,namespace,scan))
+            values=cached_many(db,'hybrid-'+name,scans,'v4-'+str(version(db,'heads')),compute,dependency='scene',dependency_keys=addresses)
             for scan in scans:h.update(encoded([scan,values[scan]]).encode())
         else:
             compute=lambda:rows_digest(query,(scope,namespace))
