@@ -59,3 +59,15 @@ def test_vector_growth_checks_free_space_per_block_not_per_witness(tmp_path,monk
         for _ in range(32):scratch_space.grow(Path(budget.directory)/'vectors',16384)
         assert len(calls)<=2
         assert budget.used>=32*16384
+
+
+def test_retained_matrix_directory_releases_lease_with_last_owner(tmp_path):
+    import gc
+    config=configured(rebuild_scratch_directory=str(tmp_path),rebuild_scratch_bytes=32*1024**2)
+    with scratch_space.scope(config) as budget:
+        directory=scratch_space.directory(prefix='witnesses-')
+        path=Path(directory.name)
+        scratch_space.grow(path/'vectors',16384)
+        assert budget.used>0
+        del directory;gc.collect()
+        assert budget.used==0 and not path.exists()
