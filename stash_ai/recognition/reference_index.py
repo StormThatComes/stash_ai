@@ -7,6 +7,7 @@ from .resource_errors import ResourceLimit
 from contextlib import contextmanager
 from contextvars import ContextVar
 from heapq import merge
+from array import array
 
 from .database import encoded
 from .profiling import count, measured
@@ -19,6 +20,7 @@ class ReferenceIndex:
         self.db, self.scope, self.namespace = db, scope, namespace
         self.members, self.deltas, self.groups = {}, {}, {}
         self.sampler=None
+        self.enabled=False
         self.role_dirty, self.owners = set(), {}
         self.incremental, self.scene_by_id = {}, {}
         from .reference_roles import index
@@ -35,20 +37,28 @@ class ReferenceIndex:
         cache=current()
         available=(cache.working-sum(cache.reservations.values()) if cache is not None and cache.working is not None
                    else config.data['execution']['rebuild_memory_bytes'])
-        self.enabled = total * 512 + 524288 <= available
+        owners = db.execute('SELECT COUNT(*) FROM people').fetchone()[0]
+        scenes = db.execute('SELECT COUNT(*) FROM scans').fetchone()[0]
+        extra = db.execute('SELECT COALESCE(SUM(MAX(0,length(id)-36)*5),0) FROM observations').fetchone()[0]
+        required = total*224 + 256*(owners+scenes) + extra + 524288
+        self.enabled = required <= available
         if self.enabled and cache is not None:
-            cache.reserve(('reference-index',id(self)), total*512+524288)
+            cache.reserve(('reference-index',id(self)), required)
         if not self.enabled:
             count('reference_index_budget_fallbacks')
             return
         import sqlite3
-        self.sampler=sqlite3.connect('')
+        from .scratch_space import connect
+        self.sampler=connect()
         self.sampler.execute('PRAGMA cache_size=-256')
         self.sampler.execute('CREATE TABLE state(owner TEXT PRIMARY KEY,maximum INTEGER,payload BLOB)')
         rows = db.execute('SELECT o.id,o.quality,s.scope,s.namespace,s.scene,s.status,o.rejected FROM observations o '
             'JOIN scans s ON s.id=o.scan ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,'
             'o.seconds,o.geometry,o.embedding,o.id')
-        self.order, self.rank, self.allowed, self.anchors = [], {}, set(), set()
+        from .packed_ids import Order,Ranks,Flags,Values
+        self.order,self.rank=Order(),Ranks()
+        self.allowed,self.anchors=Flags(self.rank,total),Flags(self.rank,total)
+        self.scene_by_id,self.owners=Values(self.rank,total),Values(self.rank,total)
         from .progress import tracking
         with tracking(rows, 'Index canonical replay references', unit='observation',
                       total=total, position=0) as tracked:
@@ -61,8 +71,15 @@ class ReferenceIndex:
                     self.allowed.add(row['id'])
                     if self.is_anchor(row['quality']):
                         self.anchors.add(row['id'])
-        for row in db.execute('SELECT observation,person FROM members'):
-            self.changed(row['observation'], None, row['person'])
+        from .reference_roles import strict_sql
+        for row in db.execute('SELECT m.observation,m.person,'+strict_sql()+
+                ' AS strict FROM members m JOIN observations o ON o.id=m.observation'):
+            identifier=row['observation']
+            if identifier not in self.allowed:raise ValueError('Face identity has incompatible retained membership evidence.')
+            if identifier in self.anchors and row['strict']:
+                self.members.setdefault(row['person'],array('I')).append(self.rank[identifier])
+                self.owners[identifier]=row['person'];self.dirty.add(row['person'])
+        for person,ranks in self.members.items():self.members[person]=array('I',sorted(ranks))
         db.create_function('recognition_reference_member', 3, self.changed)
         db.create_function('recognition_reference_roots', 0, self.changed_roots)
         db.create_function('recognition_reference_role', 1, self.role_dirty.add)
@@ -122,7 +139,7 @@ class ReferenceIndex:
         self.role_dirty.clear()
         self.deltas.clear()
         for person, (removed, added) in changes.items():
-            retained = self.members.get(person, [])
+            retained = self.members.get(person, array('I'))
             append_only = (not removed and retained and added and retained[-1] < min(added)
                 and self.scene_by_id[self.order[retained[-1]]] != self.scene_by_id[self.order[min(added)]])
             if append_only and self.incremental.get(person, []) is not None:
@@ -136,7 +153,7 @@ class ReferenceIndex:
                 self.members[person] = retained
             else:
                 old = (rank for rank in retained if rank not in removed and rank not in added)
-                self.members[person] = list(merge(old, sorted(added)))
+                self.members[person] = array('I',merge(old, sorted(added)))
             self.dirty.add(person)
 
     @measured('reference_index_refresh')
@@ -262,15 +279,31 @@ class ReferenceIndex:
         self.db.create_function('recognition_reference_role', 1, None)
 
 
+class LazyIndex:
+    def __init__(self,*args):self.args=args;self.db=args[0];self.value=None
+    def get(self):
+        if self.value is None:
+            value=ReferenceIndex.__new__(ReferenceIndex)
+            try:value.__init__(*self.args)
+            except BaseException:
+                value.close();raise
+            self.value=value
+        return self.value
+    def close(self):
+        if self.value is not None:self.value.close()
+
+
 def current(db):
     index = _active.get()
-    return index if index is not None and index.enabled and index.db is db else None
+    if index is None or index.db is not db:return None
+    if isinstance(index,LazyIndex):index=index.get()
+    return index if index.enabled else None
 
 
 @contextmanager
 def references(db, scope, namespace, config):
     from stash_ai.runtime.cleanup import cleanup
-    index = ReferenceIndex(db, scope, namespace, config)
+    index = LazyIndex(db, scope, namespace, config)
     token = _active.set(index)
     try:
         yield index

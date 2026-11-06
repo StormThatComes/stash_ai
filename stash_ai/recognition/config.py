@@ -53,7 +53,7 @@ def defaults():
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
         'execution': {'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
-                      'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
+                      'rebuild_parallel_scenes': True, 'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'detector_batch_size': 1, 'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
                       'sprite_cache_bytes': 1073741824, 'media_cache_bytes': 1073741824, 'portrait_ranking_cache_bytes': 16777216, 'prefetch_scene_depth': 3,
@@ -228,6 +228,8 @@ def validate(data):
     directory=data['execution']['rebuild_scratch_directory']
     if directory is not None and (not isinstance(directory,str) or not directory.strip() or '\x00' in directory):
         raise ValueError('execution.rebuild_scratch_directory must be a path or null.')
+    if type(data['execution']['rebuild_parallel_scenes']) is not bool:
+        raise ValueError('execution.rebuild_parallel_scenes must be boolean.')
     if data['execution']['rebuild_checkpoint_mode'] not in ('snapshot','incremental'):
         raise ValueError('execution.rebuild_checkpoint_mode must be snapshot or incremental.')
     if data['execution']['rebuild_storage'] not in ('disk','memory'):

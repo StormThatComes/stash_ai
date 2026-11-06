@@ -512,6 +512,9 @@ execution:
     scratch_directory: null
     # Scratch parent directory, relative to this YAML; null uses the system temporary directory. Run-owned files
     # are removed on exit.
+    parallel_scenes: true
+    # Match independent local face scenes concurrently using the CPU worker/queue budget, then apply in scene
+    # order; requires anchor_view_matching. Values: true, false.
     storage: disk
     # Private replay storage: disk (bounded SQLite pages) or memory (legacy RAM image).
     workers: 16
