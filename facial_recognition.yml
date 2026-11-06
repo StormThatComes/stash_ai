@@ -1,473 +1,565 @@
-# Explicit recognition commands only; this file never starts a background task.
-# Similarities are cosine scores, not identity probabilities; calibrate per model/library.
-# Anchor samples seed identity references; auxiliary samples only attach to known identities.
-# Support counts independent observations/cues, not repeated copies of the same image.
-# Face/body size limits use source pixels; pose deviation is a landmark score, not degrees.
+# VTT recognition. Settings take effect when a recognition command runs.
+# Face and body similarities are cosine scores. Support counts independent cues.
+# Face/body sizes are source pixels. Face pose deviation is a landmark score.
 
-clustering:
-  # Anchor references, auxiliary attachments and alternate face views.
-  adaptive_view_witnesses: false
-  # Grow each view's supporting reference set as independent evidence increases.
-  anchor_outlier_quarantine: false
-  # Experimental clean-core attachment matching; original anchors still veto; needs anchor_view_matching.
-  anchor_view_matching: true
-  # Match withheld anchors against frozen face-view groups; requires anchor quality limits.
-  auxiliary_matching: true
-  # Attach non-anchor faces to established identities without letting them seed a core.
-  auxiliary_min_support: 1
-  # Independent auxiliary observations needed to accept an attachment.
-  cohesion_threshold: 0.60
-  # Minimum similarity to every retained reference when matching or merging.
-  context_view_enrichment: true
-  # Add views after 2+ contextual cues pass strict-core checks; needs anchor_view_matching.
-  corroborated_view_enrichment: true
-  # Recover alternate views corroborated by independent scenes and rooted views; one generation only.
-  deduplicate_detections: false
-  # Detect same-cue duplicates using box overlap, landmarks and face embeddings.
-  max_anchor_pose_deviation: 0.20
-  # Maximum pose deviation to seed an identity; null adds no anchor pose limit.
-  max_people_per_lookup: 20000
-  # Maximum identities loaded into a face lookup; exceeding it stops the lookup.
-  max_reference_bytes: 134217728
-  # Face reference byte cap (1 MiB..64 GiB), including views; not a total RAM/VRAM limit.
-  max_samples_per_person: 32
-  # Maximum selected face references per identity; does not limit stored observations.
-  max_view_prototypes_per_person: 4
-  # Maximum primary confirmed face-view representatives per identity.
-  max_view_witnesses: 32
-  # Maximum witnesses per adaptive view; shares max_reference_bytes.
-  min_anchor_face_pixels: null
-  # Extra minimum shorter face-box side for anchors; null adds no anchor pixel floor.
-  min_anchor_sharpness: null
-  # Extra minimum face sharpness for anchors; null adds no anchor sharpness floor.
-  min_anchor_visible_face_fraction: 0.80
-  # Minimum visible fraction for anchor references; null adds no extra anchor floor.
-  min_auxiliary_face_pixels: null
-  # Extra minimum shorter face-box side for queries, including anchors; null adds no floor.
-  min_auxiliary_sharpness: null
-  # Extra minimum face sharpness for queries (including anchors); null adds no floor.
-  min_auxiliary_visible_face_fraction: 0.50
-  # Minimum visible fraction for attachments; also a floor for anchors; null adds no extra floor.
-  same_scene_match_bonus: 0.03
-  # Subtract from match/cohesion thresholds after strict local support; 0 disables.
-  same_scene_min_support: 3
-  # Independent strict anchor observations required for same-scene matching/merging.
-  strict_appearance_matching: true
-  # Match supported strict looks at ordinary thresholds; recovered faces stay attachments; needs anchor_view_matching.
-  view_ambiguity_margin: 0.12
-  # Minimum view-match score lead over a competing identity.
-  view_attach_min_support: 2
-  # Independent observations required for a view-only attachment.
-  view_cohesion_threshold: 0.80
-  # Minimum pairwise similarity within a view's retained references.
-  view_match_threshold: 0.82
-  # Minimum similarity for matching through a confirmed face view.
-  view_min_support: 3
-  # Independent anchor-confirmed observations needed to promote a face view.
-  view_prototypes_enabled: true
-  # Use confirmed alternate face views for auxiliary matching; needs auxiliary_matching and anchor limits.
+version: 2
+# Recognition YAML layout. Use 2 for this schema.
 
-detection:
-  # Hard scan filters; rejected faces cannot become recognition samples.
-  max_faces_per_frame: 100
-  # Maximum face detections processed per VTT thumbnail.
-  max_pose_deviation: 0.50
-  # Maximum five-landmark pose deviation, not degrees; null disables this gate.
-  min_face_pixels: 32
-  # Minimum shorter face-box side in source thumbnail pixels.
-  min_sharpness: 10.0
-  # Minimum face sharpness (Laplacian variance after resizing to 112x112).
-  min_visible_face_fraction: 0.50
-  # Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.
-  nms_threshold: 0.30
-  # Box IoU threshold for suppressing duplicate face detections; lower suppresses more.
-  require_complete_face: true
-  # Reject face boxes extending beyond the thumbnail.
-  score_threshold: 0.90
-  # Minimum face detection confidence (0..1).
-
-execution:
-  # Parallelism, caches and progress persistence; byte budgets are separate from total process memory.
-  gpu_model_policy: phase
-  # phase: unload inference models/cache after VTT (default); reload lazily for portraits.
-  # sequential: additionally run faces then bodies per scene, unloading between them.
-  # retain: keep face models until run exit (legacy throughput policy).
-  log_vram: true
-  # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
-  checkpoint_cues: 32
-  # Persist scan progress every N cues; memory pressure or body collection may save sooner.
-  max_cues: 0
-  # Maximum VTT cues scanned per selected scene; 0 scans all cues.
-  media_cache_bytes: 1073741824
-  # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables.
-  portrait_cpu_threads: 0
-  # Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget.
-  portrait_faceocc_batch_size: 4
-  # Faces per portrait visibility inference batch (1..8); 1 disables batching.
-  portrait_ranking_cache_bytes: 16777216
-  # Byte cap for completed VTT portrait rankings; 0 disables.
-  prefetch_frames: 4
-  # Decoded CPU frames queued ahead of inference; 0 disables frame prefetch.
-  prefetch_portraits: true
-  # Prepare bounded VTT portrait sources and quality measurements ahead of use.
-  prefetch_scene_depth: 3
-  # Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers.
-  prefetch_scenes: true
-  # Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.
-  profile_rebuild: false
-  # Record rebuild SQL, fetch and pipeline timings in run history.
-  rebuild_cache_bytes: 1073741824
-  # Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables.
-  rebuild_checkpoint_bytes: 536870912
-  # Maximum bytes per rebuild recovery checkpoint generation.
-  rebuild_checkpoint_scenes: 0
-  # Save strict rebuild recovery checkpoints every N scenes; 0 disables.
-  rebuild_cohort_backend: threads
-  # Scene-local CPU worker backend: threads or processes (spawn).
-  rebuild_matrix_cache_bytes: 536870912
-  # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables.
-  rebuild_memory_bytes: 8589934592
-  # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS.
-  replay_snapshot_bytes: 68719476736
-  # Maximum on-disk evidence snapshot used by offline reports and solver replay.
-  rebuild_native_threads: 1
-  # Hybrid centroid nomination: cpu, or auto to benchmark CUDA including transfers.
-  rebuild_nomination_device: cpu
-  # BLAS threads per compute worker; CPU availability also limits effective workers.
-  rebuild_prefetch_scenes: false
-  # Experimental preloading of the next scene's immutable rebuild inputs.
-  rebuild_queue_bytes: 67108864
-  # Pending rebuild CPU work byte cap; shares the working-memory budget with caches.
-  rebuild_workers: 1
-  # Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256.
-  recognizer_batch_size: 1
-  # Face embedding microbatch size (1..32); static ONNX models still run one at a time.
-  scan_cpu_workers: 4
-  # CPU workers for face quality, alignment and JPEG work; inference has one owner.
-  scan_queue_bytes: 268435456
-  # Byte budget for in-flight scan CPU work; oversized work runs serially.
-  sprite_cache_bytes: 1073741824
-  # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables.
-  timeout_seconds: 120.0
-  # Stash API/media request timeout in seconds; not a whole-run time limit.
-
-models:
-  # Face detection and embedding models.
-  detector: scrfd_10g
-  # Face detector: scrfd_10g, scrfd_2_5g or yunet.
-  device: cuda
-  # Inference device: cuda, cpu or auto (prefer CUDA when available).
-  directory: recognition_models
-  # Model asset directory, relative to this YAML.
-  download_missing: true
-  # Allow missing model assets to download during explicit recognition commands.
-  recognizer: sface
-  # Face embedding model: sface, auraface, lvface_b or adaface_ir50.
-
-names:
-  # Optional performer naming overrides.
-  file: null
-  # Performer-name YAML path, relative to this YAML; null disables overrides.
-
-portraits:
-  # Portrait selection and framing; quality targets rank candidates, not recognition admission.
-  anchor_only: false
-  # Require face anchor quality or an accepted body anchor for portrait candidates.
-  auto_precedence: [face+pose, face, pose]
-  # Auto only: try each tier in order; list all three exactly once. face+pose crops the associated SapiensID person.
-  aspect_ratio: null
-  # Crop width/height for faces and bodies; null keeps natural shape; body crops try to preserve the head.
-  enabled: true
-  # Generate portraits; false removes app-owned portraits for selected accepted people.
-  ffmpeg: ffmpeg
-  # FFmpeg executable name/path; used only for video portraits.
-  jpeg_quality: 90
-  # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_bytes.
-  kind: auto
-  # auto follows auto_precedence; face/person forces the crop kind.
-  margin: 0.35
-  # Face-only padding per side as a fraction of face width/height; face+pose uses the person bounds.
-  max_candidates: 8
-  # Maximum retained face candidates to sample from video; VTT ranks all retained observations.
-  max_clipped_fraction: 0.15
-  # Preferred maximum fraction of near-black/white pixels (brightness <=5 or >=250).
-  max_exposure: 225.0
-  # Upper end of the preferred mean grayscale brightness range (0..255).
-  max_pose_deviation: 0.35
-  # Preferred maximum face pose deviation, not degrees.
-  max_video_bytes: 67108864
-  # Maximum video bytes fetched per extraction session, not a source-file size limit.
-  min_exposure: 30.0
-  # Lower end of the preferred mean grayscale brightness range (0..255).
-  min_face_pixels: 96
-  # Preferred shorter face-box side in source pixels; 0 removes this target penalty.
-  min_sharpness: 25.0
-  # Preferred minimum face sharpness (Laplacian variance); lower-quality faces remain eligible.
-  min_visible_face_fraction: 0.80
-  # Preferred visible face fraction; 0 removes the extra target penalty.
-  source: vtt
-  # Face portrait source: vtt thumbnail or video frame extracted with FFmpeg.
-  time_offsets: [0.0, -0.5, 0.5]
-  # Video sampling offsets in seconds relative to each candidate's cue time.
-  timeout_seconds: 30.0
-  # Time budget in seconds for each video extraction session.
-
-  weights:
-    # Relative portrait ranking weights; 0 removes a factor from the weighted score.
-    closed_mouth: 0.0
-    # Prefer a closed mouth (lower jawOpen); normally use this or open_mouth.
-    exposure: 1.0
-    # Prefer balanced brightness with fewer clipped pixels.
-    frontal: 3.0
-    # Prefer a frontal, complete face with valid landmarks.
-    neutral_expression: 0.0
-    # Prefer a neutral expression; positive values enable expression analysis.
-    open_eyes: 0.0
-    # Prefer both eyes open; penalize blinking.
-    open_mouth: 0.0
-    # Prefer an open mouth (higher jawOpen); normally use this or closed_mouth.
-    resolution: 1.0
-    # Prefer larger faces in source pixels.
-    sharpness: 2.0
-    # Prefer sharper faces.
-    visibility: 3.0
-    # Prefer unobscured faces; 0 skips portrait-only visibility inference, not scan checks.
-
-recognition:
-  # Face identity matching and independent support.
-  ambiguity_margin: 0.10
-  # Minimum score lead over a competing identity.
-  cooccurrence_merge_threshold: 0.90
-  # Stronger face similarity required to treat same-cue faces as one person (e.g. reflections).
-  cross_scene_provisional: true
-  # Let unconfirmed anchor groups pool independent support across selected scenes.
-  match_threshold: 0.65
-  # Minimum mean face similarity for a match; calibrate separately per model.
-  metric: cosine
-  # Similarity metric; only cosine is supported.
-  min_identity_support: 2
-  # Independent anchor observations needed to confirm a new face identity.
-  min_merge_support: 3
-  # Independent supporting observations needed to merge face identities.
-
-sapiensid:
-  # Optional body identity evidence alongside the face recognizer; see docs/sapiensid-hybrid.md.
-  # Uses models.device and the shared scan CPU queues; paths are relative to this YAML.
-  collection:
-    # Independent body observations, including people without an accepted face.
-    enabled: false
-    # Collect independent body observations; requires sapiensid.enabled.
-    max_overlap: 0.65
-    # Maximum fraction of this body box covered by any other body box; not IoU.
-    min_keypoints: 4
-    # Minimum usable pose keypoints after pose.keypoint_score_threshold.
-    min_person_pixels: 64
-    # Minimum shorter body-crop side in source thumbnail pixels.
+face:
+  # Face detection, scan admission and embeddings.
+  detector:
+    # Find face boxes and landmarks in VTT frames.
+    backend: scrfd_10g
+    # Face detector: scrfd_10g, scrfd_2_5g or yunet.
+    score_threshold: 0.9
+    # Minimum face detection confidence (0..1).
+    nms_threshold: 0.3
+    # Box IoU threshold for suppressing duplicate face detections; lower suppresses more. Range: 0..1.
+    max_faces_per_frame: 100
+    # Maximum face detections processed per VTT thumbnail. Range: 1..1000.
+  quality:
+    # Scan admission. Rejected faces cannot seed or attach to identities.
+    min_face_pixels: 32
+    # Minimum shorter face-box side in source thumbnail pixels. Range: 8..4096.
     min_sharpness: 10.0
-    # Minimum body-crop sharpness (Laplacian variance at source resolution).
+    # Minimum face sharpness (Laplacian variance after resizing to 112x112). Range: 0..100000.
+    min_visible_face_fraction: 0.5
+    # Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.
+    max_pose_deviation: 0.5
+    # Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.
+    require_complete_face: true
+    # Reject face boxes extending beyond the thumbnail.
+  recognizer:
+    # Compute identity embeddings for accepted faces.
+    backend: sface
+    # Face embedding model: sface, auraface, lvface_b or adaface_ir50.
 
-  consolidation:
-    # Scene scope for replaying queued identity merges.
-    max_scenes: 1000
-    # Maximum scenes in automatic replay expansion; Stash publication remains selected-only.
-    scene_ids: []
-    # Quoted scene-ID allowlist for retained scope; [] allows all in this library/model namespace.
-    scope: selected
-    # selected replays selected scenes; retained may include queued merges from retained scenes.
-
-  enabled: false
-  # Enable SapiensID body evidence; missing assets download only if models.download_missing allows.
-
-  execution:
-    # Body inference and matching resource limits.
-    batch_size: 1
-    # Person inputs per SapiensID inference batch (1..16), within scan CPU queue budgets.
-    max_candidate_pairs: 100000
-    # Maximum nominated identity pairs per hybrid/global body plan, not embedding pairs.
-    max_witness_comparisons: 1000000
-    # Maximum exact vector comparisons per body scene/global pass, including face vetoes.
-    plan_bytes: 16777216
-    # Byte budget for retained body/hybrid matching plans and decision proofs.
-    reference_bytes: 134217728
-    # Byte budget for body/hybrid reference banks, metadata and lookup working arrays.
-
-  global_matching:
-    # Body identity consolidation across scenes, retaining face contradiction checks.
-    ambiguity_margin: 0.10
-    # Minimum global body score lead over identities outside the merge group.
-    cohesion_threshold: 0.85
-    # Minimum pairwise body similarity across the original cores being merged.
+pose:
+  # Find people and estimate COCO17 keypoints in each VTT frame.
+  detector:
+    # Select the box detector and its per-frame limits.
+    backend: rfdetr_xl
+    # Person boxes: yolo, dfine_l, dfine_x or rfdetr_xl; non-YOLO detectors require a separate pose backend.
+    score_threshold: 0.5
+    # Minimum person detection confidence (0..1).
+    nms_threshold: 0.7
+    # Body-box IoU threshold for duplicate suppression in YOLO, D-FINE and RF-DETR-XL. Range: 0..1.
+    max_people_per_frame: 100
+    # Maximum body detections per thumbnail, independent of the face detection limit. Range: positive integer.
+    frame_batch_size: 4
+    # Maximum VTT frames per person detector batch. Range: 1..16.
+    yolo:
+      # Weights for YOLO person detection.
+      path: recognition_models/sapiensid_v1/yolo26m-pose.pt
+      # YOLO checkpoint path; unused with D-FINE or RF-DETR-XL.
+      sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
+      # Expected YOLO checkpoint SHA256; unused with D-FINE/RF-DETR; custom hashes require a local file.
+    dfine:
+      # Local assets shared by the D-FINE detector variants.
+      directory: ''
+      # D-FINE asset folder; empty uses execution.models.directory/<detector>/<pinned revision>.
+    rfdetr_xl:
+      # Local assets for RF-DETR-XL person detection.
+      directory: ''
+      # RF-DETR-XL weight folder; empty uses execution.models.directory/rfdetr_xl/<SHA256>. Requires
+      # requirements-rfdetr.txt.
+  estimator:
+    # Select the keypoint model operating on the detected people.
+    backend: vitpose_plus_large
+    # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
+    keypoint_score_threshold: 0.5
+    # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
+    # Range: 0..1.
+    vitpose_plus_large:
+      # ViTPose++ Large weights and crop batch.
+      directory: ''
+      # ViTPose asset folder; empty uses execution.models.directory/vitpose_plus_large/<pinned revision>.
+      batch_size: 4
+      # Maximum person crops per ViTPose batch, independent of the detector frame batch. Range: 1..16.
+    sapiens:
+      # Sapiens Pose weights, size and crop batch.
+      directory: ''
+      # Sapiens Pose weights folder; empty uses execution.models.directory/sapiens_pose/<variant>/<revision>.
+      variant: 0.3b
+      # Sapiens v1 Pose size: 0.3b, 0.6b or 1b; larger variants need more memory/compute.
+      batch_size: 1
+      # Maximum people per Sapiens Pose batch (1..16); separate from detector/ViTPose batching.
+    pmpose:
+      # PMPose weights, crop batch and output probabilities.
+      directory: ''
+      # PMPose-B 1.0.0 weights folder; empty uses execution.models.directory/pmpose_b/<pinned revision>.
+      batch_size: 1
+      # Maximum people per PMPose batch (1..16); inference also averages horizontally flipped crops.
+      presence_threshold: 0.5
+      # Minimum probability of a PMPose point lying in the crop; 0 disables this filter. Range: 0..1.
+      visibility_threshold: 0.0
+      # Minimum PMPose visibility probability; 0 retains occluded points. Try 0.5 for visible points only.
+      # Range: 0..1.
+  point_quality:
+    # Inherited PMPose point requirements for refinement and deduplication.
+    min_keypoint_score: 0.5
+    # Minimum expected OKS of a PMPose point for refinement and duplicate detection. Range: 0..1.
+    min_presence: 0.5
+    # Minimum probability that a PMPose point lies inside the crop. Range: 0..1.
+    min_visibility: 0.5
+    # Minimum probability that a PMPose point is visible. Range: 0..1.
+  refinement:
+    # Optional SAM-pose2seg mask and second PMPose pass.
     enabled: false
-    # Merge identities using body evidence across scenes; requires identities.enabled.
-    match_threshold: 0.90
-    # Minimum mean body similarity between identities for a global merge.
-    max_references: 32
-    # Maximum selected body references per identity; original merge witnesses are also retained.
-    min_support: 3
-    # Independent body cues required per identity in a global merge.
-
-  identities:
-    # Scene-local body identities and attachments.
-    ambiguity_margin: 0.10
-    # Minimum scene-local body score lead over a competing identity/group.
-    anchor_min_keypoints: 6
-    # Minimum usable pose keypoints for a scene-local body anchor.
-    anchor_keypoint_rules:
-      # Additional regional gates for both body and face-associated body anchors; COCO17 names.
-      all: []
-      # Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].
-      any: []
-      # At least one rule must pass if nonempty: [{group: left_leg, min: 2}, {group: right_leg, min: 2}].
-      # A rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.
-    anchor_min_person_pixels: null
-    # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor.
-    anchor_min_sharpness: 25.0
-    # Minimum body-crop sharpness for a scene-local body anchor.
-    attach_min_support: 2
-    # Independent references needed in a face-linked body bank before attaching a faceless query.
-    cohesion_threshold: 0.80
-    # Minimum similarity to every body reference in a scene-local match.
+    # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
+    directory: ''
+    # Optional asset folder; empty uses execution.models.directory/sam_pose2seg/<pinned revision>.
+    mode: all
+    # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
+    overlap_threshold: 0.2
+    # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
+    min_keypoint_score: null
+    # Minimum expected OKS for head/torso points used as segmentation prompts. Null inherits pose.point_quality.
+    # Range: 0..1 or null.
+    min_presence: null
+    # Minimum prompt probability of being inside the PMPose crop. Null inherits pose.point_quality. Range: 0..1
+    # or null.
+    min_visibility: null
+    # Minimum prompt visibility. Null inherits pose.point_quality. Range: 0..1 or null.
+    min_prompt_points: 2
+    # Minimum reliable, nonconflicting head/torso prompts; otherwise retain the first pose. Range: 1..8.
+    max_prompt_points: 3
+    # Maximum positive prompts, ordered by visibility (1..8).
+    min_mask_score: 0.5
+    # Reject masks below SAM's predicted mask quality. Range: 0..1.
+    min_prompt_coverage: 1.0
+    # Required fraction of selected prompts inside the mask. Range: 0..1.
+    max_foreign_coverage: 0.0
+    # Maximum fraction of other people's reliable head/torso points inside the mask. Range: 0..1.
+    expand_boxes: true
+    # Union the admitted mask bounds with the original detector box; never shrink.
+    max_box_area_ratio: 2.0
+    # Reject masks whose union box exceeds this multiple of the original area. Range: 1..10.
+    max_side_expansion: 0.5
+    # Maximum extension on any side, relative to original width or height. Range: 0..2.
+  deduplication:
+    # Optional suppression of duplicate PMPose predictions.
     enabled: false
-    # Create/match body identities within a scene; requires collection.enabled.
-    match_threshold: 0.85
-    # Minimum mean body similarity for a scene-local match.
-    min_appearance_distance: 4
-    # Minimum differing image-hash bits (0..64) for another cue; 0 skips hash filtering, but exact duplicates still do not count.
-    min_support: 3
-    # Independent body cues needed to confirm a body-born identity.
+    # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
+    min_keypoint_score: null
+    # Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range:
+    # 0..1 or null.
+    min_presence: null
+    # Minimum presence probability for a point supporting duplicate selection. Null inherits pose.point_quality.
+    # Range: 0..1 or null.
+    min_visibility: null
+    # Minimum visibility probability. Null inherits pose.point_quality. Range: 0..1 or null.
+    min_shared_points: 4
+    # Minimum agreeing anatomical head/torso points (4..9); at least two regions are always required.
+    max_point_distance: 0.05
+    # Maximum matching-point distance as a fraction of the smaller box diagonal (0.001..0.1).
+    min_match_fraction: 0.8
+    # Required matching fraction among shared reliable core points; distinct heads/torsos veto suppression.
+    # Range: 0.5..1.
 
-  matching:
-    # Hybrid face/body matching; face and body scores are checked separately.
-    ambiguity_margin: 0.10
-    # Minimum hybrid body score lead over competing identities.
-    face_floor: 0.40
-    # Minimum face compatibility for hybrid matches and global body merge vetoes.
-    min_support: 3
-    # Independent body observations needed to support a hybrid match.
-    person_threshold: 0.85
-    # Minimum body cosine similarity for a hybrid match; never averaged with face scores.
-
-  model:
-    # SapiensID v1 assets; local paths are relative to this YAML.
-    checkpoint_directory: ""
-    # Model checkpoint directory; empty uses models.directory/sapiensid_v1/<variant>.
-    model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
-    # Expected SHA256 of the SapiensID model.yaml architecture file.
-    source_directory: recognition_models/sapiensid_v1/source
-    # Directory for verified upstream SapiensID source; Git is not required.
+body:
+  # SapiensID evidence for people with or without accepted faces.
+  enabled: true
+  # Enable SapiensID and the person/pose scan. Install requirements-sapiensid.txt and, for RF-DETR-XL,
+  # requirements-rfdetr.txt.
+  encoder:
+    # SapiensID weights and person embedding batch.
     variant: wb12m
     # wb12m (more training data) or wb4m; each uses separate cached embeddings.
+    source_directory: recognition_models/sapiensid_v1/source
+    # Directory for verified upstream SapiensID source; Git is not required.
+    checkpoint_directory: ''
+    # Model checkpoint directory; empty uses execution.models.directory/sapiensid_v1/<variant>.
+    model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
+    # Expected SHA256 of the SapiensID model.yaml architecture file.
+    batch_size: 1
+    # Person inputs per SapiensID inference batch (1..16), within scan CPU queue budgets.
+  collection:
+    # Admission of independent body observations.
+    enabled: true
+    # Collect independent body observations, including cues without an accepted face. Requires body.enabled.
+    min_person_pixels: 64
+    # Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.
+    min_sharpness: 10.0
+    # Minimum body-crop sharpness (Laplacian variance at source resolution). Range: 0..1000000.
+    min_keypoints: 4
+    # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
+    max_overlap: 0.65
+    # Maximum fraction of this body box covered by any other body box; not IoU. Range: 0..1.
 
-  pose:
-    # Person/pose detector used to prepare SapiensID inputs.
-    backend: yolo
-    # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
-    detector: yolo
-    # Person boxes: yolo, dfine_l, dfine_x or rfdetr_xl; non-YOLO detectors require a separate pose backend.
-    dfine_directory: ""
-    # D-FINE asset folder; empty uses models.directory/<detector>/<pinned revision>.
-    rfdetr_directory: ""
-    # RF-DETR-XL weight folder; empty uses models.directory/rfdetr_xl/<SHA256>. Requires requirements-rfdetr.txt.
-    batch_size: 4
-    # Maximum frames per person-detector batch and people per ViTPose batch (1..16).
-    vitpose_directory: ""
-    # ViTPose asset folder; empty uses models.directory/vitpose_plus_large/<pinned revision>.
-    sapiens_variant: "0.3b"
-    # Sapiens v1 Pose size: 0.3b, 0.6b or 1b; larger variants need more memory/compute.
-    sapiens_batch_size: 1
-    # Maximum people per Sapiens Pose batch (1..16); separate from detector/ViTPose batching.
-    sapiens_directory: ""
-    # Sapiens Pose weights folder; empty uses models.directory/sapiens_pose/<variant>/<revision>.
-    pmpose_directory: ""
-    # PMPose-B 1.0.0 weights folder; empty uses models.directory/pmpose_b/<pinned revision>.
-    pmpose_batch_size: 1
-    # Maximum people per PMPose batch (1..16); inference also averages horizontally flipped crops.
-    pmpose_presence_threshold: 0.50
-    # Minimum probability of a PMPose point lying in the crop; 0 disables this filter.
-    pmpose_visibility_threshold: 0.0
-    # Minimum PMPose visibility probability; 0 retains occluded points. Try 0.5 for visible points only.
-    deduplication:
+matching:
+  # Build and match identities from retained evidence.
+  face:
+    # Identity matching using face embeddings.
+    metric: cosine
+    # Similarity metric; only cosine is supported.
+    match_threshold: 0.65
+    # Minimum mean face similarity for a match; calibrate separately per model. Range: 0..1.
+    ambiguity_margin: 0.1
+    # Minimum score lead over a competing identity. Range: 0..1.
+    cohesion_threshold: 0.6
+    # Minimum similarity to every retained reference when matching or merging. Range: 0..1.
+    deduplicate_detections: false
+    # Detect same-cue duplicates using box overlap, landmarks and face embeddings.
+    samples:
+      # Query quality and reference bank limits.
+      minimum:
+        # Quality floors for all queries, including anchors.
+        min_face_pixels: null
+        # Extra minimum shorter face-box side for queries, including anchors; null adds no floor. Range:
+        # face.quality.min_face_pixels..4096 or null.
+        min_sharpness: null
+        # Extra minimum face sharpness for queries (including anchors); null adds no floor. Range:
+        # face.quality.min_sharpness..100000 or null.
+        min_visible_face_fraction: 0.5
+        # Minimum visible fraction for attachments; also a floor for anchors; null adds no extra floor. Range:
+        # 0..1 or null.
+      references:
+        # Retained face reference banks and lookup limits.
+        max_samples_per_person: 32
+        # Maximum selected face references per identity; does not limit stored observations. Range: 2..128.
+        max_people_per_lookup: 20000
+        # Maximum identities loaded into a face lookup; exceeding it stops the lookup. Range: 1..100000.
+        max_reference_bytes: 134217728
+        # Face reference byte cap (1 MiB..64 GiB), including views; not a total RAM/VRAM limit. Range:
+        # 1048576..68719476736.
+    anchors:
+      # Face observations allowed to seed an identity.
+      min_identity_support: 2
+      # Independent anchor observations needed to confirm a new face identity. Range: 1..1000.
+      quality:
+        # Extra requirements above the shared query floor.
+        min_face_pixels: null
+        # Extra minimum shorter face-box side for anchors; null adds no anchor pixel floor. Range:
+        # face.quality.min_face_pixels..4096 or null.
+        min_sharpness: null
+        # Extra minimum face sharpness for anchors; null adds no anchor sharpness floor. Range:
+        # face.quality.min_sharpness..100000 or null.
+        min_visible_face_fraction: 0.8
+        # Minimum visible fraction for anchor references; null adds no extra anchor floor. Range: 0..1 or null.
+        max_pose_deviation: 0.2
+        # Maximum pose deviation to seed an identity; null adds no anchor pose limit. Range: 0..1 or null.
+    auxiliary:
+      # Attach eligible non-anchor observations to existing identities.
+      enabled: true
+      # Attach non-anchor faces to established identities without letting them seed a core.
+      min_support: 1
+      # Independent auxiliary observations needed to accept an attachment. Range: 1..1000.
+    views:
+      # Alternate face appearances, prototypes and supporting witnesses.
+      prototypes_enabled: true
+      # Use confirmed alternate views for auxiliary matching. Requires matching.face.auxiliary.enabled and
+      # anchor quality limits.
+      anchor_view_matching: true
+      # Match withheld anchors against frozen face-view groups; requires anchor quality limits.
+      strict_appearance_matching: true
+      # Match supported strict looks at ordinary thresholds; recovered faces stay attachments; needs
+      # anchor_view_matching.
+      anchor_outlier_quarantine: false
+      # Experimental clean-core attachment matching; original anchors still veto; needs anchor_view_matching.
+      context_view_enrichment: true
+      # Add views after 2+ contextual cues pass strict-core checks; needs anchor_view_matching.
+      corroborated_view_enrichment: true
+      # Recover alternate views corroborated by independent scenes and rooted views; one generation only.
+      adaptive_view_witnesses: false
+      # Grow each view's supporting reference set as independent evidence increases.
+      match_threshold: 0.82
+      # Minimum similarity for matching through a confirmed face view. Range: 0..1.
+      cohesion_threshold: 0.8
+      # Minimum pairwise similarity within a view's retained references. Range: 0..1.
+      ambiguity_margin: 0.12
+      # Minimum view-match score lead over a competing identity. Range: 0..1.
+      min_support: 3
+      # Independent anchor-confirmed observations needed to promote a face view. Range: 2..1000.
+      attach_min_support: 2
+      # Independent observations required for a view-only attachment. Range: 1..1000.
+      max_prototypes_per_person: 4
+      # Maximum primary confirmed face-view representatives per identity. Range: 1..8.
+      max_witnesses: 32
+      # Maximum witnesses per adaptive view; shares max_reference_bytes. Range: 8..128.
+    same_scene:
+      # Rules for matches supported within one scene.
+      match_bonus: 0.03
+      # Subtract from match/cohesion thresholds after strict local support; 0 disables. Range: 0..0.1.
+      min_support: 3
+      # Independent strict anchor observations required for same-scene matching/merging. Range: 1..1000.
+    cross_scene:
+      # Rules for confirming and merging identities across scenes.
+      provisional: true
+      # Let unconfirmed anchor groups pool independent support across selected scenes.
+      min_merge_support: 3
+      # Independent supporting observations needed to merge face identities. Range: 1..1000.
+      cooccurrence_merge_threshold: 0.9
+      # Stronger face similarity required to treat same-cue faces as one person (e.g. reflections). Range: 0..1.
+  body:
+    # Identity matching using SapiensID body embeddings.
+    identities:
+      # Scene-local body identities and attachments.
       enabled: false
-      # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
-      min_keypoint_score: 0.50
-      # Minimum expected OKS for a point supporting duplicate selection.
-      min_presence: 0.50
-      # Minimum presence probability for a point supporting duplicate selection.
-      min_visibility: 0.50
-      # Minimum visibility probability; separate from final pose and SAM prompt filters.
-      min_shared_points: 4
-      # Minimum agreeing anatomical head/torso points (4..9); at least two regions are always required.
-      max_point_distance: 0.05
-      # Maximum matching-point distance as a fraction of the smaller box diagonal (0.001..0.1).
-      min_match_fraction: 0.80
-      # Required matching fraction among shared reliable core points; distinct heads/torsos veto suppression.
-    refinement:
+      # Create body identities within scenes. Requires body.collection.enabled.
+      match_threshold: 0.85
+      # Minimum mean body similarity for a scene-local match. Range: 0..1.
+      cohesion_threshold: 0.8
+      # Minimum similarity to every body reference in a scene-local match. Range: 0..1.
+      ambiguity_margin: 0.1
+      # Minimum scene-local body score lead over a competing identity/group. Range: 0..1.
+      min_support: 3
+      # Independent body cues needed to confirm a body-born identity. Range: 2..100000.
+      attach_min_support: 2
+      # Independent references needed in a face-linked body bank before attaching a faceless query. Range:
+      # 1..100000.
+      min_appearance_distance: 4
+      # Minimum differing image-hash bits (0..64) for another cue; 0 skips hash filtering, but exact duplicates
+      # still do not count.
+    anchors:
+      # Admission of both body-only and face-associated body anchors.
+      min_keypoints: 6
+      # Minimum usable pose keypoints for a scene-local body anchor. Range: 1..17.
+      min_person_pixels: null
+      # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor. Range: 1..8192
+      # or null.
+      min_sharpness: 25.0
+      # Minimum body-crop sharpness for a scene-local body anchor. Range: 0..1000000.
+      keypoint_rules:
+        # COCO17 regional rules. Each rule uses a group or a list of named points and a minimum count.
+        all: []
+        # Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].
+        any: []
+        # At least one rule must pass if nonempty: [{group: left_leg, min: 2}, {group: right_leg, min: 2}]. A
+        # rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.
+    global:
+      # Across-scene body consolidation with face contradiction checks.
       enabled: false
-      # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
-      directory: ""
-      # Optional asset folder; empty uses models.directory/sam_pose2seg/<pinned revision>.
-      mode: all
-      # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
-      overlap_threshold: 0.20
-      # Minimum intersection / smaller-box area in overlap mode.
-      min_keypoint_score: 0.50
-      # Minimum expected OKS for head/torso points used as segmentation prompts.
-      min_presence: 0.50
-      # Minimum prompt probability of being inside the PMPose crop.
-      min_visibility: 0.50
-      # Minimum prompt visibility; separate from downstream pose visibility filtering.
-      min_prompt_points: 2
-      # Minimum reliable, nonconflicting head/torso prompts; otherwise retain the first pose.
-      max_prompt_points: 3
-      # Maximum positive prompts, ordered by visibility (1..8).
-      min_mask_score: 0.50
-      # Reject masks below SAM's predicted mask quality.
-      min_prompt_coverage: 1.0
-      # Required fraction of selected prompts inside the mask.
-      max_foreign_coverage: 0.0
-      # Maximum fraction of other people's reliable head/torso points inside the mask.
-      expand_boxes: true
-      # Union the admitted mask bounds with the original detector box; never shrink.
-      max_box_area_ratio: 2.0
-      # Reject masks whose union box exceeds this multiple of the original area.
-      max_side_expansion: 0.50
-      # Maximum extension on any side, relative to original width or height.
-    keypoint_score_threshold: 0.50
-    # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
-    max_people_per_frame: 100
-    # Maximum body detections per thumbnail, independent of the face detection limit.
-    nms_threshold: 0.70
-    # Body-box IoU threshold for duplicate suppression in YOLO, D-FINE and RF-DETR-XL.
-    path: recognition_models/sapiensid_v1/yolo26m-pose.pt
-    # YOLO checkpoint path; unused with D-FINE or RF-DETR-XL.
-    score_threshold: 0.50
-    # Minimum person detection confidence (0..1).
-    sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
-    # Expected YOLO checkpoint SHA256; unused with D-FINE/RF-DETR; custom hashes require a local file.
+      # Merge body identities across scenes. Requires matching.body.identities.enabled.
+      match_threshold: 0.9
+      # Minimum mean body similarity between identities for a global merge. Range: 0..1.
+      cohesion_threshold: 0.85
+      # Minimum pairwise body similarity across the original cores being merged. Range: 0..1.
+      ambiguity_margin: 0.1
+      # Minimum global body score lead over identities outside the merge group. Range: 0..1.
+      min_support: 3
+      # Independent body cues required per identity in a global merge. Range: 1..100000.
+      max_references: 32
+      # Maximum selected body references per identity; original merge witnesses are also retained. Range:
+      # 1..100000.
+  hybrid:
+    # Joint matching with independent face and body thresholds.
+    face_floor: 0.4
+    # Minimum face compatibility for hybrid matches and global body merge vetoes. Range: 0..1.
+    person_threshold: 0.85
+    # Minimum body cosine similarity for a hybrid match; never averaged with face scores. Range: 0..1.
+    ambiguity_margin: 0.1
+    # Minimum hybrid body score lead over competing identities. Range: 0..1.
+    min_support: 3
+    # Independent body observations needed to support a hybrid match. Range: positive integer.
+  consolidation:
+    # Scene scope for replaying queued identity merges.
+    scope: selected
+    # selected replays selected scenes; retained may include queued merges from retained scenes.
+    scene_ids: []
+    # Quoted scene-ID allowlist for retained scope; [] allows all in this library/model namespace.
+    max_scenes: 1000
+    # Maximum scenes in automatic replay expansion; Stash publication remains selected-only. Range: 1..100000.
 
-  storage:
-    # Stored body images.
-    retain_person_crops: true
-    # Keep body crops for inspection/portraits, subject to storage.max_crop_bytes.
+portraits:
+  # Select and render performer portraits.
+  enabled: true
+  # Generate portraits; false removes app-owned portraits for selected accepted people.
+  selection:
+    # Portrait candidates, crop source priority and limits.
+    kind: auto
+    # auto follows auto_precedence; face/person forces the crop kind.
+    auto_precedence: [face+pose, face, pose]
+    # Auto only: try each tier in order; list all three exactly once. face+pose crops the associated SapiensID
+    # person.
+    anchor_only: false
+    # Require face anchor quality or an accepted body anchor for portrait candidates.
+    max_candidates: 8
+    # Maximum retained face candidates to sample from video; VTT ranks all retained observations. Range: 1..64.
+  quality:
+    # Quality targets used to rank portrait candidates.
+    min_face_pixels: 96
+    # Preferred shorter face-box side in source pixels; 0 removes this target penalty. Range: 0..4096.
+    min_sharpness: 25.0
+    # Preferred minimum face sharpness (Laplacian variance); lower-quality faces remain eligible. Range:
+    # 0..100000.
+    min_visible_face_fraction: 0.8
+    # Preferred visible face fraction; 0 removes the extra target penalty. Range: 0..1.
+    max_pose_deviation: 0.35
+    # Preferred maximum face pose deviation, not degrees. Range: 0..1.
+    min_exposure: 30.0
+    # Lower end of the preferred mean grayscale brightness range (0..255).
+    max_exposure: 225.0
+    # Upper end of the preferred mean grayscale brightness range (0..255).
+    max_clipped_fraction: 0.15
+    # Preferred maximum fraction of near-black/white pixels (brightness <=5 or >=250). Range: 0..1.
+  crop:
+    # Framing for the selected portrait.
+    aspect_ratio: null
+    # Crop width/height for faces and bodies; null keeps natural shape; body crops try to preserve the head.
+    # Range: 0.1..10 or null.
+    margin: 0.35
+    # Face-only padding per side as a fraction of face width/height; face+pose uses the person bounds. Range:
+    # 0..1.
+  weights:
+    # Relative ranking weights. Zero disables the corresponding contribution.
+    visibility: 3.0
+    # Prefer unobscured faces; 0 skips portrait-only visibility inference, not scan checks. Range: 0..100.
+    frontal: 3.0
+    # Prefer a frontal, complete face with valid landmarks. Range: 0..100.
+    resolution: 1.0
+    # Prefer larger faces in source pixels. Range: 0..100.
+    sharpness: 2.0
+    # Prefer sharper faces. Range: 0..100.
+    exposure: 1.0
+    # Prefer balanced brightness with fewer clipped pixels. Range: 0..100.
+    neutral_expression: 0.0
+    # Prefer a neutral expression; positive values enable expression analysis. Range: 0..100.
+    open_eyes: 0.0
+    # Prefer both eyes open; penalize blinking. Range: 0..100.
+    closed_mouth: 0.0
+    # Prefer a closed mouth (lower jawOpen); normally use this or open_mouth. Range: 0..100.
+    open_mouth: 0.0
+    # Prefer an open mouth (higher jawOpen); normally use this or closed_mouth. Range: 0..100.
+  source:
+    # VTT thumbnails or bounded FFmpeg video extraction.
+    kind: vtt
+    # Face portrait source: vtt thumbnail or video frame extracted with FFmpeg.
+    ffmpeg: ffmpeg
+    # FFmpeg executable name/path; used only for video portraits.
+    time_offsets: [0.0, -0.5, 0.5]
+    # Video sampling offsets in seconds relative to each candidate's cue time. Range: 1..9 offsets, each -5..5
+    # seconds.
+    timeout_seconds: 30.0
+    # Time budget in seconds for each video extraction session. Range: 1..600.
+    max_video_bytes: 67108864
+    # Maximum video bytes fetched per extraction session, not a source-file size limit. Range:
+    # 1048576..1073741824.
+  output:
+    # Encoding of the published portrait.
+    jpeg_quality: 90
+    # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_bytes.
+
+execution:
+  # Model locations, concurrency and resource budgets by stage.
+  models:
+    # Shared model asset directory and download policy.
+    directory: recognition_models
+    # Model asset directory, relative to this YAML.
+    download_missing: true
+    # Allow missing model assets to download during explicit recognition commands.
+  gpu:
+    # Inference device, model lifetime and memory logging.
+    device: cuda
+    # Inference device: cuda, cpu or auto (prefer CUDA when available).
+    model_policy: phase
+    # phase: unload inference models/cache after VTT (default); reload lazily for portraits. sequential:
+    # additionally run faces then bodies per scene, unloading between them. retain: keep face models until run
+    # exit (legacy throughput policy).
+    log_vram: true
+    # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
+  scan:
+    # VTT input, scan workers, queues, caches and checkpoints.
+    max_cues: 0
+    # Maximum VTT cues scanned per selected scene; 0 scans all cues. Range: 0..10000.
+    checkpoint_cues: 32
+    # Persist scan progress every N cues; memory pressure or body collection may save sooner. Range: 1..1000.
+    timeout_seconds: 120.0
+    # Stash API/media request timeout in seconds; not a whole-run time limit. Range: 1..600.
+    cpu_workers: 4
+    # CPU workers for face quality, alignment and JPEG work; inference has one owner. Range: 1..32.
+    queue_bytes: 268435456
+    # Byte budget for in-flight scan CPU work; oversized work runs serially. Range: 65536..4294967296.
+    recognizer_batch_size: 1
+    # Face embedding microbatch size (1..32); static ONNX models still run one at a time.
+    prefetch_frames: 4
+    # Decoded CPU frames queued ahead of inference; 0 disables frame prefetch. Range: 0..128.
+    prefetch_scenes: true
+    # Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.
+    prefetch_scene_depth: 3
+    # Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers. Range: 1..16.
+    media_cache_bytes: 1073741824
+    # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range:
+    # 0..68719476736.
+    sprite_cache_bytes: 1073741824
+    # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
+  rebuild:
+    # Identity rebuild workers, checkpoints and working memory.
+    workers: 1
+    # Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256. Range: 0..256.
+    native_threads: 1
+    # Native BLAS threads per compute worker. CPU availability also limits effective workers. Range: 1..16.
+    cohort_backend: threads
+    # Scene-local CPU worker backend: threads or processes (spawn).
+    nomination_device: cpu
+    # Hybrid centroid nomination device: cpu, or auto to benchmark CUDA including transfers.
+    prefetch_scenes: false
+    # Experimental preloading of the next scene's immutable rebuild inputs.
+    profile: false
+    # Record rebuild SQL, fetch and pipeline timings in run history.
+    memory_bytes: 8589934592
+    # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range:
+    # 1048576..1099511627776.
+    cache_bytes: 1073741824
+    # Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables.
+    # Range: 0..68719476736.
+    matrix_cache_bytes: 536870912
+    # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.
+    queue_bytes: 67108864
+    # Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.
+    checkpoint_scenes: 0
+    # Save strict rebuild recovery checkpoints every N scenes; 0 disables. Range: 0..1000000.
+    checkpoint_bytes: 536870912
+    # Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.
+    replay_snapshot_bytes: 68719476736
+    # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range:
+    # 1048576..1099511627776.
+    body:
+      # Limits for hybrid and body matching plans.
+      max_candidate_pairs: 100000
+      # Maximum nominated identity pairs per hybrid/global body plan, not embedding pairs. Range: positive
+      # integer.
+      max_witness_comparisons: 1000000
+      # Maximum exact vector comparisons per body scene/global pass, including face vetoes. Range: positive
+      # integer.
+      reference_bytes: 134217728
+      # Byte budget for body/hybrid reference banks, metadata and lookup working arrays. Range: positive
+      # integer.
+      plan_bytes: 16777216
+      # Byte budget for retained body/hybrid matching plans and decision proofs. Range: positive integer.
+  portraits:
+    # Portrait CPU workers, inference batches and ranking cache.
+    cpu_threads: 0
+    # Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.
+    faceocc_batch_size: 4
+    # Faces per portrait visibility inference batch (1..8); 1 disables batching.
+    ranking_cache_bytes: 16777216
+    # Byte cap for completed VTT portrait rankings; 0 disables. Range: 0..68719476736.
+    prefetch: true
+    # Prepare bounded VTT portrait sources and quality measurements ahead of use.
 
 storage:
-  # Local recognition state and retained image sizes.
+  # Recognition database, retained images and retention policy.
   database: faces_state.sqlite3
   # Recognition SQLite database path, relative to this YAML.
   max_crop_bytes: 1048576
-  # Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit.
+  # Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit. Range: 1024..8388608.
+  retain_person_crops: true
+  # Keep body crops for inspection/portraits, subject to storage.max_crop_bytes.
   retention:
-    # Opt in to pruning selected scenes only after a fully successful run.
-    # Existing YAML files that omit this section keep automatic pruning disabled.
+    # Evidence pruning after successful recognition runs.
     auto_prune: false
-    # Keep the active scan plus this many previous complete scans per scene/model.
-    # Identity origins, audit references, incomplete scans and pending writes can pin more.
+    # Prune obsolete evidence for selected scenes after a successful run.
     keep_previous_scans: 1
-    # Keep the configured SapiensID/person contract plus this many older variants.
+    # Number of previous complete scans to retain per scene/model, in addition to the active scan. Linked
+    # evidence may pin more. Range: 0..100.
     keep_previous_person_contracts: 1
-    # Remove unneeded crops from obsolete but identity-pinned evidence; retain vectors/geometry.
-    # Returning to an archived policy restores crops from verified VTT input without inference.
+    # Number of older person contract variants retained alongside the configured contract. Range: 0..100.
     prune_obsolete_crops: true
+    # Remove obsolete crops when vectors and geometry must be retained. A later run can restore them from
+    # verified VTT input.
 
-version: 1
-# Configuration schema version; keep 1.
+names:
+  # Optional performer name overrides.
+  file: null
+  # Performer-name YAML path, relative to this YAML; null disables overrides.

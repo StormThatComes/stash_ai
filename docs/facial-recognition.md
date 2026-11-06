@@ -1,11 +1,57 @@
 # Facial recognition
 
+## Recognition YAML v2
+
+The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
+setting with operator help immediately below it. The file groups settings by
+stage: face scanning, pose detection, SapiensID collection, identity matching,
+portraits, execution, storage and naming. Recognition runs use RF-DETR-XL for
+person boxes and ViTPose++ Large for COCO17 points. Body evidence collection
+is enabled, including VTT cues without an accepted face. Creating body-only
+identities and global body merging have their own switches under `matching.body`.
+
+Existing version 1 files still use their original settings and omitted-field
+defaults. To convert a local file and retain its effective policy, run:
+
+```shell
+python stash_ai.py recognition migrate-config --face-config local.yml --output local-v2.yml
+```
+
+The output must be a new file. This offline command needs neither the recognition
+database nor model weights. Keeping the files in the same directory preserves
+relative paths. Exporting elsewhere rebases paths to their original locations.
+Equivalent settings reuse the face scan, person evidence and body contracts.
+Changing the actual model or a collection threshold still changes its contract.
+
+| In a v1 file | In a v2 file |
+| --- | --- |
+| `models.detector`, `models.recognizer` | `face.detector.backend`, `face.recognizer.backend` |
+| `sapiensid.pose.detector`, `sapiensid.pose.backend` | `pose.detector.backend`, `pose.estimator.backend` |
+| `sapiensid.pose.batch_size` | `pose.detector.frame_batch_size` and `pose.estimator.vitpose_plus_large.batch_size` |
+| `clustering.min_auxiliary_face_pixels`, `clustering.min_anchor_face_pixels` | `matching.face.samples.minimum.min_face_pixels`, `matching.face.anchors.quality.min_face_pixels` |
+| `sapiensid.identities.anchor_keypoint_rules` | `matching.body.anchors.keypoint_rules` |
+| `sapiensid.matching.face_floor` | `matching.hybrid.face_floor` |
+| `execution.rebuild_memory_bytes` | `execution.rebuild.memory_bytes` |
+
+Detection sweeps and tuning grids accept either spelling. Solver winners and
+YAML diffs use the layout of their input. A diff is applied to that input.
+Under `pose.point_quality`, set the shared PMPose thresholds for SAM refinement
+and duplicate detection. A stage may override any threshold; `null` inherits it.
+The final pose-estimator filter and body-anchor rules are independent.
+
+The sections below also use v1 field names when discussing historical policies,
+reports and v1 configuration fragments. Use the template above for the full v2 paths.
+
+## Portrait selection
+
 Auto portraits use strict, configurable fallback tiers:
 
 ```yaml
+version: 2
 portraits:
-  kind: auto
-  auto_precedence: [face+pose, face, pose]
+  selection:
+    kind: auto
+    auto_precedence: [face+pose, face, pose]
 ```
 
 `face+pose` selects a face observation with usable, associated SapiensID person

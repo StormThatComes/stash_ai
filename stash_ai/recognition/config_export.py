@@ -1,12 +1,11 @@
 """Export a portable recognition policy without opening the database or models."""
 from pathlib import Path
 
-import yaml
-
 from stash_ai.reports.io import report_stream
 
-from .config import plain
+from .config import effective_data, parse_yaml, plain
 from .config_layout import get, put, v2_document
+from .config_render import render_v2
 
 LOCAL_PATHS = (
     'sapiensid.model.source_directory', 'sapiensid.model.checkpoint_directory',
@@ -37,8 +36,12 @@ def migrate(config, destination):
         raise ValueError('Choose a new YAML output separate from the input, database and names file.')
     root = config.source_path.parent if config.source_path else Path.cwd()
     data = export_data(config, absolute_paths=destination.parent != root)
-    document = v2_document(data)
+    document = v2_document(data, source=config.source)
+    serialized = render_v2(document)
+    _, restored = effective_data(parse_yaml(serialized.encode()))
+    if restored != data:
+        raise ValueError('Migration changed effective recognition settings; no output written.')
     with report_stream(destination, sync_directory=True) as stream:
-        yaml.safe_dump(document, stream, sort_keys=False)
+        stream.write(serialized)
     print(f'Wrote recognition configuration v2 to {destination}')
     return 0

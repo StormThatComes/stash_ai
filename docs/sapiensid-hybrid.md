@@ -2,58 +2,37 @@
 
 Hybrid recognition keeps the configured face recognizer and its namespace.
 SapiensID is an additional identity signal, stored against observations rather
-than mutable performer IDs. It is opt-in (`sapiensid.enabled: false` by default).
-Defaults are uncalibrated starting values, not accuracy claims.
+than mutable performer IDs. The shipped v2 template collects body observations
+using RF-DETR-XL boxes and ViTPose++ Large points, including cues with no face.
+Scene-local body identity creation and cross-scene body merging are separate opt-ins.
 
-## Enable collection
+## Configure collection
 
-Install `requirements-sapiensid.txt` alongside the normal runtime, preserving the
-CPU/CUDA PyTorch build appropriate for your installation. With
-`models.download_missing: true` (the default), the first inference that needs
-SapiensID automatically downloads its pinned upstream source, wb12m checkpoint,
-`model.yaml` and YOLO26m-pose checkpoint into the configured destinations.
-You do not need to create those folders, clone the upstream repository, install
-Git, or manually download weights. Relative paths resolve from the configuration
-file. Python packages remain managed through the requirements file.
-
-The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
-supported setting, including all SapiensID subsections, with comments and
-explicit default values for SapiensID. The example below only shows the settings
-needed to enable collection and its main matching/resource controls; omitted
-settings inherit their defaults. SapiensID uses `models.device` and the shared
-`execution.scan_cpu_workers` / `execution.scan_queue_bytes` controls.
-
-If the updater preserves your locally modified YAML, review
-`facial_recognition.yml.incoming` and copy the new settings you need. Partial
-local configurations remain supported; omitted settings inherit their defaults.
+Install `requirements-sapiensid.txt` and `requirements-rfdetr.txt` alongside
+the CPU/GPU profile. On first use, `execution.models.download_missing: true`
+allows pinned assets for the selected models to download. Relative asset paths
+resolve from the YAML location. The [v2 template](../facial_recognition.yml)
+lists every supported setting and its range or choices where applicable.
 
 ```yaml
-models:
-  download_missing: true
-sapiensid:
+version: 2
+pose:
+  detector:
+    backend: rfdetr_xl
+  estimator:
+    backend: vitpose_plus_large
+body:
   enabled: true
-  model:
+  encoder:
     variant: wb12m
-    source_directory: recognition_models/sapiensid_v1/source
-    checkpoint_directory: "" # models.directory/sapiensid_v1/<variant>
-    model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
-  pose:
-    path: recognition_models/sapiensid_v1/yolo26m-pose.pt
-    sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
-  matching:
-    face_floor: 0.4
-    person_threshold: 0.85
-    ambiguity_margin: 0.1
-    min_support: 3
-  execution:
-    batch_size: 1
-    reference_bytes: 134217728
-    plan_bytes: 16777216
-    max_candidate_pairs: 100000
-    max_witness_comparisons: 1000000
-  storage:
-    retain_person_crops: true
+  collection:
+    enabled: true
 ```
+
+A version 1 file keeps its original defaults, including the previous opt-in
+collection policy. The backend recipes below use v1 names. For the corresponding
+v2 spelling or to migrate an existing file, see [Recognition YAML v2](facial-recognition.md#recognition-yaml-v2).
+The updater preserves local edits and may provide a `facial_recognition.yml.incoming` file.
 
 Keep `models.recognizer` set to your face recognizer. Downloads use the source
 archive of `mk-minchul/sapiensid` at
@@ -70,7 +49,7 @@ on all five benchmarks in
 [Table 12 of the paper](https://arxiv.org/html/2504.04708v1#A2.SS7), which motivates
 the accuracy-oriented default. This does not establish the gain on your own scenes.
 
-The paths above are download destinations, not prerequisites. Override them to
+Model paths are download destinations, not prerequisites. Override them to
 use another disk or reuse an existing installation. Empty paths in older YAMLs
 use `sapiensid_v1/source`, `sapiensid_v1/<variant>` and
 `sapiensid_v1/yolo26m-pose.pt` beneath `models.directory`; an empty pose SHA256
@@ -106,13 +85,13 @@ affine crops and heatmap decoding. If an existing installation reports
 `requirements-sapiensid.txt` in the active CPU/GPU environment and restart the
 process. Missing SciPy is now reported before ViTPose assets are downloaded.
 
-By default, YOLO detects person boxes using the existing `pose.path`, `sha256`,
+In version 1, YOLO is the default box detector and uses the existing `pose.path`, `sha256`,
 `score_threshold`, `nms_threshold` and `max_people_per_frame` settings. ViTPose++
 Large replaces its keypoints for **every** accepted person, including people
 without a detected face. The COCO expert (`dataset_index=0`) returns 17 points
 in image coordinates. Shared boundary/confidence filtering, face association,
 SapiensID's 22-point input and audit overlays remain in use. `audit-detection`
-and `audit-alignment` select the same backend as recognition. The default
+and `audit-alignment` select the same backend as recognition. The v1 default
 `backend: yolo` preserves existing configurations and evidence contracts.
 
 The first use downloads the three pinned files from
@@ -436,7 +415,7 @@ existing verified file. A corrupt or different checkpoint is rejected rather
 than overwritten. The upstream weights have a separate CC BY-NC 4.0 license;
 see [third-party notices](../THIRD_PARTY_NOTICES.md).
 
-By default, YOLO supplies person boxes with its pose head disabled. Sapiens alone supplies
+With the v1 default, YOLO supplies person boxes with its pose head disabled. Sapiens alone supplies
 keypoints for those boxes, including people without a detected face. The model
 predicts 308 Goliath landmarks; the adapter selects and reorders the matching
 17 COCO body points (including wrists at Goliath indices 62 and 41). The other
@@ -476,7 +455,7 @@ thumbnails; compare those scenes with `recognition audit-detection`.
 ### D-FINE person detectors for Sapiens / ViTPose / PMPose
 
 `pose.detector` selects person boxes independently of `pose.backend`, which
-selects keypoints. The default `detector: yolo` preserves existing behavior.
+selects keypoints. Version 1 defaults to `detector: yolo`.
 To replace YOLO entirely while retaining Sapiens Pose:
 
 ```yaml

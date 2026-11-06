@@ -49,7 +49,7 @@ whose end is unknown have `end_seconds: null`.
 Both application profiles include tagging and on-demand facial recognition.
 Install `requirements-gpu.txt` (also selected by `requirements.txt`) or
 `requirements-cpu.txt`, with the matching constraints; keep exactly one ORT package.
-Recognition defaults to CUDA. CPU installations use `models.device: cpu` in
+Recognition defaults to CUDA. CPU installations use `execution.gpu.device: cpu` in
 `facial_recognition.yml`, or the command's `--device cpu` override.
 See [facial recognition](docs/facial-recognition.md) for scope and configuration.
 
@@ -1175,21 +1175,21 @@ python -m pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt
 for development and tests. The updater downloads these manifests but does not
 run `pip` or modify the installed Python packages.
 
-For optional SapiensID support, after installing the CPU/GPU profile:
+The shipped recognition YAML enables RF-DETR-XL person boxes and ViTPose++ Large.
+Install both inference extras after the CPU/GPU profile:
 
 ```powershell
-python -m pip install -r requirements-sapiensid.txt
+python -m pip install -r requirements-sapiensid.txt -r requirements-rfdetr.txt
 ```
 
-RF-DETR-XL person detection additionally uses
-`python -m pip install -r requirements-rfdetr.txt`; see
+For RF-DETR-XL setup and weight terms, see
 [model setup and terms](docs/sapiensid-hybrid.md#rf-detr-xl-person-detector).
 
-The SapiensID profile installs the inference extras. With `sapiensid.enabled: true` and
-`models.download_missing: true`, the application downloads missing upstream
+The SapiensID profile installs the inference extras. With `body.enabled: true` and
+`execution.models.download_missing: true`, the application downloads missing upstream
 source and model checkpoints into the SapiensID paths configured in
 `facial_recognition.yml` when inference first needs them. The default
-`sapiensid.model.variant: wb12m` selects the model trained on more data;
+`body.encoder.variant: wb12m` selects the model trained on more data;
 `wb4m` remains available. See
 [the SapiensID guide](docs/sapiensid-hybrid.md) for custom destinations and offline use.
 

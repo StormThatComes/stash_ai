@@ -1,5 +1,6 @@
 """Independent parameter trials on one original VTT cue, stacked without resizing."""
 import csv
+from copy import deepcopy
 from dataclasses import replace
 from io import StringIO
 import json
@@ -40,6 +41,7 @@ def load_variants(path, config):
     if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_VARIANTS:
         raise ValueError(f'Detection sweep requires a table of 1..{MAX_VARIANTS} parameter/value rows.')
     variants = [(config, dict(variant_index=0, parameter=None, value=None, baseline_value=None))]
+    baseline = v2_document(config.data, source=config.source)
     for index, row in enumerate(rows, 1):
         prefix = f'Detection sweep row {index}'
         if not isinstance(row, dict) or set(row) != {'parameter', 'value'}:
@@ -51,11 +53,13 @@ def load_variants(path, config):
         if not (public.startswith('pose.') or public.startswith('face.detector.')):
             raise ValueError(f'{prefix}: unsupported detector parameter {parameter!r}. '
                              'Use face.detector or pose settings (v1 names are also accepted).')
-        document = v2_document(config.data)  # Each row starts from the same baseline.
+        document = deepcopy(baseline)  # Each row starts from the same baseline.
         try:
             old = get(document, public)
         except KeyError as error:
             raise ValueError(f'{prefix}: unknown parameter {parameter!r}.') from error
+        if old is None and parameter in INTERNAL_PATHS:
+            old = get(config.data, parameter)
         if isinstance(old, (dict, list)):
             raise ValueError(f'{prefix}: expected a leaf parameter, got {parameter!r}.')
         put(document, public, row['value'])
