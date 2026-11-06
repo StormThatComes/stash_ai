@@ -374,10 +374,14 @@ class SapiensIDFaces(YuNetDetector):
         self._person_frame = None
         self._prepared_frames.clear()
         self.pose = None
+        refiner=self.pose_refiner
         self.pose_refiner = None
         try:
-            if self.encoder is not None:
-                self.encoder.close()
+            from stash_ai.runtime.cleanup import cleanup
+            actions=[]
+            if refiner is not None and callable(getattr(refiner,'close',None)):actions.append(('close pose refiner',refiner.close))
+            if self.encoder is not None:actions.append(('close person encoder',self.encoder.close))
+            cleanup(actions)
         finally:
             self.encoder = None
             super().close()

@@ -115,8 +115,14 @@ class RFDETRDetector:
             rgb = [image if image.mode == 'RGB' else stack.enter_context(image.convert('RGB')) for image in batch]
             # Match the pinned upstream predict(): RGB /255, bilinear square
             # resize without antialiasing, then ImageNet normalization.
-            inputs = torch.stack([transforms.resize(transforms.to_tensor(image).to(self.device),
-                [registry.RESOLUTION, registry.RESOLUTION], antialias=False) for image in rgb])
+            if len({image.size for image in rgb})==1:
+                # One transfer for the usual fixed-size VTT frames. Resize stays
+                # on the original device with identical interpolation settings.
+                inputs=torch.stack([transforms.to_tensor(image) for image in rgb]).to(self.device)
+                inputs=transforms.resize(inputs,[registry.RESOLUTION,registry.RESOLUTION],antialias=False)
+            else:
+                inputs = torch.stack([transforms.resize(transforms.to_tensor(image).to(self.device),
+                    [registry.RESOLUTION, registry.RESOLUTION], antialias=False) for image in rgb])
             inputs = transforms.normalize(inputs, registry.MEAN, registry.STD)
             with torch.autocast(device_type=torch.device(self.device).type, enabled=False):
                 return self.model(inputs.float())
@@ -125,8 +131,8 @@ class RFDETRDetector:
     def _decode(outputs, sizes, threshold, iou, maximum, suppress, *, frame_offset=0):
         import torch
         from torchvision.ops import nms
-        logits = outputs['pred_logits'].detach().float().cpu()
-        boxes = outputs['pred_boxes'].detach().float().cpu()
+        logits = outputs['pred_logits'].detach().float()
+        boxes = outputs['pred_boxes'].detach().float()
         if (logits.ndim != 3 or logits.shape[0] != len(sizes) or logits.shape[2] != 91
                 or boxes.shape != (*logits.shape[:2], 4)):
             raise ValueError('RF-DETR-XL returned malformed COCO91 detection shapes: '
@@ -140,7 +146,8 @@ class RFDETRDetector:
                                  f'query={query}, component={component} (zero-based).')
         # Select the person channel before any top-k limit: other classes and
         # the same query's alternative labels cannot consume the people budget.
-        scores = logits[..., registry.PERSON_LABEL].sigmoid()
+        scores = logits[..., registry.PERSON_LABEL].cpu().sigmoid()
+        boxes = boxes.cpu()
         valid_geometry = (boxes[..., 2:] > 0).all(dim=-1)
         corners = torch.cat((boxes[..., :2] - boxes[..., 2:] / 2,
                              boxes[..., :2] + boxes[..., 2:] / 2), dim=-1)

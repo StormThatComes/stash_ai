@@ -76,11 +76,13 @@ def test_face_models_and_visibility_lifetime_at_rebuild(tmp_path, monkeypatch, p
     assert len(models) == 1
 
 
+@pytest.mark.parametrize('batch_size',[1,4])
 @pytest.mark.parametrize('failure', [None, 'error', 'interrupt'])
-def test_sequential_passes_never_overlap_and_resume_body_evidence(tmp_path, monkeypatch, failure):
+def test_sequential_passes_never_overlap_and_resume_body_evidence(tmp_path, monkeypatch, failure,batch_size):
     config, _, services, faces = setup(tmp_path, monkeypatch)
     config = configured(config, 'sequential')
     config.data['sapiensid']['enabled'] = True
+    config.data['execution']['sequential_scene_batch_size']=batch_size
     people = []
     face_factory = services.backend
     def load_face(*args):
@@ -105,6 +107,7 @@ def test_sequential_passes_never_overlap_and_resume_body_evidence(tmp_path, monk
     else:
         assert run(config, services, '1', '2') == (1 if failure else 0)
     assert all(m.closed for m in faces + people)
+    if failure is None and batch_size>1:assert len(faces)==len(people)==1
     with FaceDatabase(config.database) as state:
         before = [tuple(r) for r in state.connection.execute('SELECT id,embedding FROM observations ORDER BY id')]
     loaded = len(faces)

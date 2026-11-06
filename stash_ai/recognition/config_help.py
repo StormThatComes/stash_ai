@@ -210,6 +210,7 @@ HELP = {
     'execution.gpu': 'Inference device, model lifetime and memory logging.',
     'execution.gpu.device': 'Inference device: cuda, cpu or auto (prefer CUDA when available).',
     'execution.gpu.model_policy': 'phase: unload inference models/cache after VTT (default); reload lazily for portraits. sequential: additionally run faces then bodies per scene, unloading between them. retain: keep face models until run exit (legacy throughput policy).',
+    'execution.gpu.sequential_scene_batch_size': 'Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range: 1..16.',
     'execution.gpu.log_vram': 'Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.',
     'execution.scan': 'VTT input, scan workers, queues, caches and checkpoints.',
     'execution.scan.max_cues': 'Maximum VTT cues scanned per selected scene; 0 scans all cues. Range: 0..10000.',
