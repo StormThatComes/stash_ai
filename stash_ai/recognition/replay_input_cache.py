@@ -49,9 +49,11 @@ class InputCache:
             from .dependency_schema import validate_triggers
             if not isinstance(database,FaceDatabase) or database.lock is None:return
             validate_triggers(database.connection,required=True)
-            self.limit=min(config.data['execution']['rebuild_checkpoint_bytes'],config.data['execution']['replay_snapshot_bytes'])
+            self.limit=config.data['execution']['replay_snapshot_bytes']
             self.owner=dict(format=1,installation=database.installation,path=str(database.path))
-            self.key=digest([ENGINE,self.owner,selected,scope,namespace,version(database.connection),
+            stamps=[(item['scan'],version(database.connection,'raw-observations',item['scan']),
+                     version(database.connection,'pixel-scan',item['scan'])) for item in selected]
+            self.key=digest(['raw-input-v2-no-bindings',ENGINE,self.owner,selected,scope,namespace,stamps,
                 digest(expected_schema()),config.data['clustering']['max_anchor_pose_deviation'] is not None])
             self.directory=database.path.with_name(database.path.name+'.rebuild-input')
             self.directory.mkdir(mode=0o700,exist_ok=True)
@@ -111,6 +113,8 @@ class InputCache:
             if source.in_transaction:raise ValueError('Raw replay cache requires a committed image.')
             size=source.execute('PRAGMA page_count').fetchone()[0]*source.execute('PRAGMA page_size').fetchone()[0]
             if size>self.limit:return
+            from .disk_budget import check
+            check(size,self.directory)
             path=self.directory/(str(uuid.uuid4())+'.sqlite3')
             descriptor=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600);os.close(descriptor)
             with closing(sqlite3.connect(path)) as target:source.backup(target)

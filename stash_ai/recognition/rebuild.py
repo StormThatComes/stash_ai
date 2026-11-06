@@ -127,29 +127,13 @@ REPLAY_SCHEMA = SCHEMA + '''
 
 @measured('copy')
 @stage('Copy selected face evidence')
-def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False):
+def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False,bindings=True):
     db = database.connection
     replay.executescript(REPLAY_SCHEMA)
     from .replay_vector_inputs import prepare
     shared_vectors = prepare(db, replay)
     from .snapshot_import import bulk
     with bulk(replay):
-        with tracking(
-            db.execute(
-                'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
-                'FROM people WHERE scope=? AND namespace=?',
-                (scope, namespace),
-            ),
-            'Copy historical identity labels',
-            unit='person',
-            position=0,
-            total=lambda: db.execute(
-                'SELECT COUNT(*) FROM people WHERE scope=? AND namespace=?',
-                (scope, namespace),
-            ).fetchone()[0],
-        ) as tracked:
-            for row in tracked:
-                replay.execute('INSERT INTO old_people VALUES (?,?,?,?)', tuple(row))
         with tracking(
             selected,
             'Copy selected evidence',
@@ -173,27 +157,52 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
                 ) as tracked:
                     for row in tracked:
                         pass  # The bounded copy iterator has completed both inserts.
-        # Physical keys include the scene, so batching scene traversal preserves
-        # first-origin precedence within each historical scan/cue/observation order.
-        for batch in _batches(selected):
-            scenes = encoded([item['scene'] for item in batch])
-            historical = db.execute('SELECT o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,'
-                's.scope,s.namespace,s.scene,s.input_sha,m.person FROM members m '
-                'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
-                'WHERE s.scope=? AND s.namespace=? AND s.scene IN (SELECT value FROM json_each(?)) '
-                'ORDER BY s.rowid,o.cue,o.id', (scope,namespace,scenes))
-            with tracking(_inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
-                    ((sample_key(row),row['person'],row['id']) for row in historical)),
-                    'Read historical sample ownership', unit='member') as tracked:
-                for row in tracked:
-                    pass
-        with tracking(_restore_origins(db,replay), 'Restore original sample ownership',
-                      unit='observation') as tracked:
-            for row in tracked:
-                pass
+    if bindings:_copy_bindings(database,replay,selected,scope,namespace)
     with work('Commit replay evidence', 1, unit='transaction', position=0) as committed:
         replay.commit()
         committed.advance()
+
+
+def _copy_bindings(database,replay,selected,scope,namespace):
+    """Refresh mutable ownership independently of the immutable raw image."""
+    db=database.connection
+    replay.execute('DELETE FROM old_people')
+    replay.execute('DELETE FROM origins')
+    with tracking(
+        db.execute(
+            'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
+            'FROM people WHERE scope=? AND namespace=?',
+            (scope, namespace),
+        ),
+        'Copy historical identity labels',
+        unit='person',
+        position=0,
+        total=lambda: db.execute(
+            'SELECT COUNT(*) FROM people WHERE scope=? AND namespace=?',
+            (scope, namespace),
+        ).fetchone()[0],
+    ) as tracked:
+        for row in tracked:
+            replay.execute('INSERT INTO old_people VALUES (?,?,?,?)', tuple(row))
+    # Physical keys include the scene, so batching scene traversal preserves
+    # first-origin precedence within each historical scan/cue/observation order.
+    for batch in _batches(selected):
+        scenes = encoded([item['scene'] for item in batch])
+        historical = db.execute('SELECT o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,'
+            's.scope,s.namespace,s.scene,s.input_sha,m.person FROM members m '
+            'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
+            'WHERE s.scope=? AND s.namespace=? AND s.scene IN (SELECT value FROM json_each(?)) '
+            'ORDER BY s.rowid,o.cue,o.id', (scope,namespace,scenes))
+        with tracking(_inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
+                ((sample_key(row),row['person'],row['id']) for row in historical)),
+                'Read historical sample ownership', unit='member') as tracked:
+            for row in tracked:
+                pass
+    with tracking(_restore_origins(db,replay), 'Restore original sample ownership',
+                  unit='observation') as tracked:
+        for row in tracked:
+            pass
+    replay.commit()
 
 
 @measured('binding')
@@ -516,16 +525,19 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         inputs=InputCache(database,selected,config,scope,namespace)
         if not inputs.restore(replay):
             _copy_selection(database, replay, selected, scope, namespace,
-                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
+                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False)
             from .evidence_pixels import canonicalize
             canonicalize(replay)
             replay.commit()
             inputs.save(replay)
+        _copy_bindings(database,replay,selected,scope,namespace)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
             replay.commit()
-        checkpoints = Checkpoints(database, selected, config, scope, namespace)
+        from .checkpoint_delta import DeltaCheckpoints
+        checkpoint_type=DeltaCheckpoints if config.data['execution']['rebuild_checkpoint_mode']=='incremental' else Checkpoints
+        checkpoints = checkpoint_type(database, selected, config, scope, namespace)
         late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
             sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
         late = Checkpoints(database, selected, config, scope, namespace,

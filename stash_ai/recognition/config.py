@@ -59,7 +59,7 @@ def defaults():
                       'sprite_cache_bytes': 1073741824, 'media_cache_bytes': 1073741824, 'portrait_ranking_cache_bytes': 16777216, 'prefetch_scene_depth': 3,
                       'derived_cache_bytes': 4294967296, 'pixel_index_bytes': 4294967296, 'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
-                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592, 'replay_snapshot_bytes': 68719476736},
+                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_mode': 'snapshot', 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592, 'replay_snapshot_bytes': 68719476736},
         'storage': {'crop_policy': 'all', 'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576,
                     'retention': {'auto_prune': False, 'keep_previous_scans': 1,
                                   'keep_previous_person_contracts': 1, 'prune_obsolete_crops': True}},
@@ -228,6 +228,8 @@ def validate(data):
     directory=data['execution']['rebuild_scratch_directory']
     if directory is not None and (not isinstance(directory,str) or not directory.strip() or '\x00' in directory):
         raise ValueError('execution.rebuild_scratch_directory must be a path or null.')
+    if data['execution']['rebuild_checkpoint_mode'] not in ('snapshot','incremental'):
+        raise ValueError('execution.rebuild_checkpoint_mode must be snapshot or incremental.')
     if data['execution']['rebuild_storage'] not in ('disk','memory'):
         raise ValueError('execution.rebuild_storage must be disk or memory.')
     for name,active in (('rfdetr_precision',data['sapiensid']['pose']['detector']=='rfdetr_xl'),

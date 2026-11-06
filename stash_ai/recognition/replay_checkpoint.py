@@ -232,7 +232,7 @@ class Checkpoints:
             raise ValueError('Checkpointing requires the current recognition writer owner.')
         self.owner = dict(format=FORMAT, installation=source.installation,
                           path=hashlib.sha256(str(source.path).encode()).hexdigest())
-        self.directory = source.path.with_name(source.path.name + ('.rebuild-' + self.phase if self.phase else '.rebuild'))
+        self.directory = source.path.with_name(source.path.name + ('.rebuild-' + self.phase if self.phase else '.rebuild'+getattr(self,'suffix','')))
         try:
             self.directory.mkdir(mode=0o700)
         except FileExistsError:
