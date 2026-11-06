@@ -215,11 +215,12 @@ def adopt(db,scope,namespace,config,entry):
 
 def validate(db,scope,namespace,entry,config=None,*,snapshot_reader=None):
     from .dependencies import snapshot as read_snapshot
+    committed=not db.in_transaction
     with read_snapshot(db):
-        return _validate(db,scope,namespace,entry,config,snapshot_reader=snapshot_reader)
+        return _validate(db,scope,namespace,entry,config,snapshot_reader=snapshot_reader,committed=committed)
 
 
-def _validate(db,scope,namespace,entry,config=None,*,snapshot_reader=None):
+def _validate(db,scope,namespace,entry,config=None,*,snapshot_reader=None,committed=False):
     from .publication import PendingRecognition
     queued=current(db,scope,namespace,entry['scene'])
     if (queued or {}).get('revision')!=entry['revision']:
@@ -227,7 +228,7 @@ def _validate(db,scope,namespace,entry,config=None,*,snapshot_reader=None):
     frozen=queued or entry
     if config is not None and (frozen.get('policy')!=matching_policy(config) or frozen.get('body')!=body_policy(config)):
         raise PendingRecognition('Recognition publication policy changed; rebuild this scene first.')
-    item,people,signature=(snapshot_reader.read() if snapshot_reader is not None else
+    item,people,signature=(snapshot_reader.read(committed=committed,within_snapshot=True) if snapshot_reader is not None else
                            snapshot(db,scope,namespace,entry['scene'],config))
     if signature!=entry['signature'] or people!=entry['people'] or item['scan']!=entry['scan']:
         raise PendingRecognition('Recognition scene assignments changed; refresh synchronization plan.')

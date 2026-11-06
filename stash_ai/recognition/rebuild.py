@@ -548,8 +548,13 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 with Lookahead(replay_uri, config) as lookahead:
                     # Prime the first remaining scene as well: with explicit
                     # prefetch enabled no selected scene may silently go serial.
-                    if cursor < len(selected):
-                        lookahead.submit(selected[cursor]['scan'])
+                    def prepare_local(index):
+                        if index>=len(selected):return None
+                        scan=selected[index]['scan']
+                        prepared=scene_artifacts.lookup(temporary,scan,config,local_keys.get(scan))
+                        if prepared[1] is None:lookahead.submit(scan)
+                        return prepared
+                    prepared=prepare_local(cursor)
                     with tracking(
                         selected[cursor:],
                         'Rebuild selected identities',
@@ -559,11 +564,14 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                     ) as tracked:
                         for index, item in enumerate(tracked, start=cursor):
                             with stage('Match selected scene', scene=item['scene']):
-                                lookahead.take(item['scan'])
-                                lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
+                                current_prepared=prepared
+                                if current_prepared[1] is None:lookahead.take(item['scan'])
+                                else:lookahead.release_prepared()
+                                prepared=prepare_local(index+1)
                                 local_progress=(lambda **values: progress(scene=item['scene'],**values)) if progress else None
                                 reused=scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
-                                    lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True))
+                                    lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True),
+                                    prepared=current_prepared)
                                 if reused:database.face_rebuild_mode='partial'
                                 compute_current().scenes_applied += 1
                                 compute_current().publish()

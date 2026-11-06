@@ -54,10 +54,9 @@ def prepare(db, selected, config, keys):
         store.put('face-order',keys[item['scan']],[list(r) for r in rows])
 
 
-def match(database, scan, config, base, build):
+def lookup(database,scan,config,base):
     if base is None:
-        build()
-        return False
+        return None,None
     db=database.connection
     prior=db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='prior_attachment_queries'").fetchone()
     hints=[r[0] for r in db.execute("SELECT q.id FROM prior_attachment_queries q JOIN observations o "
@@ -66,6 +65,16 @@ def match(database, scan, config, base, build):
                 config.data['execution']['rebuild_memory_bytes']])
     store=derived_cache.current()
     entry=store.get('strict-scene',key)
+    return key,entry
+
+
+def match(database, scan, config, base, build, *, prepared=None):
+    if base is None:
+        build()
+        return False
+    db=database.connection
+    store=derived_cache.current()
+    key,entry=prepared if prepared is not None else lookup(database,scan,config,base)
     if entry is None:
         build()
         candidates=[list(r) for r in db.execute('SELECT * FROM candidates WHERE scan=? ORDER BY rowid',(scan,))]
@@ -81,11 +90,8 @@ def match(database, scan, config, base, build):
         db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',person)
     db.executemany('INSERT INTO candidates VALUES (?,?,?,?,?,?)',candidates)
     db.executemany('INSERT INTO members VALUES (?,?)',members)
-    from .clustering import _groups
-    from .reference_usage import ReferenceUsage
-    scope=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(scan,)).fetchone()
-    policy=config.data['clustering']
-    _groups(db,*scope,policy,usage=ReferenceUsage(policy['max_reference_bytes']),stage='retained')
+    # Membership triggers record the exact delta. The next consumer admits the
+    # resulting bank once; no full snapshot is needed for each cached scene.
     return True
 
 

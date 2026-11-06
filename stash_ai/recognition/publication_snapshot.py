@@ -41,13 +41,14 @@ class Snapshot:
         return (schema,db.execute('PRAGMA data_version').fetchone()[0],identifier,
                 version(db,'scan',identifier),bindings,body_ids,policy,encoded(body))
 
-    def read(self):
+    def read(self, *, committed=None, within_snapshot=False):
         from .publication_queue import snapshot
         from .profiling import count
         # A rolled-back transaction can reuse dependency generations. Install
         # the shortcut only when both reads start outside a write transaction.
-        committed=not self.db.in_transaction
-        with read_snapshot(self.db):
+        if committed is None:committed=not self.db.in_transaction
+        from contextlib import nullcontext
+        with nullcontext() if within_snapshot else read_snapshot(self.db):
             hint=None
             if committed:
                 from .publication_queue import matching_policy, body_policy

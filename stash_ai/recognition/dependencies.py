@@ -93,3 +93,23 @@ def certified(db, scope, namespace, state):
     row=db.execute('SELECT version,digest FROM evidence_fingerprints WHERE kind=? AND key=? AND policy=?',
                    ('completed',digest([scope,namespace]),state['fingerprint'])).fetchone()
     return bool(row and tuple(row)==(version(db),digest(state)))
+
+
+def cached_many(db,kind,keys,policy,compute,*,dependency):
+    """Batch audited per-key clocks and digests under the caller's snapshot."""
+    from .database import encoded
+    result={}
+    for offset in range(0,len(keys),256):
+        rows=db.execute('SELECT k.value,COALESCE(v.version,0),f.version,f.digest FROM json_each(?) k '
+            'LEFT JOIN evidence_versions v ON v.kind=? AND v.key=k.value '
+            'LEFT JOIN evidence_fingerprints f ON f.kind=? AND f.key=k.value AND f.policy=?',
+            (encoded(keys[offset:offset+256]),dependency,kind,policy))
+        for key,generation,stored,value in rows:
+            if type(generation) is not int or generation<0:raise ValueError('Invalid recognition dependency version.')
+            if stored==generation and isinstance(value,str) and re.fullmatch('[0-9a-f]{64}',value):
+                count('dependency_digest_hits')
+            else:
+                count('dependency_digest_misses');value=compute(key)
+                store(db,kind,key,policy,generation,value)
+            result[key]=value
+    return result

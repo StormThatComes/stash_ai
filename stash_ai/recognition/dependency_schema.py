@@ -155,8 +155,20 @@ def upgrade_artifact_triggers(db):
                 db.execute(current[name])
 
 
+class AuditedConnection(__import__('sqlite3').Connection):
+    """Connection-owned committed DDL certificate; no process-global handles."""
+    trigger_certificate=None
+
+
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
+    raw=getattr(db,'raw',db)
+    memo=isinstance(raw,AuditedConnection)
+    key=(db.execute('PRAGMA schema_version').fetchone()[0],
+         db.execute('PRAGMA user_version').fetchone()[0],
+         db.execute('PRAGMA data_version').fetchone()[0]) if memo else None
+    certificate=raw.trigger_certificate if memo else None
+    if certificate is not None and certificate[0]==key and (certificate[1] or not required):return
     from .retention_index import TRIGGERS as pruning_triggers
     accepted={**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
@@ -173,3 +185,8 @@ def validate_triggers(db, *, required=False):
     if db.execute('PRAGMA user_version').fetchone()[0]>=11:expected.update(pruning_triggers)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
+
+    # A certificate created inside a transaction could survive a rollback and
+    # collide with another DDL change at the same schema_version. Only committed
+    # schemas seed the shortcut; nested transactions may reuse that certificate.
+    if memo and not db.in_transaction:raw.trigger_certificate=(key,required)

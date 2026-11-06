@@ -75,7 +75,8 @@ def bounded_media(client, url, limit, timeout, *, cache=None):
                             raise ValueError('Recognition media exceeds its byte budget.')
                         chunks.append(chunk)
                     return b''.join(chunks)
-                data=call_with_deadline(body, deadline, cancel=lambda: abort_response(response))
+                from .media_cache import VerifiedBytes
+                data=VerifiedBytes(call_with_deadline(body, deadline, cancel=lambda: abort_response(response)))
                 if cache is not None and current==url:
                     etag=None if 'no-store' in response.headers.get('Cache-Control','').lower() else response.headers.get('ETag')
                     cache.put(url,etag,data)
@@ -117,8 +118,8 @@ class SpriteInput:
         urls = list(dict.fromkeys(c.image for c in cues))
         self.hashes = {}
         for url in urls:
-            data = self._sheet(url)
-            self.hashes[url] = hashlib.sha256(data).hexdigest()
+            self._sheet(url)
+            self.hashes[url] = self.cache[url]
         self.cues = cues
         self.coverage = {'total_cues': total, 'selected_cues': len(cues), 'complete_sampling': total == len(cues)}
         self.manifest = {'cues': [[c.start, c.end, safe_url(c.image), list(c.rect)] for c in cues],
@@ -140,7 +141,8 @@ class SpriteInput:
             raise ValueError('Sprite changed during portrait selection.')
         if data is None:
             data = self.read(url)
-            actual = hashlib.sha256(data).hexdigest()
+            from .media_cache import VerifiedBytes
+            actual = data.sha256 if isinstance(data,VerifiedBytes) else hashlib.sha256(data).hexdigest()
             if expected is not None and actual != expected:
                 raise ValueError('Sprite changed during recognition; rerun with stable inputs.')
             self.sprites.remember(actual, data)
