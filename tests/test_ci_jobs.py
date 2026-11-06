@@ -49,6 +49,12 @@ def test_windows_selection_includes_imported_fixture_modules():
     assert {'core', 'video'} <= suites(result)
 
 
+def test_benchmark_fixtures_select_their_windows_consumers():
+    result = select_jobs([('M', 'benchmarks/benchmark_merge_solver.py')])
+    assert result['pytest'] and 'core' in suites(result)
+    assert not result['dependencies']
+
+
 def test_transitive_test_imports_include_relative_imports_and_cycles(tmp_path):
     folder = tmp_path / 'tests'
     folder.mkdir()

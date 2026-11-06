@@ -44,7 +44,7 @@ def documentation(path):
 
 
 def test_dependencies(paths, root):
-    """Include fixtures imported from other test modules, including relative imports."""
+    """Include fixtures imported from tests or benchmarks, including relative imports."""
     pending, found = list(paths), set()
     while pending:
         path = pending.pop()
@@ -63,7 +63,7 @@ def test_dependencies(paths, root):
                 modules = [module] + [module + '.' + alias.name for alias in node.names]
             for module in modules:
                 dependency = module.replace('.', '/') + '.py'
-                if module.startswith('tests.') and (root / dependency).is_file():
+                if module.startswith(('tests.', 'benchmarks.')) and (root / dependency).is_file():
                     pending.append(dependency)
     return found
 
@@ -84,15 +84,15 @@ def select_jobs(changes, root=ROOT):
                 or path in {'pytest.ini', 'pyproject.toml', 'setup.cfg', 'tests/conftest.py', 'tests/__init__.py'}):
             return full_plan('CI, dependencies or shared test infrastructure changed')
         selected.add('pytest')
+        selected.update(suite for suite, files in windows.items() if path in files)
+        if path in model_tests:
+            selected.update(('models', 'core'))
+        if path in solver_tests:
+            selected.add('core')
         if path in {'update_stash_ai.py', 'tests/test_updater.py'}:
             selected.add('updater')
             reasons.add('Updater')
         elif path.startswith('tests/test_') and path.endswith('.py'):
-            selected.update(suite for suite, files in windows.items() if path in files)
-            if path in model_tests:
-                selected.update(('models', 'core'))
-            if path in solver_tests:
-                selected.add('core')
             reasons.add('Test changes and their existing Windows jobs')
         elif path.startswith('stash_ai/recognition/') and path.endswith('.py'):
             name = PurePosixPath(path).stem
