@@ -20,7 +20,7 @@ _BLOCK=4*1024**2
 class Budget:
     def __init__(self,limit,directory):
         self.limit,self.directory=limit,directory
-        self.leases={};self.used=0;self.peak=0
+        self.leases={};self.writes={};self.used=0;self.peak=0
     def set(self,owner,size):
         total=self.used-self.leases.get(owner,0)+size
         growth=max(0,size-self.leases.get(owner,0))
@@ -65,7 +65,8 @@ class File:
     def write(self,value):
         needed=self.stream.tell()+len(value)
         if needed>self.capacity:
-            self.budget.set(self,needed);self.capacity=needed
+            capacity=max(needed,min(needed+262144,self.budget.limit-self.budget.used+self.capacity))
+            self.budget.set(self,capacity);self.capacity=capacity
         return self.stream.write(value)
     def truncate(self,size=None):
         size=self.stream.tell() if size is None else size
@@ -87,7 +88,9 @@ def file(**kwargs):
 class Connection(sqlite3.Connection):
     """Grow private database capacity in leases, avoiding per-row page queries."""
     def __init__(self,*args,**kwargs):
+        import weakref
         super().__init__(*args,**kwargs)
+        self.scratch_cursors=weakref.WeakSet()
         self.budget=_active.get();self.capacity=0;self.estimate=0;self.page_limit=None
         self.page=super().execute('PRAGMA page_size').fetchone()[0]
     def _admit(self,sql,parameters,overhead=4096):
@@ -112,7 +115,8 @@ class Connection(sqlite3.Connection):
         return bulk
     def execute(self,sql,parameters=()):
         bulk=self._admit(sql,parameters)
-        try:return super().execute(sql,parameters)
+        try:
+            cursor=super().execute(sql,parameters);self.scratch_cursors.add(cursor);return cursor
         except sqlite3.OperationalError as error:
             if self.budget and getattr(error,'sqlite_errorcode',None)==sqlite3.SQLITE_FULL:
                 raise ResourceLimit('Recognition scratch SQLite capacity exceeded.',budget='execution.rebuild.scratch_bytes',limit=self.budget.limit) from error
@@ -131,15 +135,20 @@ class Connection(sqlite3.Connection):
                 values=chain.from_iterable(row.values() if isinstance(row,dict) else row for row in batch)
                 bulk=self._admit(sql,values,4096*len(batch)) or bulk
                 yield from batch
-        try:return super().executemany(sql,admitted())
+        try:
+            cursor=super().executemany(sql,admitted());self.scratch_cursors.add(cursor);return cursor
         finally:
             if bulk:
                 actual=super().execute('PRAGMA page_count').fetchone()[0]*self.page
                 self.budget.set(self,2*actual);self.capacity=self.estimate=actual
     def executescript(self,sql):
         self._admit('CREATE script',(sql,))
-        return super().executescript(sql)
+        cursor=super().executescript(sql);self.scratch_cursors.add(cursor);return cursor
+    def cursor(self,*args,**kwargs):
+        cursor=super().cursor(*args,**kwargs);self.scratch_cursors.add(cursor);return cursor
     def close(self):
+        for cursor in tuple(self.scratch_cursors):cursor.close()
+        self.scratch_cursors.clear()
         try:super().close()
         finally:
             path=getattr(self,'owned_path',None)
@@ -159,7 +168,13 @@ def connect(**kwargs):
 
 def grow(path,size):
     budget=_active.get()
-    if budget:budget.set(str(path),budget.leases.get(str(path),0)+size)
+    if budget:
+        key=str(path);needed=budget.writes.get(key,0)+size
+        capacity=budget.leases.get(key,0)
+        if needed>capacity:
+            capacity=max(needed,min(needed+262144,budget.limit-budget.used+capacity))
+            budget.set(key,capacity)
+        budget.writes[key]=needed
 
 
 def release_directory(path):
@@ -167,4 +182,5 @@ def release_directory(path):
     if budget:
         prefix=str(path)+os.sep
         for key in tuple(budget.leases):
-            if isinstance(key,str) and key.startswith(prefix):budget.set(key,0)
+            if isinstance(key,str) and key.startswith(prefix):
+                budget.set(key,0);budget.writes.pop(key,None)
