@@ -118,15 +118,18 @@ def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
 
+REPLAY_SCHEMA = SCHEMA + '''
+      CREATE TABLE sample_keys(observation TEXT PRIMARY KEY, sample_key TEXT NOT NULL);
+      CREATE TABLE origins(sample_key TEXT PRIMARY KEY, person TEXT, observation TEXT);
+      CREATE TABLE old_people(id TEXT PRIMARY KEY, created REAL, performer TEXT, retired INTEGER);
+    '''
+
+
 @measured('copy')
 @stage('Copy selected face evidence')
 def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False):
     db = database.connection
-    replay.executescript(SCHEMA + '''
-      CREATE TABLE sample_keys(observation TEXT PRIMARY KEY, sample_key TEXT NOT NULL);
-      CREATE TABLE origins(sample_key TEXT PRIMARY KEY, person TEXT, observation TEXT);
-      CREATE TABLE old_people(id TEXT PRIMARY KEY, created REAL, performer TEXT, retired INTEGER);
-    ''')
+    replay.executescript(REPLAY_SCHEMA)
     from .replay_vector_inputs import prepare
     shared_vectors = prepare(db, replay)
     from .snapshot_import import bulk
@@ -509,11 +512,15 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
     with memory_replay(config) as (replay, replay_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
-        _copy_selection(database, replay, selected, scope, namespace,
-                        retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
-        from .evidence_pixels import canonicalize
-        canonicalize(replay)
-        replay.commit()
+        from .replay_input_cache import InputCache
+        inputs=InputCache(database,selected,config,scope,namespace)
+        if not inputs.restore(replay):
+            _copy_selection(database, replay, selected, scope, namespace,
+                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
+            from .evidence_pixels import canonicalize
+            canonicalize(replay)
+            replay.commit()
+            inputs.save(replay)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
