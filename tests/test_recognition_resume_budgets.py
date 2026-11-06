@@ -66,7 +66,9 @@ def test_completed_cue_repairs_missing_projections_without_inference_or_decode(t
         assert [r['status'] for r in rows]==['unavailable','unavailable','ready']
         assert json.loads(rows[0]['metadata'])['identity_rejection']=='person_overlap'
         assert json.loads(rows[1]['metadata'])['identity_rejection']=='person_face_association_unavailable'
-        assert rows[2]['embedding']==bodies[2]['embedding']
+        from stash_ai.recognition.shared_person_evidence import resolve,PREFIX
+        assert rows[2]['embedding']==PREFIX+bodies[2]['id'].encode()
+        assert resolve(db,rows[2])['embedding']==bodies[2]['embedding']
         collector.close()
 
 
