@@ -54,9 +54,30 @@ def scope(config):
             _active.reset(token)
 
 
+def _release_paths(budget,path):
+    prefix=str(path)+os.sep
+    for key in tuple(budget.leases):
+        if isinstance(key,str) and key.startswith(prefix):
+            budget.set(key,0);budget.writes.pop(key,None)
+
+
+class Directory:
+    def __init__(self,temporary,budget):
+        import weakref
+        self.name=temporary.name
+        def finish():
+            temporary.cleanup()
+            _release_paths(budget,temporary.name)
+        self._finalizer=weakref.finalize(self,finish)
+    def cleanup(self):self._finalizer()
+    def __enter__(self):return self.name
+    def __exit__(self,*error):self.cleanup()
+
+
 def directory(**kwargs):
     budget=_active.get()
-    return tempfile.TemporaryDirectory(dir=budget.directory if budget else None,**kwargs)
+    temporary=tempfile.TemporaryDirectory(dir=budget.directory if budget else None,**kwargs)
+    return Directory(temporary,budget) if budget else temporary
 
 
 class File:
@@ -179,8 +200,4 @@ def grow(path,size):
 
 def release_directory(path):
     budget=_active.get()
-    if budget:
-        prefix=str(path)+os.sep
-        for key in tuple(budget.leases):
-            if isinstance(key,str) and key.startswith(prefix):
-                budget.set(key,0);budget.writes.pop(key,None)
+    if budget:_release_paths(budget,path)
