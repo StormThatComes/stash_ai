@@ -131,10 +131,12 @@ def plan(db,config,bank,*,focus=None,compact=False):
 def _scenes(db,people):
     encoded_people=encoded(list(people))
     bodies=db.execute('SELECT DISTINCT s.scene FROM body_members m JOIN body_observations b ON b.id=m.observation '
-        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) AND '+current_scan(),(encoded_people,))
+        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?))',(encoded_people,))
     faces=db.execute('SELECT DISTINCT s.scene FROM members m JOIN observations o ON o.id=m.observation '
-        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) AND '+current_scan(),(encoded_people,))
-    scenes={r[0] for r in bodies}|{r[0] for r in faces}
+        'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?))',(encoded_people,))
+    candidates=db.execute('SELECT DISTINCT s.scene FROM candidates c JOIN scans s ON s.id=c.scan '
+        'WHERE c.person IN (SELECT value FROM json_each(?))',(encoded_people,))
+    scenes={r[0] for r in bodies}|{r[0] for r in faces}|{r[0] for r in candidates}
     for row in db.execute('SELECT target,evidence FROM identity_merges'):
         proof=json.loads(row['evidence'])
         if proof.get('route') in ROUTES and canonical(db,row['target']) in people:scenes.update(proof.get('scenes',()))
@@ -203,7 +205,7 @@ def reconcile(database,selected,config):
             'WHERE i.person=? AND b.contract=? AND '+current_scan(),(source,contract(config))))
         targets={r['person'] for r in rows}
         if not rows or len(targets)!=1 or None in targets or source in targets or any(r['status']!='accepted' for r in rows):continue
-        target=next(iter(targets));scenes={r['scene'] for r in rows}
+        target=next(iter(targets));scenes={r['scene'] for r in rows}|_scenes(db,[source,target])
         if not scenes<=selection or not db.execute('SELECT 1 FROM members WHERE person=? LIMIT 1',(target,)).fetchone():continue
         if len(independent(rows,config.data['sapiensid']['identities']))<config.data['sapiensid']['identities']['min_support']:continue
         proof=dict(route='body_scene',scenes=sorted(scenes,key=int),cores={source:[r['id'] for r in rows]},
