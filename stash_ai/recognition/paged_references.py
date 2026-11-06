@@ -106,7 +106,7 @@ class Rows(Sequence):
 
 def rows(values):
     pool=_active.get()
-    if pool is None:return values
+    if pool is None:return values if isinstance(values,Sequence) else list(values)
     if isinstance(values,Rows):return values
     import uuid
     from .database import encoded

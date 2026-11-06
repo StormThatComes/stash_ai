@@ -227,7 +227,8 @@ class Search:
             for i,j in offsets():
                 left=read(i);left.flags.writeable=False
                 right=left if j==i else read(j);right.flags.writeable=False
-                if self.tree is None and floor is not None and upper(bound(i,left),bound(j,right))+ROUNDING<floor:
+                required=floor(i,i+len(left),j,j+len(right)) if callable(floor) else floor
+                if self.tree is None and required is not None and upper(bound(i,left),bound(j,right))+ROUNDING<required:
                     self.stats['centroid_blocks_excluded']=self.stats.get('centroid_blocks_excluded',0)+1
                     continue
                 yield (i,j),((left,right),)
@@ -327,7 +328,11 @@ class Search:
                 # One MiB of the existing scratch allowance. If too many values
                 # tie, discard the shortlist and repeat the exact tiled scan.
                 shortlist=[]
-                for i,j,values in self.tiles(active):
+                def rival_floor(begin,end,other,stop):
+                    owners=set(self.mode_owners[begin:end])|set(self.mode_owners[other:stop])
+                    values=[maxima[lane][owner] for lane,wanted in enumerate(pending) for owner in owners if owner in wanted]
+                    return min(values,default=float('inf'))-2*ROUNDING
+                for i,j,values in self.tiles(active,floor=rival_floor):
                     for start,other,tile in rows(i,j,values):
                         for lane,g in enumerate(groups):
                             for r in np.flatnonzero(g[start:start+len(tile)]>=0):
@@ -350,7 +355,7 @@ class Search:
                             if value+2*ROUNDING>=maxima[lane][self.mode_owners[index]]:
                                 yield lane,index,column
                         return
-                    for i,j,values in self.tiles(active):
+                    for i,j,values in self.tiles(active,floor=rival_floor):
                         for start,other,tile in rows(i,j,values):
                             for lane,g in enumerate(groups):
                                 for r in np.flatnonzero(g[start:start+len(tile)]>=0):
@@ -364,7 +369,7 @@ class Search:
                         b=self.identities[self.mode_owners[column]]
                         if forbidden(a,b):continue
                         known=pairs.get(tuple(sorted((a,b))))
-                        if known is not None and self.owner_modes[a]==self.owner_modes[b]==1:
+                        if known is not None and known.get('score') is not None and self.owner_modes[a]==self.owner_modes[b]==1:
                             update(lane,a,b,known['score'])
                         else:
                             yield (lane,a,b),self.entries[index][1],self.entries[column][1],'body'
@@ -424,7 +429,7 @@ def exact_pairs(pairs,bank,config,evidence,*,compact=False):
 def _pair_result(a,b,bank,config,*,mean,minimum,face_min,core_blocked):
     first,second=bank[a],bank[b];settings=config.data['sapiensid']['global_matching']
     blockers=[]
-    if mean<settings['match_threshold']:blockers.append('body_similarity')
+    if mean is not None and mean<settings['match_threshold']:blockers.append('body_similarity')
     if core_blocked:blockers.append('body_cohesion')
     if first.get('provisional') or second.get('provisional'):
         from .body_identity import independent

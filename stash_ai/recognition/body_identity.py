@@ -50,31 +50,47 @@ def anchor(row,settings):
     return anchor_gate(row['quality'],settings)['eligible']
 
 
-def independent(rows,settings):
+def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:None):
     """At most one witness per scan/cue; repeated pixels cannot add support."""
-    from .independent_evidence import body_vote,representatives,unit
-    candidates=[];votes=[];hashes=[];pixels={};seen=set()
-    for row in sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id'])):
-        if row['id'] in seen:continue
-        seen.add(row['id'])
-        q=quality(row)
-        vote=body_vote(row);physical=unit(vote)
-        hashed=q.get('appearance_hash')
-        hashed=int(hashed,16) if hashed else None
-        fingerprint=pixels.get(physical)
-        if fingerprint is None and hashed is not None:
-            fingerprint=next((key for other,key in hashes
-                if (hashed^other).bit_count()<settings['min_appearance_distance']),None)
-        if fingerprint is None:
-            fingerprint=encoded(physical)
-            if hashed is not None:hashes.append((hashed,fingerprint))
-        pixels[physical]=fingerprint
-        # Retain every cue edge of an appearance. A greedy representative can
-        # consume the sole cue of a different, otherwise independent crop.
-        votes.append(dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}})))
-        candidates.append(row)
-    chosen={r['id'] for r in representatives(votes)}
-    return [r for r in candidates if r['id'] in chosen]
+    from .independent_evidence import body_vote,unit,Votes,stamp
+    from .paged_references import rows as page_rows
+    votes=Votes();hashes=[];pixels={};seen=set()
+    save=page_rows if paged else list
+    def candidates():
+        charge=0;count=0
+        for row in (rows if presorted else sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id']))):
+            if row['id'] in seen:continue
+            seen.add(row['id'])
+            q=quality(row)
+            vote=body_vote(row);physical=unit(vote)
+            hashed=q.get('appearance_hash')
+            hashed=int(hashed,16) if hashed else None
+            fingerprint=pixels.get(physical)
+            if fingerprint is None and hashed is not None:
+                fingerprint=next((key for other,key in hashes
+                    if (hashed^other).bit_count()<settings['min_appearance_distance']),None)
+            if fingerprint is None:
+                fingerprint=encoded(physical)
+                if hashed is not None:hashes.append((hashed,fingerprint))
+            pixels[physical]=fingerprint
+            # Retain every cue edge of an appearance. A greedy representative can
+            # consume the sole cue of a different, otherwise independent crop.
+            vote=dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}}))
+            votes.add(vote);count+=1
+            from .memory_size import size
+            charge=size([vars(votes),hashes,pixels,seen]) if count & (count-1)==0 else charge+2048
+            reserve(charge)
+            yield dict(row=row,pixel=unit(vote),stamp=stamp(vote))
+    candidates=save(candidates())
+    len(votes)
+    def freeze(value):return tuple(freeze(v) for v in value) if isinstance(value,(tuple,list)) else value
+    def selected():
+        chosen=set()
+        for record in candidates:
+            pixel=freeze(record['pixel']);timestamp=freeze(record['stamp'])
+            if votes.owners.get(pixel)==timestamp and pixel not in chosen:
+                chosen.add(pixel);yield record['row']
+    return save(selected())
 
 
 def copresent(first,second):
