@@ -154,7 +154,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install complete application CPU profile
-        run: uv pip install --system pytest -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+        run: uv pip install --system -r requirements-dev.txt -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
       - name: Load pinned CPU models
         if: matrix.smoke && matrix.suite != 'video'
         env:
@@ -169,9 +169,16 @@ jobs:
         run: choco install ffmpeg -y --no-progress
       - name: Run Windows lifecycle tests
         if: runner.os == 'Windows'
+        env:
+          # Two independent pytest workers; each module keeps its fixture order.
+          # Native libraries and solver subprocesses inherit a bounded baseline.
+          OMP_NUM_THREADS: '1'
+          MKL_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
         run: >-
           python -m pytest -q "@.github/ci/windows-${{ matrix.suite }}.txt"
-          --tb=short --durations=20 --junitxml="${{ runner.temp }}/lifecycle.xml"
+          -n 2 --dist=loadfile --max-worker-restart=0
+          --tb=short --maxfail=1 --durations=20 --junitxml="${{ runner.temp }}/lifecycle.xml"
       - name: Save Windows lifecycle durations
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4
