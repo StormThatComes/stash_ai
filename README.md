@@ -95,6 +95,7 @@ Portrait refresh reuses retained memberships; see [portraits](docs/recognition/p
 | [scene_tag_exclusions.yml](scene_tag_exclusions.yml) | Global tag exclusions |
 | [marker_core_exclusions.yml](marker_core_exclusions.yml) | Marker primary-tag exclusions |
 | [facial_recognition.yml](facial_recognition.yml) | Recognition models, matching, portraits and resources |
+| [facial_recognition_solver.yml](facial_recognition_solver.yml) | Four-trial solver profile for a 16-CPU / 64-GiB budget ([usage](docs/recognition/solver-parallel.md#resource-profiles)) |
 | `tagger_sources.sqlite3` | Tagging evidence, checkpoints and publication state |
 | `faces_state.sqlite3` | Recognition evidence and identity/publication state |
 

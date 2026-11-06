@@ -2,6 +2,23 @@
 
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
+The shipped `facial_recognition.yml` is a starting profile for 16 available CPU
+slots, 64 GiB RAM allocated to this project and an SSD, with CUDA inference.
+It uses 16 rebuild workers, one native thread per worker, a 40 GiB working
+maximum and an 8 GiB evidence cache (including up to 4 GiB of matrices).
+The 4 GiB sprite cache and untracked process allocations need additional RAM.
+Rebuild profiling is initially enabled; disable it after measuring your workload.
+The smaller built-in defaults described below still apply to omitted settings.
+For four simultaneous solver trials, use the separate
+[solver resource profile](solver-parallel.md#resource-profiles).
+
+The run profile uses eight scan CPU workers and a recognizer microbatch of eight.
+Static-one ONNX graphs still execute one embedding at a time. Dynamic batching
+can slightly change floating-point scores, so check threshold-boundary behavior
+with the actual recognizer/provider. The GPU policy is `phase`; model-specific
+person/pose/body batches remain unchanged. Neither the YAML nor a 300 GB SSD
+allocation guarantees capacity for all retained evidence from 10,000 scenes.
+
 - [Progress and stage counters](#progress-and-stage-counters)
 - [Recognition GPU memory](#recognition-gpu-memory)
 - [Rebuild performance diagnostics](#rebuild-performance-diagnostics)
