@@ -8,7 +8,8 @@ from .resource_errors import ResourceLimit
 class Plans:
     def __init__(self,limit,disk_limit):
         self.limit,self.disk_limit,self.used=limit,disk_limit,0
-        self.db=sqlite3.connect('')
+        from .scratch_space import connect
+        self.db=connect()
         self.db.execute('PRAGMA temp_store=FILE')
         self.db.execute('PRAGMA cache_size=-512')
         self.db.execute('CREATE TABLE plans(position INTEGER PRIMARY KEY,payload TEXT)')

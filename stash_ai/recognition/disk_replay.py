@@ -8,7 +8,10 @@ from .memory_size import Reservation
 from .resource_errors import ResourceLimit
 
 
-class Connection(sqlite3.Connection):
+from .scratch_space import Connection as ScratchConnection, directory
+
+
+class Connection(ScratchConnection):
     def __init__(self,*args,**kwargs):
         import weakref
         super().__init__(*args,**kwargs)
@@ -35,12 +38,12 @@ def replay(config):
     from .run_cache import current
     cache=current()
     limit=min(config.data['execution']['rebuild_memory_bytes'],cache.working if cache and cache.working is not None else config.data['execution']['rebuild_memory_bytes'])
-    pages=min(2*1024**2,max(32768,limit//16))
+    pages=min(config.data['execution']['rebuild_sqlite_cache_bytes'],max(32768,limit//16))
     reservation=Reservation(limit,label='replay-page-cache')
     reservation.set(pages*2)
     try:
-        with tempfile.TemporaryDirectory(prefix='recognition-replay-') as directory:
-            uri=(Path(directory)/'replay.sqlite3').as_uri()
+        with directory(prefix='recognition-replay-') as path:
+            uri=(Path(path)/'replay.sqlite3').as_uri()
             db=sqlite3.connect(uri,uri=True,factory=Connection)
             try:
                 db.row_factory=sqlite3.Row
@@ -48,7 +51,8 @@ def replay(config):
                 db.execute('PRAGMA temp_store=FILE')
                 db.execute('PRAGMA mmap_size=0')
                 size=db.execute('PRAGMA page_size').fetchone()[0]
-                db.execute('PRAGMA max_page_count='+str(config.data['execution']['replay_snapshot_bytes']//size))
+                db.page_limit=config.data['execution']['replay_snapshot_bytes']
+                db.execute('PRAGMA max_page_count='+str(db.page_limit//size))
                 yield db,uri
             finally:
                 from stash_ai.runtime.cleanup import cleanup

@@ -66,9 +66,10 @@ class ComparisonBudget:
 class Records:
     """Repeatable SQL spool; only bounded selected rows return to the catalogue."""
     def __init__(self):
-        self.directory=tempfile.TemporaryDirectory(prefix='stash-hybrid-witnesses-')
+        from .scratch_space import directory,Connection
+        self.directory=directory(prefix='stash-hybrid-witnesses-')
         self.path=Path(self.directory.name)
-        self.db=sqlite3.connect(self.path/'records.sqlite')
+        self.db=sqlite3.connect(self.path/'records.sqlite',factory=Connection)
         self.db.execute('PRAGMA cache_size=-512')
         self.db.execute('PRAGMA journal_mode=OFF')
         self.db.execute('CREATE TABLE records (ordinal INTEGER PRIMARY KEY,id TEXT UNIQUE,payload BLOB)')
@@ -110,6 +111,8 @@ class Records:
             target=(self.path/(str(cluster)+'.bin')).open('ab')
             self.writers[cluster]=target
         self.writers.move_to_end(cluster)
+        from .scratch_space import grow
+        grow(self.path/(str(cluster)+'.bin'),len(blob))
         target.write(blob)
 
     def _build_modes(self,config,budget):
@@ -147,6 +150,8 @@ class Records:
         # for minimum similarity and contradiction checks, including zero weights.
         for cluster,vote in enumerate(votes):
             used=set()
+            from .scratch_space import grow
+            grow(self.path/(str(cluster)+'.weights'),counts[cluster])
             with (self.path/(str(cluster)+'.weights')).open('wb') as target:
                 for timestamp,pixel in self.db.execute('SELECT stamp,unit FROM scored WHERE cluster=? ORDER BY ordinal',(cluster,)):
                     timestamp,pixel=pickle.loads(timestamp),pickle.loads(pixel)
@@ -158,4 +163,7 @@ class Records:
 
     def close(self,*,keep=False):
         self.db.close()
-        if not keep:self.directory.cleanup()
+        (self.path/'records.sqlite').unlink(missing_ok=True)
+        if not keep:
+            from .scratch_space import release_directory
+            self.directory.cleanup();release_directory(self.path)

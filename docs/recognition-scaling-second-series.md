@@ -40,3 +40,16 @@ independent scene replay no longer rebuilds an unused global reference catalogue
 Validation: 33 reference/scoring/replay tests passed, including bounded query counts
 and exact equality with scalar scores. This is operation-count evidence, not a full
 three-million-frame throughput benchmark.
+
+## Shared rebuild resources
+
+`execution.rebuild.sqlite_cache_bytes` raises the previous tiny page-cache caps
+while charging both stores against the existing shared working-memory budget.
+`scratch_directory` selects the parent of one private run directory; `scratch_bytes`
+limits capacity shared by replay/reference/plan SQLite stores, hybrid witness files
+and centroid indexes. SQLite leases include rollback-journal headroom and grow in
+blocks; native executemany remains batched. Allocation failures preserve rollback,
+and owned files are removed on close/exit. Persistent caches, checkpoints and SQLite
+internal sort files remain separately budgeted (not covered by this scratch limit).
+Validation covers aggregate admission, rejected-write position, rollback, cleanup,
+configuration roundtrips, cold replay, checkpoint restore and global body matching.

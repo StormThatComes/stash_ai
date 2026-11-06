@@ -8,7 +8,8 @@ def reorder(search):
     if len(search.entries)<256:return
     import sqlite3,tempfile
     from contextlib import closing
-    with closing(sqlite3.connect('')) as ordering:
+    from .scratch_space import connect,file
+    with closing(connect()) as ordering:
         ordering.execute('PRAGMA cache_size=-512')
         ordering.execute('CREATE TABLE ordering(code BLOB,ordinal INTEGER)')
         for ordinal in range(len(search.entries)):
@@ -18,7 +19,7 @@ def reorder(search):
             coordinates=np.clip(np.floor(row[:16]*64)+8,0,15).astype('uint8')
             code=np.packbits(np.array([(c>>bit)&1 for bit in range(3,-1,-1) for c in coordinates],dtype='uint8')).tobytes()
             ordering.execute('INSERT INTO ordering VALUES (?,?)',(code,ordinal))
-        target=search.stack.enter_context(tempfile.TemporaryFile(prefix='stash-body-spatial-'))
+        target=search.stack.enter_context(file(prefix='stash-body-spatial-'))
         entries=[]
         for (ordinal,) in ordering.execute('SELECT ordinal FROM ordering ORDER BY code,ordinal'):
             search.index.seek(ordinal*32768);target.write(search.index.read(32768));entries.append(search.entries[ordinal])
