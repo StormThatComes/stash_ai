@@ -82,12 +82,15 @@ def _restore_origins(db, replay):
         yield from batch
 
 
-def _apply_members(db, replay, mapping):
+def _apply_members(db, replay, mapping, changed=None):
     rows = replay.execute('SELECT m.observation,m.person,k.sample_key FROM members m '
                           'JOIN sample_keys k ON k.observation=m.observation')
     for batch in _batches(rows):
-        db.executemany('INSERT INTO members VALUES (?,?)',
-                       ((row['observation'], mapping[row['person']]) for row in batch))
+        for row in batch:
+            updated=db.execute('INSERT INTO members VALUES (?,?) ON CONFLICT(observation) DO UPDATE SET person=excluded.person '
+                'WHERE members.person IS NOT excluded.person',(row['observation'],mapping[row['person']])).rowcount
+            if updated and changed is not None:
+                changed.add(db.execute('SELECT s.scene FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',(row['observation'],)).fetchone()[0])
         db.executemany('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
                        ((row['sample_key'], mapping[row['person']], row['observation']) for row in batch))
         yield from batch
@@ -327,17 +330,10 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 for person in tracked:
                     db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
                         (person, scope, namespace, time.time(), None, f'stash-ai-recognition:{database.installation}:{person}'))
+            from .assignment_delta import prune,candidates as apply_candidates
+            changed=prune(db,replay,selected,scope,namespace,policy)
             with tracking(
-                selected,
-                'Replace selected assignments',
-                unit='scene',
-            ) as tracked:
-                for item in tracked:
-                    db.execute('DELETE FROM members WHERE observation IN (SELECT o.id FROM observations o JOIN scans s '
-                               'ON s.id=o.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?)', (scope, namespace, item['scene']))
-                    db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (item['scan'], policy))
-            with tracking(
-                _apply_members(db, replay, mapping),
+                _apply_members(db, replay, mapping, changed),
                 'Save rebuilt memberships',
                 unit='member',
                 total=lambda: replay.execute(
@@ -347,8 +343,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 for row in tracked:
                     pass
             with tracking(
-                _inserted(db, 'INSERT INTO candidates VALUES (?,?,?,?,?,?)',
-                          _mapped_candidates(replay, mapping, policy, '')),
+                apply_candidates(db,_mapped_candidates(replay,mapping,policy,''),changed),
                 'Save rebuilt candidates',
                 unit='candidate',
                 total=lambda: replay.execute(
@@ -360,9 +355,9 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     pass
             from .unresolved_pool import apply as apply_pool
             pooled=apply_pool(database,replay,config,mapping)
-            from .publication_queue import enqueue
+            from .assignment_delta import enqueue
             for item in selected:
-                enqueue(db,scope,namespace,item['scene'],config,'selected_identity_rebuild')
+                enqueue(db,scope,namespace,item,config,item['scene'] in changed,'selected_identity_rebuild')
             references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                 label_scenes=[item['scene'] for item in selected])
             context = reference_context(references)
@@ -373,8 +368,10 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
                 "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "
                 "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE policy=? "
-                'AND scan IN (SELECT value FROM json_each(?))',
-                (context,encoded(sorted(representative_ids)),policy,encoded([item['scan'] for item in selected])))
+                "AND scan IN (SELECT value FROM json_each(?)) AND (json_extract(payload,'$.reference_context') IS NOT ? "
+                "OR COALESCE(json_extract(payload,'$.reference_selected'),-1) != "
+                "(json_extract(payload,'$.observation') IN (SELECT value FROM json_each(?))))",
+                (context,encoded(sorted(representative_ids)),policy,encoded([item['scan'] for item in selected]),context,encoded(sorted(representative_ids))))
             if pooled:
                 db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
                     "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "

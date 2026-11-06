@@ -356,15 +356,24 @@ def rebuild(database,selected,config,result):
                 if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
                     raise ResourceLimit('Person scene plan exceeds sapiensid.execution.plan_bytes.')
                 plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
-    from .publication_queue import enqueue
+    from .assignment_delta import enqueue
     with db:
         from .body_aliases import retire_disabled
         retire_disabled(database,selected,config)
+        changed=set()
+        # Keep temporary DDL inside the same rollback boundary for callers
+        # invoking the body stage directly, without the outer rebuild wrapper.
+        if not db.in_transaction:db.execute('BEGIN')
+        db.execute('CREATE TEMP TABLE desired_body_members(id TEXT PRIMARY KEY)')
+        db.executemany('INSERT INTO desired_body_members VALUES (?)',((r['id'],) for _,rows,_ in plans for r in rows))
         for item in selected:
             scan=db.execute('SELECT * FROM scans WHERE id=?',(item['scan'],)).fetchone()
-            db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
-                'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?)',
-                (scan['scope'],scan['namespace'],scan['scene']))
+            removed=db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
+                'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?) '
+                'AND observation NOT IN (SELECT id FROM desired_body_members)',
+                (scan['scope'],scan['namespace'],scan['scene'])).rowcount
+            if removed:changed.add(scan['scene'])
+        db.execute('DROP TABLE desired_body_members')
         stamp=policy(config)
         for scan,rows,decisions in plans:
             for row in rows:
@@ -375,11 +384,16 @@ def rebuild(database,selected,config,result):
                          f'stash-ai-recognition:{database.installation}:{person}'))
                     if decision['reason']=='body_scene_core':
                         db.execute('INSERT OR IGNORE INTO body_origins VALUES (?,?)',(row['id'],person))
-                db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
-                    (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision)))
+                updated=db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?) ON CONFLICT(observation) DO UPDATE SET '
+                    'person=excluded.person,role=excluded.role,status=excluded.status,policy=excluded.policy,proof=excluded.proof '
+                    'WHERE body_members.person IS NOT excluded.person OR body_members.role IS NOT excluded.role '
+                    'OR body_members.status IS NOT excluded.status OR body_members.policy IS NOT excluded.policy '
+                    'OR body_members.proof IS NOT excluded.proof',
+                    (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision))).rowcount
+                if updated:changed.add(scan['scene'])
         for item in selected:
             scan=db.execute('SELECT scope,namespace,scene FROM scans WHERE id=?',(item['scan'],)).fetchone()
-            enqueue(db,scan['scope'],scan['namespace'],scan['scene'],config,'body_scene_rebuild')
+            enqueue(db,scan['scope'],scan['namespace'],item,config,scan['scene'] in changed,'body_scene_rebuild')
         if plans:
             from .body_global import reconcile
             reconcile(database,selected,config)

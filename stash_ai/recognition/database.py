@@ -298,10 +298,34 @@ class FaceDatabase(AbstractContextManager):
         return identifier
 
     def progress(self, run, phase, values):
-        with self.connection:
-            self.connection.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)', (run, phase, encoded(values)))
+        # Scan checkpoints live in their own tables. Telemetry can be coalesced;
+        # it must never commit a caller's tentative matching/evidence writes.
+        pending=getattr(self,'_progress_pending',{})
+        self._progress_pending=pending
+        key=(run,phase);payload=encoded(values)
+        if self.connection.in_transaction:
+            pending.pop(key,None)
+            self.connection.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?)',(run,phase,payload))
+            return
+        pending[key]=payload
+        now=time.monotonic()
+        written=getattr(self,'_progress_written',{})
+        if key not in written or now-written[key]>=.5:
+            self._flush_progress()
+
+    def _flush_progress(self):
+        pending=getattr(self,'_progress_pending',{})
+        if pending:
+            with self.connection:
+                self.connection.executemany('INSERT OR REPLACE INTO progress VALUES (?,?,?)',
+                    ((run,phase,payload) for (run,phase),payload in pending.items()))
+            written=getattr(self,'_progress_written',{})
+            written.update((key,time.monotonic()) for key in pending)
+            self._progress_written=written
+            pending.clear()
 
     def finish_run(self, run, status, summary, error=None):
+        self._flush_progress()
         with self.connection:
             self.connection.execute('UPDATE runs SET finished=?,status=?,summary=?,error=? WHERE id=?',
                                     (time.time(), status, encoded(summary), error, run))
