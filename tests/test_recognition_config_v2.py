@@ -151,7 +151,7 @@ def test_shipped_run_collects_faceless_cues_once(tmp_path, monkeypatch):
 
     def body_model(config, *args, **kwargs):
         pose = config.data['sapiensid']['pose']
-        assert (pose['detector'], pose['backend']) == ('rfdetr_xl', 'vitpose_plus_large')
+        assert (pose['detector'], pose['backend']) == ('rfdetr_xl', 'pmpose')
         return person
 
     monkeypatch.setattr('stash_ai.recognition.sapiensid_backend.SapiensIDFaces', body_model)

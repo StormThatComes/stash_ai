@@ -115,7 +115,7 @@ def test_shipped_template_matches_default_schema(filename):
     assert collection_enabled(config)
     body = config.data['sapiensid']
     assert body['pose']['detector'] == 'rfdetr_xl'
-    assert body['pose']['backend'] == 'vitpose_plus_large'
+    assert body['pose']['backend'] == 'pmpose'
     assert body['identities']['enabled'] is False
     assert body['global_matching']['enabled'] is False
     run_profile = filename == 'facial_recognition.yml'
