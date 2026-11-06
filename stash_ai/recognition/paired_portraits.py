@@ -52,8 +52,8 @@ def source_bytes(image, framing, policy, *, limit, details=None):
 
 
 def retained_crop(db, observation, framing):
-    row = db.execute("SELECT crop FROM person_evidence WHERE observation=? AND contract=? "
-                     "AND status='ready'", (observation, framing['contract'])).fetchone()
+    from .person_signal import read
+    row = read(db, observation, framing['contract'])
     if row is None or not isinstance(row['crop'], bytes) or not row['crop']:
         raise PortraitFramingError('Portrait has no retained paired person pixels.')
     return row['crop']

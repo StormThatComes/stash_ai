@@ -155,6 +155,21 @@ def upgrade_artifact_triggers(db):
                 db.execute(current[name])
 
 
+PIXEL_TRIGGERS={}
+for event in ('INSERT','UPDATE','DELETE'):
+    sides=('new',) if event=='INSERT' else ('old',) if event=='DELETE' else ('old','new')
+    body=''
+    for side in sides:
+        body+=_bump('thumbnail',side+'.id')
+        body+=("INSERT INTO evidence_versions SELECT 'pixel-scan',scan,1 FROM observations "
+               f"WHERE CASE WHEN json_valid(quality) THEN json_extract(quality,'$.evidence_thumbnail_id') END={side}.id GROUP BY scan "
+               "ON CONFLICT(kind,key) DO UPDATE SET version=version+1;")
+    name='recognition_pixel_'+event.lower()
+    PIXEL_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON evidence_thumbnails BEGIN '+body+' END'
+PIXEL_SCHEMA=("CREATE INDEX observations_thumbnail ON observations(CASE WHEN json_valid(quality) THEN json_extract(quality,'$.evidence_thumbnail_id') END);\n"+
+              ';\n'.join(PIXEL_TRIGGERS.values())+';\n')
+
+
 class AuditedConnection(__import__('sqlite3').Connection):
     """Connection-owned committed DDL certificate; no process-global handles."""
     trigger_certificate=None
@@ -170,7 +185,8 @@ def validate_triggers(db, *, required=False):
     certificate=raw.trigger_certificate if memo else None
     if certificate is not None and certificate[0]==key and (certificate[1] or not required):return
     from .retention_index import TRIGGERS as pruning_triggers
-    accepted={**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
+    from .shared_person_evidence import TRIGGERS as shared_triggers
+    accepted={**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
@@ -183,6 +199,7 @@ def validate_triggers(db, *, required=False):
     if db.execute('PRAGMA user_version').fetchone()[0]>=9:expected.update(BODY_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=10:expected.update(BODY_MEMBER_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=11:expected.update(pruning_triggers)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=12:expected.update(shared_triggers);expected.update(PIXEL_TRIGGERS)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
 

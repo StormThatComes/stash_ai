@@ -46,6 +46,9 @@ def analyse(db, config, goals):
         rows = db.execute(f'SELECT o.* FROM {table} o WHERE o.{column} IN '
             f'(SELECT value FROM json_each(?)) AND o.embedding IS NOT NULL{guard}{where} '
             f'ORDER BY o.{column} LIMIT ?', (encoded(ids), *params, limit+1)).fetchall()
+        if table=='person_evidence':
+            from .shared_person_evidence import resolve
+            rows=[resolve(db,r) for r in rows]
         return [vector(r) for r in rows[:limit]], len(rows) > limit
     from .merge_scene_exclusions import constraints
     for item in constraints(goals):

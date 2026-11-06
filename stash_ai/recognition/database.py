@@ -12,7 +12,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -90,7 +90,7 @@ from .dependency_schema import SCHEMA as DEPENDENCY_SCHEMA
 SCHEMA += DEPENDENCY_SCHEMA
 TABLES += ('evidence_versions','evidence_fingerprints')
 SCHEMA_V5, TABLES_V5 = SCHEMA, TABLES
-from .person_signal import SCHEMA as PERSON_SCHEMA
+from .person_signal import LEGACY_SCHEMA as PERSON_SCHEMA
 SCHEMA += PERSON_SCHEMA
 TABLES += ('person_evidence',)
 
@@ -118,6 +118,13 @@ SCHEMA_V10,TABLES_V10=SCHEMA,TABLES
 from .retention_index import SCHEMA as RETENTION_SCHEMA,TABLES as RETENTION_TABLES
 SCHEMA+=RETENTION_SCHEMA
 TABLES+=RETENTION_TABLES
+SCHEMA_V11,TABLES_V11=SCHEMA,TABLES
+from .person_signal import SCHEMA as SHARED_PERSON_SCHEMA
+from .shared_person_evidence import SCHEMA as SHARED_SCHEMA
+from .dependency_schema import PIXEL_SCHEMA as PIXEL_CLOCK_SCHEMA
+from .pixel_catalogue import SCHEMA as PIXEL_INDEX_SCHEMA,TABLES as PIXEL_INDEX_TABLES
+SCHEMA=SCHEMA.replace(PERSON_SCHEMA,SHARED_PERSON_SCHEMA)+SHARED_SCHEMA+PIXEL_CLOCK_SCHEMA+PIXEL_INDEX_SCHEMA
+TABLES+=PIXEL_INDEX_TABLES
 
 
 def encoded(value):
@@ -217,9 +224,9 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
@@ -227,7 +234,14 @@ class FaceDatabase(AbstractContextManager):
                                  + (SUPPORT_SCHEMA if version <= 2 else '') + (REBUILD_SCHEMA if version<=3 else '')
                                  + (DEPENDENCY_SCHEMA if version<=4 else '') + (PERSON_SCHEMA if version<=5 else '')
                                  + (PIXEL_SCHEMA + EXTRA_SCHEMA if version<=6 else '')
-                                 + (RAW_SCHEMA if version<=7 else '') + (BODY_SCHEMA if version<=8 else '') + (BODY_IDENTITY_SCHEMA if version<=9 else '') + RETENTION_SCHEMA)
+                                 + (RAW_SCHEMA if version<=7 else '') + (BODY_SCHEMA if version<=8 else '') + (BODY_IDENTITY_SCHEMA if version<=9 else '') + (RETENTION_SCHEMA if version<=10 else ''))
+                from .shared_person_evidence import migrate
+                migrate(db,SHARED_PERSON_SCHEMA)
+                from .dependency_schema import PIXEL_TRIGGERS
+                db.execute("CREATE INDEX observations_thumbnail ON observations(CASE WHEN json_valid(quality) THEN json_extract(quality,'$.evidence_thumbnail_id') END)")
+                for sql in PIXEL_TRIGGERS.values():db.execute(sql)
+                for sql in PIXEL_INDEX_SCHEMA.split(';'):
+                    if sql.strip():db.execute(sql)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:
@@ -249,6 +263,8 @@ class FaceDatabase(AbstractContextManager):
             db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
             # Scoped model-link isolation resolves performer IDs for each selected
             # scene; avoid rescanning the entire identity catalog every time.
+            db.execute('CREATE INDEX IF NOT EXISTS person_shared_embedding ON person_evidence(embedding) WHERE length(embedding)<256')
+            db.execute('CREATE INDEX IF NOT EXISTS person_shared_crop ON person_evidence(crop) WHERE length(crop)<256')
             db.execute('CREATE INDEX IF NOT EXISTS people_scope_performer ON people(scope,performer)')
             db.execute("CREATE INDEX IF NOT EXISTS portraits_observation ON portraits(scope,person,"
                        "json_extract(metadata,'$.observation')) WHERE json_valid(metadata)")

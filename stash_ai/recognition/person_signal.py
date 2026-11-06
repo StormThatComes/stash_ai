@@ -20,6 +20,9 @@ CREATE TABLE person_evidence (
  CHECK((status='ready' AND embedding IS NOT NULL AND length(embedding)=16384)
     OR (status='unavailable' AND embedding IS NULL)));
 '''
+LEGACY_SCHEMA = SCHEMA
+SCHEMA = SCHEMA.replace('length(embedding)=16384', "(length(embedding)=16384 OR (substr(embedding,1,5)=X'626f64793a' AND length(embedding) BETWEEN 6 AND 255))")
+
 
 
 def defaults():
@@ -187,8 +190,9 @@ def available(db):
 def read(db, observation, expected):
     if not available(db):
         return None
-    return db.execute('SELECT * FROM person_evidence WHERE observation=? AND contract=?',
-                      (observation,expected)).fetchone()
+    from .shared_person_evidence import resolve
+    return resolve(db,db.execute('SELECT * FROM person_evidence WHERE observation=? AND contract=?',
+                      (observation,expected)).fetchone())
 
 
 def save(db, observation, expected, metadata, vector=None, crop=None):

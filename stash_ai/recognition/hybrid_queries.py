@@ -1,3 +1,5 @@
+from .shared_person_evidence import expression
+body_embedding = expression('embedding')
 """Frozen hybrid query recovery, including original merged appearances.
 
 Recovered rows are attachments only. All current strict identities compete,
@@ -34,7 +36,7 @@ def _recover(database, selected, config, *, births=()):
     from .hybrid_query_observer import query_observer, query_decision
     observe=query_observer(db,banks,config,births,selected)
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
-    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,e.metadata AS person_metadata,c.id AS candidate,c.person AS prior_owner FROM candidates c '
+    rows=db.execute(f'SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,{body_embedding} AS body,e.metadata AS person_metadata,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
         " LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? AND e.status='ready' "
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "

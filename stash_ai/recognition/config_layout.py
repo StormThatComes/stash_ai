@@ -99,7 +99,7 @@ _GROUPS = (
      'prefetch_scenes=rebuild_prefetch_scenes profile=profile_rebuild memory_bytes=rebuild_memory_bytes '
      'cache_bytes=rebuild_cache_bytes matrix_cache_bytes=rebuild_matrix_cache_bytes '
      'queue_bytes=rebuild_queue_bytes checkpoint_scenes=rebuild_checkpoint_scenes '
-     'checkpoint_bytes=rebuild_checkpoint_bytes replay_snapshot_bytes'),
+     'checkpoint_bytes=rebuild_checkpoint_bytes replay_snapshot_bytes pixel_index_bytes'),
     ('execution.rebuild.body', 'sapiensid.execution',
      'max_candidate_pairs max_witness_comparisons reference_bytes plan_bytes'),
     ('execution.portraits', 'execution',
