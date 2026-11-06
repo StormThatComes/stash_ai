@@ -65,7 +65,7 @@ pose:
       # requirements-cpu.txt or requirements-gpu.txt.
   estimator:
     # Select the keypoint model operating on the detected people.
-    backend: vitpose_plus_large
+    backend: pmpose
     # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
     keypoint_score_threshold: 0.5
     # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
