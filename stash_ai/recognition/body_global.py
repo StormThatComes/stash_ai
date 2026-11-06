@@ -73,7 +73,7 @@ def plan(db,config,bank,*,focus=None,compact=False):
     reserve()
     try:
         with Search(db,config,bank) as search:
-            for pair in exact_pairs(search.nominations(focus),bank,config,search.evidence):
+            for pair in exact_pairs(search.nominations(focus),bank,config,search.evidence,compact=compact):
                 a,b=pair['people']
                 reserve(size(pair)+512)
                 pairs[a,b]=pair;result['pairs'].append(pair)
