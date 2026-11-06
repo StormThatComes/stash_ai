@@ -22,7 +22,7 @@ def safe_url(url):
     return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
 
 
-def bounded_media(client, url, limit, timeout, *, cache=None):
+def bounded_media(client, url, limit, timeout, *, cache=None,verify_only=False):
     from stash_ai.runtime.cleanup import closing
     from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
     deadline = time.monotonic() + timeout
@@ -55,6 +55,11 @@ def bounded_media(client, url, limit, timeout, *, cache=None):
                     if response.headers.get('ETag',retained[0])!=retained[0]:
                         cache.discard(url)
                         raise ValueError('Recognition media cache acknowledgement changed its validator.')
+                    if verify_only:
+                        from .media_cache import Validator
+                        if limit is not None and retained[2]>limit:raise ValueError('Recognition media exceeds its byte budget.')
+                        if 'no-store' in response.headers.get('Cache-Control','').lower():cache.discard(url)
+                        return Validator(retained[1],retained[2])
                     body=cache.get(url)
                     if body is None or body[0]!=retained[0]:
                         # Corruption/eviction between metadata and 304: retry a
@@ -118,8 +123,14 @@ class SpriteInput:
         urls = list(dict.fromkeys(c.image for c in cues))
         self.hashes = {}
         for url in urls:
-            self._sheet(url)
-            self.hashes[url] = self.cache[url]
+            from .media_cache import Validator,VerifiedBytes
+            proof=bounded_media(self.client,url,None,settings['timeout_seconds'],cache=self.media_cache,verify_only=True)
+            if isinstance(proof,Validator):
+                self.hashes[url]=proof.sha256;self.cache[url]=proof.sha256
+            else:
+                actual=proof.sha256 if isinstance(proof,VerifiedBytes) else hashlib.sha256(proof).hexdigest()
+                self.sprites.remember(actual,proof);self.hashes[url]=actual;self.cache[url]=actual
+            if len(self.cache)>2:self.cache.popitem(last=False)
         self.cues = cues
         self.coverage = {'total_cues': total, 'selected_cues': len(cues), 'complete_sampling': total == len(cues)}
         self.manifest = {'cues': [[c.start, c.end, safe_url(c.image), list(c.rect)] for c in cues],
