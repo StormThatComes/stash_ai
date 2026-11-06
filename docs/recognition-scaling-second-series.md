@@ -67,3 +67,15 @@ witness selection are paged without building a full owner ID-to-row map.
 Validation: 71 body/hybrid/scaling/parallel tests, including the exhaustive oracle.
 A 180-vector coherent mode retains every vector with fewer than 180 scalar dots
 instead of 16110; no end-to-end GPU speedup is claimed.
+
+## Resume before raw replay import
+
+When rebuild checkpoints are enabled, retain a bounded raw replay image before
+strict matching. Resume first validates the database's audited dependency clock,
+selection, installation, trusted schema, vector source and file checksum. Matching
+input images are copied with SQLite backup before restoring existing strict/late
+checkpoints, skipping per-observation SQL import and pixel canonicalization. Changed
+or corrupt inputs fall back to cold import. The optional image uses the smaller of
+checkpoint_bytes and replay_snapshot_bytes; it is separate from transient scratch.
+Tests cover interrupted disk/RAM replay, corrupt images, raw mutations, changed
+bindings, checkpoint corruption and the existing full-vs-resumed decision oracle.
