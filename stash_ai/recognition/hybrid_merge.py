@@ -20,7 +20,7 @@ def signature(db,selected,config):
     first=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     if first is None:raise ValueError('Hybrid rebuild requires an existing scan.')
     scope,namespace=first
-    h=hashlib.sha256(encoded(plain([selected,matching_policy(config),config.data['sapiensid']['execution'],
+    h=hashlib.sha256(encoded(plain(["hybrid-v4",selected,matching_policy(config),config.data['sapiensid']['execution'],
         config.data['clustering'],config.data['execution']])).encode())
     from .pixel_storage import integrity
     h.update(integrity(db,scope,namespace).encode())
@@ -35,9 +35,9 @@ def signature(db,selected,config):
         ('origins','SELECT i.sample_key,i.person,i.observation FROM identity_origins i JOIN people p ON p.id=i.person WHERE p.scope=? AND p.namespace=? ORDER BY i.sample_key')]
     from .body_identity import available as bodies_available
     if bodies_available(db):
-        queries.append(('body-scope','SELECT b.scan,m.observation,m.person FROM body_members m '
-            'JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan '
-            'WHERE s.scope=? AND s.namespace=? ORDER BY m.observation'))
+        queries.append(('body-scope','SELECT b.scan,b.id,b.face,b.contract,m.person FROM body_observations b '
+            'LEFT JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
+            'WHERE s.scope=? AND s.namespace=? ORDER BY b.id'))
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
     from .dependencies import cached, supported
     from .dependency_schema import validate_triggers, EXTRA_TRIGGERS, RAW_TRIGGERS
@@ -64,7 +64,7 @@ def signature(db,selected,config):
                 h.update(encoded([scan,value]).encode())
         else:
             compute=lambda:rows_digest(query,(scope,namespace))
-            value=(cached(db,'hybrid-'+name,digest([scope,namespace]),'v2',compute,checked=True)
+            value=(cached(db,'hybrid-'+name,digest([scope,namespace]),'v3',compute,checked=True)
                    if cacheable else compute())
             h.update(value.encode())
     return digest([scope,namespace,selected]),h.hexdigest()

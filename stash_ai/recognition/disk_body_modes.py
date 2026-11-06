@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import numpy as np
 
-from .independent_evidence import Votes,unit
+from .independent_evidence import Votes,unit,stamp
 
 
 class Matrix:
@@ -73,7 +73,7 @@ class Records:
         self.db.execute('PRAGMA journal_mode=OFF')
         self.db.execute('CREATE TABLE records (ordinal INTEGER PRIMARY KEY,id TEXT UNIQUE,payload BLOB)')
         self.db.execute('CREATE TABLE features (cluster INTEGER,embedding BLOB,PRIMARY KEY(cluster,embedding))')
-        self.db.execute('CREATE TABLE scored (cluster INTEGER,unit BLOB,PRIMARY KEY(cluster,unit))')
+        self.db.execute('CREATE TABLE scored (ordinal INTEGER PRIMARY KEY,cluster INTEGER,stamp BLOB,unit BLOB)')
 
     def add(self,row):
         self.db.execute('INSERT INTO records(id,payload) VALUES (?,?)',(row['id'],pickle.dumps(dict(row),protocol=5)))
@@ -111,9 +111,8 @@ class Records:
                 cluster=len(votes);votes.append(Votes());counts.append(0)
             self.db.execute('INSERT OR IGNORE INTO features VALUES (?,?)',(cluster,blob))
             with (self.path/(str(cluster)+'.bin')).open('ab') as target:target.write(blob)
-            fresh=self.db.execute('INSERT OR IGNORE INTO scored VALUES (?,?)',
-                                  (cluster,pickle.dumps(unit(row),protocol=5))).rowcount
-            with (self.path/(str(cluster)+'.weights')).open('ab') as target:target.write(bytes([int(bool(fresh))]))
+            self.db.execute('INSERT INTO scored(cluster,stamp,unit) VALUES (?,?,?)',
+                            (cluster,pickle.dumps(stamp(row),protocol=5),pickle.dumps(unit(row),protocol=5)))
             votes[cluster].add(row);support.add(row);counts[cluster]+=1
             # Bound vote metadata as well as vector tiles and SQLite page cache.
             seen+=1
@@ -124,6 +123,16 @@ class Records:
             if charge+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ResourceLimit('SapiensID reference_bytes budget exceeded by mode vote metadata.')
         if any(len(v)<minimum for v in votes):return (),0
+        # Use the same maximum cue/pixel matching as support. Keep every vector
+        # for minimum similarity and contradiction checks, including zero weights.
+        for cluster,vote in enumerate(votes):
+            used=set()
+            with (self.path/(str(cluster)+'.weights')).open('wb') as target:
+                for timestamp,pixel in self.db.execute('SELECT stamp,unit FROM scored WHERE cluster=? ORDER BY ordinal',(cluster,)):
+                    timestamp,pixel=pickle.loads(timestamp),pickle.loads(pixel)
+                    fresh=pixel not in used and vote.owners.get(pixel)==timestamp
+                    if fresh:used.add(pixel)
+                    target.write(bytes([int(fresh)]))
         return tuple(Matrix(self.path/(str(i)+'.bin'),n,self.directory,self.path/(str(i)+'.weights'))
                      for i,n in enumerate(counts)),len(support)
 
