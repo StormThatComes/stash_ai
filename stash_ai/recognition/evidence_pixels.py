@@ -88,24 +88,27 @@ def _aliases(db,scope=None,namespace=None,*,budget=67108864):
                 if scratch is None:
                     scratch = sqlite3.connect('')
                     scratch.row_factory = sqlite3.Row
-                    scratch.execute('CREATE TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
+                    scratch.execute('CREATE TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, observation TEXT, aspect REAL)')
                     scratch.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
                 bucket = signature(pixels)
                 alias = None
                 candidates = scratch.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,))
                 for candidate in candidates:
+                    witness = db.execute('SELECT quality,embedding FROM observations WHERE id=?',
+                                         (candidate['observation'],)).fetchone()
                     if fingerprint == candidate['fingerprint'] or verified(pixels,
-                            np.frombuffer(candidate['pixels'], dtype='uint8'), sample,
-                            np.frombuffer(candidate['embedding'], dtype='<f4'),
+                            np.frombuffer(read(db, metadata(witness['quality'])), dtype='uint8'), sample,
+                            np.frombuffer(witness['embedding'], dtype='<f4'),
                             record.get('evidence_aspect'), candidate['aspect']):
                         alias = candidate['fingerprint']
                         break
                 candidates.close()
                 if alias is None:
-                    used+=len(raw)+len(row['embedding'])+1024
+                    # The disk index holds addresses, never a second pixel/vector bank.
+                    used+=len(fingerprint)+len(row['id'])+1024
                     if used>budget:raise ResourceLimit('Pixel witness index exceeds recognition evidence budget.')
-                    scratch.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?,?)',
-                        (bucket, fingerprint, raw, row['embedding'], record.get('evidence_aspect')))
+                    scratch.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?)',
+                        (bucket, fingerprint, row['id'], record.get('evidence_aspect')))
                 elif alias != fingerprint:
                     yield fingerprint, alias
     finally:
@@ -202,13 +205,16 @@ def _aliases_cached(db,scope=None,namespace=None,*,budget=67108864,persist=False
 
 
 # Increment when the pixel verification contract changes.
-ALIAS_FORMAT = 1
+ALIAS_FORMAT = 2
 
 
 def canonicalize(db):
     """Materialize the same verified aliases in a disposable replay."""
-    mapping = dict(aliases(db))
-    if not mapping and _active_aliases.get() is None:
+    # A local map cannot be composed with a global map: similarity is not
+    # transitive. Use the enclosing authoritative map (and its budget) once.
+    active = _active_aliases.get()
+    mapping = active if active is not None else dict(aliases(db))
+    if not mapping:
         return
     # Local ordering, worker input and the cache signature must see the same
     # final pixel vote, including a representative outside this selection.
@@ -216,7 +222,7 @@ def canonicalize(db):
                           "AND json_type(quality,'$.evidence_pixel_sha256')='text'"):
         record = dict(metadata(row['quality']))
         pixel=record['evidence_pixel_sha256']
-        alias=canonical_pixel(mapping.get(pixel,pixel))
+        alias=mapping.get(pixel,pixel)
         if alias!=pixel:
             record['evidence_pixel_sha256'] = alias
             db.execute('UPDATE main.observations SET quality=? WHERE id=?',

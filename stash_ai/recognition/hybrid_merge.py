@@ -10,7 +10,7 @@ from .progress import stage, tracking
 
 
 def signature(db,selected,config):
-    """Exact semantic warm stamp; publication-only fields and pixels are excluded.
+    """Exact semantic warm stamp; publication-only fields are excluded.
 
     Do not trust a former merge merely because its input embeddings still exist:
     changed membership, candidates, input contracts or rivals invalidate it too.
@@ -22,6 +22,8 @@ def signature(db,selected,config):
     scope,namespace=first
     h=hashlib.sha256(encoded(plain([selected,matching_policy(config),config.data['sapiensid']['execution'],
         config.data['clustering'],config.data['execution']])).encode())
+    from .pixel_storage import integrity
+    h.update(integrity(db,scope,namespace).encode())
     queries=[
         ('scans', 'SELECT rowid,id,scene,input_sha,policy_sha,status,cursor,total FROM scans WHERE scope=? AND namespace=? ORDER BY id'),
         ('scan-heads', 'SELECT s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND '+current_scan()+' ORDER BY s.id'),
