@@ -27,6 +27,9 @@ class Budget:
         if total>self.limit:
             raise ResourceLimit('Recognition scratch allocations exceed execution.rebuild.scratch_bytes.',
                 budget='execution.rebuild.scratch_bytes',limit=self.limit,requested=total)
+        if growth:
+            from .disk_budget import check
+            check(growth,self.directory)
         if growth and shutil.disk_usage(self.directory).free<growth:
             raise ResourceLimit('Insufficient free space in recognition scratch directory.')
         self.used=total;self.peak=max(self.peak,total)
@@ -47,7 +50,9 @@ def scope(config):
     with tempfile.TemporaryDirectory(prefix='recognition-scratch-',dir=directory) as path:
         budget=Budget(settings.get('rebuild_scratch_bytes',256*1024**3),path)
         token=_active.set(budget)
-        try:yield budget
+        from .disk_budget import temporary
+        try:
+            with temporary(path):yield budget
         finally:
             from .profiling import count
             count('scratch_reserved_peak_bytes',budget.peak)

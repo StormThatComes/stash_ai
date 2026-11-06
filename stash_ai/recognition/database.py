@@ -321,6 +321,8 @@ class FaceDatabase(AbstractContextManager):
         return identifier
 
     def progress(self, run, phase, values):
+        from .disk_budget import check
+        check(throttled=True)
         # Scan checkpoints live in their own tables. Telemetry can be coalesced;
         # it must never commit a caller's tentative matching/evidence writes.
         pending=getattr(self,'_progress_pending',{})

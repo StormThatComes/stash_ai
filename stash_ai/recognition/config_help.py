@@ -244,6 +244,8 @@ HELP = {
     'execution.rebuild.checkpoint_scenes': 'Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range: 0..1000000.',
     'execution.rebuild.checkpoint_bytes': 'Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.',
     'execution.rebuild.sqlite_cache_bytes': 'SQLite page-cache ceiling per replay/reference store, additionally constrained by the shared RAM budget. Range: 32768..1073741824.',
+    'execution.rebuild.disk_total_bytes': 'Maximum combined recognition database, caches, checkpoints and scratch bytes per volume; 0 disables. Range: 0..10995116277760.',
+    'execution.rebuild.disk_free_bytes': 'Free disk reserve per volume, also covering unattributed SQLite sort files and other applications; 0 disables. Range: 0..1099511627776.',
     'execution.rebuild.scratch_bytes': 'Combined capacity of private replay databases, reference pages, body witnesses and search files; includes journal headroom. Excludes persistent caches, checkpoints and SQLite internal sort files. Range: 1048576..1099511627776.',
     'execution.rebuild.scratch_directory': 'Scratch parent directory, relative to this YAML; null uses the system temporary directory. Run-owned files are removed on exit.',
     'execution.rebuild.replay_snapshot_bytes': 'Maximum on-disk evidence snapshot used by offline reports and solver replay. Range: 1048576..1099511627776.',

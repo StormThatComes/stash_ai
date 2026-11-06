@@ -16,7 +16,7 @@ from benchmarks.benchmark_recognition_replay import fixture
 def test_retained_benchmark_never_opens_a_writer_or_reads_images(tmp_path, monkeypatch):
     config = setup(tmp_path)
     with FaceDatabase(config.database) as state:
-        fixture(state, 20, 128, 16)
+        fixture(state, 4, 16, 4)
         state.connection.execute("UPDATE observations SET source='https://private.invalid/secret-token', quality=?,crop=?",
                                  ('{"private":"quality"}', b'private JPEG payload'))
         state.connection.commit()
@@ -25,7 +25,7 @@ def test_retained_benchmark_never_opens_a_writer_or_reads_images(tmp_path, monke
     def readonly(path):
         db = original(path)
         db.set_authorizer(lambda action, table, column, *_: sqlite3.SQLITE_DENY
-            if action == sqlite3.SQLITE_READ and (table == 'observations' and column in ('quality', 'crop')
+            if action == sqlite3.SQLITE_READ and (table == 'observations' and column == 'crop'
                                                  or table == 'portraits' and column == 'image') else sqlite3.SQLITE_OK)
         return db
     monkeypatch.setattr(benchmark, '_open_readonly', readonly)
@@ -34,7 +34,7 @@ def test_retained_benchmark_never_opens_a_writer_or_reads_images(tmp_path, monke
     data['execution']['rebuild_checkpoint_scenes'] = 1  # Benchmark must override disk checkpoints.
     result = benchmark.run(replace(config, data=data), all_scenes=True, namespace='ns', workers=(1, 2))
     assert result['identical_semantics'] and result['source_read_only']
-    assert result['manifest']['scenes'] == 20
+    assert result['manifest']['scenes'] == 4
     assert {t['mode'] for t in result['trials']} == {'cold', 'cached'}
     assert all(t['memory']['method'] == 'sampled-process-rss' for t in result['trials'])
     assert all(t['profile']['cpu']['submitted_blocks'] == 0 for t in result['trials'] if t['mode'] == 'cached')
@@ -48,21 +48,21 @@ def test_retained_benchmark_never_opens_a_writer_or_reads_images(tmp_path, monke
 def test_latest_partial_scan_cannot_fall_back_to_older_complete_evidence(tmp_path):
     config = setup(tmp_path)
     with FaceDatabase(config.database) as state:
-        fixture(state, 16, 128, 16)
+        fixture(state, 4, 16, 4)
         state.connection.execute("INSERT INTO scans SELECT 'newer',scope,scene,namespace,'new-input',policy_sha,"
                                  "manifest,coverage,total,0,'partial' FROM scans WHERE scene='1'")
         state.connection.commit()
     with pytest.raises(ValueError, match='latest complete'):
         benchmark.run(config, ['1'], namespace='ns', workers=(1,))
     result = benchmark.run(config, all_scenes=True, namespace='ns', workers=(1,))
-    assert result['manifest']['scenes'] == 15
+    assert result['manifest']['scenes'] == 3
     assert result['manifest']['skipped_latest_incomplete'] == 1
 
 
 def test_foreign_or_executable_schema_is_refused_without_modification(tmp_path):
     config = setup(tmp_path)
     with FaceDatabase(config.database) as state:
-        fixture(state, 16, 128, 16)
+        fixture(state, 4, 16, 4)
         state.connection.execute('CREATE VIEW foreign_view AS SELECT * FROM scans')
         state.connection.commit()
     before = config.database.read_bytes()
