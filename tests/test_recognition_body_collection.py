@@ -33,7 +33,7 @@ class Persons:
         self.frame_people=[]
         for i in range(self.count):
             points=[[-1.,-1.]]*17
-            if i==0:points[:3]=[[80.,70.],[60.,60.],[100.,60.]]
+            if i==0:points[:3]=[[80.,84.],[111.,60.],[49.,60.]]
             points[5:13]=[[40.,90.],[120.,90.],[30.,110.],[130.,110.],[20.,130.],[140.,130.],[60.,145.],[100.,145.]]
             self.frame_people.append(dict(bounds=[0,0,160,160],keypoints=points,score=.99))
         self.face_matches=associate(faces,self.frame_people)

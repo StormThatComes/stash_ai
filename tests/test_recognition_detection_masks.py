@@ -20,7 +20,7 @@ from tests.test_recognition_pose_refinement import BOX, Pose, Segmenter
 
 
 class SpeckledSAM(Segmenter):
-    def predict(self, points):
+    def predict(self, points, negative=()):
         mask, score = super().predict(points)
         mask[2, 2] = True  # Raw-only speckle; never passed to PMPose.
         mask[64:70, 43:49] = False  # Hole must survive both capture and rendering.
@@ -39,7 +39,7 @@ class RefinedDetector(Detector):
         self.pose.settings['mode'] = mode
         if score is not None:
             predict = self.pose.segmenter.predict
-            self.pose.segmenter.predict = lambda points: (predict(points)[0], score)
+            self.pose.segmenter.predict = lambda points, negative=(): (predict(points, negative)[0], score)
 
     def detect(self, image, *, force_pose=False):
         assert force_pose

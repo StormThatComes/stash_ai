@@ -381,6 +381,7 @@ def test_unmatched_reason_is_drawn_in_png_and_retained_in_manifest(tmp_path, mon
     outside = dict(PERSON, keypoints=[[4, 4]] * 3 + [[-1, -1]] * 14)
     partial = dict(PERSON, bounds=[32, 4, 156, 156])
     few = dict(partial, keypoints=[[80, 84]] + [[-1, -1]] * 16)
+    aligned = dict(PERSON, keypoints=[FACE.landmarks[j] for j in (2,1,0)] + PERSON['keypoints'][3:])
     people = {
         'no_people_detected': [],
         'face_outside_person_box': [dict(PERSON, bounds=[140, 4, 156, 156])],
@@ -390,8 +391,8 @@ def test_unmatched_reason_is_drawn_in_png_and_retained_in_manifest(tmp_path, mon
         'insufficient_head_landmarks': [few],
         'head_landmark_mismatch': [partial],
         'mixed_association_failures': [few, partial],
-        'multiple_person_candidates': [PERSON, PERSON],
-        'competing_faces': [PERSON],
+        'multiple_person_candidates': [aligned, aligned],
+        'competing_faces': [aligned],
     }[reason]
     faces = [FACE, FACE] if reason == 'competing_faces' else [FACE]
 

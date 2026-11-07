@@ -24,9 +24,13 @@ def detector(monkeypatch):
     config = SimpleNamespace(data=data)
     confidence = torch.ones((1, 17))
     confidence[0, -1] = .1
+    points = torch.full((1,17,2), 30.)
+    # The stable nose and left eye agree; the variable boundary eye is unobserved by pose.
+    points[0,:3] = torch.tensor([[30.,40.],[40.,30.],[-1.,-1.]])
+    points[0,5:7] = torch.tensor([[60.,55.],[25.,55.]])
     result = SimpleNamespace(
         boxes=SimpleNamespace(xyxy=torch.tensor([[10., 20., 91., 140.]]), conf=torch.tensor([.99])),
-        keypoints=SimpleNamespace(xy=torch.full((1, 17, 2), 30.), conf=confidence))
+        keypoints=SimpleNamespace(xy=points, conf=confidence))
     monkeypatch.setattr(backend, 'load_pose', lambda _: SimpleNamespace(
         predict=lambda **kw: [result] * (len(kw['source']) if isinstance(kw['source'],list) else 1)))
     model = backend.SapiensIDFaces(config, {}, load_identity=False, load_detector=False)
@@ -80,7 +84,7 @@ def test_valid_face_points_and_existing_missing_pose_points_are_preserved(detect
         _, points, _ = detector.audit_input(image, face)
         expected = (np.asarray(face.landmarks, dtype=np.float32) - [10, 20] + [19, 0]) / 120
         np.testing.assert_allclose(points[0, 17:], expected, atol=1e-7)
-        assert (points[0, :17] == -1).all(dim=1).sum().item() == 1
+        assert (points[0, :17] == -1).all(dim=1).sum().item() == 2
 
 
 def test_outside_point_does_not_relax_ambiguous_person_association(detector):
@@ -148,7 +152,7 @@ def test_confident_pose_points_on_zero_edges_survive_and_unusable_points_do_not(
                            keypoints=SimpleNamespace(xy=points,conf=confidence))
     detector.pose=SimpleNamespace(predict=lambda **kw:[result])
     with Image.new('RGB',(160,180)) as image:
-        face=checked_detection([0,0,40,40,20,20,25,20,20,25,15,30,25,30,.99])
+        face=checked_detection([0,0,40,40,0,0,10,0,0,10,15,30,25,30,.99])
         detector.detect(image,faces=[face])
         retained=detector.frame_people[0]['keypoints']
         assert retained[:3]==[[0.,10.],[10.,0.],[0.,0.]]

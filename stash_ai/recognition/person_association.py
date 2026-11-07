@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='joint-landmark-assignment-v2', containment_tolerance=.05,
+    return dict(version='joint-landmark-assignment-v3', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -37,8 +37,6 @@ def association_rejection(face, person):
         return 'no_valid_head_keypoints'
     if not any(x <= px <= x+w and y <= py <= y+h for px, py in head):
         return 'head_keypoints_outside_face'
-    if contained:
-        return None
     landmarks = getattr(face, 'landmarks', ())
     pairs = []
     for pose_index, face_index in enumerate((2, 1, 0)):
@@ -48,6 +46,11 @@ def association_rejection(face, person):
         if (_inside(pose_point, (left, top, right, bottom)) and
                 _inside(face_point, (x, y, x+w, y+h))):
             pairs.append((pose_point, face_point))
+    if contained:
+        # A missing far eye is common in profile. Measured contradictions still veto.
+        if any(math.dist(pose, reference) > .20 * min(w, h) for pose, reference in pairs):
+            return 'head_landmark_mismatch'
+        return None
     if len(pairs) < settings['min_head_landmarks']:
         return 'insufficient_head_landmarks'
     distance = settings['max_head_distance'] * min(w, h)

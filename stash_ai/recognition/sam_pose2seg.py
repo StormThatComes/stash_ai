@@ -125,12 +125,14 @@ class Segmenter:
             finally:
                 self.predictor.reset_predictor()
 
-    def predict(self, points):
+    def predict(self, points, negative=()):
         import numpy as np
-        # Upstream BMPv2 uses the three most visible positive points, no box.
-        # This leaves missing limbs outside a D-FINE box available to SAM.
-        masks, scores, _ = self.predictor.predict(point_coords=points,
-            point_labels=np.ones(len(points), dtype=np.int32), box=None, multimask_output=False)
+        labels = np.ones(len(points), dtype=np.int32)
+        if len(negative):
+            points = np.concatenate((points, negative))
+            labels = np.concatenate((labels, np.zeros(len(negative), dtype=np.int32)))
+        masks, scores, _ = self.predictor.predict(point_coords=points, point_labels=labels,
+            box=None, multimask_output=False)
         masks, scores = np.asarray(masks), np.asarray(scores)
         if (masks.ndim != 3 or len(masks) != 1 or scores.shape != (1,) or
                 not np.isfinite(masks).all() or not np.isin(masks, [0, 1]).all() or
