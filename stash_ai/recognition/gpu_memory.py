@@ -67,6 +67,8 @@ class GpuMemory:
         self.samples = 0
         self.latest = {}
         self.peaks = {}
+        self.display = ''
+        self.reported_unavailable = False
         self.sampled_scene = None
         self.scene_sample_at = float('-inf')
 
@@ -114,7 +116,17 @@ class GpuMemory:
                 f": process={size(values['process_bytes'])}"
                 f" torch_allocated={size(tensor.get('allocated_bytes'))}"
                 f" torch_reserved={size(tensor.get('reserved_bytes'))}")
-        (self.report.detail if scene is not None else self.report.write)(line)
+        from .live_resources import gib
+        current = values['process_bytes']
+        self.display = (f'{stage} {point} · process {gib(current)} · sampled max {gib(self.peaks.get("process_bytes"))}'
+                        f' · torch reserved {gib(tensor.get("reserved_bytes"))}')
+        unavailable = current is None and not any(v is not None for v in tensor.values())
+        if self.report.verbose:
+            self.report.detail(line)
+        elif unavailable and not self.reported_unavailable:
+            self.reported_unavailable = True
+            self.report.write('VRAM measurement unavailable for this process.')
+
 
     def summary(self):
         return dict(samples=self.samples, sampled_peak_bytes=dict(self.peaks),

@@ -26,8 +26,11 @@ def command(function):
         style = getattr(args, 'progress_style', 'off')
         state.console = None
         if state.progress:
+            from .live_resources import ConsoleResources
+            state.resources = ConsoleResources(config, cpus=getattr(args, 'solver_cpus', None))
             state.console = ConsolePresenter(lambda text: print(text, file=sys.stderr, flush=True),
                                              style=style, status_position=0, heartbeat=60.).start()
+            state.console.live_fields = state.resources.fields
             state.console.heartbeat_on_progress = True
         token = _active.set(state)
         outcome = 'completed'

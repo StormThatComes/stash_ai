@@ -50,7 +50,7 @@ class Budget:
             held=sum(max(0,cap-p.stat().st_size) for p,(vol,cap) in self.reservations.items() if vol==dev)
             requested=row['used']+held+(growth if dev==device else 0)
             free=shutil.disk_usage(row['path']).free
-            row.update(free=free,requested=requested)
+            row.update(free=free, requested=requested, reserved=held)
             if self.limit and requested>self.limit:
                 raise ResourceLimit('Recognition data, caches and scratch exceed the per-volume disk budget.',
                     budget='execution.rebuild.disk_total_bytes',limit=self.limit,requested=requested)

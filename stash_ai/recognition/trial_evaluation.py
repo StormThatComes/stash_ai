@@ -29,7 +29,13 @@ def evaluate(name, settings, *, seed, source, scope, namespace, installation, sc
     try:
         with heartbeat(name, progress) as live:
             reporter = ReplayProgress(name, live) if live else None
-            with observe_updates(reporter.update, count_totals=False) if reporter else nullcontext():
+            from .solver_execution import current
+            from .live_resources import monitor
+            runtime = current()
+            meter = getattr(live, 'meter', None)
+            if meter is not None and runtime is not None:
+                meter.trial_budget = runtime.trial_bytes
+            with monitor(meter), observe_updates(reporter.update, count_totals=False) if reporter else nullcontext():
                 result = _evaluate(name, settings, seed=seed, source=source, scope=scope,
                     namespace=namespace, installation=installation, scans=scans,
                     observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,

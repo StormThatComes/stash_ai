@@ -6,23 +6,29 @@ from time import monotonic
 
 from .console_layout import compact, clock
 from .progress import status_lines
+from .live_resources import gib
 
 
-def worker_row(snapshot, now):
-    fields = [snapshot['stage'], clock(now - snapshot['started'])]
+def worker_row(snapshot, now, width):
+    resources = snapshot.get('resources', {})
+    tail = [clock(now - snapshot['started'])]
     if snapshot.get('work'):
         work = snapshot['work'][-1]
         total = '?' if work['total'] is None else work['total']
-        fields.append(f"{work['completed']}/{total} {work['unit']}")
+        tail.append(f"{work['completed']}/{total} {work['unit']}")
     reported = snapshot.get('reported', snapshot['updated'])
     completed = snapshot.get('last_completed')
     if now - reported >= 15:
-        fields.append('no telemetry ' + clock(now - reported))
-    elif completed is None:
-        fields.append('awaiting first completion')
-    elif now - completed >= 15:
-        fields.append('last progress ' + clock(now - completed) + ' ago')
-    return ' · '.join(fields)
+        tail.append('no telemetry ' + clock(now - reported))
+    elif completed is not None and now - completed >= 15:
+        tail.append('last progress ' + clock(now - completed) + ' ago')
+    if resources.get('rss') is not None:
+        tail.append('RSS ' + gib(resources['rss']))
+    if resources.get('cores') is not None:
+        tail.append(f"CPU {resources['cores']:.1f}")
+    detail = ' · '.join(tail)
+    stage, = compact([snapshot['stage']], max(12, width - len(detail) - 3))
+    return f'{stage} · {detail}'
 
 
 class SolverDisplay:
@@ -54,8 +60,22 @@ class SolverDisplay:
             if self.pool or self.preparing:
                 lines.append(self.pool or self.preparing)
             for name, value in self.rows.items():
-                text = worker_row(value, now) if isinstance(value, dict) else value
+                text = worker_row(value, now, width-12) if isinstance(value, dict) else value
                 lines.append(f'{name:<12}{text}')
+            if fields.get('process'):
+                lines.append('Coordinator: ' + fields['process'])
+            plans = {v['resources']['trial_budget'] for v in self.rows.values() if isinstance(v, dict)
+                     and v.get('resources', {}).get('trial_budget')}
+            if plans:
+                lines.append('Admission per trial: ' + ', '.join(gib(plan) for plan in sorted(plans)))
+            if fields.get('disk'):
+                lines.append('SSD: ' + fields['disk'])
+            leases = [v['resources'] for v in self.rows.values() if isinstance(v, dict)
+                      and 'scratch_reserved' in v.get('resources', {})]
+            if leases:
+                free = [r['scratch_free'] for r in leases if r.get('scratch_free') is not None]
+                lines.append('Trial scratch held: ' + gib(sum(r['scratch_reserved'] for r in leases))
+                             + ' · min sampled volume free ' + gib(min(free) if free else None))
             return compact(lines, width)
 
     def heartbeat(self, row, fields):

@@ -191,7 +191,8 @@ def test_snapshots_are_bounded_and_unknown_process_usage_is_not_zero(monkeypatch
     assert summary['sampled_peak_bytes'] == dict(allocated_bytes=100, reserved_bytes=200)
     assert saved[-1][2] == summary
     gpu.record('rebuild', 'before')
-    assert 'process=unavailable' in messages[-1]
+    assert 'process n/a' in gpu.display and 'torch reserved' in gpu.display
+    assert not messages
 
 
 def test_fast_scenes_skip_monitoring_but_keep_paired_boundary_samples(monkeypatch):

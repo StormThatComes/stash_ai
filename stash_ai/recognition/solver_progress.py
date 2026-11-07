@@ -45,6 +45,8 @@ class LiveProgress(AbstractContextManager):
     latest snapshot rather than building an unbounded backlog of stage events.
     """
     def __init__(self, name, queue):
+        from .live_resources import ProcessMeter
+        self.meter = ProcessMeter()
         self.name, self.queue = name, queue
         self.lock, self.stop = Lock(), Event()
         now = time.monotonic()
@@ -65,7 +67,11 @@ class LiveProgress(AbstractContextManager):
         with self.lock:
             snapshot = self.snapshot
         try:
-            self.queue.put_nowait((self.name, dict(snapshot, reported=time.monotonic())))
+            try:
+                resources = self.meter.sample()
+            except (ValueError, OSError, RuntimeError):
+                resources = {}
+            self.queue.put_nowait((self.name, dict(snapshot, reported=time.monotonic(), resources=resources)))
         except (Full, OSError, ValueError):
             # Observability must not make cancellation or worker exit wait on IPC.
             pass
@@ -123,6 +129,10 @@ def worker_text(snapshot, now):
     for row in snapshot['work']:
         total = row['total'] if row['total'] is not None else '?'
         text += f" | {row['label']}={row['completed']}/{total} {row['unit']}"
+    resources = snapshot.get('resources', {})
+    if resources:
+        from .live_resources import process_line
+        text += ' | ' + process_line(resources)
     completed = snapshot['last_completed']
     text += ' | last_completed=' + ('none observed' if completed is None else f'{now-completed:.0f}s ago')
     return text
