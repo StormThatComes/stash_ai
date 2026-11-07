@@ -49,17 +49,18 @@ def test_detector_batches_equal_shapes_and_preserves_serial_geometry(monkeypatch
 
 def test_pose_decode_overlaps_next_inference_and_preserves_order(monkeypatch):
     torch=pytest.importorskip('torch')
+    from stash_ai.recognition import gpu_transfers
     from stash_ai.recognition.vitpose_pose import ViTPoseLarge
     owner=get_ident();started=Event();next_inference=Event();threads=[];calls=[]
     zeros=torch.zeros
     monkeypatch.setattr(torch,'zeros',lambda *args,**kw:zeros(*args,**dict(kw,device='cpu')))
-    class Inputs(dict):
-        def to(self,device):
-            assert get_ident()==owner
-            return self
+    def transfer(value,device):
+        assert get_ident()==owner and device=='cuda'
+        return value
+    monkeypatch.setattr(gpu_transfers,'to_device',transfer)
     class Processor:
         def __call__(self,*,images,boxes,return_tensors):
-            return Inputs(pixel_values=zeros(sum(map(len,boxes)),3,4,4))
+            return dict(pixel_values=zeros(sum(map(len,boxes)),3,4,4))
         def post_process_pose_estimation(self,outputs,*,boxes,threshold):
             threads.append(get_ident());started.set()
             assert next_inference.wait(5), 'decode blocked the next inference'
@@ -76,10 +77,11 @@ def test_pose_decode_overlaps_next_inference_and_preserves_order(monkeypatch):
     # Device allocation is simulated; this verifies scheduling/ownership, not
     # accelerator throughput. All model and transfer calls stay on the owner.
     refiner=ViTPoseLarge(model,Processor(),device='cuda',batch_size=2)
-    with Image.new('RGB',(100,100)) as image:
-        result=refiner.predict_many([(image,[[0,0,10,10],[10,20,30,40]]),(image,[]),
-                                    (image,[[30,40,50,60]])])
-    refiner.close()
+    try:
+        with Image.new('RGB',(100,100)) as image:
+            result=refiner.predict_many([(image,[[0,0,10,10],[10,20,30,40]]),(image,[]),
+                                        (image,[[30,40,50,60]])])
+    finally:refiner.close()
     assert len(calls)==2 and all(t!=owner for t in threads)
     np.testing.assert_array_equal(result[0][0][:,0],[[1,2],[11,22]])
     np.testing.assert_array_equal(result[2][0][:,0],[[31,42]])
