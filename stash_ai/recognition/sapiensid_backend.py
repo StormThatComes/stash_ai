@@ -1,5 +1,4 @@
 """SapiensID v1 person embeddings anchored to real detected face observations."""
-from collections import Counter
 import math
 from threading import get_ident
 
@@ -73,9 +72,8 @@ def association_choices(faces, people):
 
 
 def associate(faces, people):
-    choices = association_choices(faces, people)
-    usage = Counter(index for indices in choices for index in indices)
-    return [indices[0] if len(indices) == 1 and usage[indices[0]] == 1 else None for indices in choices]
+    from .person_association import resolve
+    return resolve(faces, people, association_choices(faces, people))
 
 
 from .person_geometry import adjust_pose, body_points
@@ -352,7 +350,9 @@ class SapiensIDFaces(YuNetDetector):
         return person['bounds'], points.tolist()
 
     def person_input(self, image, face):
-        return self._person_geometry(image,face)
+        value = self._person_geometry(image,face)
+        mask = self._person(image,face).get('pose_refinement', {}).get('encoder_mask')
+        return (*value,mask) if mask else value
 
     def embed_inputs(self, prepared):
         self._owner()
@@ -372,13 +372,17 @@ class SapiensIDFaces(YuNetDetector):
             persons=[]
             for face in faces:
                 bounds,points=self._person_geometry(image,face)
-                persons.append((stack.enter_context(image.crop(bounds)),points))
+                from .person_geometry import encoder_crop
+                mask = self._person(image,face).get('pose_refinement', {}).get('encoder_mask')
+                persons.append((stack.enter_context(encoder_crop(image,bounds,mask)),points))
             return self.encoder.embed_person_batch(persons)
 
     def audit_input(self, image, face):
         from .sapiensid_v1 import prepare_person_input
         bounds, points = self._person_geometry(image, face)
-        with image.crop(bounds) as crop:
+        from .person_geometry import encoder_crop
+        mask = self._person(image,face).get('pose_refinement', {}).get('encoder_mask')
+        with encoder_crop(image,bounds,mask) as crop:
             return prepare_person_input(crop, points)
 
 

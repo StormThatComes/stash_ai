@@ -275,3 +275,13 @@ def test_production_single_and_batched_collection_use_identical_refined_geometry
     finally:
         detector.close()
     assert detector.pose_refiner is None
+
+
+def test_identity_mask_preserves_only_the_selected_pixels():
+    import base64
+    from stash_ai.recognition.person_geometry import encoder_crop
+    image = Image.new('RGB', (4, 2), (251, 12, 19))
+    mask = base64.b64encode(bytes([0b10000000])).decode()
+    with encoder_crop(image, (1, 0, 3, 1), mask) as crop:
+        assert crop.getpixel((0, 0)) == (251, 12, 19)
+        assert crop.getpixel((1, 0)) == (127, 127, 127)

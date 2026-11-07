@@ -65,17 +65,36 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
         row=rows[associated] if associated is not None else None
         measured,reason=measurements[index]
         ambiguous=associated is None and any(index in candidates for candidates in choices)
-        if ambiguous:reason='person_face_association_ambiguous'
+        refinement = person.get('pose_refinement', {})
+        separated = refinement.get('status') == 'refined' and refinement.get('separated')
+        if ambiguous and not separated:
+            reason = 'person_face_association_ambiguous'
+        if reason == 'person_overlap' and separated:
+            reason = None
+            measured['query_only'] = True
+        if ambiguous and separated:
+            measured['query_only'] = True
+        if refinement.get('encoder_mask'):
+            from .person_geometry import encoder_crop
+            with encoder_crop(image, person['bounds'], refinement['encoder_mask']) as foreground:
+                _, measured['pixel_digest'], measured['foreground_hash'] = _pixels(
+                    foreground, (0, 0, foreground.width, foreground.height))
+            measured['appearance_hash'] = measured['foreground_hash']
+        public_person = dict(person)
+        if 'encoder_mask' in refinement:
+            public_person['pose_refinement'] = {k:v for k,v in refinement.items() if k != 'encoder_mask'}
         face_accepted=row is not None and row['rejected'] is None
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None
-        metadata=dict(person=person,quality=measured,identity_rejection=reason,
+        metadata=dict(person=public_person,quality=measured,identity_rejection=reason,
             face_status='accepted' if face_accepted else 'rejected' if row is not None else 'absent',
             _body=dict(scan=scan,cue=cue,seconds=seconds,contract=expected,
                        face=row['id'] if row is not None else None,
                        face_accepted=face_accepted,rejected=reason))
         record=[identifier(scan,cue,person,expected),metadata,None,None]
         value=model.person_geometry(image,person,usable_face) if reason is None else None
+        if value is not None and refinement.get('encoder_mask'):
+            value = (*value, refinement['encoder_mask'])
         items.append((record,value))
     marker=[None,dict(_body_cue=(scan,expected,cue)),None,None]
     pipeline.collect_items(db,image,items+[ (marker,None) ])

@@ -668,3 +668,16 @@ cached for the same input contract. Inference failures propagate, preserve
 previously completed cues and never become false negative identity evidence.
 Each cue commits atomically. Changing pose settings creates a new contract and
 allows unavailable associations to be measured again.
+
+### Overlapping people and identity crops
+
+Contested face assignments use anatomical landmark agreement and the margin to the
+best whole-frame assignment without the chosen edge. A tie leaves the face unmatched.
+A refined mask with measured torso support and separation from every overlapping
+neighbour can retain an ambiguous body as an auxiliary query. It cannot establish
+an identity. PMPose removes individual limb endpoints outside the accepted mask.
+
+Set `pose.refinement.masked_identity_crop: true` with refinement enabled to test
+neutral background pixels for separated, overlapping people. The identity-input
+contract changes and affected body inputs must be recollected. Stored portrait
+crops continue to use the source image.

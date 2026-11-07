@@ -28,7 +28,7 @@ _GROUPS = (
     ('pose.refinement', 'sapiensid.pose.refinement',
      'enabled directory mode overlap_threshold min_keypoint_score min_presence min_visibility '
      'min_prompt_points max_prompt_points min_mask_score min_prompt_coverage max_foreign_coverage '
-     'expand_boxes max_box_area_ratio max_side_expansion'),
+     'expand_boxes max_box_area_ratio max_side_expansion masked_identity_crop'),
     ('pose.deduplication', 'sapiensid.pose.deduplication',
      'enabled min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
      'min_match_fraction'),

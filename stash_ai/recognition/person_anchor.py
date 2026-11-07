@@ -49,6 +49,8 @@ def anchor_gate(metadata,settings,*,collection=None):
             points=min(points,effective) if valid(points) else effective
             regional=evaluate(rules,anatomical)
         reason=record.get('identity_rejection') or gate['reason']
+        if quality.get('query_only'):
+            reason='body_query_only'
         if reason is None and collection is not None:
             # Older face projections discarded collection rejection reasons.
             # Re-evaluate measured quality before admitting those retained rows.

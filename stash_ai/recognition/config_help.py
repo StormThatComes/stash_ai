@@ -61,6 +61,7 @@ HELP = {
     'pose.refinement.max_prompt_points': 'Maximum positive prompts, ordered by visibility (1..8).',
     'pose.refinement.min_mask_score': "Reject masks below SAM's predicted mask quality. Range: 0..1.",
     'pose.refinement.min_prompt_coverage': 'Required fraction of selected prompts inside the mask. Range: 0..1.',
+    'pose.refinement.masked_identity_crop': 'Mask the identity encoder crop when refinement separates overlapping bodies. Requires refinement.enabled.',
     'pose.refinement.max_foreign_coverage': "Maximum fraction of other people's reliable head/torso points inside the mask. Range: 0..1.",
     'pose.refinement.expand_boxes': 'Union the admitted mask bounds with the original detector box; never shrink.',
     'pose.refinement.max_box_area_ratio': 'Reject masks whose union box exceeds this multiple of the original area. Range: 1..10.',

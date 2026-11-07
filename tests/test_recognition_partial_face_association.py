@@ -108,3 +108,16 @@ def test_rescued_face_uses_original_person_crop_and_omits_outside_landmarks():
     assert bounds == pose['bounds']
     assert points[17] == [-1., -1.]
     assert points[18:20] == [[25., 45.], [10., 60.]]
+
+
+def test_joint_assignment_uses_landmark_evidence_and_abstains_on_tie():
+    from types import SimpleNamespace
+    faces = [SimpleNamespace(box=(x,20,60,80), landmarks=[
+        (x+15,45), (x+45,45), (x+30,60)]) for x in (20,70)]
+    first = person((0,0,155,150))
+    first['keypoints'][:3] = [[50,60],[75,45],[35,45]]
+    second = person((0,0,155,150))
+    second['keypoints'][:3] = [[100,60],[115,45],[85,45]]
+    assert associate(faces,[first,second]) == [0,1]
+    assert associate(faces,[second,first]) == [1,0]
+    assert associate([faces[0]], [first,deepcopy(first)]) == [None]

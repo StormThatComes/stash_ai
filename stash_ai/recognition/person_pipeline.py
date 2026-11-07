@@ -16,10 +16,12 @@ class PreparedCollector:
         self.cues=deque();self.jobs=[];self.db=None
 
     def prepare(self,image,value):
-        bounds,points=value
+        bounds,points,*mask=value
         from .sapiensid_v1 import prepare_person_input
+        from .person_geometry import encoder_crop
+        with encoder_crop(image,bounds,*mask) as input_crop:
+            prepared=prepare_person_input(input_crop,points)
         with image.crop(bounds) as crop:
-            prepared=prepare_person_input(crop,points)
             encoded=None;omitted=False
             if self.config.data['sapiensid']['storage']['retain_person_crops'] and self.config.data['storage']['crop_policy']=='all':
                 output=BytesIO();crop.save(output,format='PNG')

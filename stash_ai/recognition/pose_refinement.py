@@ -143,6 +143,13 @@ class RefinedPMPose:
                 if reason:
                     continue
                 record['mask_pixels'] = int(mask.sum())
+                torso = [k for k in cores[i] if k in (5, 6, 11, 12)]
+                neighbours = [j for j, other in enumerate(bounds) if j != i
+                              and overlaps(bounds[i], other, settings['overlap_threshold'])]
+                # Require positive ownership and measurable negative evidence for every neighbour.
+                record['separated'] = bool(neighbours and len(torso) >= 2 and
+                    inside(mask, points[i, torso]).all() and all(len(cores[j]) >= 2 and
+                    not inside(mask, points[j, cores[j]]).any() for j in neighbours))
                 pending.append((i, box, mask, indices))
                 if len(pending) >= self.pose.batch_size:
                     self._second_pass(image, pending, result, records, points)
@@ -166,7 +173,21 @@ class RefinedPMPose:
             if keep.sum() < self.settings['min_prompt_points']:
                 records[i]['reason'] = 'second_pass_core_drift'
                 continue
-            result[0][i], result[1][i] = new_points[offset], new_scores[offset]
+            # A valid torso does not establish ownership of a distal limb.
+            # Check both its endpoint and the segment to its proximal joint.
+            joints = new_points[offset].copy()
+            confidence = new_scores[offset].copy()
+            for parent, child in ((5,7),(7,9),(6,8),(8,10),(11,13),(13,15),(12,14),(14,16)):
+                if not inside(mask, [joints[child]])[0] or (confidence[parent] > 0 and
+                        not inside(mask, [(joints[parent] + joints[child]) / 2])[0]):
+                    joints[child] = -1
+                    confidence[child] = 0
+            if records[i].get('separated') and self.settings.get('masked_identity_crop'):
+                import base64
+                left, top, right, bottom = box
+                packed = np.packbits(mask[top:bottom, left:right], axis=None)
+                records[i]['encoder_mask'] = base64.b64encode(packed).decode('ascii')
+            result[0][i], result[1][i] = joints, confidence
             for key in result[2]:
                 result[2][key][i] = probabilities[key][offset]
             records[i].update(status='refined', reason=None, bounds=box,

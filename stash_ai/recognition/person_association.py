@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='landmark-supported-partial-face-v1', containment_tolerance=.05,
+    return dict(version='joint-landmark-assignment-v2', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -58,3 +58,41 @@ def association_rejection(face, person):
            for index, a in enumerate(pairs) for b in pairs[index+1:]):
         return 'insufficient_head_landmarks'
     return None
+
+
+def resolve(faces, people, choices):
+    """Resolve competing head claims using a global assignment with abstention."""
+    from collections import Counter
+    usage = Counter(p for candidates in choices for p in candidates)
+    matches = [c[0] if len(c) == 1 and usage[c[0]] == 1 else None for c in choices]
+    contested = [i for i, c in enumerate(choices) if c and matches[i] is None]
+    if not contested:
+        return matches
+    import numpy as np
+    from scipy.optimize import linear_sum_assignment
+    owners = sorted({p for i in contested for p in choices[i]})
+    columns = {p: j for j, p in enumerate(owners)}
+    weights = np.zeros((len(contested), len(owners) + len(contested)))
+    for row, i in enumerate(contested):
+        face = faces[i]
+        for p in choices[i]:
+            distances = []
+            landmarks = getattr(face, 'landmarks', ())
+            for k, j in enumerate((2, 1, 0)):
+                point = people[p]['keypoints'][k]
+                if min(point) >= 0 and j < len(landmarks):
+                    distances.append(math.dist(point, landmarks[j]) / min(face.box[2:]))
+            if len(distances) >= 2 and max(distances) <= .20:
+                weights[row, columns[p]] = 1 - sum(distances) / len(distances)
+    rows, cols = linear_sum_assignment(weights, maximize=True)
+    total = weights[rows, cols].sum()
+    for row, col in zip(rows, cols):
+        score = weights[row, col]
+        if score <= 0:
+            continue
+        weights[row, col] = 0
+        other_rows, other_cols = linear_sum_assignment(weights, maximize=True)
+        if total - weights[other_rows, other_cols].sum() >= .12:
+            matches[contested[row]] = owners[col]
+        weights[row, col] = score
+    return matches

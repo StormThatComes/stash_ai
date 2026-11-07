@@ -177,9 +177,15 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
         evidence['format']='sapiensid-wb4m-person-v2' if legacy_boundaries else 'sapiensid-wb4m-person-v3'
     else:
         evidence.update(variant=variant,model_sha256=model['sha256'],source_revision=UPSTREAM_COMMIT)
-    if not legacy_association and not legacy_boundaries:
+    if legacy_association is not True and not legacy_boundaries:
         from .person_association import policy
         evidence['face_person_association'] = policy()
+        if legacy_association == 'partial':
+            evidence['face_person_association']['version'] = 'landmark-supported-partial-face-v1'
+    if legacy_association and 'refinement' in evidence.get('pose_refiner', {}):
+        old = evidence['pose_refiner']['refinement']
+        old.pop('masked_identity_crop', None)
+        old['version'] = 'pmpose-sam-pose2seg-refinement-v1'
     from .inference_precision import contract as precision_contract
     evidence.update(precision_contract(config))
     return digest(evidence)

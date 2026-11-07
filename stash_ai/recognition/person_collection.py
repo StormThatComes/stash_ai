@@ -255,7 +255,9 @@ def audit_input(detector,image,face,path):
 def audit_person(detector,image,person,path,*,face=None,details=None):
     from .sapiensid_v1 import prepare_person_input
     bounds,points=detector.person_geometry(image,person,face)
-    with image.crop(bounds) as crop:prepared=prepare_person_input(crop,points)
+    from .person_geometry import encoder_crop
+    mask = person.get('pose_refinement', {}).get('encoder_mask')
+    with encoder_crop(image,bounds,mask) as crop:prepared=prepare_person_input(crop,points)
     return _audit_prepared(image,face,dict(details or {},person=person),prepared,path)
 
 
