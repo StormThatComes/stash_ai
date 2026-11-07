@@ -77,6 +77,9 @@ def _apply(db):
         kinds="'scan','raw-observations','raw-person','raw-body','scene-face-vectors','hybrid-observations','hybrid-person','vtt-scan-decisions'"
         add(f'Delete obsolete bookkeeping: {table}', f"DELETE FROM {table} WHERE kind IN ({kinds}) "
                    "AND key IN (SELECT id FROM retention_scans WHERE action='delete')")
+    from .rejection_summary import PREFIX
+    add('Delete obsolete rejection summaries', "DELETE FROM metadata WHERE key IN "
+        "(SELECT ?||id FROM retention_scans WHERE action='delete')", (PREFIX,))
     add('Delete obsolete crop markers', "DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete' "
         "UNION ALL SELECT 'verified-scan-geometry:'||id FROM retention_scans WHERE action='delete')",(FACE_CROPS,))
     with tracking(statements, 'Prune obsolete recognition evidence', unit='statement') as steps:

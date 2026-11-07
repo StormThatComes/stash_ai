@@ -109,7 +109,7 @@ class ConsoleResources:
         self.cpus = min(cpus or available_cpus(), available_cpus())
         self.disk_checked, self.disk_text = float('-inf'), ''
         self.disk_limit = config.data['execution'].get('disk_total_bytes')
-        self.gpu = None
+        self.gpu = self.prefetch = None
 
     def disk(self, now):
         if now - self.disk_checked < 10:
@@ -119,8 +119,18 @@ class ConsoleResources:
         if volumes:
             # Budget replaces the complete snapshot atomically. Its collector
             # already walked the charged files on the coordinator thread.
-            dev, row = min(volumes.items(), key=lambda kv: kv[1]['free'] - kv[1]['reserved'])
-            self.disk_text = (f'volume {dev}: used {gib(row["used"])} · '
+            def margin(row):
+                free = row['free'] - row['reserved'] - getattr(self.budget, 'headroom', 0)
+                if self.disk_limit:
+                    cap = self.disk_limit - row.get('requested', row['used'] + row['reserved'])
+                    if cap <= free:
+                        return cap, 'cap'
+                return free, 'free reserve'
+            dev, row = min(volumes.items(), key=lambda kv: margin(kv[1])[0])
+            remaining, reason = margin(row)
+            age = now - getattr(self.budget, 'checked', now)
+            self.disk_text = (f'volume {dev}: {reason} margin {gib(remaining)} · sample {max(0,age):.0f}s ago'
+                              f' · used {gib(row["used"])} · '
                               f'held {gib(row["reserved"])} · free {gib(row["free"])}')
             if self.disk_limit:
                 self.disk_text += f' · cap {gib(self.disk_limit)}'
@@ -140,8 +150,14 @@ class ConsoleResources:
     def fields(self):
         row = self.meter.sample()
         values = dict(process=process_line(row, self.cpus), disk=self.disk(time.monotonic()))
-        if self.gpu and self.gpu.display:
-            values['vram'] = self.gpu.display
+        if self.gpu:
+            if self.gpu.display:
+                values['vram'] = self.gpu.live_display()
+            batch = self.gpu.batch_line()
+            if batch:
+                values['gpu_batch'] = batch
+        if self.prefetch and self.prefetch.taken:
+            values['prefetch'] = self.prefetch.line()
         if 'scratch_reserved' in row:
             values['scratch'] = f'held {gib(row["scratch_reserved"])} / {gib(row["scratch_limit"])}'
         return values

@@ -16,7 +16,7 @@ class RunDisplay:
         self.rejections = {key: Counter() for key in ('face', 'body', 'person_evidence_unavailable')}
         self.references = {}
         self.rebuild = {}
-        self.gpu = None
+        self.gpu = self.prefetch = None
         self.debt = None
         self.selected = 0
         self.retention = 'skipped'
@@ -36,6 +36,8 @@ class RunDisplay:
             work += [f'{kind}={self.scans[kind]}' for kind in ('fresh', 'resumed', 'reused') if self.scans[kind]]
             work.append(f'VTT complete={c["vtt_complete"]}/{self.selected} face_cues={c["face_cues"]} '
                         f'pose_cues={c["pose_cues"]} backfilled={c["pose_backfilled"]}')
+        if self.prefetch and self.prefetch.taken:
+            work.append('prefetch ' + self.prefetch.line())
         if c['scenes_processed']:
             work.append(f'published={c["scenes_processed"]-c["publications_unchanged"]} unchanged={c["publications_unchanged"]}')
         if 'portrait_people_selected' in c:
@@ -64,6 +66,8 @@ class RunDisplay:
         if self.references:
             r = self.references
             details.append(f'face references={usage_line(r)} samples={r["samples"]} stage={r["stage"]}')
+        if self.gpu is not None and self.gpu.batch_line():
+            details.append('CUDA OOM ' + self.gpu.batch_line())
         if self.gpu is not None and self.gpu.peaks:
             from .live_resources import gib
             details.append('VRAM sampled peak ' + gib(self.gpu.peaks.get('process_bytes'))

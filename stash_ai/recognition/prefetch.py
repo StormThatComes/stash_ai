@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from queue import Empty, Full
 from threading import Thread
+from time import monotonic
 
 from stash_ai.inference.managed_stream import ManagedStream, StreamFailure
 from stash_ai.runtime.cancellation import Cancellation, use
@@ -118,6 +119,8 @@ class ScenePrefetch:
         self.enabled = config.data['execution']['prefetch_scenes']
         self.executor = self.active = None
         self.queued = OrderedDict()
+        self.taken = self.ready = 0
+        self.blocked_seconds = 0.
         self.depth = config.data['execution']['prefetch_scene_depth']
 
     def _prepare(self, identifier, token=None):
@@ -172,17 +175,34 @@ class ScenePrefetch:
             self.close()
             raise
 
+    def line(self):
+        from .console_layout import duration
+        return f'ready {self.ready}/{self.taken} · blocked {duration(self.blocked_seconds)}'
+
     @pipeline_stage('scene_input_wait')
+    def _wait(self, future):
+        started = monotonic()
+        try:
+            return future.result()
+        finally:
+            self.blocked_seconds += monotonic() - started
+
     def take(self, identifier):
         if not self.enabled:
             self.active = self._prepare(identifier)
             return self.active
         if self.pending is None or self.identifier != identifier:
             raise RuntimeError('Recognition scene prefetch order changed.')
+        future = self.pending
+        self.taken += 1
         try:
-            from stash_ai.runtime.console import activity
-            with activity(self.report, 'wait for VTT input', scene=identifier, wait='VTT input'):
-                result = self.pending.result()
+            if future.done():
+                self.ready += 1
+                result = future.result()
+            else:
+                from stash_ai.runtime.console import activity
+                with activity(self.report, 'wait for VTT input', scene=identifier, wait='VTT input'):
+                    result = self._wait(future)
         except Exception:
             self.queued.pop(identifier)
             raise

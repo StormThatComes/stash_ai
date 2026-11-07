@@ -116,7 +116,7 @@ def status_lines(row, fields, width, *, verbose=False):
         info = ' · '.join(f'{key}={fields[key]}' for key in reasons if fields.get(key))
         if info:
             lines.append(info)
-        lines.extend(f'{key.upper()}: {fields[key]}' for key in ('process', 'vram', 'disk', 'scratch') if fields.get(key))
+        lines.extend(f'{key.upper()}: {fields[key]}' for key in ('process', 'vram', 'gpu_batch', 'prefetch', 'disk', 'scratch') if fields.get(key))
         return compact(lines, width)
     return layout(row, fields, width)
 
@@ -136,7 +136,7 @@ def heartbeat_line(row, fields, *, verbose=False):
                 if fields.get(key + suffix):
                     text += f" {label}={fields[key + suffix]}"
             parts.append(text)
-    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'portrait_cpu', 'wait', 'process', 'vram', 'disk', 'scratch', 'backoff remaining', 'deadline remaining'):
+    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'portrait_cpu', 'wait', 'process', 'vram', 'gpu_batch', 'prefetch', 'disk', 'scratch', 'backoff remaining', 'deadline remaining'):
         if fields.get(key):
             parts.append(f'{key}={fields[key]}')
     if verbose and fields.get('references'):
