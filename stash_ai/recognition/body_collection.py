@@ -54,6 +54,12 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
     if len(people)>1 and config.data['execution']['scan_cpu_workers']>1:
         measurements=list(pipeline.stage.ordered(lambda pixels,person:quality(pixels,person,people,settings),image,people,extra=16384))
     else:measurements=[quality(image,person,people,settings) for person in people]
+    if people:
+        from .body_perspectives import frame_signature, orientation
+        signature = frame_signature(image)
+        for person, (measurement, _) in zip(people, measurements):
+            measurement['frame_signature'] = signature
+            measurement['orientation'] = orientation(person)
     items=[]
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):

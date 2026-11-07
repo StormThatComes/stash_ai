@@ -38,7 +38,7 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False)
 
 
 def contract(config):
-    return _contract(config,'independent-person-v2-rgb-pixels')
+    return _contract(config,'independent-person-v3-perspective')
 
 
 def compatible_contracts(config):
@@ -46,7 +46,7 @@ def compatible_contracts(config):
     # cores; retain their frozen banks only as conservative competitors.
     return list(dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
         for association,boundaries in ((False,False),(True,False),(True,True))
-        for version in ('independent-person-v2-rgb-pixels','independent-person-v1')))
+        for version in ('independent-person-v3-perspective','independent-person-v2-rgb-pixels','independent-person-v1')))
 
 
 def identifier(scan, cue, person, expected):

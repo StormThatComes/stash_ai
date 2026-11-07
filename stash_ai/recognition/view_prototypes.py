@@ -39,17 +39,18 @@ def _signed_pose(geometry):
 
 def pose_view(geometry, *, neutral=.12):
     signed=_signed_pose(geometry)
-    return ('other' if signed is None else 'left' if signed < -neutral else
-            'right' if signed > neutral else 'other')
+    return ('unknown' if signed is None else 'left' if signed < -neutral else
+            'right' if signed > neutral else 'neutral')
 
 
 def pose_matches(geometry, pose, *, neutral=.12, uncertainty=.02):
+    pose = 'neutral' if pose == 'other' else pose
     hint=pose_view(geometry,neutral=neutral)
     if hint==pose:
         return True
     signed=_signed_pose(geometry)
     return bool(signed is not None and abs(abs(signed)-neutral)<=uncertainty and
-                (hint=='other' or pose=='other'))
+                (hint=='neutral' or pose=='neutral') and pose != 'unknown')
 
 
 def query_pose_matches(geometry, pose, *, relaxed=False):
@@ -59,8 +60,9 @@ def query_pose_matches(geometry, pose, *, relaxed=False):
     embedding, rival and co-presence gates. Unknown geometry and opposite side
     categories do not qualify for this fallback.
     """
+    pose = 'neutral' if pose == 'other' else pose
     return pose_matches(geometry, pose) or bool(relaxed and _signed_pose(geometry) is not None
-        and pose in ('left', 'right', 'other') and 'other' in (pose_view(geometry), pose))
+        and pose in ('left', 'right', 'neutral') and 'neutral' in (pose_view(geometry), pose))
 
 
 def pose_fallback(geometry, pose):
@@ -71,13 +73,14 @@ def pose_fallback(geometry, pose):
     The return value is (score premium, independent support required).
     """
     value = _signed_pose(geometry)
-    if value is None:
+    pose = 'neutral' if pose == 'other' else pose
+    if value is None or pose == 'unknown':
         return .08, 3
     if pose_matches(geometry, pose):
         return 0., 2
     distance = (max(0., value + .12) if pose == 'left' else
                 max(0., .12 - value) if pose == 'right' else max(0., abs(value) - .12))
-    opposing = pose != 'other' and pose_view(geometry) not in ('other', pose)
+    opposing = pose != 'neutral' and pose_view(geometry) not in ('neutral', pose)
     return min(.08, .1 * distance), 3 if opposing else 2
 
 
@@ -158,8 +161,8 @@ class _Cluster:
                 witnesses.append(row['id'])
         if 'geometry' in row.keys():
             self.pose_hints.add(pose_view(row['geometry']))
-            if 'other' in self.pose_hints:
-                self.pose='other'
+            if 'neutral' in self.pose_hints:
+                self.pose='neutral'
         import numpy as np
         from .reference_selection import quality
         self.total = query.astype('float64').copy() if self.total is None else self.total + query
@@ -222,7 +225,12 @@ def prioritized(slots,maximum):
         # containing different NumPy vectors, which cannot be compared by ==.
         def priority(index):
             slot=remaining[index]
-            return (1.-max(float(np.dot(slot.medoid()[0],c.medoid()[0])) for c in chosen),len(slot.cues),slot.first)
+            known = slot.pose in ('left', 'right', 'neutral')
+            new_perspective = known and all(slot.pose != c.pose for c in chosen)
+            distance = 1.-max(float(np.dot(slot.medoid()[0], c.medoid()[0])) for c in chosen)
+            covered = {oid for c in chosen for oid in c.observations}
+            new_witnesses = sum(oid not in covered for oid in slot.observations)
+            return (new_perspective and new_witnesses > 0, distance, new_witnesses, len(slot.cues), slot.first)
         winner=0 if not chosen else max(range(len(remaining)),key=priority)
         chosen.append(remaining.pop(winner))
     return chosen+remaining

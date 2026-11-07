@@ -14,7 +14,7 @@ def decode(db,payload):
         raise ValueError('Invalid late checkpoint payload.')
     views=[]
     for row in payload['early']:
-        if not isinstance(row,dict) or row.get('pose') not in ('left','right','other'):
+        if not isinstance(row,dict) or row.get('pose') not in ('left','right','neutral','unknown','other'):
             raise ValueError('Invalid late checkpoint view.')
         sample=db.execute('SELECT dimensions,embedding FROM observations WHERE id=? AND rejected IS NULL',(row['medoid'],)).fetchone()
         if sample is None or not db.execute('SELECT 1 FROM people WHERE id=?',(row['person'],)).fetchone():
