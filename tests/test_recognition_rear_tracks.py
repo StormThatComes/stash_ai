@@ -7,8 +7,9 @@ from stash_ai.recognition.database import FaceDatabase, encoded
 from tests.test_recognition_body_global import configured, scene
 
 
-@pytest.mark.parametrize('missing_root', [False, True])
-def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, missing_root):
+@pytest.mark.parametrize('incremental,rejected_face,missing_root', [
+    (False, False, False), (False, False, True), (True, False, True), (True, True, False)])
+def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, incremental, rejected_face, missing_root):
     config = configured(tmp_path)
     with FaceDatabase(config.database) as state:
         db = state.connection
@@ -32,8 +33,18 @@ def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, m
                      np.array(front,dtype='<f4').tobytes(),None))
                 db.execute('INSERT INTO members VALUES (?,?)',(fid,'A'))
                 db.execute('UPDATE body_observations SET face=? WHERE id=?',(fid,oid))
+        if rejected_face:
+            for cue, oid in enumerate(queries):
+                fid = 'rejected-' + oid
+                db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (fid,b['scan'],cue,float(cue),'','[]','[]','{}','pixels',2,None,None))
+                db.execute('UPDATE body_observations SET face=? WHERE id=?',(fid,oid))
         db.commit()
-        rebuild(state,[a,b],config,{a['scan']:[],b['scan']:[]})
+        if incremental:
+            rebuild(state,[b],config,{b['scan']:[]})
+            rebuild(state,[a],config,{a['scan']:[]})
+        else:
+            rebuild(state,[a,b],config,{a['scan']:[],b['scan']:[]})
         def members():
             return [dict(r) for r in db.execute('SELECT * FROM body_members WHERE observation IN (?,?,?)',queries)]
         assert all(r['person']=='A' and r['role']=='auxiliary' and
@@ -127,3 +138,54 @@ def test_duplicate_pixels_in_another_scene_cannot_confirm_the_query():
     assert duplicate[0]==-1 and duplicate[5]==1
     [independent] = gallery.rank(query,'other scan',settings,'new')
     assert independent[0]==1 and len(independent[4])==2
+
+
+def test_greatest_admissible_view_keeps_every_rival():
+    from stash_ai.recognition.rear_gallery import winner
+    settings = dict(match_threshold=.85, cohesion_threshold=.8, ambiguity_margin=.05)
+    banks = [(.889,.78,'A','first',(),.889), (.87,.87,'A','second',(),.87)]
+    assert winner(banks,settings) == banks[1]
+    assert winner(banks+[(.84,.70,'B','third',(),.84)],settings) is None
+
+
+def test_tiled_rival_decisions_match_each_scalar_query():
+    from io import BytesIO
+    from types import SimpleNamespace
+    from stash_ai.recognition.rear_recovery import _global_rivals
+    rng = np.random.default_rng(45)
+    matrix = rng.normal(size=(11,4096))
+    queries = rng.normal(size=(5,4096))
+    search = SimpleNamespace(index=BytesIO(matrix.astype('<f8').tobytes()), entries=[(i,[]) for i in range(11)],
+                             identities=list(range(11)), block=3)
+    batch = [(i,q,{i},float(matrix[5]@q)+1e-6) for i,q in enumerate(queries)]
+    expected = {}
+    for i,q,ignored,floor in batch:
+        for owner,value in enumerate(np.concatenate([matrix[s:s+3] @ q for s in range(0,len(matrix),3)])):
+            if owner not in ignored and value+1e-6 >= floor:
+                expected[i] = owner
+                break
+    assert _global_rivals(search,batch)==expected
+
+
+def test_two_different_face_roots_veto_independent_local_gallery():
+    from types import SimpleNamespace
+    from stash_ai.recognition.body_identity import defaults, Scores
+    from stash_ai.recognition.body_perspectives import recover
+    rows, decisions, seeds = [], {}, {'A':[], 'B':[]}
+    for cue, owner, colour in [(0,'A',15),(1,None,15),(2,'A',15),(5,'A',180),(6,None,180),
+                               (7,'A',180),(10,'A',60),(11,None,60),(12,'B',60)]:
+        body = [.82,np.sqrt(1-.82**2)] if owner=='B' else [1.,0.]
+        quality = dict(pixel_digest=str(cue),orientation='front' if owner else 'back',
+                       frame_signature=(bytes([colour,15,15])*16).hex())
+        row = dict(id=str(cue),scan='s',cue=cue,seconds=cue,quality=encoded({'quality':quality}),
+                   geometry=encoded(dict(bounds=[0,0,80,100])),face_person=owner,_vector=np.array(body))
+        rows.append(row)
+        if owner:
+            seeds[owner].append(row)
+        decisions[row['id']] = dict(person=owner,status='accepted' if owner else 'withheld',
+                                    reason='measured_face_association' if owner else 'body_anchor_quality')
+    scores = Scores(SimpleNamespace(data={'sapiensid':{'execution':{
+        'max_witness_comparisons':2000,'reference_bytes':2**20}}}))
+    recover(rows,decisions,seeds,defaults(),scores,SimpleNamespace(allows=lambda *args:True))
+    assert decisions['11']['person'] is None
+    assert decisions['11']['track_blocker']['reason']=='different_face_root'

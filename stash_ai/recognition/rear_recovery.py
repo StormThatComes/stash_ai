@@ -8,24 +8,39 @@ from .database import encoded
 from .scan_heads import predicate
 
 
-def _global_rival(search, query, ignored, floor):
-    # The disk index contains exact means of every production body mode,
-    # including provisional appearances. Round borderline results toward veto.
-    for start in range(0,len(search.entries),search.block):
-        count = min(search.block,len(search.entries)-start)
+def _global_rivals(search, batch):
+    """Read each centroid tile once for all bounded queries."""
+    if not batch:
+        return {}
+    ids, queries, ignored, floors = zip(*batch)
+    queries = np.stack(queries, axis=1).astype(np.float64)
+    rivals = {}
+    for start in range(0, len(search.entries), search.block):
+        count = min(search.block, len(search.entries)-start)
         search.index.seek(start*4096*8)
-        block = np.frombuffer(search.index.read(count*4096*8),dtype='<f8').reshape(count,4096)
-        scores = block @ query
-        for offset in np.flatnonzero(scores+1e-6>=floor):
-            owner = search.identities[search.entries[start+int(offset)][0]]
-            if owner not in ignored:
-                return owner
-    return None
+        tile = np.frombuffer(search.index.read(count*4096*8), dtype='<f8').reshape(count,4096)
+        scores = tile @ queries
+        for col, oid in enumerate(ids):
+            if oid in rivals:
+                continue
+            column = scores[:,col]
+            if np.any(np.abs(column + 1e-6 - floors[col]) <= 1e-8):
+                column = tile @ np.ascontiguousarray(queries[:,col])
+            for offset in np.flatnonzero(column+1e-6 >= floors[col]):
+                owner = search.identities[search.entries[start+int(offset)][0]]
+                if owner not in ignored[col]:
+                    rivals[oid] = owner
+                    break
+        if len(rivals) == len(batch):
+            break
+    return rivals
 
 
 def _rows(db, scan, stamp):
     return db.execute("""SELECT b.id,b.cue,b.scan,b.face,b.quality,b.geometry,b.embedding,
-        m.person,m.status,m.role,m.proof FROM body_observations b JOIN body_members m
+        m.person,m.status,m.role,m.proof,f.rejected AS face_rejection,f.embedding AS face_embedding,
+        f.dimensions AS face_dimensions,fm.person AS face_owner FROM body_observations b
+        LEFT JOIN observations f ON f.id=b.face LEFT JOIN members fm ON fm.observation=f.id JOIN body_members m
         ON m.observation=b.id WHERE b.scan=? AND m.policy=? AND b.rejected IS NULL
         ORDER BY b.cue,b.id""",(scan,stamp))
 
@@ -37,18 +52,30 @@ def _scene(db, scan, stamp, gallery, search, config):
     required = defaultdict(set)
     satellites = defaultdict(dict)
     face_owners = set()
+    from .body_guards import FaceGuard
+    from .clustering import vector as face_vector
+    from .rear_gallery import winner
+    guard = FaceGuard(db, config)
+    batch = []
+    waiting = {}
+    def verify_batch():
+        for oid, rival in _global_rivals(search, batch).items():
+            _, _, _, proof = proposals.pop(oid)
+            waiting[oid] = (proof['previous'], rival, 'competing_owner')
+        batch.clear()
+
     for raw in _rows(db,scan,stamp):
         row = dict(raw)
         old = row['person']
         decision = json.loads(row['proof'])
         if old is not None:
-            if row['face']:
+            if row['face_owner'] or row['face_rejection'] is None and row['face_embedding'] is not None:
                 face_owners.add(old)
             if row['role']=='anchor' or decision.get('reason')=='body_scene_core':
                 required[old].add(row['id'])
             else:
                 satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
-        if (row['face'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
+        if (row['face_owner'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
                 or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root')):
             continue
         person = json.loads(row['geometry'])
@@ -57,27 +84,37 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         query = vector(row)
         ranked = gallery.rank(query,scan,settings,quality(row).get('pixel_digest'))
-        if not ranked:
+        best = winner(ranked, settings)
+        if best is None:
+            if ranked:
+                waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
             continue
-        mean,low,owner,source,witnesses,_ = ranked[0]
+        mean,low,owner,source,witnesses,_ = best
         if (owner==old or decision.get('open_face_root',{}).get('owner',owner)!=owner
                 or mean<settings['match_threshold'] or low<settings['cohesion_threshold']):
             continue
-        if any(r[2]!=owner and mean-max(r[0],r[5])<settings['ambiguity_margin'] for r in ranked):
-            continue
+        if row['face_embedding'] is not None and row['face_rejection'] is None:
+            measured = face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
+            if not guard.allows({'_face_vector':measured}, (), owner):
+                continue
         bank = search.bank.get(owner)
         if bank is None or (scan,row['cue']) in bank['cues']:
             continue
         if old and (old not in search.bank or search.bank[old]['faces']
                     or any(s!=scan for s,_ in search.bank[old]['cues'])):
             continue
-        if _global_rival(search,query,{owner,old},mean-settings['ambiguity_margin']):
-            continue
         proof = dict(person=owner, status='accepted', role='auxiliary',
                      reason='external_rear_view', source_scan=source, perspective='back', score=mean,
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses])
         proposals[row['id']] = (owner,row['cue'],old,proof)
+        batch.append((row['id'], query, {owner,old}, mean-settings['ambiguity_margin']))
+        if len(batch) >= min(search.block, 32):
+            verify_batch()
+    verify_batch()
+    for oid, (previous, rival, reason) in waiting.items():
+        proof = dict(previous, rear_retry=dict(reason=reason, rival=rival, references=gallery.revision))
+        db.execute('UPDATE body_members SET proof=? WHERE observation=? AND proof<>?', (encoded(proof),oid,encoded(proof)))
     # Freeze competing simultaneous claims and move a pre-existing fragment atomically.
     simultaneous = Counter((owner,cue) for owner,cue,_,_ in proposals.values())
     viable = {oid for oid,(owner,cue,_,_) in proposals.items() if simultaneous[owner,cue]==1}
@@ -154,6 +191,11 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery):
     references = banks(db,config,scope,namespace)
     if any(b['stale_policy'] or b['missing_original'] for b in references.values()):
         return
+    from .rear_pending import matching_scans
+    from .rear_gallery import revision
+    gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
+        scans.update(matching_scans(db,scope,namespace,scans,stamp,gallery,search,
+                                    config.data['sapiensid']['identities']))
         for scan in sorted(scans):
             _scene(db,scan,stamp,gallery,search,config)

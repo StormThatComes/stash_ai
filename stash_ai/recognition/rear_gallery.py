@@ -51,6 +51,29 @@ def load(db, config, scope, namespace):
     return Gallery(banks)
 
 
+def revision(gallery):
+    import hashlib
+    from .database import encoded
+    stamp = hashlib.sha256()
+    for owner, source, rows in sorted(gallery.banks, key=lambda bank: bank[:2]):
+        stamp.update(encoded([owner,source]).encode())
+        for row in rows:
+            stamp.update(encoded([row['id'],row['roots'],row['quality']]).encode())
+            stamp.update(row['_vector'].tobytes())
+    return stamp.hexdigest()
+
+
+def winner(ranked, settings):
+    for candidate in ranked:
+        mean, minimum, owner = candidate[:3]
+        if mean < settings['match_threshold'] or minimum < settings['cohesion_threshold']:
+            continue
+        rival = max((max(r[0],r[5]) for r in ranked if r[2]!=owner), default=-1.)
+        if mean-rival >= settings['ambiguity_margin']:
+            return candidate
+    return None
+
+
 class Gallery:
     def __init__(self,banks):
         from scipy.spatial import cKDTree
