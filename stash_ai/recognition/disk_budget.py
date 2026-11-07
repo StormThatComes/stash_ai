@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from pathlib import Path
 import shutil
 import time
+import threading
 
 from .resource_errors import ResourceLimit
 
@@ -18,8 +19,14 @@ class Budget:
         self.roots=set()
         self.volumes={}
         self.checked=0.0
+        self.lock=threading.RLock()
+        self.reservations={}
 
     def check(self, growth=0, path=None, *, throttled=False):
+        with self.lock:
+            return self._check(growth,path,throttled=throttled)
+
+    def _check(self, growth=0, path=None, *, throttled=False):
         if throttled and time.monotonic()-self.checked<1:return self.volumes
         if not self.limit and not self.headroom:return {}
         parent=self.database.parent
@@ -40,13 +47,14 @@ class Budget:
         device=target.stat().st_dev
         volumes.setdefault(device,dict(path=str(target),used=0))
         for dev,row in volumes.items():
-            requested=row['used']+(growth if dev==device else 0)
+            held=sum(max(0,cap-p.stat().st_size) for p,(vol,cap) in self.reservations.items() if vol==dev)
+            requested=row['used']+held+(growth if dev==device else 0)
             free=shutil.disk_usage(row['path']).free
             row.update(free=free,requested=requested)
             if self.limit and requested>self.limit:
                 raise ResourceLimit('Recognition data, caches and scratch exceed the per-volume disk budget.',
                     budget='execution.rebuild.disk_total_bytes',limit=self.limit,requested=requested)
-            required=self.headroom+(growth if dev==device else 0)
+            required=self.headroom+held+(growth if dev==device else 0)
             if free<required:
                 raise ResourceLimit('Recognition disk free-space reserve would be exhausted.',
                     budget='execution.rebuild.disk_free_bytes',limit=free,requested=required)
@@ -77,3 +85,23 @@ def temporary(path):
     try:yield
     finally:
         if budget is not None:budget.roots.discard(path)
+
+@contextmanager
+def reserve_file(path, maximum):
+    """Admit a private SQLite file once; max_page_count enforces the grant."""
+    budget=_active.get()
+    if budget is None or not (budget.limit or budget.headroom):
+        yield maximum
+        return
+    path=Path(path)
+    with budget.lock:
+        dev=path.stat().st_dev
+        volume=budget.check(path=path)[dev]
+        held=volume['requested']-volume['used']
+        cap=min(maximum,volume['free']-budget.headroom-held)
+        if budget.limit:cap=min(cap,budget.limit-volume['requested'])
+        cap=max(0,cap)
+        budget.reservations[path]=(dev,cap)
+    try:yield cap
+    finally:
+        with budget.lock:budget.reservations.pop(path,None)

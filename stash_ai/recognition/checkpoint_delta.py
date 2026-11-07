@@ -142,10 +142,29 @@ class DeltaCheckpoints(base.Checkpoints):
         return cursor,clock
 
     def _save(self,replay,cursor,next_clock):
+        previous=self.manifest
+        self._staging_delta=False
+        try:return self._save_once(replay,cursor,next_clock)
+        except sqlite3.OperationalError as error:
+            # A larger-than-expected delta may overflow its remaining chain
+            # share although a new base fits. SQL_FULL rolls back the private
+            # stage; its immutable parent remains usable until pointer swap.
+            if (getattr(error,'sqlite_errorcode',None)!=sqlite3.SQLITE_FULL or
+                    not self._staging_delta or self.manifest is not previous):raise
+            return self._save_once(replay,cursor,next_clock,force_base=True)
+
+    def _save_once(self,replay,cursor,next_clock,*,force_base=False):
         if replay.in_transaction:raise ValueError('Only committed cues can be checkpointed.')
         self._owned()
         if self.valid:self._journal(replay)
-        compact=not self.valid or len(self.chain)>=16
+        chain_bytes=sum(lease[2] for _,_,lease in self.chain)
+        # Compact before the next delta can exhaust the retained chain quota.
+        # The first generation is a full base, not a prediction of the next delta.
+        last_bytes=self.chain[-1][2][2] if len(self.chain)>1 else 0
+        compact=(not self.valid or len(self.chain)>=16 or
+                 chain_bytes+max(last_bytes,32*4096)>=self.limit)
+        compact=compact or force_base
+        self._staging_delta=not compact
         parent=None if compact else dict(generation=self.manifest['generation'],checksum=self.manifest['checksum'])
         if self.input_hash is None:
             self.input_hash=base.rebuild_cache.input_context(self.database.connection,self.selected,self.scope,self.namespace,self.config)
@@ -156,14 +175,15 @@ class DeltaCheckpoints(base.Checkpoints):
         if len(encoded(header).encode())>base._MAX_META:raise ValueError('Oversized checkpoint header.')
         path=self.directory/f'replay-{generation}.sqlite3';stage=self.directory/f'.manifest-{generation}.json'
         previous_bytes=sum(lease[2] for _,_,lease in self.chain) if parent else 0
+        from .disk_budget import reserve_file,check
         published=False
         try:
             with path.open('xb'):pass
-            with closing(sqlite3.connect(path)) as target:
+            with reserve_file(path,self.limit-previous_bytes) as grant, closing(sqlite3.connect(path)) as target:
                 target.execute('PRAGMA journal_mode=OFF');target.execute('PRAGMA synchronous=OFF')
                 page=target.execute('PRAGMA page_size').fetchone()[0]
-                if self.limit-previous_bytes<page*32:raise ValueError('Incremental checkpoint chain budget exhausted.')
-                target.execute(f'PRAGMA max_page_count={(self.limit-previous_bytes)//page}')
+                if grant<page*32:raise ValueError('Incremental checkpoint chain budget exhausted.')
+                target.execute(f'PRAGMA max_page_count={grant//page}')
                 target.executescript(SCHEMA)
                 target.execute(f'PRAGMA application_id={base.APPLICATION_ID}');target.execute('PRAGMA user_version=2')
                 target.execute('INSERT INTO metadata VALUES (?,?)',('state',encoded(header)))
@@ -180,10 +200,9 @@ class DeltaCheckpoints(base.Checkpoints):
                         batches=bounded(rows)
                     for batch in batches:
                         base._check_cancel();written+=len(batch)
-                        from .disk_budget import check
-                        check(sum(len(encoded(tuple(r)).encode()) for r in batch),self.directory)
                         target.executemany(f'INSERT INTO {table} VALUES ({",".join("?" for _ in batch[0])})',batch)
                 target.commit();stamp=checksum(target,header)
+            check(0,self.directory)
             with path.open('r+b') as stream:os.fsync(stream.fileno())
             base._sync_directory(self.directory)
             manifest=dict(owner=self.owner,generation=path.name,checksum=stamp)
