@@ -80,6 +80,8 @@ def _apply(db):
     from .rejection_summary import PREFIX
     add('Delete obsolete rejection summaries', "DELETE FROM metadata WHERE key IN "
         "(SELECT ?||id FROM retention_scans WHERE action='delete')", (PREFIX,))
+    add('Delete obsolete cue shots', "DELETE FROM metadata WHERE key IN "
+        "(SELECT 'cue-view-shots:'||id FROM retention_scans WHERE action='delete')")
     add('Delete obsolete crop markers', "DELETE FROM metadata WHERE key IN (SELECT ?||id FROM retention_scans WHERE action='delete' "
         "UNION ALL SELECT 'verified-scan-geometry:'||id FROM retention_scans WHERE action='delete')",(FACE_CROPS,))
     with tracking(statements, 'Prune obsolete recognition evidence', unit='statement') as steps:

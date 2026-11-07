@@ -80,7 +80,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         person = json.loads(row['geometry'])
         kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
-        if kind != 'back':
+        if kind != 'back' and decision.get('query_perspective') != 'back':
             continue
         query = vector(row)
         ranked = gallery.rank(query,scan,settings,quality(row).get('pixel_digest'))
@@ -106,7 +106,8 @@ def _scene(db, scan, stamp, gallery, search, config):
         proof = dict(person=owner, status='accepted', role='auxiliary',
                      reason='external_rear_view', source_scan=source, perspective='back', score=mean,
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
-                     source_tracks=[[*w['roots'],w['id']] for w in witnesses])
+                     source_tracks=[[*w['roots'],w['id']] for w in witnesses],
+                     source_scans=sorted({w['scan'] for w in witnesses}))
         proposals[row['id']] = (owner,row['cue'],old,proof)
         batch.append((row['id'], query, {owner,old}, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):
@@ -191,11 +192,12 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery):
     references = banks(db,config,scope,namespace)
     if any(b['stale_policy'] or b['missing_original'] for b in references.values()):
         return
-    from .rear_pending import matching_scans
+    from .rear_pending import Pending
     from .rear_gallery import revision
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
-        scans.update(matching_scans(db,scope,namespace,scans,stamp,gallery,search,
-                                    config.data['sapiensid']['identities']))
-        for scan in sorted(scans):
+        pending = Pending(db,gallery,search,config.data['sapiensid']['identities'])
+        selected = set(scans)
+        for scan,scene in pending.candidates(scope,namespace,selected,stamp):
             _scene(db,scan,stamp,gallery,search,config)
+            scans[scan] = scene

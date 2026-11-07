@@ -76,3 +76,17 @@ def test_predicted_hidden_eyes_do_not_veto_rear_torso():
     assert orientation(dict(keypoints=points, keypoint_visibility=visibility)) == 'back'
     visibility[6] = .1
     assert orientation(dict(keypoints=points, keypoint_visibility=visibility)) == 'unknown'
+
+
+def test_sharp_outlier_cannot_remove_two_agreeing_shots():
+    from stash_ai.recognition.rooted_witnesses import select
+    from stash_ai.recognition.body_identity import defaults
+    tracks = []
+    for i, direction in enumerate([-24,24,24]):
+        angle = np.deg2rad(direction)
+        row = dict(id=str(i),scan='s',cue=i,seconds=i,quality=json.dumps({'quality':{'pixel_digest':str(i)}}),
+                   _vector=np.array([np.cos(angle),np.sin(angle)]))
+        tracks.append((f's{i}',f'e{i}',row))
+    scores = SimpleNamespace(face_similarity=np.dot)
+    kept = select(tracks,defaults(),scores,lambda t:-t[2]['cue'],lambda r:r['cue'])
+    assert [r['cue'] for _,_,r in kept] == [1,2]

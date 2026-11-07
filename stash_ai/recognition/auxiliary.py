@@ -136,7 +136,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
     """
     grouping, settings = config.data['clustering'], config.data['recognition']
     views = (confirmed_views(db, policy, grouping,
-                            remaining_bytes=grouping['max_reference_bytes'] - usage.bytes,complete=True)
+                            remaining_bytes=grouping['max_reference_bytes'] - usage.bytes,complete=True,include_local=True)
              if grouping['view_prototypes_enabled'] else ())
     views=tuple({(v.group.identifier,v.pose,v.medoid):v for v in tuple(views)+tuple(extra_views)}.values())
     for view in views:
@@ -181,7 +181,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                         saw_cohesion = True
                         continue
                     view = by_group[id(group)]
-                    if not pose_matches(row['geometry'],view.pose):
+                    if getattr(view,'local_scan',None) not in (None,scan) or not pose_matches(row['geometry'],view.pose):
                         continue
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):

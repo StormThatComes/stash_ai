@@ -282,3 +282,19 @@ def test_repeated_shot_cannot_outvote_a_view_confirmed_in_two_shots():
             slot.add(row,np.asarray([1.,0.],dtype='float32'))
         slots.append(slot)
     assert prioritized(slots,1)[0].pose=='neutral'
+
+
+def test_single_shot_auxiliary_view_remains_local(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db,config)
+        assert all(row['status']=='accepted' for row in policy_membership(db,config,selected[1]['scan']))
+        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.view_shot',0) WHERE scan=?",
+                              (selected[0]['scan'],))
+        db.connection.commit()
+        rebuild_selected(db,selected,config)
+        args = (db.connection,matching_policy(config),config.data['clustering'])
+        assert not confirmed_views(*args,remaining_bytes=2**20)
+        [local] = confirmed_views(*args,remaining_bytes=2**20,include_local=True)
+        assert local.local_scan == selected[0]['scan']
+        assert all(row['status']=='withheld' for row in policy_membership(db,config,selected[1]['scan']))

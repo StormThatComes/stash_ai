@@ -31,6 +31,9 @@ def scan(state, config, scene, vectors=None, count=3):
     # These fixtures assign arbitrary vectors to repeated placeholder pixels.
     # They model independent observations, not retained pixel-equality evidence.
     state.connection.execute("UPDATE observations SET quality=json_remove(quality,'$.evidence_crop_sha256','$.evidence_pixel_sha256','$.evidence_thumbnail','$.evidence_thumbnail_id','$.evidence_aspect') WHERE scan=?", (identifier,))
+    # Each mocked vector represents an independent shot rather than the single
+    # placeholder sprite. Tests for repeated shots supply their actual shot IDs.
+    state.connection.execute("UPDATE observations SET quality=json_set(quality,'$.view_shot',cue) WHERE scan=?", (identifier,))
     state.connection.commit()
     return identifier, client
 

@@ -133,7 +133,7 @@ class Cues:
     def __contains__(self,value):
         return self.pool.db.execute('SELECT 1 FROM cues WHERE group_id=? AND scan=? AND cue=?',(self.group,*value)).fetchone() is not None
     def __iter__(self):
-        return iter(self.pool.db.execute('SELECT scan,cue FROM cues WHERE group_id=?',(self.group,)))
+        return iter(self.pool.db.execute('SELECT scan,cue FROM cues WHERE group_id=? ORDER BY scan,cue',(self.group,)))
     def __len__(self):return self.pool.db.execute('SELECT COUNT(*) FROM cues WHERE group_id=?',(self.group,)).fetchone()[0]
     def isdisjoint(self,other):
         if isinstance(other,Cues) and other.pool is self.pool:

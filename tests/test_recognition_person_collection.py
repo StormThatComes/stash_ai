@@ -216,3 +216,52 @@ def test_person_cleanup_releases_model_when_cpu_shutdown_fails(tmp_path):
     model = Person();collector.model = model
     with pytest.raises(RuntimeError, match='shutdown failed'): collector.close()
     assert model.closed and collector.pipeline is None and collector.model is None
+
+
+def test_separate_pose_phase_receives_same_shot_labels_as_face_scan(tmp_path):
+    import json
+    settings=config(tmp_path)
+    data=plain(settings.data)
+    data['sapiensid']['enabled']=True
+    settings=replace(settings,data=data)
+    seen = {}
+    class Observer(Person):
+        def detect(self,image,faces=None):
+            index,shot,_ = image._recognition_cue_signature
+            seen[index] = shot
+            return faces
+    collector = PersonCollector(settings,{},factory=Observer)
+    client = MediaClient()
+    try:
+        with FaceDatabase(settings.database) as state,SpriteInput(client,client.scene,settings) as source:
+            scan,_ = scan_scene(state,'scope',client.scene,settings,'ns',source,Backend)
+            collector.enrich(state.connection,scan,source)
+            expected = {r['cue']:json.loads(r['quality'])['view_shot'] for r in
+                        state.connection.execute('SELECT cue,quality FROM observations WHERE scan=?',(scan,))}
+            assert seen == expected and seen
+    finally:
+        collector.close()
+
+
+def test_older_scan_recovers_shots_for_missing_poses_once(tmp_path):
+    import json
+    from tests.test_recognition_body_collection import Persons, settings
+    cfg = settings(tmp_path)
+    client,model = MediaClient(),Persons(0)
+    collector = PersonCollector(cfg,{},factory=lambda *args:model)
+    try:
+        with FaceDatabase(cfg.database) as state,SpriteInput(client,client.scene,cfg) as source:
+            db=state.connection
+            scan,_=scan_scene(state,'scope',client.scene,cfg,'ns',source,Backend)
+            key='cue-view-shots:'+scan
+            expected=db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()[0]
+            with db:
+                db.execute('DELETE FROM metadata WHERE key=?',(key,))
+                db.execute("UPDATE observations SET quality=json_remove(quality,'$.view_shot') WHERE scan=?",(scan,))
+            collector.enrich(db,scan,source)
+            assert db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()[0]==expected
+            assert all('view_shot' in json.loads(q) for q, in db.execute('SELECT quality FROM observations WHERE scan=?',(scan,)))
+            assert model.calls==len(source.cues)
+            assert collector.enrich(db,scan,source)==0
+    finally:
+        collector.close()

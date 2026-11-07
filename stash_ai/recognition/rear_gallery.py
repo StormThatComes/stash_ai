@@ -17,16 +17,18 @@ def load(db, config, scope, namespace):
         FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.status='complete'
         AND b.contract=? AND b.rejected IS NULL AND m.policy=?
-        AND json_extract(m.proof,'$.rooted_view.perspective')='back' AND """ + predicate()
+        AND COALESCE(json_extract(m.proof,'$.rooted_view.perspective'),
+                     json_extract(m.proof,'$.rooted_track.perspective'))='back' AND """ + predicate()
     settings = config.data['sapiensid']['identities']
     limit = config.data['sapiensid']['execution']['reference_bytes'] // 8
     groups = defaultdict(list)
     used = 0
     for raw in db.execute(sql,(scope,namespace,contract(config),policy(config))):
         row = dict(raw)
-        proof = json.loads(row.pop('proof'))['rooted_view']
+        membership = json.loads(row.pop('proof'))
+        proof = membership.get('rooted_view') or membership['rooted_track']
         owner = proof['owner']
-        if row['person'] not in (None,owner):
+        if row['person'] not in (None,owner) and membership.get('reason') != 'body_scene_core':
             continue
         roots = proof['roots']
         # The strict face at each endpoint must still belong to this owner.
@@ -48,6 +50,22 @@ def load(db, config, scope, namespace):
         witnesses = independent(rows,settings)
         if len(witnesses)>=max(2,settings['attach_min_support']):
             banks.append((owner,scan,witnesses))
+    from .body_identity import Scores
+    from .rooted_witnesses import select
+    by_owner = defaultdict(list)
+    for (owner,scan), rows in groups.items():
+        for row in rows:
+            by_owner[owner].append((*row['roots'],row))
+    scores = Scores(config)
+    for owner, tracks in sorted(by_owner.items()):
+        if len({row['scan'] for _,_,row in tracks}) < 2:
+            continue
+        def rank(item):
+            q = json.loads(item[2]['quality']).get('quality',{})
+            return (-q.get('overlap',0),q.get('keypoints',0),q.get('sharpness',0),item[2]['id'])
+        kept = select(tracks,settings,scores,rank,lambda row:row['scan'])
+        if len(kept) >= max(2,settings['attach_min_support']):
+            banks.append((owner,kept[0][2]['scan'],[row for _,_,row in kept]))
     return Gallery(banks)
 
 
@@ -89,7 +107,7 @@ class Gallery:
         result = []
         for index in candidates:
             owner,source,rows = self.banks[index]
-            if source == scan:
+            if source == scan or any(row.get('scan')==scan for row in rows):
                 continue
             scored = [(float(np.dot(query,row['_vector'])),row) for row in rows]
             rival_score = sum(score for score,_ in scored)/len(scored)
