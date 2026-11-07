@@ -98,4 +98,6 @@ def snapshot(target, config, labels):
         decisions[identifier] = dict(status='rejected' if rejected else 'withheld', identity=None,
             evidence=dict(observation=identifier, reason=rejected or 'no_assignment_decision'),
             explanation='No accepted production decision for this retained observation.')
+    for identifier, decision in decisions.items():
+        decision['accepted_identity'] = predictions[identifier]
     return predictions, decisions, dict(sorted(reasons.items()))
