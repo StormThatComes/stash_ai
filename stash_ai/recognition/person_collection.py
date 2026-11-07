@@ -64,7 +64,7 @@ class PersonCollector:
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
         from bisect import bisect_right
         from .body_perspectives import frame_signature
-        saved_shots = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
+        saved_shots = next(iter(db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,))),None)
         shots = json.loads(saved_shots[0]) if saved_shots else []
         starts = [item[0] for item in shots]
         self.resume_rows=[]
