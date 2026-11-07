@@ -79,7 +79,7 @@ def _copy_scene(source, target, scan):
 
 def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_sizes=(0, 1),
              scene_orders=('numeric',), shuffle_seed=0, history_modes=('cold',), repeat_runs=1,
-             retune_from_baseline=False, source_snapshot=None, omitted_cues=None):
+             retune_from_baseline=False, source_snapshot=None, omitted_cues=None, variant_started=None):
     """Labels map retained observation IDs to human person labels, not predictions."""
     if not isinstance(labels, dict) or not labels or any(not isinstance(k, str) or not k or
             not isinstance(v, str) or not v.strip() for k, v in labels.items()):
@@ -121,6 +121,8 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
         if set(known) != set(labels):
             raise ValueError('Every truth label must address an observation in the selected latest scans.')
         for name, variant in configurations.items():
+            if variant_started is not None:
+                variant_started(name)
             data = plain(variant.data)
             # Explicit evaluation never writes durable replay checkpoints.
             data['execution']['rebuild_checkpoint_scenes'] = 0

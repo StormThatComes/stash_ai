@@ -243,3 +243,7 @@ Before a fully solved configuration exists, ties prefer fewer goal-to-outsider
 attachments, external coverage losses, splits and joins, then confirmed local
 stability and fewer/smaller normalized parameter changes. External partition
 changes are not accuracy estimates; labels of other people are unknown.
+
+Compact console output identifies the search phase, the first changed parameter against the previous winner, and the most frequent sampled blocker per unresolved set (up to three sets). Where retained evidence supplies an address, the message includes its scene and cue. A partial diagnostic budget is reported once per affected signal.
+
+Held-out evaluation reports baseline and winner replays separately, followed by each omitted cue window. Its summary compares fragments and false joins for all labels and for back/entangled slices, then lists lost and joined pairs for the windows.

@@ -20,7 +20,12 @@ def test_holdout_replays_one_winner_and_removes_only_private_cues(tmp_path):
     goal = dict(scope=scope,namespace=namespace,selected_trial='trial1',best_result={'changes':[]})
     with closing(sqlite3.connect(':memory:')) as training:
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
-        result = validate_winner(cfg,training,goal,manifest)
+        events = []
+        result = validate_winner(cfg,training,goal,manifest,progress=events.append)
+        assert [e.split(' · ')[0] for e in events] == ['Holdout baseline', 'Holdout winner', 'Holdout omission 1/1']
+        from stash_ai.recognition.solver_explanation import holdout_summary
+        text = holdout_summary(result)
+        assert 'back (9)' in text and 'entangled (9)' in text and '1:0-0 lost=' in text
         assert result['metrics']['winner/joint']['back']['observations']==9
         assert result['omissions'][0]['scored']==8
         assert result['omissions'][0]['excluded_labels']==1

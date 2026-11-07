@@ -133,7 +133,7 @@ def read_manifest(manifest_path):
             document.get('series', []), triples)
 
 
-def validate_winner(config, training, result, manifest_path, *, manifest=None):
+def validate_winner(config, training, result, manifest_path, *, manifest=None, progress=None):
     scenes, samples, labels, database, series, triples = manifest or read_manifest(manifest_path)
     conflict = training.execute('SELECT DISTINCT scene FROM scans WHERE scope=? AND namespace=? AND '
                                 'scene IN (SELECT value FROM json_each(?)) LIMIT 1',
@@ -156,7 +156,10 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None):
             if tuple(item) not in windows:
                 windows.append(tuple(item))
         options = dict(scenes=scenes,scope=scope,batch_sizes=(0,),source_snapshot=source)
-        full = evaluate(settings,labels,variants={'winner':winner},**options)
+        def announce(name):
+            if progress:
+                progress(f'Holdout {name} · {len(scans)} scenes · {len(labels)} labels')
+        full = evaluate(settings,labels,variants={'winner':winner},variant_started=announce,**options)
         locations = _locations(source,scans,labels)
         predicted = full['trials']['winner/joint']['decisions']
         metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples)
@@ -176,7 +179,9 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None):
                 if len(windows)==3:
                     break
         stress = []
-        for window in windows:
+        for index, window in enumerate(windows, 1):
+            if progress:
+                progress(f'Holdout omission {index}/{len(windows)} · scene {window[0]} cues {window[1]}–{window[2]}')
             trial = evaluate(winner,labels,omitted_cues=window,**options)['trials']['baseline/joint']['decisions']
             scene,first,last = window
             excluded = {oid for oid,(s,c) in locations.items() if s==scene and first<=c<=last}

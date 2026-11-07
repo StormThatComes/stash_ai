@@ -177,7 +177,16 @@ def execute(args, config):
             if validation_path and result.get('best_result') and not result.get('interrupted'):
                 from .solver_validation import validate_winner
                 with report_phase('Validate finalist on held-out scenes'):
-                    result['holdout_validation'] = validate_winner(config, db, result, validation_path, manifest=validation_manifest)
+                    console = current_console()
+                    def validation_step(label):
+                        console.update(validation=label)
+                        console.message(label, decorative=True)
+                    validation = validate_winner(config, db, result, validation_path, manifest=validation_manifest,
+                                                 progress=validation_step if console else None)
+                    result['holdout_validation'] = validation
+                    if console:
+                        from .solver_explanation import holdout_summary
+                        console.message(holdout_summary(validation), decorative=True)
         elif args.simulate:
             with report_phase('Replay merge goals'):
                 result['simulation'] = evaluate(config, result, db)

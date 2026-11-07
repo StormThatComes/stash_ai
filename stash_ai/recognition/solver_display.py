@@ -45,6 +45,7 @@ class SolverDisplay:
         self.durations = deque(maxlen=31)
         self.pool, self.preparing = '', ''
         self.last_initialization = None
+        self.search_phase = None
         console.status_layout = self.layout
         console.heartbeat_layout = self.heartbeat
 
@@ -54,7 +55,8 @@ class SolverDisplay:
 
     def layout(self, row, fields, width):
         if row['phase'] != 'Solve merge goals':
-            return status_lines(row, fields, width)
+            lines = status_lines(row, fields, width)
+            return compact([*lines, fields['validation']], width) if fields.get('validation') else lines
         with self.lock:
             now = monotonic()
             lines = [self.header(), f"Total {clock(row['total_elapsed'])} · phase {clock(row['elapsed'])}"]
@@ -62,6 +64,8 @@ class SolverDisplay:
                 lines[-1] += ' · median fresh trial ' + clock(median(self.durations))
             if self.pool or self.preparing:
                 lines.append(self.pool or self.preparing)
+            if self.search_phase:
+                lines.append('Search: ' + self.search_phase)
             for name, value in self.rows.items():
                 text = worker_row(value, now, width-12) if isinstance(value, dict) else value
                 lines.append(f'{name:<12}{text}')
@@ -83,14 +87,15 @@ class SolverDisplay:
 
     def heartbeat(self, row, fields):
         if row['phase'] != 'Solve merge goals':
-            return ' · '.join(str(v) for v in (row['phase'], clock(row['elapsed']), fields.get('stage')) if v)
+            return ' · '.join(str(v) for v in (row['phase'], clock(row['elapsed']), fields.get('validation'), fields.get('stage')) if v)
         with self.lock:
             workers = [(name, value) for name, value in self.rows.items() if isinstance(value, dict)]
             detail = ''
             if workers:
                 name, value = min(workers, key=lambda entry: entry[1]['started'])
                 detail = f' · {name} {worker_row(value, monotonic(), 70)}'
-            return self.header() + ' · ' + (self.pool or self.preparing) + detail
+            phase = ' · ' + self.search_phase if self.search_phase else ''
+            return self.header() + phase + ' · ' + (self.pool or self.preparing) + detail
 
     show_winner = True
 
@@ -101,6 +106,8 @@ class SolverDisplay:
             self.console.message(message, decorative=True)
 
     def update(self, name, stage, item):
+        if stage == 'partial':
+            return f"Partial {item['kind']} diagnostics · {item['reason']} · {str(item.get('detail', ''))[:160]}"
         if stage == 'plan':
             return 'Merge solver execution: plan ' + item['text']
         if name == 'inputs':
@@ -113,6 +120,7 @@ class SolverDisplay:
                 return 'Merge solver initialization: ' + label
         elif stage == 'start':
             self.preparing = ''
+            self.search_phase = item.get('search_phase', 'baseline' if name == 'baseline' else self.search_phase)
             self.rows[name] = 'queued / starting'
             if name == 'baseline':
                 self.pool = f'baseline runs alone · {self.slots} candidate slots after baseline'
@@ -152,7 +160,19 @@ class SolverDisplay:
                     self.first_solution = best
                     prefix = 'first feasible'
                 if not restored or self.restored == 1:
-                    return f'Merge solver {prefix} {best} · {detail}'
+                    from .solver_explanation import parameter_change
+                    delta = item.get('winning_delta', ())
+                    if delta:
+                        detail += ' · ' + parameter_change(delta[0])
+                        if len(delta) > 1:
+                            detail += f' (+{len(delta)-1} more)'
+                    evidence = item.get('blockers', ())
+                    if evidence:
+                        detail += '\n  ' + ' | '.join(evidence[:3])
+                        if len(evidence) > 3:
+                            detail += f' (+{len(evidence)-3} sets)'
+                    phase = item.get('winning_phase', 'baseline')
+                    return f'Merge solver {prefix} {best} · {phase} · {detail}'
         return None
 
     def finish(self, result):
