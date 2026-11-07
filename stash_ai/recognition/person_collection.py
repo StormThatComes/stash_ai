@@ -4,7 +4,7 @@ import json
 
 from .models import checked_detection
 from .person_signal import contract, save
-from .progress import tracking
+from .progress import work
 from stash_ai.runtime.cleanup import closing, cleanup
 
 
@@ -61,8 +61,8 @@ class PersonCollector:
         loaded=None
         try:
             with closing(frames,name='close person source frames') as stream:
-                with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
-                    for index,cue,image in frames:
+                with work('Collect SapiensID evidence', len(missing), unit='cue') as progress:
+                    for index,cue,image in stream:
                         with image:
                             if index in missing:
                                 if loaded!=blocks[index]:
@@ -74,6 +74,7 @@ class PersonCollector:
                                         lookup[row['cue']].append(row)
                                 rows=lookup[index]
                                 self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
+                                progress.advance()
             self.flush()
         finally:
             # Only sealed, completely inferred cues enter this buffer. Preserve

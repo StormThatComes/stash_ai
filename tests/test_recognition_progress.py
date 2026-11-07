@@ -81,7 +81,8 @@ def test_terminal_has_scene_frame_publication_and_performer_bars_with_one_owner(
     assert all(line.startswith(('Recognition success:', 'VRAM ')) for line in lines)
     if log_vram:
         assert lines[0].startswith('VRAM vtt before:')
-        assert lines[-1].startswith('VRAM final after_release:')
+        assert lines[-2].startswith('VRAM final after_release:')
+        assert lines[-1].startswith('Recognition success:')
     else:
         assert len(lines) == 1 and lines[0].startswith('Recognition success:')
     assert 'Face references scene' not in output and 'Performer names starter' not in output
@@ -299,3 +300,47 @@ def test_handled_names_preflight_error_marks_phase_partial(tmp_path, monkeypatch
     assert 'Phase: Recognition names preflight partial [7/9]' in output.err
     assert 'Phase: Recognition names preflight complete' not in output.err
     assert 'metadata_failed=1' in output.out
+
+
+def test_command_outcome_after_final_release(tmp_path, monkeypatch, capsys):
+    from stash_ai.recognition.gpu_memory import GpuMemory
+    config, _, services, _ = setup(tmp_path, monkeypatch)
+    release = GpuMemory.release
+    def fail_final(self, stage, callbacks, **options):
+        release(self, stage, callbacks, **options)
+        if stage == 'final':
+            raise RuntimeError('release failure')
+    monkeypatch.setattr(GpuMemory, 'release', fail_final)
+    with pytest.raises(RuntimeError, match='release failure'):
+        execute(args('1'), config, services=services)
+    output = capsys.readouterr().out
+    assert 'Recognition success:' not in output
+    assert output.splitlines()[-1].startswith('Recognition failed:')
+    with FaceDatabase(config.database) as state:
+        assert state.connection.execute('SELECT status FROM runs').fetchone()[0] == 'failed'
+
+
+def test_sapiens_progress_counts_only_missing_cues(monkeypatch):
+    from contextlib import nullcontext
+    from stash_ai.recognition import body_observations, person_collection, person_crop_backfill
+    from stash_ai.recognition.progress import observe_updates
+
+    class Source:
+        def frames(self, start):
+            return ((i, SimpleNamespace(start=i), nullcontext()) for i in range(start, 5))
+
+    class Database:
+        def execute(self, query, arguments):
+            return [(1,), (3,)] if 'SELECT DISTINCT o.cue' in query else []
+
+    collector = person_collection.PersonCollector(SimpleNamespace(data={'sapiensid': {'enabled': True}}), None)
+    monkeypatch.setattr(person_collection, 'contract', lambda _: 'test')
+    monkeypatch.setattr(body_observations, 'enabled', lambda _: False)
+    monkeypatch.setattr(person_crop_backfill, 'backfill', lambda *args: None)
+    monkeypatch.setattr(collector, '_load', lambda: None)
+    collected, rows = [], []
+    monkeypatch.setattr(collector, 'collect_records', lambda db, scan, i, *a, **kw: collected.append(i))
+    with observe_updates(lambda kind, value: rows.append(value) if kind == 'work' else None):
+        collector.enrich(Database(), 'scan', Source())
+    assert collected == [1, 3]
+    assert rows[-1]['completed'] == rows[-1]['total'] == 2

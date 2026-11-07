@@ -103,8 +103,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True
-    backend = backend_factory()
     frame_progress(completed=record['cursor'], total=record['total'])
+    backend = backend_factory()
     pending, cursor = [], record['cursor']
     pending_bytes=0
     collector=getattr(on_cue,'__self__',None)

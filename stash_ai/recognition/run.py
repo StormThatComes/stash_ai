@@ -1,5 +1,4 @@
 """Finite recognition and retained-portrait orchestration; no tag runtime or hook."""
-from collections import Counter
 from dataclasses import asdict, dataclass, replace
 import os
 from urllib.parse import urlsplit
@@ -119,6 +118,8 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             if check:check()
             with db:acknowledge(db,scope,namespace,scene,revision)
             counts['scenes_processed'] += 1
+            if unchanged:
+                counts['publications_unchanged'] += 1
             database.progress(run, 'matching',
                               {'scene': scene, 'groups': groups, 'policy': 'cold_selected_replay'})
         except KeyboardInterrupt:
@@ -131,11 +132,22 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
 
 def execute(args, config, *, services=None):
     from .profiling import pipeline_scope
-    with pipeline_scope(config.data['execution']['profile_rebuild']):
-        return _execute(args, config, services=services)
+    from tqdm import tqdm
+    from .run_display import RunDisplay
+    report = RunReport(args.progress_style == 'verbose', tqdm.write)
+    display = RunDisplay(report)
+    try:
+        with pipeline_scope(config.data['execution']['profile_rebuild']):
+            _execute(args, config, services=services, display=display)
+    except BaseException as error:
+        display.finish('interrupted' if isinstance(error, KeyboardInterrupt) else 'failed')
+        raise
+    outcome = 'partial' if display.retention == 'failed' else display.recognition
+    display.finish(outcome)
+    return 0 if outcome == 'success' else 1
 
 
-def _execute(args, config, *, services=None):
+def _execute(args, config, *, services, display):
     services = services or Services()
     retry_images = bool(getattr(args, 'retry_unresolved_images', False))
     portraits_only = getattr(args, 'command', 'run') == 'portraits'
@@ -145,11 +157,8 @@ def _execute(args, config, *, services=None):
     scope = instance_scope(url)
     # Optional extensions read immutable config before any Stash mutations.
     extra = services.metadata_config(config, scope) if services.metadata_config and not portraits_only else None
-    from tqdm import tqdm
-    report = RunReport(args.progress_style == 'verbose', tqdm.write)
-    counts = Counter()
-    rejection_totals={kind:Counter() for kind in ('face','body','person_evidence_unavailable')}
-    references = {}
+    report, counts = display.report, display.counts
+    rejection_totals, references = display.rejections, display.references
     publication_debt = None
     from .sprite_cache import scope as sprite_scope
     from .disk_budget import scope as disk_scope
@@ -180,6 +189,7 @@ def _execute(args, config, *, services=None):
                         if identifier not in seen:
                             identifiers.append(identifier)
                             seen.add(identifier)
+            display.selected = len(identifiers)
             snapshot = config.snapshot()
             if portraits_only or retry_images:
                 snapshot['invocation'] = {**({'command': 'portraits'} if portraits_only else {}),
@@ -245,7 +255,15 @@ def _execute(args, config, *, services=None):
                         batches=Batches(ordered,batch_size,release_faces,release_all)
                         with closing(batches.events(),name='close scene batches') as events:
                             for pass_kind,position,identifier in events:
-                                following = ordered[position + 1] if position + 1 < len(ordered) else None
+                                if pass_kind != 'combined':
+                                    offset = position % batch_size
+                                    total = min(batch_size, len(ordered) - position + offset)
+                                    status(report, batch=f'{"pose" if pass_kind == "body" else "face"} {offset + 1}/{total}')
+                                cursor = None
+                                scan_mode = None
+                                def started(mode, completed):
+                                    nonlocal cursor, scan_mode
+                                    cursor, scan_mode = completed, mode
                                 scene_work = False
                                 try:
                                     with activity(report, 'prepare VTT input', scene=identifier):
@@ -254,13 +272,17 @@ def _execute(args, config, *, services=None):
                                         scene, source = prepared.scene, prepared.source
                                         if pass_kind!='body':inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                                         def progress(**values):
+                                            nonlocal cursor
+                                            cursor = values.get('scanned', values.get('reused', cursor))
+                                            status(report, checkpoint=cursor)
                                             database.progress(run, 'scan', values)
                                         if pass_kind=='body':scan,reused=batches.results[position]
                                         else:
-                                            with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
+                                            with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier, started) as frames:
                                                 scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
                                                     backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
                                                     on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] and not sequential else None)
+                                            display.scans[scan_mode or ('reused' if reused else 'fresh')] += 1
                                         scene_work = not reused
                                         if pass_kind=='face':
                                             batches.results[position]=(scan,reused)
@@ -288,6 +310,8 @@ def _execute(args, config, *, services=None):
                                                 ' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items())))
                                     selected.append({'scene': identifier, 'scan': scan})
                                 except KeyboardInterrupt:
+                                    if cursor is not None:
+                                        display.interrupted_cursor = identifier, cursor
                                     scene_work = True
                                     raise
                                 except Exception as error:
@@ -338,6 +362,8 @@ def _execute(args, config, *, services=None):
                             face_mode=getattr(database,'face_rebuild_mode','cold')
                             body_mode=getattr(database,'body_rebuild_mode','disabled')
                             hybrid_mode=getattr(database,'hybrid_rebuild_mode','disabled')
+                            display.rebuild = dict(face=face_mode, body=body_mode, hybrid=hybrid_mode,
+                                                   scenes=len(getattr(database, 'last_rebuild_selection', selected)))
                             phases={face_mode,body_mode,hybrid_mode}-{'disabled'}
                             mode=next(iter(phases)) if len(phases)==1 else 'partial'
                             database.progress(run, 'rebuild', {'mode': mode, 'face_mode':face_mode,'body_mode':body_mode,
@@ -428,13 +454,7 @@ def _execute(args, config, *, services=None):
                         'Recognition publication pending: selected='+str(publication_debt['pending_selected'])+
                         ' outside_selection='+str(publication_debt['pending_outside_selection'])+
                         '; inspect with recognition sync-identities')
-                report.optional('recognition_summary', report.write, f'Recognition {outcome}: ' +
-                                ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
-                                ''.join(' | '+kind+': '+' '.join(f'{reason}={total}' for reason,total in sorted(reasons.items()))
-                                        for kind,reasons in rejection_totals.items() if reasons) +
-                                (' | face references=' + usage_line(references) +
-                                 f" people={references['people']} samples={references['samples']} stage={references['stage']}" if references else ''))
-                return 0 if outcome == 'success' else 1
+                display.debt = publication_debt
             except BaseException as error:
                 outcome = 'interrupted' if isinstance(error, KeyboardInterrupt) else 'failed'
                 failure = safe_error(error, key)[:1000]
@@ -481,6 +501,7 @@ def _execute(args, config, *, services=None):
                 finally:
                     if report.counts['cleanup_failures'] > before_cleanup and outcome == 'success':
                         outcome, failure = 'failed', 'Recognition resource cleanup failed.'
+                    display.recognition = outcome
                     # History stays on its SQLite owner, even while a worker's
                     # resources must remain quarantined. Preserve any primary.
                     cleanup([('collect recognition error summary', collect_errors),
@@ -491,6 +512,16 @@ def _execute(args, config, *, services=None):
                     raise resource_error
                 if outcome == 'success' and not portraits_only:
                     from .db_retention import after_run, format_report
-                    retained = report.optional('recognition_retention', after_run, database, config, run,api_key=key)
+                    try:
+                        retained = after_run(database, config, run, api_key=key)
+                    except KeyboardInterrupt:
+                        display.retention = 'interrupted'
+                        raise
+                    except Exception as error:
+                        display.retention = 'failed'
+                        report.optional('recognition_retention_error', report.issue, 'recognition',
+                                        'retention', None, error, safe_error(error, key))
+                        retained = None
                     if retained is not None:
+                        display.retention = 'success'
                         report.optional('recognition_retention_report', report.write, format_report(retained))
