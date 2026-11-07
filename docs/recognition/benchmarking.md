@@ -82,3 +82,23 @@ The synthetic `benchmark_recognition_parallel` remains useful for offline smoke
 tests, but its orthogonal repeated identities do not predict a real 9,000-scene
 library. Representative 24-core measurements and a measured tuning/default
 recommendation remain tracked in #856.
+
+### Crowded VTT pairs
+
+Run `python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels pairs.json --cuda-profile`
+against Stash using its usual connection settings. Each profile scans the same complete VTT scenes into a disposable
+database and rebuilds identities locally. The profiles are unmasked PMPose, SAM on overlapping boxes, and SAM with
+foreground SapiensID crops. The benchmark needs the models on the machine performing the scan. CUDA profiling is
+optional and reports summed CUDA activity time separately from scan wall time.
+
+Labels map scene and zero-based cue to every visible performer and their torso centre in original VTT pixels.
+Mark separate clear cues as references for the same performer. For example:
+
+```json
+{"42":{"0":[{"truth":"A","point":[90,120],"reference":true}],
+       "2":[{"truth":"B","point":[160,120],"reference":true}],
+       "8":[{"truth":"A","point":[100,120]},{"truth":"B","point":[145,118]}]}}
+```
+
+The report counts two correctly retained IDs, missing and duplicate poses, and joins to the partner.
+A tie in torso alignment abstains. Include both performers before and after a crossing.

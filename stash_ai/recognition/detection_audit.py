@@ -108,11 +108,17 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_ind
     frames = []
     counts = dict(cues_exported=0, faces_detected=0, people_detected=0, cues_without_detections=0)
     selected = source.frames() if cue_index is None else source.frames_indices([cue_index])
+    from .perspective_shots import advance
+    from .crowd_context import attach_context
+    shot = None
     with closing(selected, name='close detection audit frames') as images:
         for index, cue, image in images:
             # SpriteInput owns its images; the nested close also supports injected
             # sources and covers detection/export failures before the next yield.
             with closing(image, name='close detection audit image'):
+                shot = advance(image,index,shot)
+                image._recognition_cue_signature = shot
+                attach_context(detector,image,scene_id,index,cue.start)
                 with render_frame(image, detector, scene_id, index, cue, mask_options=mask_options) as (annotated, record):
                     _png(annotated, directory / record['file'])
                 frames.append(record)

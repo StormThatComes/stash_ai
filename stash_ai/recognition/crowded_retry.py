@@ -31,21 +31,45 @@ def _regions(image, faces, heads, box):
 
 def retry_people(model, image, faces, people):
     from .sapiensid_backend import associate
-    if len(faces) != 2 or len(people) != 1 or getattr(model, 'pose_refiner', None) is None:
+    if len(faces) > 2 or len(people) != 1 or getattr(model, 'pose_refiner', None) is None:
         return people
     settings = model.config.data['sapiensid']['pose']
     if settings['max_people_per_frame'] < 2:
         return people
     left, top, right, bottom = people[0]['bounds']
-    heads = [(x+w/2, y+h/2) for x,y,w,h in (f.box for f in faces)]
+    context = getattr(image,'_recognition_crowd',None)
+    temporal = len(faces)<2
+    if temporal:
+        if context is None or context[4] is None:
+            return people
+        centres,scale = context[4]
+        heads = centres
+        separation = .12*scale
+    else:
+        heads = [(x+w/2, y+h/2) for x,y,w,h in (f.box for f in faces)]
+        separation = .7 * max(min(f.box[2:]) for f in faces)
     if (not all(left <= x < right and top <= y < bottom for x,y in heads)
-            or math.dist(*heads) < max(4., .7 * max(min(f.box[2:]) for f in faces))):
+            or math.dist(*heads) < max(4., separation)):
         return people
 
     # A padded crop changes detector scale while preserving both heads. Only
     # replace the original after two independent poses confirm the two faces.
     candidates = []
-    regions = _regions(image,faces,heads,(left,top,right,bottom))
+    if temporal:
+        # Overlapping tiles around each previously visible torso alter the detector scale.
+        axis = int(abs(heads[0][1]-heads[1][1]) > abs(heads[0][0]-heads[1][0]))
+        mid = (heads[0][axis]+heads[1][axis])/2
+        pad = .2*abs(heads[0][axis]-heads[1][axis])
+        regions = []
+        for centre in heads:
+            tile = [left,top,right,bottom]
+            if centre[axis]<mid:
+                tile[axis+2] = min(tile[axis+2],math.ceil(mid+pad))
+            else:
+                tile[axis] = max(tile[axis],math.floor(mid-pad))
+            regions.append((tile,[centre]))
+    else:
+        regions = _regions(image,faces,heads,(left,top,right,bottom))
     for region, required_heads in regions:
         x0,y0,x1,y1 = region
         with image.crop(region) as crop:
@@ -71,7 +95,11 @@ def retry_people(model, image, faces, people):
     bounds, scores = zip(*candidates)
     found = model._people(list(bounds), list(scores), *model.pose_refiner.predict(image, list(bounds)))
     matches = associate(faces, found)
-    if None in matches or len(set(matches)) != 2:
+    if temporal:
+        from .crowd_context import follows, pair
+        if not follows(context[4],pair(found)):
+            return people
+    if None in matches or len(set(matches)) != len(faces):
         return people
     for person in found:
         person['crowded_box_retry'] = True
