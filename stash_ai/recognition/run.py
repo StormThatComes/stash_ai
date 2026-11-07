@@ -249,7 +249,7 @@ def _execute(args, config, *, services, display):
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
-                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered), estimate=False) as scenes:
                         from .scene_batches import Batches
                         batch_size=config.data['execution']['sequential_scene_batch_size'] if sequential else 1
                         def release_faces():
@@ -333,7 +333,8 @@ def _execute(args, config, *, services, display):
                                             ('close person models', person_collector.close),
                                             ('unload face models', backend.unload),
                                             ('unload face visibility', visibility.close)], scene=identifier))], report=report)
-                                scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
+                                scenes.advance(fresh=display.scans['fresh'], resumed=display.scans['resumed'],
+                                               reused=display.scans['reused'], failed=counts['scenes_failed'])
                                 if pass_kind!='body':inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                                 database.progress(run, 'run', dict(counts))
                     inputs.close()

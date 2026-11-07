@@ -36,7 +36,7 @@ bar and a second bar for VTT frames in the active scene, with elapsed time,
 throughput and estimated remaining time. Publication has its own scene bar;
 names and portraits have a performer bar. ETAs describe the current stage,
 not the whole invocation, and remain unavailable until work has completed.
-The frame bar starts at the saved checkpoint cursor; cached scenes show all
+The scene bar counts fresh, resumed and reused scans separately. It omits a blended ETA for different kinds of work. The frame bar starts at the saved checkpoint cursor; cached scenes show all
 frames reused without treating them as newly inferred work. Frame progress
 updates independently of the configured SQLite checkpoint interval.
 

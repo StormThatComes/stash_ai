@@ -27,3 +27,15 @@ def test_process_sampler_measures_cpu_cores_without_summing_shared_memory(monkey
         row = meter.sample()
     assert row['cores'] == 3 and row['rss'] == 2**30 and row['scratch_reserved'] == 1024
     assert meter.scratch is None
+
+
+def test_mixed_scene_counter_keeps_cache_hits_out_of_inference_rate():
+    from stash_ai.recognition.progress import WorkProgress
+    from stash_ai.runtime.console import present
+    from stash_ai.runtime.report import RunReport
+    report = RunReport(write=lambda _: None)
+    with present(report, 'compact'):
+        with WorkProgress(report, 'Scenes', 10, estimate=False) as scenes:
+            scenes.set_completed(1, force=True, reused=1)
+            assert report.console.state['scenes'] == '1/10'
+            assert 'scenes_eta' not in report.console.state and 'scenes_rate' not in report.console.state
