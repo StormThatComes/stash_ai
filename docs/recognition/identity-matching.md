@@ -873,3 +873,19 @@ canonical labels. It does not construct a new merged centroid, relax thresholds,
 or use recovered queries as training evidence. Recovered memberships remain
 attachment-only and require at least two independent timestamps. Matching policy
 version changes invalidate previous derived decisions; VTT scans remain reusable.
+
+### Face-rooted body perspectives
+
+Face prototypes distinguish a measured neutral pose from unknown landmarks.
+The bounded primary set gives a supported new direction precedence when it
+covers additional witnesses. Reserve cohorts remain available in complete replay.
+
+Body collection saves a small RGB scene signature and a conservative anatomical
+torso direction per observation. Scene replay can recover a body appearance
+using two disjoint short VTT tracks, each bracketed by strict face/body anchors
+of the same owner. A cut, long gap, ambiguous competing body or contradictory
+face ends the track. One shot contributes at most one witness. Recovered members
+are auxiliary, and the proof retains the exact face roots and body witnesses.
+A complete body fragment moves only when all its members agree on the same
+target. This route works within a scene; global reconciliation uses the usual
+original-witness safeguards across scenes.

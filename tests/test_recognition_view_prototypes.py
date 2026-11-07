@@ -83,7 +83,7 @@ def test_confirmed_view_recovers_profiles_which_cannot_match_frontal_anchor(tmp_
         assert {row['person'] for row in second} == {first[0]['person']}
         assert all(json.loads(row['payload'])['reason'] == 'view_identity' for row in second)
         proofs = [json.loads(row['payload'])['view_prototype'] for row in second]
-        assert all(p['anchor_verified_support'] >= 3 and p['pose'] == 'other' for p in proofs)
+        assert all(p['anchor_verified_support'] >= 3 and p['pose'] == 'neutral' for p in proofs)
         anchors = _groups(db.connection, 'scope', 'ns', config.data['clustering'])
         assert len(anchors) == 1 and len(anchors[0].samples) == 3
         assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
@@ -128,7 +128,7 @@ def test_one_identity_can_own_two_distinct_confirmed_view_clusters(tmp_path):
         assert len(views) == 2
         assert len({view.group.identifier for view in views}) == 1
         assert all(view.support_count == 3 for view in views)
-        assert all(view.pose == 'other' for view in views)
+        assert all(view.pose == 'neutral' for view in views)
 
 
 def test_competing_view_prototypes_respect_ambiguity_margin(tmp_path):
@@ -178,7 +178,7 @@ def test_promotion_prototypes_bounded_and_nontransitive(tmp_path):
         # The two second-pass matches cannot increase promotion support.
         assert len(views) == 1
         assert views[0].support_count == 3
-        assert views[0].pose == 'other'
+        assert views[0].pose == 'neutral'
 
 
 @pytest.mark.parametrize('field,value', [
@@ -255,7 +255,7 @@ def test_pose_hint_keeps_signed_direction_and_does_not_claim_yaw_degrees():
     right = neutral.copy()
     left[8] = 64
     right[8] = 96
-    assert pose_view(neutral) == 'other'
+    assert pose_view(neutral) == 'neutral'
     assert pose_view(left) == 'left'
     assert pose_view(right) == 'right'
-    assert pose_view('not-json') == 'other'
+    assert pose_view('not-json') == 'unknown'

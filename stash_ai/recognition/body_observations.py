@@ -38,10 +38,14 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False)
 
 
 def contract(config):
-    return _contract(config,'independent-person-v2-rgb-pixels')
+    return _contract(config,'independent-person-v3-perspective')
 
 
 def compatible_contracts(config):
+    return list(dict.fromkeys([contract(config), *_previous_contracts(config)]))
+
+
+def _previous_contracts(config):
     # Old association/crop policies and grayscale digests cannot train current
     # cores; retain their frozen banks only as conservative competitors.
     return list(dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
