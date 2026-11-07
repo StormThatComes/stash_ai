@@ -48,6 +48,8 @@ class LiveProgress(AbstractContextManager):
         from .live_resources import ProcessMeter
         self.meter = ProcessMeter()
         self.name, self.queue = name, queue
+        self.dropped = 0
+        self.publisher_lock = Lock()
         self.lock, self.stop = Lock(), Event()
         now = time.monotonic()
         self.snapshot = dict(pid=os.getpid(), started=now, updated=now,
@@ -63,7 +65,17 @@ class LiveProgress(AbstractContextManager):
         with self.lock:
             self.snapshot = snapshot
 
+    def starting(self, label):
+        with self.lock:
+            now = time.monotonic()
+            self.snapshot = dict(self.snapshot, stage=label, stage_started=now, updated=now)
+        self.publish()
+
     def publish(self):
+        with self.publisher_lock:
+            self._publish()
+
+    def _publish(self):
         with self.lock:
             snapshot = self.snapshot
         try:
@@ -71,8 +83,10 @@ class LiveProgress(AbstractContextManager):
                 resources = self.meter.sample()
             except (ValueError, OSError, RuntimeError):
                 resources = {}
-            self.queue.put_nowait((self.name, dict(snapshot, reported=time.monotonic(), resources=resources)))
-        except (Full, OSError, ValueError):
+            self.queue.put_nowait((self.name, dict(snapshot, reported=time.monotonic(), resources=resources, dropped=self.dropped)))
+        except Full:
+            self.dropped += 1
+        except (OSError, ValueError):
             # Observability must not make cancellation or worker exit wait on IPC.
             pass
 
@@ -133,6 +147,8 @@ def worker_text(snapshot, now):
     if resources:
         from .live_resources import process_line
         text += ' | ' + process_line(resources)
+    if snapshot.get('dropped'):
+        text += f" | dropped telemetry={snapshot['dropped']}"
     completed = snapshot['last_completed']
     text += ' | last_completed=' + ('none observed' if completed is None else f'{now-completed:.0f}s ago')
     return text

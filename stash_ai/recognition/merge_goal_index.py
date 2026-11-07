@@ -91,6 +91,9 @@ def solver_scope(function):
                 execution = plan(config, kwargs["execution"], source=args[0] if args else kwargs.get('db'),
                                  scope=goals['scope'], namespace=goals['namespace']) if kwargs.get("execution") is not None else None
             if progress.telemetry_enabled:
+                if execution is not None:
+                    from .report_metrics import admitted_cpus
+                    admitted_cpus(execution.cpus)
                 progress('execution', 'plan', dict(text=plan_text(execution, maximum=kwargs.get('maximum', 500))))
             from .solver_journal_events import journal_scope
             from contextlib import ExitStack

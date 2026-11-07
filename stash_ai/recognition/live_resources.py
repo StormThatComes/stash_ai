@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+import os
 from threading import Lock
 import shutil
 import time
@@ -21,8 +22,20 @@ class ProcessMeter:
         self.lock = Lock()
         self.then, self.cpu = time.monotonic(), time.process_time()
         self.row = {}
+        self.children = {}
         self.scratch = None
         self.trial_budget = None
+
+    def child_sample(self, pid, row):
+        with self.lock:
+            previous = self.children.get(pid)
+            if previous is None or row['sampled'] >= previous['sampled']:
+                self.children[pid] = row
+
+    def release_children(self, pids):
+        with self.lock:
+            for pid in pids:
+                self.children.pop(pid, None)
 
     def sample(self):
         with self.lock:
@@ -32,7 +45,9 @@ class ProcessMeter:
                 return self.row
             cpu = time.process_time()
             row = dict(rss=process_rss(), cores=(cpu - self.cpu)/elapsed if elapsed >= .5 else None,
-                       trial_budget=self.trial_budget)
+                       trial_budget=self.trial_budget, sampled=now, pid=os.getpid())
+            if self.children:
+                row['children'] = dict(self.children)
             scratch = self.scratch
             if scratch is not None:
                 row.update(scratch_reserved=scratch.used, scratch_limit=scratch.limit, scratch_free=scratch.free)
@@ -44,7 +59,23 @@ class ProcessMeter:
 def process_line(row, cpus=None):
     cores = row.get('cores')
     cpu = 'warming up' if cores is None else f'{cores:.1f}' + (f'/{cpus}' if cpus else '') + ' cores'
-    return f'CPU {cpu} · RSS {gib(row.get("rss"))}'
+    line = f'CPU {cpu} · RSS {gib(row.get("rss"))}'
+    if row.get('children'):
+        line += ' · inner ' + sampled_processes(row['children'].values(), time.monotonic())
+    return line
+
+
+def sampled_processes(rows, now):
+    rows = list(rows)
+    known = [r['rss'] for r in rows if r.get('rss') is not None]
+    active = [r['cores'] for r in rows if now-r['sampled'] <= 5 and r.get('cores') is not None]
+    age = max(now-r['sampled'] for r in rows)
+    cpu = f'{sum(active):.1f} cores' if active else 'n/a'
+    return f'{len(rows)} PIDs · sampled RSS {gib(sum(known) if known else None)} · CPU {cpu} · oldest {age:.0f}s'
+
+
+def current_meter():
+    return _active.get()
 
 
 @contextmanager

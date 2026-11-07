@@ -137,7 +137,7 @@ Auto and compact display the trial budget, fresh and restored attempts, failures
 and one live row per pending trial. Baseline runs alone. Candidate rows distinguish startup,
 evaluation and completed results waiting for application. Batch scheduling shows the earlier
 trial holding up application. Free slots can mean the search needs a pending result before it
-can propose another configuration. The median uses recent fresh evaluations only.
+can propose another configuration. The median uses recent successful fresh replays. Recovered errors and repeated failures of the same stage and budget appear as separate totals.
 
 A persistent event records the baseline, first feasible solution, a change in the best result
 or a trial error. Redirected output uses one periodic summary per minute. The verbose style
@@ -146,7 +146,7 @@ to disable progress. Numeric durations on work rows describe observed work. An o
 time during a live heartbeat can indicate blocking native or SQLite work.
 
 Worker rows include current process RSS, measured CPU in cores and the planned per-trial
-memory budget. The coordinator has its own process row. RSS includes shared pages and planned
+memory budget. The coordinator has its own process row and uses the admitted CPU count as its denominator. Sampled worker RSS includes idle pool PIDs, reports the oldest sample age and excludes stale CPU readings. Inner numerical process samples are collected when blocks return. Saturated telemetry queues count dropped updates and retry without blocking replay. RSS includes shared pages and planned
 memory is an admission figure. Scratch leases report reserved bytes on the scratch volume.
 Replay uses retained observations and does not initialize GPU models to collect telemetry.
 

@@ -64,6 +64,7 @@ def test_full_transport_retries_latest_snapshot_without_changing_work_time():
     assert name == 'trial-1'
     assert snapshot.pop('reported') >= initial['started']
     assert {'rss', 'cores'} <= snapshot.pop('resources').keys()
+    assert snapshot.pop('dropped') == 2
     assert snapshot == latest
     live.publish()
     assert queue.get_nowait()[1]['updated'] == latest['updated']
@@ -263,3 +264,22 @@ def test_trial_rows_explain_liveness_and_fit_a_narrow_terminal():
     assert 'no telemetry' in next(line for line in rows if line.startswith('trial-10'))
     assert 'waiting for trial-10' in next(line for line in rows if line.startswith('trial-12'))
     assert all(len(line) <= 79 for line in rows)
+
+
+def test_failed_and_restored_trials_do_not_skew_replay_duration():
+    from stash_ai.recognition.solver_display import SolverDisplay
+    messages = []
+    display = SolverDisplay(SimpleNamespace(message=lambda line, **kw: messages.append(line)), 50, 2)
+    failure = dict(stage='rebuild', reason='resource_limit', error='over budget', elapsed_seconds=999)
+    display('trial-1', 'failed', failure)
+    display('trial-2', 'failed', failure)
+    display('trial-3', 'failed', dict(failure, restored_result=True))
+    assert not display.durations and len(messages) == 1
+    summary = display.finish({})
+    assert '×2 (fresh)' in summary and '×1 (restored)' in summary
+
+
+def test_resource_samples_keep_idle_pids_without_counting_stale_cpu():
+    from stash_ai.recognition.live_resources import sampled_processes
+    resources = [dict(rss=2**30, sampled=80., cores=3.), dict(rss=2**30, sampled=99., cores=.5)]
+    assert '2 PIDs · sampled RSS 2.00 GiB · CPU 0.5 cores · oldest 20s' == sampled_processes(resources, 100.)

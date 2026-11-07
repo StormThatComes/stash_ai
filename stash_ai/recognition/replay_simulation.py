@@ -211,6 +211,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                     for note in evaluated.get('diagnostics', ()):
                                         error.add_note(note)
                                     raise error
+                                if getattr(progress, 'coordinator_status', False):
+                                    progress(name, 'coordinator', dict(text='apply worker result'))
                                 if parallel_accept:
                                     parallel_accept(settings, evaluated)
                             else:
@@ -259,6 +261,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         if runtime:
                             item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds','worker_cache_reused') if k in evaluated}
                         if consume is not None:
+                            if getattr(progress, 'coordinator_status', False):
+                                progress(name, 'coordinator', dict(text='score goal assignments'))
                             consume_started = time.perf_counter()
                             item.update(consume(name, observations, retained, predictions))
                             if runtime and runtime.profile:
@@ -268,6 +272,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         item['completed_wall_seconds'] = time.perf_counter()-wall_started
                         result['trials'][name] = item
                         if record_trial:
+                            if getattr(progress, 'coordinator_status', False) and journal is not None:
+                                progress(name, 'coordinator', dict(text='write checkpoint / fsync'))
                             journal_started = time.perf_counter()
                             record_trial(name,settings,item,inputs)
                             if runtime and runtime.profile:

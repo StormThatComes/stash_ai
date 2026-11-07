@@ -35,18 +35,23 @@ def initialize(event, updates=None, context=None):
 def work(request):
     from stash_ai.runtime.cancellation import use
     from .solver_trial import evaluate, Task, restore
-    if isinstance(request, Task):
-        request = restore(request, _context)
     from .solver_progress import LiveProgress
     telemetry = LiveProgress(request.name, _updates) if _updates is not None else nullcontext(None)
-    reused=_reuse.prepare(request) if _reuse is not None else False
-    try:
-        with use(_cancel), telemetry as progress:
-            result=evaluate(request, progress=progress)
-            result['worker_cache_reused']=reused
+    with use(_cancel), telemetry as progress:
+        if isinstance(request, Task):
+            if progress:
+                progress.starting('Restore trial inputs')
+            request = restore(request, _context)
+        if progress:
+            progress.starting('Prepare worker cache')
+        reused = _reuse.prepare(request) if _reuse is not None else False
+        try:
+            result = evaluate(request, progress=progress)
+            result['worker_cache_reused'] = reused
             return result
-    finally:
-        if _reuse is not None:_reuse.completed()
+        finally:
+            if _reuse is not None:
+                _reuse.completed()
 
 
 class Trials(AbstractContextManager):
@@ -62,6 +67,7 @@ class Trials(AbstractContextManager):
         self.telemetry = progress is not None and getattr(progress, 'telemetry_enabled', True)
         self.updates = context_mp.Queue(maxsize=execution.trials * 4) if self.telemetry else None
         self.snapshots, self.dispatched = {}, {}
+        self.process_samples = OrderedDict()
         self.wait_reason = ''
         self.retired = 0
         self.started = time.monotonic()
@@ -150,6 +156,12 @@ class Trials(AbstractContextManager):
                 name, snapshot = self.updates.get_nowait()
             except Empty:
                 break
+            if snapshot.get('resources') and snapshot.get('pid') is not None:
+                pid = snapshot['pid']
+                self.process_samples[pid] = (snapshot.get('reported', snapshot['updated']), snapshot['resources'])
+                self.process_samples.move_to_end(pid)
+                while len(self.process_samples) > self.execution.trials:
+                    self.process_samples.popitem(last=False)
             if name in self.pending and name not in self.ready:
                 self.snapshots[name] = snapshot
 
@@ -166,7 +178,7 @@ class Trials(AbstractContextManager):
         occupied = f'Pool {len(running)} running · {len(self.pending)-len(running)-len(ready)} starting · {len(ready)} ready'
         if idle and self.wait_reason:
             occupied += f' · {idle} idle: {self.wait_reason}'
-        self.progress('workers', 'pool', dict(compact=occupied, text=(
+        self.progress('workers', 'pool', dict(compact=occupied, process_samples=dict(self.process_samples), text=(
             f'running={len(running)} queued/starting={len(self.pending)-len(running)-len(ready)} '
             f'ready={len(ready)} retired={self.retired} limit={self.execution.trials} '
             f'elapsed={now-self.started:.0f}s scheduling={self.execution.scheduling} waiting_for={waiting}')))

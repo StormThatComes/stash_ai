@@ -31,6 +31,7 @@ class Result:
     seconds: float
     cpu_seconds: float
     backend: str = 'threads'
+    sample: dict | None = None
 
 
 def available_cpus():
@@ -71,6 +72,9 @@ class Compute:
         self.cancel = LinkedCancellation(current_cancellation())
         self.executor = self.native = self.process_executor = self.process_event = None
         self.process_blocks = 0
+        from .live_resources import current_meter
+        self.meter = current_meter()
+        self.child_pids = set()
         self.shared_inputs = {}
         self.pending = deque()
         self.closed = False
@@ -175,7 +179,7 @@ class Compute:
         self.process_event = context.Event()
         self.cancel.subscribe(self.process_event.set)
         self.process_executor = ProcessPoolExecutor(max_workers=self.workers, mp_context=context,
-            initializer=_initialize_process, initargs=(self.process_event, self.native_threads))
+            initializer=_initialize_process, initargs=(self.process_event, self.native_threads, self.meter is not None))
 
     def _invoke(self, function, job):
         with self.lock:
@@ -212,6 +216,10 @@ class Compute:
             with self.lock:
                 self.completed += 1
             self.process_blocks += 1
+            if result.sample and self.meter:
+                pid = result.sample['pid']
+                self.child_pids.add(pid)
+                self.meter.child_sample(pid, result.sample)
         self.release_input(job.ordinal)
         self.pending.popleft()
         self.bytes -= job.size
@@ -286,6 +294,8 @@ class Compute:
 
     def close(self):
         self.closed = True
+        if self.meter:
+            self.meter.release_children(self.child_pids)
         def stop():
             self.cancel.cancel()
             for future, _ in self.pending:
@@ -327,10 +337,16 @@ def compute_scope(config):
 _process_cancellation = _process_native = None
 
 
-def _initialize_process(event, native_threads):
+_process_meter = None
+
+
+def _initialize_process(event, native_threads, measure=False):
     # Spawned workers receive no SQLite connection, CUDA model or coordinator
     # ContextVars. Only an event, immutable scene input and plain config cross.
-    global _process_cancellation, _process_native
+    global _process_cancellation, _process_native, _process_meter
+    if measure:
+        from .live_resources import ProcessMeter
+        _process_meter = ProcessMeter()
     import numpy  # Load BLAS before applying this process-local thread limit.
     from threadpoolctl import threadpool_limits
     _process_native = threadpool_limits(limits=native_threads, user_api='blas')
@@ -344,4 +360,4 @@ def _invoke_process(function, job):
         value = function(job.payload)
         _process_cancellation.check()
         return Result(job.ordinal, job.generation, value, time.perf_counter()-start,
-                      time.process_time()-cpu, 'processes')
+                      time.process_time()-cpu, 'processes', _process_meter.sample() if _process_meter else None)
