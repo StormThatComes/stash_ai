@@ -39,10 +39,13 @@ def orientation(person):
     return 'unknown' if all(visible(i) for i in (1,2)) else 'back'
 
 
-def recover(rows, decisions, seeds, settings, scores, guard):
+def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
     from .body_identity import quality, independent
     if not seeds:
+        for row in rows:
+            if not row.get('face_person') and quality(row).get('orientation') == 'back':
+                decisions[row['id']]['track_blocker'] = dict(reason='no_face_root', cue=row['cue'])
         return
     by_cue = defaultdict(list)
     geometry = {}
@@ -74,7 +77,12 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
         gap = b['seconds'] - a['seconds']
-        if not 0 < gap <= 12 or boundary[b['cue']] != 'continuous':
+        skipped = b['cue'] - a['cue'] == 2
+        if skipped:
+            continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
+        else:
+            continuous = boundary[b['cue']] == 'continuous'
+        if not 0 < gap <= 12 or not continuous:
             return None
         wa, ha = ba[2]-ba[0], ba[3]-ba[1]
         wb, hb = bb[2]-bb[0], bb[3]-bb[1]
@@ -88,10 +96,17 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         return similarity if similarity >= settings['cohesion_threshold'] else None
 
     # Ambiguous transitions, cuts and sparse cue gaps end a track.
-    next_row = {}
+    next_row, stops = {}, {}
+    occupied = set(occupied) | set(by_cue)
     margin = max(.025, settings['ambiguity_margin'])
     for cue, left in by_cue.items():
-        right = by_cue.get(cue+1, ())
+        target = cue+1 if cue+1 in occupied else cue+2
+        right = by_cue.get(target, ())
+        default_stop = ('cut' if boundary.get(target)=='cut' else
+                        'cue_gap' if not right else 'geometry_or_appearance')
+        for row in left:
+            stops[row['id']] = dict(reason=default_stop, cue=target)
+
         forward, backward = defaultdict(list), defaultdict(list)
         for a in left:
             for b in right:
@@ -101,12 +116,17 @@ def recover(rows, decisions, seeds, settings, scores, guard):
                     backward[b['id']].append((score,a['id']))
         for a in left:
             edges = sorted(forward[a['id']], reverse=True)
-            if not edges or len(edges)>1 and edges[0][0]-edges[1][0] < margin:
+            if not edges:
+                continue
+            if len(edges)>1 and edges[0][0]-edges[1][0] < margin:
+                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=edges[1][1])
                 continue
             _, bid = edges[0]
             rivals = sorted(backward[bid], reverse=True)
             if rivals[0][1] == a['id'] and (len(rivals)==1 or rivals[0][0]-rivals[1][0] >= margin):
                 next_row[a['id']] = bid
+            else:
+                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=rivals[0][1])
     lookup = {r['id']: r for r in rows}
     from .body_identity import copresent
     measured = defaultdict(list)
@@ -119,13 +139,32 @@ def recover(rows, decisions, seeds, settings, scores, guard):
     for start, owner in root.items():
         path = []
         successor = next_row.get(start)
-        while successor and successor not in root and len(path) < 4:
+        skipped = 0
+        while successor and successor not in root:
             member = lookup[successor]
+            previous = path[-1] if path else lookup[start]
+            skipped += member['cue']-previous['cue']-1
+            if skipped > 1 or member['seconds'] - lookup[start]['seconds'] > 60:
+                successor = None
+                break
             if member.get('face_person') is not None:
                 break
             path.append(member)
             successor = next_row.get(successor)
-        if root.get(successor) != owner or not path:
+        if not path:
+            continue
+        last = path[-1]
+        if successor in root and (lookup[successor]['seconds'] - lookup[start]['seconds'] > 60
+                or skipped + lookup[successor]['cue'] - last['cue'] - 1 > 1):
+            successor = None
+        if root.get(successor) != owner:
+            stop = stops.get(last['id'], dict(reason='no_returning_face', cue=last['cue']))
+            if successor is not None:
+                stop = dict(reason='different_face_root', cue=lookup[successor]['cue'])
+            for member in path:
+                decisions[member['id']]['track_blocker'] = stop
+                if stop['reason'] not in ('competing_transition','different_face_root'):
+                    decisions[member['id']]['open_face_root'] = dict(owner=owner, observation=start)
             continue
         for r in path:
             source_paths[r['id']] = (start, successor)
@@ -165,6 +204,11 @@ def recover(rows, decisions, seeds, settings, scores, guard):
                 decisions[witness]['rooted_view'] = dict(owner=key[0], perspective=key[1],
                                                          roots=[start,end], tracks=proof)
 
+    for row in rows:
+        decision = decisions[row['id']]
+        if not row.get('face_person') and decision.get('status') != 'accepted':
+            decision.setdefault('track_blocker', stops.get(row['id']) if row['id'] not in next_row
+                                and row['id'] in stops else dict(reason='no_independent_view', cue=row['cue']))
     if not banks:
         return
     owner_rows = defaultdict(list)
@@ -180,6 +224,8 @@ def recover(rows, decisions, seeds, settings, scores, guard):
             continue
         kind = geometry[row['id']][0].get('orientation')
         for (owner, perspective), (bank, proof) in banks.items():
+            if decision.get('open_face_root', {}).get('owner', owner) != owner:
+                continue
             if perspective != kind or copresent([row],owner_rows[owner]) or not guard.allows(row,bank,owner):
                 continue
             # A rooted track has its own temporal proof, but cannot vote for
@@ -195,11 +241,14 @@ def recover(rows, decisions, seeds, settings, scores, guard):
             if mean < settings['match_threshold'] or low < settings['cohesion_threshold']:
                 continue
             # Every foreign owner including provisional scene groups competes.
-            runner = max((scores.compare([row],others)[0] for p, others in owner_rows.items()
-                          if p not in (owner,decision['person']) and not copresent([row],others)
-                          and guard.allows(row,others)),default=-1.)
-            rivals = [scores.compare([row], other)[0] for (p,_), (other,_) in banks.items() if p!=owner]
-            if mean-max([runner,*rivals]) >= margin:
+            competing = [(scores.compare([row],others)[0], p) for p,others in owner_rows.items()
+                         if p not in (owner,decision['person']) and not copresent([row],others)
+                         and guard.allows(row,others)]
+            competing.extend((scores.compare([row],other)[0], p) for (p,_),(other,_) in banks.items() if p!=owner)
+            runner, rival = max(competing, default=(-1.,None))
+            if mean-runner < margin:
+                decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
+            else:
                 candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
     proposed = {oid: owner for oid, owner, *_ in candidates}
     # An established body fragment moves as a unit or remains available as a rival.

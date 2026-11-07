@@ -57,13 +57,13 @@ def feedback_summary(feedback, hybrid, config, changes, locations):
             parameters={k: dict(current=changes.get(k, parameter(settings, k)), proposed=v) for k, v in patch.items()})
     for row in feedback.get('provenance', {}).get('blocker_trace', ()):
         location = locations.get(row.get('observation'))
-        if location is None or row['stage'] not in ('assignment', 'quality'):
+        if location is None or row['stage'] not in ('assignment', 'quality', 'body_track'):
             continue
         index, performer, scene = location
         key = index, row['stage']
         if key in examples:
             continue
-        example = fields(row, 'stage reason observation parameters requires_evidence')
+        example = fields(row, 'stage reason observation parameters requires_evidence cue rival')
         rules = row.get('keypoint_rules', {})
         if rules:
             example['failed_rules'] = [fields(rule, 'parameter label measured minimum') for mode in ('all', 'any')
