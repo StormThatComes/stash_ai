@@ -75,3 +75,13 @@ def test_provisional_partner_relations_cannot_score_as_production_membership():
     scores = _metrics(labels, samples, places, joined, partner_sets=triples)['partners']
     assert (scores['target_pairs'], scores['recovered'], scores['partner_pairs'], scores['false_joins']) == (1,1,2,2)
     assert _partition_delta(decisions, joined, labels) == dict(lost_pairs=0, joined_pairs=6)
+
+
+def test_single_physical_target_cannot_recover_itself():
+    from stash_ai.recognition.solver_validation import partner_metrics
+    ids = ['face', 'body', 'partner']
+    labels = dict(zip(ids,['A','A','B']))
+    decisions = {k:{'accepted_identity':v} for k,v in labels.items()}
+    result = partner_metrics([ids],labels,dict.fromkeys(ids,('scene',3)),decisions,())
+    assert result['target_pairs']==result['recovered']==0
+    assert result['partner_pairs']==1

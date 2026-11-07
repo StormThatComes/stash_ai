@@ -53,6 +53,8 @@ def partner_metrics(triples, labels, locations, decisions, exclude):
                 continue
             a, b = (decisions[oid]['accepted_identity'] for oid in (first, second))
             addresses = tuple(sorted((labels[oid], *locations[oid]) for oid in (first, second)))
+            if addresses[0] == addresses[1]:
+                continue
             (positive if same else negative)[addresses].append(a is not None and a == b)
     counts = defaultdict(Counter)
     for key, values in positive.items():
