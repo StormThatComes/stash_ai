@@ -74,6 +74,9 @@ class RunProgress:
         for name in self.plan[self.cursor:index]:
             reason = ('no eligible scenes' if name in ('Recognition identity rebuild', 'Recognition Stash publication')
                       else 'no eligible performers')
+            if name in ('Recognition identity rebuild', 'Recognition Stash publication') and self.report.console.phase_outcomes.get(
+                    'Recognition Stash reconciliation') == 'failed':
+                reason = 'Stash reconciliation failed'
             if name == 'Recognition Stash publication' and self.report.console.phase_outcomes.get(
                     'Recognition identity rebuild') == 'failed':
                 reason = 'identity rebuild failed'

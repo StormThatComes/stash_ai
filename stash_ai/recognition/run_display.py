@@ -36,8 +36,9 @@ class RunDisplay:
             work += [f'{kind}={self.scans[kind]}' for kind in ('fresh', 'resumed', 'reused') if self.scans[kind]]
             work.append(f'VTT complete={c["vtt_complete"]}/{self.selected} face_cues={c["face_cues"]} '
                         f'pose_cues={c["pose_cues"]} backfilled={c["pose_backfilled"]}')
-        if c['scenes_processed']:
-            work.append(f'published={c["scenes_processed"]-c["publications_unchanged"]} unchanged={c["publications_unchanged"]}')
+        if c['publication_selected']:
+            work.append(f'publication {c["publication_attempted"]}/{c["publication_selected"]} attempted · '
+                        f'published={c["scenes_processed"]-c["publications_unchanged"]} unchanged={c["publications_unchanged"]}')
         if 'portrait_people_selected' in c:
             work.append(f'portrait_people_selected={c["portrait_people_selected"]}')
         if self.rebuild:
