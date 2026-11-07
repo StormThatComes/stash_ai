@@ -193,6 +193,12 @@ def execute(args, config):
         if display and result.get('simulation', {}).get('input_selection', {}).get('excluded_scans'):
             from .replay_inputs import describe
             text += '\n' + describe(result['simulation']['input_selection'], max_scenes=5)
+        if display:
+            paths = [f'{label}={path}' for label, path in (
+                ('JSON', args.output), ('YAML', args.yaml_output if result.get('yaml_exported') else None),
+                ('checkpoint', checkpoint)) if path]
+            if paths:
+                text += '\n  ' + ' · '.join(paths)
         print(text, file=sys.stderr, flush=True)
     return 130 if result.get('interrupted') else 2 if result.get('status') == 'no_compatible_scans' else 0
 

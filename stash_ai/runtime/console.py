@@ -80,6 +80,8 @@ class ConsolePresenter:
         self.stopped = threading.Event()
         self.degraded = False
         self.status_layout = None
+        self._drawn_lines = ()
+        self._drawn_width = None
         self.heartbeat_layout = None
         self.live_fields = None
         self.heartbeat_on_progress = False
@@ -279,6 +281,12 @@ class ConsolePresenter:
         if self.stopping:
             row.update(phase='Stopping', elapsed=time.monotonic()-self.stop_started)
         fields = {k: v for k, v in row['values'].items() if not k.startswith('_')}
+        now = time.monotonic()
+        for key, deadline in row['values'].items():
+            if key.startswith('_eta_until_') and now >= float(deadline):
+                work = key.removeprefix('_eta_until_')
+                fields.pop(work + '_eta', None)
+                fields[work + '_rate'] = 'awaiting progress'
         for key, label in (('_backoff_until', 'backoff remaining'), ('_deadline', 'deadline remaining')):
             if key in row['values']:
                 fields[label] = f"{max(0., float(row['values'][key])-time.monotonic()):.1f}s"
@@ -294,7 +302,13 @@ class ConsolePresenter:
         if self.tty:
             from .console_layout import status_lines, terminal_width
             layout = self.status_layout or status_lines
-            self._render_status(layout(row, fields, terminal_width(self.stream)))
+            width = terminal_width(self.stream)
+            if width != self._drawn_width:
+                self._drawn_lines = ()
+                self._drawn_width = width
+            for bar in tuple(self._bars):
+                bar.expire_postfix(now)
+            self._render_status(layout(row, fields, width))
             from .resources import resource_line
             # Inference already owns buffer/cache rows; no duplicate resource row.
             text = resource_line(resources) if row['phase'] != 'inference' else ''
@@ -329,7 +343,9 @@ class ConsolePresenter:
             if index == len(self._status_rows):
                 self._status_rows.append(tqdm(total=0, position=self.status_position + index,
                                              leave=False, file=self.stream, bar_format='{desc}', dynamic_ncols=True))
-            self._status_rows[index].set_description_str(text)
+            if index >= len(self._drawn_lines) or text != self._drawn_lines[index]:
+                self._status_rows[index].set_description_str(text)
+        self._drawn_lines = tuple(lines)
         self._status = self._status_rows[0]
 
     def _run(self):
@@ -394,6 +410,7 @@ class ConsolePresenter:
 class OwnedBar:
     def __init__(self, owner, factory, iterable, options):
         self.owner, self.iterable, self.options = owner, iterable, dict(options)
+        self.expiring_postfix = None
         self.status_key = self.options.pop('status_key', 'progress')
         self.milestones = self.options.pop('milestones', True)
         self.n = self.options.get('initial', 0)
@@ -445,6 +462,12 @@ class OwnedBar:
         self._total = value
         if getattr(self, 'target', None) is not None:
             self.owner.call(lambda: setattr(self.target, 'total', value))
+
+    def expire_postfix(self, now):
+        if self.expiring_postfix and now >= self.expiring_postfix[0] and self.target is not None:
+            _, fields = self.expiring_postfix
+            self.expiring_postfix = None
+            self.target.set_postfix(**fields, rate='awaiting progress')
 
     def set_postfix(self, *args, **kwargs):
         if self.status_key is not None:

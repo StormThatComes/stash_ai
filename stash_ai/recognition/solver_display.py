@@ -11,24 +11,27 @@ from .live_resources import gib
 
 def worker_row(snapshot, now, width):
     resources = snapshot.get('resources', {})
-    tail = [clock(now - snapshot['started'])]
-    if snapshot.get('work'):
-        work = snapshot['work'][-1]
-        total = '?' if work['total'] is None else work['total']
-        tail.append(f"{work['completed']}/{total} {work['unit']}")
     reported = snapshot.get('reported', snapshot['updated'])
     completed = snapshot.get('last_completed')
-    if now - reported >= 15:
-        tail.append('no telemetry ' + clock(now - reported))
+    age = now - reported
+    if age >= 15:
+        state = 'no telemetry ' + clock(age)
     elif completed is not None and now - completed >= 15:
-        tail.append('last progress ' + clock(now - completed) + ' ago')
+        state = 'last progress ' + clock(now - completed) + ' ago'
+    else:
+        state = clock(now - snapshot['started'])
+    detail = [state]
+    if snapshot.get('scene') is not None:
+        detail.append('scene ' + str(snapshot['scene']))
+    for work in snapshot.get('work', ()):
+        total = '?' if work['total'] is None else work['total']
+        detail.append(f"{work['completed']}/{total} {work['unit']}")
+    stage, = compact([snapshot['stage']], max(8, min(34, width-len(' · '.join(detail))-3)))
     if resources.get('rss') is not None:
-        tail.append('RSS ' + gib(resources['rss']))
+        detail.append('RSS ' + gib(resources['rss']))
     if resources.get('cores') is not None:
-        tail.append(f"CPU {resources['cores']:.1f}")
-    detail = ' · '.join(tail)
-    stage, = compact([snapshot['stage']], max(12, width - len(detail) - 3))
-    return f'{stage} · {detail}'
+        detail.append(f"CPU {resources['cores']:.1f}")
+    return stage + ' · ' + ' · '.join(detail)
 
 
 class SolverDisplay:
@@ -80,8 +83,14 @@ class SolverDisplay:
 
     def heartbeat(self, row, fields):
         if row['phase'] != 'Solve merge goals':
-            return f"{row['phase']} · {clock(row['elapsed'])}"
-        return ' | '.join(self.layout(row, fields, 110))
+            return ' · '.join(str(v) for v in (row['phase'], clock(row['elapsed']), fields.get('stage')) if v)
+        with self.lock:
+            workers = [(name, value) for name, value in self.rows.items() if isinstance(value, dict)]
+            detail = ''
+            if workers:
+                name, value = min(workers, key=lambda entry: entry[1]['started'])
+                detail = f' · {name} {worker_row(value, monotonic(), 70)}'
+            return self.header() + ' · ' + (self.pool or self.preparing) + detail
 
     show_winner = True
 
@@ -161,10 +170,11 @@ class SolverDisplay:
         assigned = sum(g.get('assigned', 0) for g in groups)
         attempted = search.get('attempted', 0)
         restored = search.get('restored_trials', 0) + search.get('recovered_evaluations', 0)
-        line = (f'Merge solver {phrase} · merged sets {merged}/{len(groups)} · assigned={assigned}'
+        line = (f'Merge solver {phrase} · stop={search.get("stop_reason", "unknown")}\n'
+                f'  merged sets {merged}/{len(groups)} · assigned={assigned}'
                 f' · Solver {attempted}/{search.get("max_trials", self.maximum)} · fresh {attempted-restored}'
                 f' · restored {restored} · failed {search.get("failed_trials", 0)}'
-                f' · stop={search.get("stop_reason", "unknown")}')
+                )
         if best and best['unmet_conditions']:
             from collections import Counter
             reasons = Counter()
