@@ -672,6 +672,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         finally:
             if compact_report and stage == 'complete':
                 trim_completed(name, item, config, changes_for(name), locations)
+    trial_progress.coordinator_status = getattr(progress, 'show_winner', False)
     trial_progress.telemetry_enabled = progress is not None and getattr(progress, 'telemetry_enabled', True)
     def trial_error(name, settings, exc, stage):
         if name == 'baseline' or not resource_limit(exc):

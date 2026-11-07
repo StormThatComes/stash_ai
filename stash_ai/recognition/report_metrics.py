@@ -17,6 +17,12 @@ def current_console():
     return _active.get().console
 
 
+def admitted_cpus(count):
+    state = _active.get()
+    if state is not None and state.console:
+        state.resources.cpus = count
+
+
 def command(function):
     @wraps(function)
     def wrapped(args, config):

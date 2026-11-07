@@ -1,5 +1,5 @@
 """Bounded coordinator-owned progress for interactive terminals and CI logs."""
-from collections import deque
+from collections import Counter, deque
 from statistics import median
 from threading import RLock
 from time import monotonic
@@ -31,6 +31,8 @@ def worker_row(snapshot, now, width):
         detail.append('RSS ' + gib(resources['rss']))
     if resources.get('cores') is not None:
         detail.append(f"CPU {resources['cores']:.1f}")
+    if snapshot.get('dropped'):
+        detail.append(f"telemetry skipped {snapshot['dropped']}")
     return stage + ' · ' + ' · '.join(detail)
 
 
@@ -46,6 +48,9 @@ class SolverDisplay:
         self.pool, self.preparing = '', ''
         self.last_initialization = None
         self.search_phase = None
+        self.process_samples = {}
+        self.failure_groups = Counter()
+        self.applying = None
         console.status_layout = self.layout
         console.heartbeat_layout = self.heartbeat
 
@@ -61,7 +66,7 @@ class SolverDisplay:
             now = monotonic()
             lines = [self.header(), f"Total {clock(row['total_elapsed'])} · phase {clock(row['elapsed'])}"]
             if self.durations:
-                lines[-1] += ' · median fresh trial ' + clock(median(self.durations))
+                lines[-1] += ' · median successful replay ' + clock(median(self.durations))
             if self.pool or self.preparing:
                 lines.append(self.pool or self.preparing)
             if self.search_phase:
@@ -69,6 +74,9 @@ class SolverDisplay:
             for name, value in self.rows.items():
                 text = worker_row(value, now, width-12) if isinstance(value, dict) else value
                 lines.append(f'{name:<12}{text}')
+            if self.process_samples:
+                from .live_resources import sampled_processes
+                lines.append('Workers: ' + sampled_processes(self.process_samples.values(), now))
             if fields.get('process'):
                 lines.append('Coordinator: ' + fields['process'])
             plans = {v['resources']['trial_budget'] for v in self.rows.values() if isinstance(v, dict)
@@ -94,6 +102,8 @@ class SolverDisplay:
             if workers:
                 name, value = min(workers, key=lambda entry: entry[1]['started'])
                 detail = f' · {name} {worker_row(value, monotonic(), 70)}'
+            if self.applying:
+                detail += f' · {self.applying[0]} {self.applying[1]}'
             phase = ' · ' + self.search_phase if self.search_phase else ''
             return self.header() + phase + ' · ' + (self.pool or self.preparing) + detail
 
@@ -128,21 +138,32 @@ class SolverDisplay:
                 self.pool = self.pool if self.pool.startswith('Pool ') else f'Candidate slots {self.slots}'
         elif stage == 'pool':
             self.pool = item.get('compact', item['text'])
+            self.process_samples = {pid: dict(row, sampled=row.get('sampled', observed))
+                                    for pid, (observed, row) in item.get('process_samples', {}).items()}
+        elif stage == 'coordinator':
+            self.applying = (name, item['text'])
+            self.rows[name] = item['text']
         elif stage in ('ready', 'status'):
             self.rows[name] = item.get('snapshot') or item.get('compact', item['text'])
         elif stage.startswith('stage: '):
             if name in self.rows:
                 self.rows[name] = item
         elif stage in ('failed', 'complete'):
+            if self.applying and self.applying[0] == name:
+                self.applying = None
             self.rows.pop(name, None)
             restored = item.get('restored_result', False)
             self.restored += int(restored)
             self.fresh += int(not restored)
             self.failed += int(stage == 'failed')
-            if not restored:
+            if not restored and stage == 'complete':
                 self.durations.append(item['elapsed_seconds'])
             if stage == 'failed':
-                return f"Merge solver {name} failed · {item['stage']} · {item['reason']}: {item['error']}"
+                key = (item['stage'], item['reason'], (item.get('resource') or {}).get('budget'), restored)
+                self.failure_groups[key] += 1
+                if not restored and self.failure_groups[key] == 1:
+                    return f"Merge solver {name} failed · {item['stage']} · {item['reason']}: {item['error']}"
+                return None
             best = item['best_trial']
             state = item['winner_state']
             if self.best != best:
@@ -201,4 +222,9 @@ class SolverDisplay:
             for condition in best['unmet_conditions']:
                 reasons[condition['reason']] += condition.get('count', 1)
             line += ' · unmet: ' + ', '.join(f'{key} ({count})' for key, count in reasons.most_common(3))
+        if self.failure_groups:
+            reasons = []
+            for (stage, reason, budget, restored), count in self.failure_groups.most_common(3):
+                reasons.append(f"{stage}/{budget or reason} ×{count} ({'restored' if restored else 'fresh'})")
+            line += '\n  failed trials: ' + ', '.join(reasons)
         return line
