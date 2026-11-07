@@ -92,14 +92,37 @@ def plan(db,config,bank,*,focus=None,compact=False):
             reserve(size(components)+size(membership))
             incomplete={i for i,people in enumerate(components)
                         if any(len(edges[p])!=len(people)-1 for p in people)}
-            if compact:
-                membership={p:i for p,i in membership.items() if i not in incomplete}
+            # Split only incomplete components; every retained subgraph is
+            # re-scored against its outside owners by the ordinary nearest pass.
+            from .frozen_subgroups import Edges, nonoverlapping
+            groups = []
+            for i, people in enumerate(components):
+                if i not in incomplete:
+                    groups.append(people)
+                    continue
+                result['decisions'].append(dict(people=people, outcome='blocked',
+                                                blockers=['incomplete_body_component']))
+                if len(people) > 128:
+                    continue
+                graph = Edges(max(0, limit - plan_bytes) // 4)
+                for owner in people:
+                    for other in edges[owner]:
+                        if owner < other:
+                            graph.add(owner, other, pairs[owner, other]['score'])
+                margin = max(settings['ambiguity_margin'], 1e-6)
+                proposals = graph.proposals(people, settings['match_threshold'], margin)
+                separated = []
+                for proposal in proposals:
+                    floors = graph.floors(proposal)
+                    if all(floors[p] - graph.score(p, q) >= margin for p in proposal
+                           for q in edges[p] if q not in proposal):
+                        separated.append(proposal)
+                groups.extend(nonoverlapping(separated))
+            components = groups
+            membership = {p: i for i, group in enumerate(groups) for p in group}
             rivals,goal_rivals=search.nearest([membership,focus],pairs)
             result['nearest_competitors']=list(goal_rivals.values())
             for index,people in enumerate(components):
-                if compact and index in incomplete:
-                    result['decisions'].append(dict(people=people,outcome='blocked',blockers=['incomplete_body_component']))
-                    continue
                 blockers=[];nearest=-1.
                 if any(b not in edges[a] for a in people for b in people if a!=b):
                     blockers.append('incomplete_body_component')

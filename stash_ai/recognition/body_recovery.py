@@ -10,7 +10,8 @@ def recover(database,selected,config):
     from .body_guards import FaceGuard,resolve_claims
     from .clustering import vector as face_vector
     db=database.connection;settings=config.data['sapiensid']['identities']
-    reasons={'body_anchor_quality','body_anchor_pixels','body_anchor_pixels_missing'}
+    reasons={'body_anchor_quality','body_anchor_pixels','body_anchor_pixels_missing',
+             'body_anchor_keypoint_rules', 'body_anchor_keypoint_rules_missing'}
     for item in selected:
         if not db.execute("SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation "
                 "WHERE b.scan=? AND m.status='withheld' AND json_extract(m.proof,'$.reason') IN "

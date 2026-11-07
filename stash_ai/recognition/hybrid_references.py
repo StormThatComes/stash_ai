@@ -48,7 +48,8 @@ def _select(records,config):
     wanted={i for i,_ in chosen}
     from .hybrid_modes import body_modes
     result=BodyRows(r for r in records if r['id'] in wanted)
-    result.modes=body_modes(records,config)
+    result.modes=body_modes(records,config,partial=True)
+    result.unsupported_modes=sum(map(len,result.modes)) < len(records)
     from .independent_evidence import Votes
     votes=Votes()
     for row in (records if result.modes else result):votes.add(row)
@@ -74,7 +75,7 @@ def catalogue_rows(db,config,scope,namespace,owners):
             try:
                 from .body_mode_cache import load,save,witnesses
                 query=_query(db,config,scope,namespace,[owner]) if store else None
-                policy=digest(['body-source-v3',config.data['sapiensid']['matching'],config.data['sapiensid']['identities'],config.data['clustering']])
+                policy=digest(['body-source-v4-partial',config.data['sapiensid']['matching'],config.data['sapiensid']['identities'],config.data['clustering']])
                 from .local_dependencies import available as local_clocks
                 from .dependencies import version
                 policy=digest([policy,version(db,'heads')]) if store else policy
@@ -94,7 +95,7 @@ def catalogue_rows(db,config,scope,namespace,owners):
                 selected=BodyRows(spool.selected(ids) if found is None else _rows(db,config,scope,namespace,[owner],ids))
                 selected.modes=modes
                 selected.witnesses=tuple(row[0] for row in spool.db.execute('SELECT id FROM records ORDER BY ordinal')) if found is None else tuple(saved_witnesses)
-                selected.unsupported_modes=bool(selected.witnesses and not selected.modes)
+                selected.unsupported_modes=sum(map(len,selected.modes)) < len(selected.witnesses)
                 votes=Votes()
                 for row in selected:votes.add(row)
                 selected.support=support if selected.modes else len(votes)

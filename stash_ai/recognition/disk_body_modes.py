@@ -158,10 +158,14 @@ class Records:
             charge+=len(row['quality'])
             if charge+2*1024**2>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ResourceLimit('SapiensID reference_bytes budget exceeded by mode vote metadata.')
-        if any(len(v)<minimum for v in votes):return (),0
+        confirmed = {i for i, vote in enumerate(votes) if len(vote) >= minimum}
+        if not confirmed:
+            return (), 0
         # Use the same maximum cue/pixel matching as support. Keep every vector
         # for minimum similarity and contradiction checks, including zero weights.
         for cluster,vote in enumerate(votes):
+            if cluster not in confirmed:
+                continue
             used=set()
             from .scratch_space import grow
             grow(self.path/(str(cluster)+'.weights'),counts[cluster])
@@ -172,7 +176,7 @@ class Records:
                     if fresh:used.add(pixel)
                     target.write(bytes([int(fresh)]))
         return tuple(Matrix(self.path/(str(i)+'.bin'),n,self.directory,self.path/(str(i)+'.weights'))
-                     for i,n in enumerate(counts)),len(support)
+                     for i,n in enumerate(counts) if i in confirmed),len(support)
 
     def close(self,*,keep=False):
         self.db.close()

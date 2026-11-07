@@ -12,6 +12,36 @@ from .scan_heads import predicate as current_scan
 ROUTES=('body_global','body_scene')
 
 
+def diverse_references(witnesses, maximum):
+    """Bounded scan/appearance coverage, then evenly spaced independent witnesses."""
+    import hashlib
+    if len(witnesses) <= maximum:
+        return list(witnesses)
+    representatives = {}
+    for row in witnesses:
+        quality = json.loads(row['quality']).get('quality', {})
+        # A coarse crop hash separates looks without charging another vector read.
+        bucket = (row['scan'], quality.get('orientation', 'unknown'),
+                  str(quality.get('appearance_hash') or '')[:2])
+        rank = hashlib.blake2b(encoded(bucket).encode(), digest_size=8).digest()
+        if rank in representatives:
+            continue
+        if len(representatives) == maximum:
+            last = max(representatives)
+            if rank >= last:
+                continue
+            del representatives[last]
+        representatives[rank] = row
+    chosen = {row['id']: row for row in representatives.values()}
+    step = max(1, len(witnesses) // maximum)
+    for offset in range(0, len(witnesses), step):
+        if len(chosen) == maximum:
+            break
+        row = witnesses[offset]
+        chosen[row['id']] = row
+    return sorted(chosen.values(), key=lambda row: (row['scan'], row['cue'], row['id']))
+
+
 def banks(db,config,scope,namespace):
     from .run_cache import current, database_key, MISSING
     from .config import digest, plain
@@ -57,7 +87,7 @@ def _banks(db,config,scope,namespace):
                 yield dict(raw)
         rows=page_rows(source_rows())
         witnesses=independent(rows,settings,presorted=True,paged=True,reserve=reserve)
-        selected=witnesses[:config.data['sapiensid']['global_matching']['max_references']]
+        selected=diverse_references(witnesses,config.data['sapiensid']['global_matching']['max_references'])
         if not selected and rows:selected=rows[:1]
         core=page_rows(dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows)
         selected_ids={r['id'] for r in selected}

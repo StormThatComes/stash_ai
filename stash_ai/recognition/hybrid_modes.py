@@ -3,7 +3,7 @@ import numpy as np
 from .independent_evidence import Votes
 
 
-def body_modes(rows,config):
+def body_modes(rows,config, *, partial=False):
     from .hybrid_references import body_vector
     threshold=config.data['sapiensid']['matching']['person_threshold']
     minimum=config.data['sapiensid']['matching']['min_support']
@@ -19,7 +19,10 @@ def body_modes(rows,config):
         votes=Votes()
         for row,_ in cluster:votes.add(row)
         # All witnesses must belong to an independently confirmed mode.
-        if len(votes)<minimum:return ()
+        if len(votes)<minimum:
+            if partial:
+                continue
+            return ()
         result.append(np.asarray([v for _,v in cluster]))
     return tuple(result)
 

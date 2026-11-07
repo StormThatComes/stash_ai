@@ -96,3 +96,17 @@ def test_source_attachments_do_not_add_support_on_later_merge(tmp_path):
         assert len(bank)==1
         assert next(iter(bank.values()))['support']==3
         assert len(next(iter(bank.values()))['cores'])>=2
+
+
+def test_incomplete_component_recovers_only_margin_separated_pair(tmp_path):
+    c = configured(tmp_path)
+    c.data['sapiensid']['global_matching'].update(match_threshold=.90, cohesion_threshold=.75, ambiguity_margin=.025)
+    with FaceDatabase(c.database) as state:
+        items = []
+        for i, angle in enumerate((0., .09, .50), 1):
+            vector = [math.cos(angle), math.sin(angle)]
+            item, _ = scene(state.connection, c, str(i), vectors=[vector]*3)
+            items.append(item)
+        state.connection.commit()
+        rebuild(state, items, c, {i['scan']: [] for i in items})
+        assert state.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 1
