@@ -27,6 +27,16 @@ def blockers(groups, trace, locations, inputs):
             label, scene, cue = certificate['reason'], certificate.get('scene'), None
         else:
             label, scene, cue = 'no measured blocker', None, None
+            inputs_for_set = group.get('inputs', {})
+            if inputs_for_set.get('body_routes', {}).get('collection'):
+                unavailable = Counter(inputs_for_set.get('body_input_counts', {}))
+                unavailable.pop('ready_for_matching', None)
+                if unavailable:
+                    reason, n = unavailable.most_common(1)[0]
+                    row = inputs_for_set['body_input_examples'][reason]
+                    address = locations.get(row['observation'])
+                    label = f'body input {reason} ({n} samples)'
+                    scene, cue = address[2] if address else None, row.get('cue')
         address = f' · scene {scene}' if scene is not None else ''
         if cue is not None:
             address += f' cue {cue}'
@@ -34,10 +44,33 @@ def blockers(groups, trace, locations, inputs):
     return result
 
 
-def short_parameter(value):
-    if isinstance(value, (tuple, list, dict)):
-        return 'rule profile'
-    return f'{value:.4g}' if type(value) is float else str(value)
+def parameter_change(change):
+    key = change['parameter']
+    before = change.get('previous', change.get('current'))
+    after = change.get('proposed', change.get('current'))
+    while isinstance(before, (dict, list)) and type(before) is type(after):
+        if isinstance(before, dict):
+            fields = sorted(before.keys() | after.keys())
+            field = next((k for k in fields if before.get(k, 'unset') != after.get(k, 'unset')), None)
+            if field is None:
+                break
+            key += '.' + field
+            before, after = before.get(field, 'unset'), after.get(field, 'unset')
+        else:
+            from itertools import zip_longest
+            for i, (left, right) in enumerate(zip_longest(before, after, fillvalue='unset')):
+                if left != right:
+                    key += f'[{i}]'
+                    before, after = left, right
+                    break
+            else:
+                break
+    def short(value):
+        if type(value) is float:
+            return f'{value:.6g}'
+        text = str(value)
+        return text if len(text) <= 40 else text[:39] + '…'
+    return f'{key} {short(before)} → {short(after)}'
 
 
 def holdout_summary(report):
