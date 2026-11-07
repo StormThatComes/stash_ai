@@ -181,3 +181,19 @@ def test_limits_fail_explicitly_without_source_changes_or_scratch_leaks(tmp_path
         assert not list(tmp_path.glob('stash-body-means-*'))
         assert c.database.read_bytes()==before
     finally:state.__exit__(None,None,None)
+
+
+def test_solver_focus_skips_unrelated_positive_pair_but_keeps_exact_outsider(tmp_path):
+    from stash_ai.recognition.body_solver import focused_evidence
+    c,state=fixture(tmp_path,[[1.,0.],[.98,.20],[0.,1.],[0.,1.]])
+    try:
+        db=state.connection
+        people = sorted(banks(db,c,'scope','ns'))
+        focus = {people[0]: 0, people[1]: 0}
+        result = focused_evidence(db,c,{'scope':'scope','namespace':'ns'},focus)
+        assert all(set(p['people']) & focus.keys() for p in result['pairs'])
+        assert any(set(p['people'])==set(focus) for p in result['pairs'])
+        expected=report(db,c,'scope','ns',focus=focus)
+        assert result['nearest_competitors']==expected['nearest_competitors']
+    finally:
+        state.__exit__(None,None,None)

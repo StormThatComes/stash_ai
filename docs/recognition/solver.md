@@ -521,3 +521,25 @@ has overhead: the same-count face case took 0.124 s versus 0.101 s, and full
 12-trial runtime including polishing did not consistently improve. These small
 synthetic fixtures do not establish a speedup on a real library. Raw repetitions
 and timing scope are in `benchmarks/results/merge_solver_targeted_comparison.json`.
+
+### Validating a finalist on back views and entangled people
+
+Pass `--solver-validation holdout.json` to `report-merge --solve`. The solver
+excludes all versions of the listed scenes from its private training snapshot,
+selects its winner and then replays the held-out scenes. The default is the
+configured recognition database. An optional `database` path can point at a
+separate holdout database with the same scope and encoder namespace. Example:
+
+```json
+{"scenes":["42"],"observations":{
+  "observation-A":{"truth":"Alice","slices":["back","entangled"]},
+  "observation-B":{"truth":"Bob","slices":["entangled"]}},"series":[["42",8,12]]}
+```
+
+The report compares baseline and winner on the supplied observations, including
+coverage, extra fragments, false merge pairs and pair recall. Include both people
+in an entangled cue and keep difficult negatives. Up to three inclusive, zero-based
+cue windows are removed one at a time in disposable full replays. If omitted from
+the manifest, windows come from the winner's recorded body-view tracks when
+available. The omission report excludes removed labels from both comparison
+metrics and counts lost and newly joined relations among the remaining labels.

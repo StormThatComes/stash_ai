@@ -46,6 +46,8 @@ class RecognitionParser(argparse.ArgumentParser):
                 self.error('Outside impact limits must be nonnegative.')
             if any(v is not None for v in outside) and not result.solve:
                 self.error('Outside impact limits require --solve.')
+            if result.solver_validation and not result.solve:
+                self.error('--solver-validation requires --solve')
             if result.yaml_output and not result.solve:
                 self.error('--yaml-output requires --solve')
             if result.yaml_mode == 'diff' and (not result.solve or not (result.yaml_output or result.checkpoint)):
@@ -255,6 +257,7 @@ def parser():
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
     merge_report.add_argument('--yaml-mode', choices=('full', 'diff'), default='full',
         help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')
+    merge_report.add_argument('--solver-validation', type=Path, help='After choosing the winner, replay a labelled holdout manifest and up to three omitted cue series.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--goal-policy', choices=('identity','identity-physical','strict'), default='identity',
         help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; identity-physical also accepts a frozen linked body as the same physical vote; strict requires every original observation. Applies to solver and set evaluation.')

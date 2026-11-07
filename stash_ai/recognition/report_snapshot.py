@@ -4,7 +4,7 @@ import sqlite3
 
 
 @contextmanager
-def snapshot(config, identifier, *, scope=None, by_performer=False, other_identifiers=()):
+def snapshot(config, identifier, *, scope=None, by_performer=False, other_identifiers=(), excluded_scenes=()):
     from .fragmentation_report import _open_readonly
     from .identity_report import _select
     from .models import namespace
@@ -24,7 +24,8 @@ def snapshot(config, identifier, *, scope=None, by_performer=False, other_identi
         from .report_metrics import phase
         with ExitStack() as retained:
             with phase('Copy retained snapshot'):
-                seed=retained.enter_context(prepared_history(source, config, person['scope'], namespace(config), installation))
+                seed=retained.enter_context(prepared_history(source, config, person['scope'], namespace(config),
+                                                        installation, excluded_scenes=excluded_scenes))
                 seed.row_factory = sqlite3.Row
                 # The seed owns all evidence and bindings needed by this report.
                 source.close()

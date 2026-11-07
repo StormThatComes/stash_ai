@@ -249,14 +249,21 @@ class Search:
             return
         yield from self.dense_nominations(focus)
 
-    def dense_nominations(self,focus):
+    def dense_nominations(self,focus, *, incident_only=False):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
         wanted=np.array([p in focus for p in self.identities])
         seen=set()
-        for i,j,values in self.tiles(floor=None if focus else floor):
+        active = wanted[self.mode_owners] if incident_only else None
+        def tile_floor(a,b,c,d):
+            # Requested pairs are measured even when they miss the nomination floor.
+            return -float('inf') if active[a:b].any() and active[c:d].any() else floor
+        threshold = tile_floor if incident_only else None if focus else floor
+        for i,j,values in self.tiles(active,floor=threshold):
             rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
             mask=(rows[:,None]!=cols[None,:]) & ((values+ROUNDING>=floor) |
                   (wanted[rows,None] & wanted[None,cols]))
+            if incident_only:
+                mask &= wanted[rows,None] | wanted[None,cols]
             if i==j:mask &= np.arange(len(rows))[:,None]<np.arange(len(cols))[None,:]
             for a,b in zip(*np.nonzero(mask)):
                 pair=tuple(sorted((self.identities[rows[a]],self.identities[cols[b]])))

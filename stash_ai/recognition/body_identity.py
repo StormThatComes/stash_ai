@@ -348,7 +348,7 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
     from .body_perspectives import recover
     recover(rows, decisions, seeds, settings, scores, guard)
     from .local_body_hints import observe
-    observe(rows, groups, seeds, scores, guard, config)
+    observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
     resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)

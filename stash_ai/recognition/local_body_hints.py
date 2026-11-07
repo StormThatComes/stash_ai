@@ -35,7 +35,7 @@ class Budget:
                 for key in sorted(self.buckets)]
 
 
-def observe(rows, groups, seeds, scores, guard, config):
+def observe(rows, groups, seeds, scores, guard, config, *, frozen=None):
     observer = _observer.get()
     if observer is None or not hasattr(observer, 'local_body'):
         return
@@ -48,7 +48,11 @@ def observe(rows, groups, seeds, scores, guard, config):
     scores = Scores(diagnostic_settings(config))
     guard = FaceGuard(guard.db, config, scores=scores)
     banks = [(g, None, 'min_support') for g in groups]
-    banks += [(g, person, 'attach_min_support') for person, g in seeds.items()]
+    if frozen is not None:
+        banks += [(mode, person, 'attach_min_support') for person, modes in frozen.modes.items()
+                  for mode in modes]
+    support_counts = dict(frozen.support) if frozen is not None else {}
+    witnesses = {id(g): (person or g[0]['id']) for g, person, _ in banks}
     observer.local_budget.start(observer.visits)
     for row in rows:
         if row['id'] not in observer.sets and row.get('face') not in observer.sets:
@@ -70,12 +74,15 @@ def observe(rows, groups, seeds, scores, guard, config):
             for group, person, gate in banks:
                 if any(r['id'] == row['id'] for r in group):
                     continue
-                if copresent([row], group) or not guard.allows(row, group, person):
+                whole = seeds[person] if person is not None else group
+                if copresent([row], whole) or not guard.allows(row, whole, person):
                     continue
                 mean, minimum = scores.compare([row], group)
-                support = len(independent(group, settings))
+                if id(group) not in support_counts:
+                    support_counts[id(group)] = len(independent(group,settings))
+                support = support_counts[id(group)]
                 if support:
-                    choices.append(dict(observation=row['id'], witnesses=[r['id'] for r in group],
+                    choices.append(dict(owner=witnesses[id(group)], observation=row['id'], witnesses=[r['id'] for r in group],
                         mean=mean, minimum=minimum, support=support, support_gate=gate))
         except ResourceLimit:
             observer.truncation_reasons.add('local_body_budget')
@@ -84,7 +91,7 @@ def observe(rows, groups, seeds, scores, guard, config):
             allocation['comparisons'] += scores.count-start
         choices.sort(key=lambda q: (-q['mean'], q['witnesses']))
         for index, choice in enumerate(choices[:4]):
-            runner = max((q['mean'] for j, q in enumerate(choices) if j != index), default=-1.)
+            runner = max((q['mean'] for j, q in enumerate(choices) if q['owner'] != choice['owner']), default=-1.)
             if choice['minimum'] >= 0 and choice['mean'] >= runner:
                 if allocation['hints'] < allocation['hint_limit']:
                     observer.local_body.append(dict(choice, gap=min(1., choice['mean']-runner)))
