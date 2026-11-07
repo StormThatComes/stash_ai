@@ -211,8 +211,11 @@ def test_pose_backend_selects_nms_and_preserves_coco17_to_22_point_input(monkeyp
     from stash_ai.recognition.models import checked_detection
     calls=[]
     confidence=torch.ones((1,17));confidence[0,-1]=.1
+    pose_points=torch.full((1,17,2),20.)
+    pose_points[0,:3]=torch.tensor([[25.,27.],[32.,20.],[18.,20.]])
+    pose_points[0,5:7]=torch.tensor([[45.,50.],[12.,50.]])
     result=SimpleNamespace(boxes=SimpleNamespace(xyxy=torch.tensor([[0.,0.,100.,100.]]),conf=torch.tensor([.99])),
-                           keypoints=SimpleNamespace(xy=torch.full((1,17,2),20.),conf=confidence))
+                           keypoints=SimpleNamespace(xy=pose_points,conf=confidence))
     def predict(**kwargs):calls.append(kwargs);return [result]
     monkeypatch.setattr(backend,'load_pose',lambda config:SimpleNamespace(predict=predict))
     data=defaults();data['models']['device']='cpu';data['sapiensid']['pose']['nms_threshold']=.42
