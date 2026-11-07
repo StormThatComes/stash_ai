@@ -62,6 +62,7 @@ class Trials(AbstractContextManager):
         self.telemetry = progress is not None and getattr(progress, 'telemetry_enabled', True)
         self.updates = context_mp.Queue(maxsize=execution.trials * 4) if self.telemetry else None
         self.snapshots, self.dispatched = {}, {}
+        self.wait_reason = ''
         self.retired = 0
         self.started = time.monotonic()
         self.peak = 0
@@ -94,7 +95,7 @@ class Trials(AbstractContextManager):
             self.journal.task(name, settings, status)
         cached = self.journal.raw_result(name, settings) if self.journal else None
         if cached is not None:
-            self.ready[name] = cached
+            self.ready[name] = dict(cached, recovered_evaluation=True)
         if not completed and cached is None:
             from dataclasses import replace
             from .solver_trial import split
@@ -135,7 +136,8 @@ class Trials(AbstractContextManager):
                     detail = f"evaluation={state} elapsed={elapsed:.1f}s awaiting_application"
                     if waiting:
                         detail += f' waiting_for={waiting}'
-                    self.progress(name, 'ready', dict(text=detail))
+                    self.progress(name, 'ready', dict(text=detail,
+                        compact='ready · waiting for ' + waiting if waiting else 'ready · awaiting application'))
         if not stopping:
             self.report_status()
 
@@ -160,7 +162,11 @@ class Trials(AbstractContextManager):
         ready = {n for n, (_, f) in self.pending.items() if n in self.ready or f is None}
         running = set(self.pending).intersection(self.snapshots) - ready
         waiting = next(iter(self.pending)) if self.execution.scheduling == 'batch' else 'any completed trial'
-        self.progress('workers', 'pool', dict(text=(
+        idle = max(0, self.execution.trials - len(self.pending))
+        occupied = f'Pool {len(running)} running · {len(self.pending)-len(running)-len(ready)} starting · {len(ready)} ready'
+        if idle and self.wait_reason:
+            occupied += f' · {idle} idle: {self.wait_reason}'
+        self.progress('workers', 'pool', dict(compact=occupied, text=(
             f'running={len(running)} queued/starting={len(self.pending)-len(running)-len(ready)} '
             f'ready={len(ready)} retired={self.retired} limit={self.execution.trials} '
             f'elapsed={now-self.started:.0f}s scheduling={self.execution.scheduling} waiting_for={waiting}')))
@@ -171,7 +177,12 @@ class Trials(AbstractContextManager):
                 text = worker_text(self.snapshots[name], now)
             else:
                 text = f'queued/starting elapsed={now-self.dispatched[name]:.0f}s; worker start not yet observed'
-            self.progress(name, 'status', dict(text=text))
+            brief = 'queued / starting'
+            if name in ready:
+                brief = ('ready · waiting for ' + waiting if self.execution.scheduling == 'batch'
+                         and name != waiting else 'ready · awaiting application')
+            self.progress(name, 'status', dict(text=text, compact=brief,
+                          snapshot=self.snapshots.get(name) if name in running else None))
 
     def retire(self, name, *, restored=False):
         settings, future = self.pending[name]
@@ -215,10 +226,13 @@ class Trials(AbstractContextManager):
                         if proposal is None:
                             if not self.pending:
                                 raise ValueError('Solver requested results without pending trials.')
+                            self.wait_reason = 'search needs pending results'
                             break
+                        self.wait_reason = ''
                         name, settings = proposal
                     except StopIteration:
                         exhausted = True
+                        self.wait_reason = 'no further proposals'
                         break
                     self.dispatch(name, settings)
             if not self.pending:

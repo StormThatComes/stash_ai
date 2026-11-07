@@ -203,6 +203,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                     error = ResourceLimit(evaluated['error'])
                                     error.replay_stage = evaluated['stage']
                                     error.worker_elapsed_seconds = evaluated['elapsed_seconds']
+                                    error.recovered_evaluation = evaluated.get('recovered_evaluation', False)
                                     error.trial_profile = evaluated.get('trial_profile')
                                     for key in ('budget','limit','requested'):
                                         setattr(error,key,evaluated.get('resource',{}).get(key))
@@ -232,6 +233,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             if failure is None:
                                 raise
                             failure.update(failed=True, elapsed_seconds=getattr(exc, 'worker_elapsed_seconds', time.perf_counter()-started))
+                            if getattr(exc, 'recovered_evaluation', False):
+                                failure['recovered_evaluation'] = True
                             result.setdefault('failed_trials', {})[name] = failure
                             if record_trial:record_trial(name, settings, failure, inputs)
                             if progress:progress(name, 'failed', failure)
@@ -246,6 +249,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             bodies = compact(bodies, result['trials']['baseline']['independent_person'].get('identities', []))
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
                             versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                        if evaluated.get('recovered_evaluation'):
+                            item['recovered_evaluation'] = True
                         if runtime and runtime.profile:
                             item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started),
                                 rebuild=rebuild_metrics, trial=evaluated.get('trial_profile'))

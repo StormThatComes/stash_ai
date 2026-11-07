@@ -142,64 +142,16 @@ def execute(args, config):
                 result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
-            from .merge_goal_output import group_summary_lines
-            import json
-            import sys
-            completed_trials = 0
-            def progress(name, stage, item):
-                nonlocal completed_trials
-                if args.progress_style != 'off':
-                    detail = ''
-                    if stage == 'start':
-                        if item['previous_trial'] is None:
-                            detail = (' (input configuration with capped support)' if item['changes_from_previous']
-                                      else ' (input configuration)')
-                        else:
-                            detail = f" changes_vs={item['previous_trial']} parent={item['search_parent']}"
-                    elif stage == 'complete':
-                        completed_trials += 1
-                        detail = (f" disjoint={item['goal_result']['disjoint']} "
-                                  f"best={item['best_trial']} best_number={item['best_trial_number']}")
-                        if item['goal_result'].get('goal_policy', {}).get('name') == 'identity':
-                            detail += f" goal_policy=identity strict_disjoint={item['goal_result']['strict_disjoint']}"
-                        detail += f" elapsed={item['elapsed_seconds']:.1f}s completed={completed_trials}/{args.max_trials}"
-                    elif stage in ('plan', 'pool', 'status', 'ready'):
-                        detail = ' ' + item['text']
-                    elif stage.startswith('stage: ') and item:
-                        from .solver_progress import worker_text
-                        import time
-                        detail = ' | ' + worker_text(item, time.monotonic())
-                    print(f'Merge solver {name}: {stage}{detail}', file=sys.stderr, flush=True)
-                    if stage == 'start':
-                        for change in item['changes_from_previous']:
-                            print(f"  {change['parameter']}: {json.dumps(change['previous'])} -> "
-                                  f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
-                        if item.get('search_phase') == 'bidirectional':
-                            print(f"  Search: phase=bidirectional strategy={item['search_strategy']}",
-                                  file=sys.stderr, flush=True)
-                        if item.get('search_phase') == 'feasibility':
-                            print(f"  Search: phase=feasibility profile={item['search_strategy']}", file=sys.stderr, flush=True)
-                        if item.get('search_phase') == 'anchor_rules':
-                            print(f"  Anchor rule profile: {item['search_strategy']}", file=sys.stderr, flush=True)
-                        if item.get('search_phase') == 'targeted':
-                            target = item['search_target']
-                            print(f"  Search: phase=targeted set={target['set']+1} route={target['route']} "
-                                  f"performers={json.dumps(target['performers'])} blockers={json.dumps(target['blockers'])}",
-                                  file=sys.stderr, flush=True)
-                    elif stage == 'complete':
-                        for group in item['goal_result']['groups']:
-                            print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
-                        from .merge_scene_exclusions import summary_lines
-                        for line in summary_lines(item['goal_result']):
-                            print(line, file=sys.stderr, flush=True)
-                        construction = item['goal_result'].get('construction')
-                        if construction:
-                            merged = [g['index']+1 for g in construction['groups'] if g['merged']]
-                            print(f"  Construction: {construction['status']} merged_sets={merged} "
-                                  f"goals_satisfied={construction['goals_satisfied']}", file=sys.stderr, flush=True)
-                    elif stage == 'failed':
-                        print(f"  Trial incomplete: {item['reason']}; stage={item['stage']}; "
-                              f"elapsed={item['elapsed_seconds']:.1f}s; {item['error']}", file=sys.stderr, flush=True)
+            from .report_metrics import current_console
+            from .solver_display import SolverDisplay
+            from .solver_verbose import verbose_progress
+            display = None
+            progress = None
+            if args.progress_style == 'verbose':
+                progress = verbose_progress(args.max_trials)
+            elif args.progress_style != 'off':
+                display = SolverDisplay(current_console(), args.max_trials, (execution or {}).get('trials', 1))
+                progress = display
             with report_phase('Solve merge goals',quiet=True):
                 result.update(solve(config, result, db, maximum=args.max_trials,
                                      progress=progress if args.progress_style != 'off' else None,
@@ -225,7 +177,11 @@ def execute(args, config):
                compact_report=compact_report)
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
-        print(summary(result), file=sys.stderr, flush=True)
+        text = display.finish(result) if display else summary(result)
+        if display and result.get('simulation', {}).get('input_selection', {}).get('excluded_scans'):
+            from .replay_inputs import describe
+            text += '\n' + describe(result['simulation']['input_selection'], max_scenes=5)
+        print(text, file=sys.stderr, flush=True)
     return 130 if result.get('interrupted') else 2 if result.get('status') == 'no_compatible_scans' else 0
 
 

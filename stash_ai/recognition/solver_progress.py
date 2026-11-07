@@ -27,7 +27,7 @@ class ReplayProgress:
             self.rows[value['row']] = value
         elif kind == 'work_end':
             self.rows.pop(value['row'], None)
-        stage = self.stages[-1] if self.stages else dict(label='Finalize trial', started=now)
+        stage = self.stages[-1] if self.stages else dict(label='Between stages', started=now)
         # Nested rows at the same position temporarily replace their parent.
         rows = {r['position']: r for r in self.rows.values()}
         snapshot = dict(pid=os.getpid(), started=self.started, updated=now,
