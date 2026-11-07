@@ -88,7 +88,7 @@ pose:
       # PMPose weights, crop batch and output probabilities.
       directory: ''
       # PMPose-B 1.0.0 weights folder; empty uses execution.models.directory/pmpose_b/<pinned revision>.
-      batch_size: 1
+      batch_size: 4
       # Maximum people per PMPose batch (1..16); inference also averages horizontally flipped crops.
       presence_threshold: 0.5
       # Minimum probability of a PMPose point lying in the crop; 0 disables this filter. Range: 0..1.
