@@ -4,6 +4,8 @@ import math
 
 
 def torso(person):
+    if not person.get('keypoints'):
+        return None
     points = []
     for i in (5,6,11,12):
         point = person['keypoints'][i]
