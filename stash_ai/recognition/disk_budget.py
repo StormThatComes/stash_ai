@@ -98,8 +98,9 @@ def reserve_file(path, maximum):
         dev=path.stat().st_dev
         volume=budget.check(path=path)[dev]
         held=volume['requested']-volume['used']
-        cap=min(maximum,volume['free']-budget.headroom-held)
-        if budget.limit:cap=min(cap,budget.limit-volume['requested'])
+        existing=path.stat().st_size
+        cap=min(maximum,existing+volume['free']-budget.headroom-held)
+        if budget.limit:cap=min(cap,existing+budget.limit-volume['requested'])
         cap=max(0,cap)
         budget.reservations[path]=(dev,cap)
     try:yield cap
