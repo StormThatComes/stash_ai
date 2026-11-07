@@ -152,3 +152,16 @@ def test_merged_box_retries_only_after_two_distinct_heads(monkeypatch):
     with Image.new('RGB', (200,150)) as image:
         assert retry_people(model,image,[FACE,FACE],original) is original and not calls
         assert retry_people(model,image,heads,original) == poses and len(calls)==1
+
+
+def test_full_frame_merged_box_retries_distinct_tiles_containing_each_complete_face():
+    from stash_ai.recognition.crowded_retry import _regions
+    from types import SimpleNamespace
+    with Image.new('RGB',(160,160)) as image:
+        faces = [SimpleNamespace(box=(10,40,40,50)),SimpleNamespace(box=(100,40,36,50))]
+        regions = _regions(image,faces,[(30,65),(118,65)],(0,0,160,160))
+        assert len(regions)==2
+        for face,(bounds,heads) in zip(faces,regions):
+            x,y,w,h = face.box
+            assert bounds[0]<=x<x+w<=bounds[2] and bounds[1]<=y<y+h<=bounds[3]
+            assert len(heads)==1 and bounds[2]-bounds[0]<image.width
