@@ -25,3 +25,13 @@ def test_append_reuses_precanonical_scene_rows_and_rebinds_current_selection(tmp
         monkeypatch.setattr(rebuild,'_copy_observations',counted)
         assert collect(selected,True)==expected
         assert calls==[selected[-1]['scan']]
+
+
+def test_existing_shard_pages_only_reserve_future_growth(tmp_path):
+    from types import SimpleNamespace
+    from stash_ai.recognition.disk_budget import scope,reserve_file
+    path=tmp_path/'faces';shard=tmp_path/'faces.cache'
+    path.write_bytes(b'a'*100);shard.write_bytes(b'b'*400)
+    config=SimpleNamespace(database=path,data={'execution':{'disk_total_bytes':800,'disk_free_bytes':0}})
+    with scope(config), reserve_file(shard,900) as grant:
+        assert grant==700

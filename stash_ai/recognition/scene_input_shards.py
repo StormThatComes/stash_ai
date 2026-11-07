@@ -1,8 +1,7 @@
 """Independent pre-canonicalization replay inputs in one bounded SQLite cache."""
-from contextlib import contextmanager,closing
+from contextlib import ExitStack,contextmanager
 import hashlib
 import json
-import os
 import sqlite3
 import time
 from .database import encoded
@@ -18,6 +17,7 @@ SCHEMA=(
 class Shards:
     def __init__(self,db,cache,shared,limit):
         self.db,self.cache,self.shared,self.limit=db,cache,shared,limit
+        self.path=cache.directory/'shards.sqlite3';self.reservation=ExitStack();self.grant=0
 
     def stamp(self,scan):
         from .config import digest
@@ -41,43 +41,67 @@ class Shards:
         h=hashlib.sha256()
         replay.execute('SAVEPOINT shard_import')
         try:
-            for doc,vector,pixels in self.db.execute('SELECT doc,vector,pixels FROM records WHERE scan=? ORDER BY pos',(scan,)):
-                self.update(h,doc,vector,pixels)
-                fields,key,thumb=json.loads(doc)
-                if fields[1]!=scan or len(fields)!=10:raise ValueError('Foreign shard row.')
-                replay.execute('INSERT INTO main.observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',(*fields,vector,None))
-                replay.execute('INSERT INTO sample_keys VALUES (?,?)',(fields[0],key))
-                if pixels is not None:
-                    if hashlib.sha256(pixels).hexdigest()!=thumb:raise ValueError('Changed shard thumbnail.')
-                    replay.execute('INSERT OR IGNORE INTO evidence_thumbnails VALUES (?,?)',(thumb,pixels))
+            from .rebuild import _batches
+            rows=self.db.execute('SELECT doc,vector,pixels FROM records WHERE scan=? ORDER BY pos',(scan,))
+            for batch in _batches(rows):
+                observations=[];keys=[];thumbnails=[]
+                for doc,vector,pixels in batch:
+                    self.update(h,doc,vector,pixels)
+                    fields,key,thumb=json.loads(doc)
+                    if len(fields)!=10 or fields[1]!=scan:raise ValueError('Foreign shard row.')
+                    observations.append((*fields,vector,None));keys.append((fields[0],key))
+                    if pixels is not None:
+                        if hashlib.sha256(pixels).hexdigest()!=thumb:raise ValueError('Changed shard thumbnail.')
+                        thumbnails.append((thumb,pixels))
+                replay.executemany('INSERT INTO main.observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',observations)
+                replay.executemany('INSERT INTO sample_keys VALUES (?,?)',keys)
+                replay.executemany('INSERT OR IGNORE INTO evidence_thumbnails VALUES (?,?)',thumbnails)
             if h.hexdigest()!=meta[1]:raise ValueError('Changed replay shard.')
         except (ValueError,TypeError,sqlite3.DatabaseError):
             replay.execute('ROLLBACK TO shard_import');replay.execute('RELEASE shard_import')
             count('input_shard_rejections');return False
         replay.execute('RELEASE shard_import');count('input_shard_restores');return True
 
+    def admit(self,replay,scan):
+        from .disk_budget import reserve_file
+        # One lease normally covers several scenes. Reuse free SQLite pages before
+        # reserving growth, including when replacing an older scan generation.
+        estimated=replay.execute("SELECT coalesce(sum(4608+length(quality)+length(geometry)+coalesce(length(embedding),0)),0) "
+                                 "FROM main.observations WHERE scan=?",(scan,)).fetchone()[0]
+        size=self.path.stat().st_size;free=self.db.execute('PRAGMA freelist_count').fetchone()[0]*4096
+        needed=min(self.limit,size+max(0,estimated*2-free))
+        if needed<=self.grant:return
+        self.reservation.close();self.grant=0
+        self.grant=self.reservation.enter_context(reserve_file(self.path,min(self.limit,max(needed,size+16*1024**2))))
+        self.db.execute(f'PRAGMA max_page_count={max(1,self.grant//4096)}')
+
     def save(self,replay,scan):
+        from .rebuild import _batches
+        from .resource_errors import ResourceLimit
         try:
             rows=replay.execute("SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,o.rejected,"
                 "o.dimensions,o.embedding,k.sample_key,t.id,t.pixels FROM main.observations o "
                 "JOIN sample_keys k ON k.observation=o.id LEFT JOIN evidence_thumbnails t "
                 "ON t.id=json_extract(o.quality,'$.evidence_thumbnail_id') WHERE o.scan=? ORDER BY o.cue,o.id",(scan,))
             h=hashlib.sha256();size=0
+            self.admit(replay,scan)
             with self.db:
-                from .disk_budget import check
-                check(0,self.cache.directory,throttled=True)
                 self.remove(scan)
                 # max_page_count bounds physical space. Batch eviction leaves spare pages for later scenes.
                 if self.db.execute('PRAGMA freelist_count').fetchone()[0]<16 and self.db.execute('PRAGMA page_count').fetchone()[0]*4096>self.limit*.85:
                     for (old,) in self.db.execute('SELECT scan FROM shards ORDER BY touched LIMIT 32').fetchall():
                         self.remove(old)
-                for i,row in enumerate(rows):
-                    doc=encoded([tuple(row[:10]),row[11],row[12]])
-                    self.update(h,doc,row[10],row[13]);size+=len(doc)+len(row[10] or b'')+len(row[13] or b'')
-                    self.db.execute('INSERT INTO records VALUES (?,?,?,?,?)',(scan,i,doc,row[10],row[13]))
+                position=0
+                for batch in _batches(rows):
+                    records=[]
+                    for row in batch:
+                        doc=encoded([tuple(row[:10]),row[11],row[12]])
+                        self.update(h,doc,row[10],row[13]);size+=len(doc)+len(row[10] or b'')+len(row[13] or b'')
+                        records.append((scan,position,doc,row[10],row[13]));position+=1
+                    self.db.executemany('INSERT INTO records VALUES (?,?,?,?,?)',records)
                 self.db.execute('INSERT INTO shards VALUES (?,?,?,?,?)',(scan,self.stamp(scan),h.hexdigest(),size,time.time_ns()))
             count('input_shard_saves')
-        except (sqlite3.Error,OSError):count('input_shard_save_failures')
+        except (sqlite3.Error,OSError,ResourceLimit):count('input_shard_save_failures')
 
 
 @contextmanager
@@ -92,6 +116,7 @@ def open_shards(cache,shared):
         if available<131072:raise ValueError('Shard cache has no available capacity.')
         path=cache.directory/'shards.sqlite3'
         if path.is_symlink():raise ValueError('Unowned shard cache.')
+        if path.exists() and path.stat().st_size>available:raise ValueError('Existing shard cache exceeds budget.')
         db=sqlite3.connect(path)
         db.execute('PRAGMA trusted_schema=OFF')
         schema=tuple(r[0] for r in db.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid"))
@@ -106,4 +131,7 @@ def open_shards(cache,shared):
         count('input_shard_unavailable');value=None
     try:yield value
     finally:
-        if db is not None:db.close()
+        try:
+            if value is not None:value.reservation.close()
+        finally:
+            if db is not None:db.close()
