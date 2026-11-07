@@ -230,10 +230,11 @@ def test_cli_interrupt_exports_logged_winner_with_default_500_trials(tmp_path, m
     assert result['selected_trial'] == 'trial-1' and result['interrupted']
     assert set(result['simulation']['trials']) == {'baseline','trial-1'}
     captured = capsys.readouterr()
-    completed = [line for line in captured.err.splitlines() if ': complete ' in line]
-    assert len(completed) == 2
-    assert 'best=baseline best_number=0' in completed[0]
-    assert 'best=trial-1 best_number=1' in completed[1]
+    lines = captured.err.splitlines()
+    baseline = next(i for i, line in enumerate(lines) if line.startswith('Merge solver best baseline'))
+    winner = next(i for i, line in enumerate(lines) if line.startswith('Merge solver first feasible trial-1'))
+    assert winner > baseline
+    assert any('trial-1 (fully_solved)' in line and 'stop=interrupted' in line for line in lines)
     assert captured.out == ''
     assert 'best completed trial trial-1' in document.read_text().splitlines()[0]
     monkeypatch.setattr(replay_simulation, 'rebuild_selected', original)
