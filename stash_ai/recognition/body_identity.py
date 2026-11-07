@@ -32,7 +32,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v13-rear-recovery',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v14-core-retry',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -351,6 +351,11 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
                     decisions[row['id']]['reason']=regional['reason']
     from .body_perspectives import recover
     recover(rows, decisions, seeds, settings, scores, guard, occupied=record.get('occupied_cues', ()))
+    for row in rows:
+        q = quality(row)
+        if q.get('query_only'):
+            decisions[row['id']]['query_only_reason'] = q.get('query_only_reason','uncertain_body_geometry')
+            decisions[row['id']]['retry_when'] = 'confirmed_core_changes'
     from .local_body_hints import observe
     observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
     resolve_claims(rows,decisions,config,scores=scores)

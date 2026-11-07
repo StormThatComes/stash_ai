@@ -11,11 +11,11 @@ def recover(database,selected,config):
     from .clustering import vector as face_vector
     db=database.connection;settings=config.data['sapiensid']['identities']
     reasons={'body_anchor_quality','body_anchor_pixels','body_anchor_pixels_missing',
-             'body_anchor_keypoint_rules', 'body_anchor_keypoint_rules_missing'}
+             'body_anchor_keypoint_rules', 'body_anchor_keypoint_rules_missing', 'fragment_auxiliary_retry'}
     for item in selected:
         if not db.execute("SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation "
-                "WHERE b.scan=? AND m.status='withheld' AND json_extract(m.proof,'$.reason') IN "
-                "(SELECT value FROM json_each(?)) LIMIT 1",(item['scan'],encoded(sorted(reasons)))).fetchone():continue
+                "WHERE b.scan=? AND m.status='withheld' AND (json_extract(m.proof,'$.reason') IN "
+                "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons)))).fetchone():continue
         rows=[];decisions={};cost=0
         for raw in db.execute('SELECT b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
                 'o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
@@ -39,7 +39,9 @@ def recover(database,selected,config):
                     row['role']=='anchor' or proof.get('reason')=='body_scene_core'):
                 banks.setdefault(row['person'],[]).append(row)
                 if row['status']=='accepted':confirmed.add(row['person'])
-            elif row['status']=='withheld' and proof.get('reason') in reasons and not anchor(row,settings):queries.append(row)
+            elif row['status']=='withheld' and (proof.get('retry_when')=='confirmed_core_changes' or
+                    proof.get('reason') in reasons and not anchor(row,settings)):
+                queries.append(row)
         scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         for row in queries:
             ranked=[]
@@ -53,8 +55,11 @@ def recover(database,selected,config):
                     and mean-runner>=settings['ambiguity_margin']):
                 decisions[row['id']].update(person=person,status='accepted',role='auxiliary',
                     reason='body_confirmed_core_attachment',score=mean,minimum=minimum,runner=runner)
+        before = {r['id']:(r['person'],r['status']) for r in rows}
         resolve_claims(rows,decisions,config,scores=scores)
-        for row in queries:
+        for row in rows:
             proof=decisions[row['id']]
+            if before[row['id']]==(proof['person'],proof['status']):
+                continue
             db.execute('UPDATE body_members SET person=?,status=?,role=?,proof=? WHERE observation=?',
                 (proof['person'],proof['status'],proof['role'],encoded(proof),row['id']))

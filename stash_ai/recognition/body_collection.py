@@ -82,6 +82,8 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
         ambiguous=associated is None and any(index in candidates for candidates in choices)
         refinement = person.get('pose_refinement', {})
         separated = refinement.get('status') == 'refined' and refinement.get('separated')
+        if separated and (ambiguous or reason == 'person_overlap'):
+            measured['query_only_reason'] = 'unassigned_face' if ambiguous else 'separated_overlap'
         if ambiguous and not separated:
             reason = 'person_face_association_ambiguous'
         if reason == 'person_overlap' and separated:
