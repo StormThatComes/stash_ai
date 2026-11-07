@@ -114,3 +114,30 @@ def test_weak_queries_cannot_confirm_under_supported_cores(tmp_path):
         db.commit();rebuild(state,selected,c,{i['scan']:[] for i in selected})
         assert db.execute("SELECT COUNT(*) FROM body_members WHERE status='accepted'").fetchone()[0]==0
         assert db.execute("SELECT COUNT(*) FROM body_members WHERE status='withheld'").fetchone()[0]==4
+
+
+def test_failed_regional_anchor_can_attach_to_confirmed_core(tmp_path):
+    from stash_ai.recognition.body_identity import rebuild
+    c = configuration(tmp_path)
+    c.data['sapiensid']['global_matching']['enabled'] = True
+    c.data['sapiensid']['identities']['anchor_keypoint_rules'] = {'all':[{'points':['nose'], 'min':1}], 'any':[]}
+    with FaceDatabase(c.database) as state:
+        db = state.connection
+        selected, weak = [], []
+        for i in range(2):
+            item, ids = scene(db, c, str(i+1))
+            selected.append(item)
+            weak.append(ids[-1])
+            for oid in ids:
+                points = [[50, 39]] + [[-1, -1]] * 4 + [[65, 75], [35, 75]] * 6
+                if oid == ids[-1]:
+                    points[0] = [-1, -1]
+                quality = dict(person=dict(bounds=[0,0,100,180], keypoints=points),
+                               quality=dict(sharpness=100, keypoints=13, pixel_digest=oid))
+                db.execute('UPDATE body_observations SET quality=? WHERE id=?', (encoded(quality), oid))
+        db.commit()
+        rebuild(state, selected, c, {s['scan']: [] for s in selected})
+        for oid in weak:
+            row = db.execute('SELECT status,role,proof FROM body_members WHERE observation=?', (oid,)).fetchone()
+            assert tuple(row[:2]) == ('accepted', 'auxiliary')
+            assert json.loads(row['proof'])['reason'] == 'body_confirmed_core_attachment'

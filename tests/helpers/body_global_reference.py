@@ -40,7 +40,8 @@ def exhaustive(bank,config):
                 plan_bytes+=len(encoded(pair))+256
                 if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
                     raise ValueError('Global body plan exceeds sapiensid.execution.plan_bytes.')
-    seen=set()
+    from itertools import combinations
+    seen=set();groups=[]
     for start in identities:
         if start in seen or not edges[start]:continue
         pending=[start];component=set()
@@ -48,7 +49,26 @@ def exhaustive(bank,config):
             current=pending.pop()
             if current in component:continue
             component.add(current);pending.extend(edges[current]-component)
-        seen.update(component);blockers=[];nearest=-1.
+        seen.update(component)
+        if any(component - {a} - edges[a] for a in component):
+            margin = max(settings['ambiguity_margin'], 1e-6)
+            eligible = []
+            for n in range(2, len(component)):
+                for subset in combinations(sorted(component), n):
+                    if all(b in edges[a] for a,b in combinations(subset,2)) and all(
+                        min(pairs[tuple(sorted((a,b)))]['score'] for b in subset if a!=b) -
+                        max((pairs[tuple(sorted((a,b)))]['score'] for b in edges[a] if b not in subset),
+                            default=-float('inf')) >= margin for a in subset):
+                        eligible.append(subset)
+            maximal = [g for g in eligible if not any(set(g)<set(h) for h in eligible)]
+            chosen = [g for g in maximal if not any(g!=h and set(g)&set(h) for h in maximal)]
+            if chosen:
+                result['decisions'].append(dict(people=sorted(component),outcome='blocked',blockers=['incomplete_body_component']))
+                groups.extend(sorted(chosen,key=lambda g:(-len(g),g)))
+                continue
+        groups.append(component)
+    for component in groups:
+        blockers=[];nearest=-1.
         if any(b not in edges[a] for a in component for b in component if a!=b):blockers.append('incomplete_body_component')
         for a in component:
             outsiders=[pairs[tuple(sorted((a,b)))]['score'] for b in identities if b not in component]

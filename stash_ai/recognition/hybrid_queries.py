@@ -77,10 +77,14 @@ def _recover(database, selected, config, claims, *, births=()):
                     measures=[m for m in measures if m is not None]
                     if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
                     score=max((m['mean'] for m in measures),default=None)
-                    admissible=bool(measures and not identity.guard_missing and not identity.unsupported_body_modes and
+                    admissible=bool(measures and not identity.guard_missing and (not identity.unsupported_body_modes or
+                        (bodies is identity.persons and bool(modes))) and
                         len(identity.independent)>=settings['min_support'] and
                         any(m['minimum']>=settings['person_threshold'] for m in measures))
                     choices.append((score,identity.person,admissible,group))
+                    if identity.unsupported_body_modes:
+                        # Pending appearances have no certified upper score for another owner.
+                        choices.append((None,identity.person,False,group))
                 winner=choose(choices,settings['ambiguity_margin']);signal='face_and_body'
             if winner is None:
                 if observe is not None:query_decision(row['id'],'choice','no_unambiguous_query_winner',
