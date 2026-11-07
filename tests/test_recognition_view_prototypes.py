@@ -259,3 +259,13 @@ def test_pose_hint_keeps_signed_direction_and_does_not_claim_yaw_degrees():
     assert pose_view(left) == 'left'
     assert pose_view(right) == 'right'
     assert pose_view('not-json') == 'unknown'
+
+
+def test_historical_other_view_accepts_both_preexisting_geometry_categories():
+    from stash_ai.recognition.view_prototypes import pose_matches, query_pose_matches
+    neutral = [16,16,128,128,49,60,111,60,80,84,56,108,104,108,.99]
+    for geometry in (neutral, []):
+        assert pose_matches(geometry, 'other')
+        assert query_pose_matches(geometry, 'other')
+    assert not pose_matches([], 'neutral')
+    assert not pose_matches(neutral, 'unknown')
