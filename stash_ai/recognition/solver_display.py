@@ -154,9 +154,17 @@ class SolverDisplay:
             phrase += ' · configuration=' + ('changed' if best['changed'] else 'unchanged')
         else:
             phrase = 'no completed trial'
-        coverage = self.best_state.get('sets', 'unknown')
-        line = (f'Merge solver {phrase} · merged sets {coverage} · assigned={self.best_state.get("assigned", 0)}'
-                f' · {self.header()} · stop={search.get("stop_reason", "unknown")}')
+        trials = result.get('simulation', {}).get('trials', {})
+        selected = result.get('selected_trial')
+        groups = trials.get(selected, {}).get('goal_result', {}).get('groups', [])
+        merged = sum(g.get('identity_fully_merged', g.get('fully_merged', False)) for g in groups)
+        assigned = sum(g.get('assigned', 0) for g in groups)
+        attempted = search.get('attempted', 0)
+        restored = search.get('restored_trials', 0) + search.get('recovered_evaluations', 0)
+        line = (f'Merge solver {phrase} · merged sets {merged}/{len(groups)} · assigned={assigned}'
+                f' · Solver {attempted}/{search.get("max_trials", self.maximum)} · fresh {attempted-restored}'
+                f' · restored {restored} · failed {search.get("failed_trials", 0)}'
+                f' · stop={search.get("stop_reason", "unknown")}')
         if best and best['unmet_conditions']:
             from collections import Counter
             reasons = Counter()

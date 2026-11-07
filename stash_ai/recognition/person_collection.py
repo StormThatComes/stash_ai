@@ -33,12 +33,10 @@ class PersonCollector:
         self.pipeline = self.model = None
         cleanup([(name, resource.close) for name, resource in resources if resource is not None])
 
-    def enrich(self, db, scan, source):
+    def missing_cues(self, db, scan, total):
+        """Find sparse durable gaps for both face projections and independent body cues."""
         if not self.config.data['sapiensid']['enabled']:
-            return
-        from .body_observations import enabled,repair_projections
-        if enabled(self.config):
-            with db:repair_projections(db,self.config,scan)
+            return set()
         expected=contract(self.config)
         # Include every face in association, even if its identity evidence was
         # rejected. Otherwise a second face could disappear from ambiguity checks.
@@ -48,11 +46,20 @@ class PersonCollector:
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
             complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,body_contract(self.config)))}
-            missing.update(set(range(len(source.cues)))-complete)
+            missing.update(set(range(total))-complete)
+        return missing
+
+    def enrich(self, db, scan, source):
+        if not self.config.data['sapiensid']['enabled']:
+            return 0
+        from .body_observations import enabled,repair_projections
+        if enabled(self.config):
+            with db:repair_projections(db,self.config,scan)
+        missing = self.missing_cues(db, scan, len(source.cues) if enabled(self.config) else 0)
         if not missing:
             from .person_crop_backfill import backfill
             backfill(db,scan,source,self.config)
-            return
+            return 0
         self._load()
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
         self.resume_rows=[]
@@ -83,6 +90,7 @@ class PersonCollector:
             finally:self.resume_rows=None
         from .person_crop_backfill import backfill
         backfill(db,scan,source,self.config)
+        return len(missing)
 
     def _load(self):
         if self.model is None:

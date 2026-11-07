@@ -160,7 +160,7 @@ def execute(args, config):
             elif args.progress_style != 'off':
                 display = SolverDisplay(current_console(), args.max_trials, (execution or {}).get('trials', 1))
                 progress = display
-            with report_phase('Solve merge goals',quiet=True):
+            with report_phase('Solve merge goals', quiet=True, interrupted=lambda: result.get('interrupted')):
                 result.update(solve(config, result, db, maximum=args.max_trials,
                                      progress=progress if args.progress_style != 'off' else None,
                                     checkpoint=checkpoint,resume=resume,winner_writer=writer,
