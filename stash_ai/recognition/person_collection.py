@@ -56,13 +56,23 @@ class PersonCollector:
         self._load()
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
         self.resume_rows=[]
+        # Read only narrow geometry columns; cap each ordered lookup to 64 cues.
+        blocks={cue:cue//64 for cue in missing}
+        loaded=None
         try:
             with closing(frames,name='close person source frames') as stream:
                 with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
                     for index,cue,image in frames:
                         with image:
                             if index in missing:
-                                rows=list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+                                if loaded!=blocks[index]:
+                                    loaded=blocks[index]
+                                    cues=[i for i in range(loaded*64,(loaded+1)*64) if i in missing]
+                                    lookup={i:[] for i in cues}
+                                    for row in db.execute('SELECT cue,id,geometry,rejected FROM observations WHERE scan=? '
+                                            'AND cue IN (SELECT value FROM json_each(?)) ORDER BY cue,id',(scan,json.dumps(cues))):
+                                        lookup[row['cue']].append(row)
+                                rows=lookup[index]
                                 self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
             self.flush()
         finally:

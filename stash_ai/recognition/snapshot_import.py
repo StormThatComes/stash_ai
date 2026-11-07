@@ -11,6 +11,9 @@ def bulk(target):
         for name, _ in triggers:
             target.execute('DROP TRIGGER main."'+name.replace('"', '""')+'"')
         yield
+        if target.execute("SELECT 1 FROM sqlite_master WHERE name='scene_owners'").fetchone():
+            from .scene_owner_index import populate
+            populate(target)
         for name, sql in triggers:
             # A replay may shadow observations with a TEMP vector-source view.
             # Bind restored triggers to the trusted main schema explicitly.
