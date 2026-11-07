@@ -12,11 +12,15 @@ from .merge_report_policy import patched
 from .offline_evaluation import evaluate, _selection
 
 
-def _metrics(labels, samples, locations, decisions, exclude=()):
+def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=()):
     records = [dict(observation=oid, scene=locations[oid][0], truth=truth,
-                    predicted=decisions[oid]['identity']) for oid, truth in labels.items() if oid not in exclude]
+                    predicted=decisions[oid]['accepted_identity']) for oid, truth in labels.items() if oid not in exclude]
     all_metrics = evaluate_identities(records)
-    metrics = {'all': all_metrics}
+    provisional = [dict(row, predicted=decisions[row['observation']]['identity'])
+                   for row in records if row['predicted'] is None
+                   and decisions[row['observation']].get('status') == 'provisional']
+    metrics = {'all': all_metrics, 'provisional_only': evaluate_identities(provisional),
+               'partners': partner_metrics(partner_sets, labels, locations, decisions, exclude)}
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
         outside = [r for r in records if category not in samples[r['observation']]['slices']]
@@ -38,11 +42,34 @@ def _metrics(labels, samples, locations, decisions, exclude=()):
     return metrics
 
 
+def partner_metrics(triples, labels, locations, decisions, exclude):
+    """Each performer/cue relation votes once, including face and body projections."""
+    from collections import defaultdict
+    positive = defaultdict(list)
+    negative = defaultdict(list)
+    for face, back, partner in triples:
+        for first, second, same in ((face, back, True), (back, partner, False), (face, partner, False)):
+            if first in exclude or second in exclude:
+                continue
+            a, b = (decisions[oid]['accepted_identity'] for oid in (first, second))
+            addresses = tuple(sorted((labels[oid], *locations[oid]) for oid in (first, second)))
+            (positive if same else negative)[addresses].append(a is not None and a == b)
+    counts = defaultdict(Counter)
+    for key, values in positive.items():
+        counts[key[0][0]].update(target_pairs=1, recovered=int(all(values)))
+    for key, values in negative.items():
+        for performer in {address[0] for address in key}:
+            counts[performer].update(partner_pairs=1, false_joins=int(any(values)))
+    return dict(target_pairs=len(positive), recovered=sum(map(all, positive.values())),
+                partner_pairs=len(negative), false_joins=sum(map(any, negative.values())),
+                per_performer=dict(sorted(counts.items())))
+
+
 def _partition_delta(original, stressed, identifiers):
     # Count joins and lost relations without materialising observation pairs.
     left, right, shared = Counter(), Counter(), Counter()
     for oid in identifiers:
-        a, b = original[oid]['identity'], stressed[oid]['identity']
+        a, b = original[oid]['accepted_identity'], stressed[oid]['accepted_identity']
         if a is not None:
             left[a] += 1
         if b is not None:
@@ -91,11 +118,21 @@ def read_manifest(manifest_path):
     database = document.get('database')
     if database is not None and (not isinstance(database,str) or not database):
         raise ValueError('Validation database must be a filename.')
-    return scenes, samples, labels, (path.parent/database).resolve() if database else None, document.get('series', [])
+    triples = document.get('partner_sets', [])
+    if not isinstance(triples, list):
+        raise ValueError('partner_sets must be a list of [face, back, partner] triples.')
+    for triple in triples:
+        if (not isinstance(triple, list) or len(triple) != 3
+                or any(not isinstance(oid, str) or oid not in labels for oid in triple)
+                or len(set(triple)) != 3 or labels[triple[0]] != labels[triple[1]]
+                or labels[triple[1]] == labels[triple[2]]):
+            raise ValueError('Each partner set needs two observations of one target and a different partner.')
+    return (scenes, samples, labels, (path.parent/database).resolve() if database else None,
+            document.get('series', []), triples)
 
 
 def validate_winner(config, training, result, manifest_path, *, manifest=None):
-    scenes, samples, labels, database, series = manifest or read_manifest(manifest_path)
+    scenes, samples, labels, database, series, triples = manifest or read_manifest(manifest_path)
     conflict = training.execute('SELECT DISTINCT scene FROM scans WHERE scope=? AND namespace=? AND '
                                 'scene IN (SELECT value FROM json_each(?)) LIMIT 1',
                                 (result['scope'],result['namespace'],encoded(scenes))).fetchone()
@@ -120,7 +157,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None):
         full = evaluate(settings,labels,variants={'winner':winner},**options)
         locations = _locations(source,scans,labels)
         predicted = full['trials']['winner/joint']['decisions']
-        metrics = {name: _metrics(labels,samples,locations,trial['decisions'])
+        metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples)
                    for name, trial in full['trials'].items()}
         if not windows:
             # Derive omission windows from the actual winner's recorded face roots.
@@ -143,8 +180,8 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None):
             excluded = {oid for oid,(s,c) in locations.items() if s==scene and first<=c<=last}
             group = sorted(labels.keys()-excluded)
             delta = _partition_delta(predicted,trial,group)
-            before = _metrics(labels,samples,locations,predicted,excluded)
-            after = _metrics(labels,samples,locations,trial,excluded)
+            before = _metrics(labels,samples,locations,predicted,excluded,triples)
+            after = _metrics(labels,samples,locations,trial,excluded,triples)
             stress.append(dict(scene=scene, first_cue=first, last_cue=last, scored=len(group),
                                excluded_labels=len(excluded), **delta, reference=before, omitted=after))
     return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, omissions=stress,

@@ -36,7 +36,7 @@ def test_back_slice_counts_joins_to_frontal_partner():
     labels = {'back':'A','face':'A','partner':'B'}
     tagged = {k:{'slices':['back'] if k=='back' else []} for k in labels}
     scores = _metrics(labels, tagged, dict.fromkeys(labels,('1',0)),
-                      {k:{'identity':'mixed'} for k in labels})
+                      {k:{'accepted_identity':'mixed'} for k in labels})
     assert scores['back']['pairs_touching_slice'] == dict(true_pairs=1,joined_pairs=2,
         false_merge_pairs=1,recall=1.,precision=.5)
 
@@ -59,3 +59,19 @@ def test_same_database_holdout_excludes_raw_inputs_before_solver_replay(tmp_path
             result = validate_winner(cfg,training,dict(scope=scope,namespace=namespace,
                                      best_result={'changes':[]}),plan)
             assert result['metrics']['winner/joint']['back']['observations']==len(held)
+
+
+def test_provisional_partner_relations_cannot_score_as_production_membership():
+    from stash_ai.recognition.solver_validation import _metrics, _partition_delta
+    labels = {'face':'A', 'back':'A', 'back_projection':'A', 'partner':'B'}
+    samples = {k:{'slices':['entangled']} for k in labels}
+    places = {k:('1', 0 if k=='face' else 1) for k in labels}
+    triples = [('face', k, 'partner') for k in ('back','back_projection')]
+    decisions = {k:dict(accepted_identity=None, identity='x', status='provisional') for k in labels}
+    values = _metrics(labels, samples, places, decisions, partner_sets=triples)
+    assert values['all']['coverage'] == 0
+    assert values['provisional_only']['assigned'] == 4
+    joined = {k:dict(accepted_identity='x', identity='x', status='accepted') for k in labels}
+    scores = _metrics(labels, samples, places, joined, partner_sets=triples)['partners']
+    assert (scores['target_pairs'], scores['recovered'], scores['partner_pairs'], scores['false_joins']) == (1,1,2,2)
+    assert _partition_delta(decisions, joined, labels) == dict(lost_pairs=0, joined_pairs=6)

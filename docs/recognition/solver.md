@@ -532,8 +532,10 @@ separate holdout database with the same scope and encoder namespace. Example:
 
 ```json
 {"scenes":["42"],"observations":{
+  "face-A":{"truth":"Alice","slices":[]},
   "observation-A":{"truth":"Alice","slices":["back","entangled"]},
-  "observation-B":{"truth":"Bob","slices":["entangled"]}},"series":[["42",8,12]]}
+  "observation-B":{"truth":"Bob","slices":["entangled"]}},
+ "partner_sets":[["face-A","observation-A","observation-B"]],"series":[["42",8,12]]}
 ```
 
 The report compares baseline and winner on the supplied observations, including
@@ -543,3 +545,9 @@ cue windows are removed one at a time in disposable full replays. If omitted fro
 the manifest, windows come from the winner's recorded body-view tracks when
 available. The omission report excludes removed labels from both comparison
 metrics and counts lost and newly joined relations among the remaining labels.
+
+Partner triples report recovered target relations and false joins to the named
+partner, including counts per performer. Multiple projections of a person in the
+same cue have one vote per relation. Recovery requires agreement across those
+projections, and any false join counts. Primary metrics and omission deltas use
+accepted production memberships. Provisional proposals have separate metrics.
