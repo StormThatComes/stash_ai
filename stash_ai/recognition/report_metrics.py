@@ -1,11 +1,14 @@
 """CLI report lifetime measurements and stage-aware progress outside the solver."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from functools import wraps
 from types import SimpleNamespace
 import json
 import sys
 import time
+
+from stash_ai.runtime.console import ConsolePresenter
+from .console_layout import time_line
 
 _active = ContextVar('recognition_report_metrics', default=None)
 
@@ -16,6 +19,12 @@ def command(function):
         from .trial_metrics import Metrics
         state = SimpleNamespace(metrics=Metrics(getattr(args,'profile_solver',False)),
                                 progress=getattr(args,'progress_style','off')!='off',depth=0)
+        style = getattr(args, 'progress_style', 'off')
+        state.console = None
+        if state.progress:
+            state.console = ConsolePresenter(lambda text: print(text, file=sys.stderr, flush=True),
+                                             style=style, status_position=0, heartbeat=60.).start()
+            state.console.heartbeat_on_progress = True
         token = _active.set(state)
         outcome = 'completed'
         try:
@@ -28,6 +37,13 @@ def command(function):
             raise
         finally:
             _active.reset(token)
+            if state.console is not None:
+                state.console.close()
+                try:
+                    print('Merge report ' + outcome + ': ' + time_line(time.monotonic() - state.console.started,
+                          state.console.phase_totals), file=sys.stderr, flush=True)
+                except OSError:
+                    pass
             if state.metrics.enabled:
                 # Only this final summary includes serialization, fsync and
                 # publication. The JSON report honestly identifies its cutoff.
@@ -52,11 +68,17 @@ def phase(label, *, quiet=False):
     last = [0.,None]
     def progress(name, stage, item):
         now=time.monotonic()
+        if state.console.style != 'verbose':
+            state.console.update(stage=item['stage'])
+            if item['stage'] != last[1] and item['stage'] in ('Copy retained snapshot', 'Fingerprint retained inputs'):
+                state.console.message('Merge report: ' + item['stage'], decorative=True)
+            last[1] = item['stage']
+            return
         if now-last[0] >= 1 or last[1] != item['stage']:
             last[:]=[now,item['stage']]
             print('Merge report: '+worker_text(item,now),file=sys.stderr,flush=True)
     try:
-        with state.metrics.stage(label):
+        with (state.console.phase(label) if state.console and not nested else nullcontext()), state.metrics.stage(label):
             if quiet or nested or not state.progress:
                 yield
             else:

@@ -56,10 +56,10 @@ known total, such as paginated all-scene discovery, remain indeterminate and sho
 completed units and elapsed time. Nested detail bars are terminal-only; redirected
 output keeps bounded status heartbeats and major-stage milestones.
 
-Redirected output keeps phase milestones and infrequent status heartbeats,
+In auto and compact mode redirected output keeps phase milestones and one status heartbeat per minute,
 including scene/frame counts and stage ETAs, without per-scene frame logs.
 `--progress-style verbose` adds per-scene quality/reference details and the
-performer names YAML starter. The starter remains recorded in face SQLite
+performer names YAML starter. Compact progress skips optional SQL counts and uses known totals for a rolling stage ETA. The last summary includes total command time and the three longest phases. The starter remains recorded in face SQLite
 history in every style. `--progress-style off` keeps errors and the final
 summary, including aggregate rejection reasons and reference usage. Repeated
 scan/publication errors are grouped; failed scenes still count as inspected

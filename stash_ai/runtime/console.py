@@ -71,6 +71,7 @@ class ConsolePresenter:
         self._resource_row = None
         self.stopping = self.finalized = False
         self.stop_started = None
+        self.phase_totals = Counter()
         self.phase_outcomes = {}
         self.skipped_reasons = {}
         self.last_phase = None
@@ -90,7 +91,7 @@ class ConsolePresenter:
     def snapshot(self):
         with self.lock:
             moment = time.monotonic()
-            return dict(phase=self.phase_name, elapsed=moment-self.phase_started,
+            return dict(phase=self.phase_name, elapsed=moment-self.phase_started, total_elapsed=moment-self.started,
                         last_progress_age=moment-self.completed if self.completed is not None else None,
                         values=dict(self.state), counts=dict(self.counts))
 
@@ -144,6 +145,7 @@ class ConsolePresenter:
                 self.failure_phase = name
             with self.lock:
                 if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
+                    self.phase_totals[name] += time.monotonic() - self.phase_started
                     self.phase_outcomes[name] = status
                 if status == 'complete':
                     self.completed = time.monotonic()
@@ -437,7 +439,8 @@ class OwnedBar:
             self.owner.call(lambda: setattr(self.target, 'total', value))
 
     def set_postfix(self, *args, **kwargs):
-        self.owner.update(**{self.status_key: ', '.join(f'{k}={v}' for k, v in kwargs.items() if k != 'refresh')})
+        if self.status_key is not None:
+            self.owner.update(**{self.status_key: ', '.join(f'{k}={v}' for k, v in kwargs.items() if k != 'refresh')})
         if self.target is not None and not self.disable:
             self.owner.call(lambda: self.target.set_postfix(*args, **kwargs))
 

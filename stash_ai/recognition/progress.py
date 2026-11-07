@@ -6,6 +6,8 @@ import time
 
 from tqdm import tqdm
 
+from .console_layout import WindowRate, clock, compact
+
 from stash_ai.runtime.console import status, activity, current_report, phase, skipped
 
 _work_rows = ContextVar('recognition_work_rows', default=())
@@ -52,7 +54,7 @@ class RunProgress:
         report.console.status_layout = partial(status_lines, verbose=report.verbose)
         report.console.heartbeat_layout = partial(heartbeat_line, verbose=report.verbose)
         report.console.heartbeat_on_progress = True
-        report.console.heartbeat = 15.
+        report.console.heartbeat = 15. if report.verbose else 60.
 
     @contextmanager
     def phase(self, name, **values):
@@ -97,15 +99,29 @@ def status_lines(row, fields, width, *, verbose=False):
                 row['values'].get(key + '_label') for key in ('scenes', 'frames', 'people', 'work', 'detail')):
             fields['activity'] = stage
     if not verbose:
-        fields = {k: v for k, v in fields.items() if not k.startswith('reference') and
-                  k not in ('cpu_blocks', 'cpu_queue', 'cpu_scenes')}
+        lines = ['Status: ' + row['phase']]
+        if fields.get('stage'):
+            lines.append('Stage: ' + fields['stage'])
+        work = ('scene', 'person', 'batch', 'frame_cache', 'checkpoint')
+        details = ' · '.join(f'{key}={fields[key]}' for key in work if key in fields)
+        if details:
+            lines.append(details)
+        age = row['last_progress_age']
+        lines.append(f"Time: total {clock(row.get('total_elapsed', row['elapsed']))} · phase {clock(row['elapsed'])}"
+                     + (f' · last completed {clock(age)} ago' if age is not None else ''))
+        reasons = ('cpu_workers', 'cpu_wait', 'backoff remaining', 'deadline remaining')
+        info = ' · '.join(f'{key}={fields[key]}' for key in reasons if fields.get(key))
+        if info:
+            lines.append(info)
+        return compact(lines, width)
     return layout(row, fields, width)
 
 
 def heartbeat_line(row, fields, *, verbose=False):
     """One periodic log line, including progress during continuously busy work."""
     step = fields.get('phase_step')
-    parts = [(f'[{step}] ' if step else '') + row['phase'], f"elapsed={row['elapsed']:.0f}s"]
+    parts = [(f'[{step}] ' if step else '') + row['phase'], f"elapsed={row['elapsed']:.0f}s",
+             "total=" + clock(row.get("total_elapsed", row["elapsed"]))]
     for key in ('section', 'stage', 'scene', 'person'):
         if fields.get(key) and (key != 'stage' or fields[key] != fields.get('section')):
             parts.append(f'{key}={fields[key]}')
@@ -171,6 +187,7 @@ class WorkProgress:
         self.transient, self.bar = transient, None
         self.position = (1 if transient else 0) if position is None else position
         self.started = self.last_render = time.monotonic()
+        self.window = WindowRate(self.started, initial)
         self.postfix = {}
         self.observer = _update_observer.get()
         self.last_observed = self.started
@@ -196,7 +213,9 @@ class WorkProgress:
             self.bar = console.bar(tqdm, total=self.total, initial=self.n, desc=self.label,
                                    unit=self.unit, position=self.position,
                                    leave=False, dynamic_ncols=True, disable=None,
-                                   status_key=self.key + '_counts',
+                                   bar_format=('{desc}: {n_fmt}/{total_fmt} {unit} |{bar:10}|{postfix}'
+                                               if self.total is not None else '{desc}: {n_fmt} {unit}{postfix}'),
+                                   status_key=None,
                                    milestones=not hasattr(self.report, 'recognition_progress') or console.style == 'verbose')
 
     def advance(self, amount=1, **postfix):
@@ -217,8 +236,7 @@ class WorkProgress:
             return
         if not force and now - self.last_render < .25:
             return
-        elapsed, observed = now - self.started, self.n - self.initial
-        rate = observed / elapsed if observed > 0 and elapsed > 0 else None
+        rate = self.window.sample(now, self.n)
         eta = ('unknown' if self.total is None else '00:00' if self.n == self.total else
                tqdm.format_interval((self.total - self.n) / rate) if rate else 'warming up')
         delta = self.n - self.rendered
@@ -229,8 +247,13 @@ class WorkProgress:
             self.key + '_counts': ', '.join(f'{k}={v}' for k, v in self.postfix.items()) or None,
         })
         if self.bar is not None:
-            if self.postfix:
-                self.bar.set_postfix(refresh=False, **self.postfix)
+            if self.enabled and getattr(self.report.console, 'tty', False):
+                estimates = dict(rate='warming up')
+                if rate:
+                    estimates['rate'] = f'{rate:.1f} {self.unit}/s'
+                    if self.total is not None:
+                        estimates['ETA'] = eta
+                self.bar.set_postfix(refresh=False, **self.postfix, **estimates)
             if delta:
                 self.bar.update(delta)
         self.rendered, self.last_render = self.n, now
@@ -257,7 +280,8 @@ def work(label, total=None, *, unit='item', position=1, initial=0, **values):
     console = getattr(report, 'console', None)
     if callable(total):
         # Counting is optional telemetry, never another BLOB materialization.
-        if (console is None or console.style == 'off') and _update_observer.get() is None:
+        if console is None or console.style == 'off' or (
+                hasattr(report, 'recognition_progress') and console.style != 'verbose'):
             total = None
         else:
             try:

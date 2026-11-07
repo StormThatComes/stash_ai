@@ -233,11 +233,11 @@ def test_redirected_heartbeat_reports_busy_work_at_bounded_intervals(monkeypatch
     ui = RunProgress(report)
     with ui.phase('Recognition selection'):
         with WorkProgress(report, 'Read recognition scene IDs', None) as progress:
-            clock[0] = 14.
+            clock[0] = 59.
             progress.advance()
             report.console._render()
             assert 'Still working:' not in stream.getvalue()
-            clock[0] = 15.
+            clock[0] = 60.
             progress.advance()
             report.console._render()
             report.console._render()
@@ -246,7 +246,7 @@ def test_redirected_heartbeat_reports_busy_work_at_bounded_intervals(monkeypatch
             assert 'Read recognition scene IDs: 2/?' in line
             assert 'ETA=unknown' in line and 'last completed=0s ago' in line
             assert 'rate=' in line and 'phase_step=' not in line
-            clock[0] = 30.
+            clock[0] = 120.
             progress.advance()
             report.console._render()
     assert stream.getvalue().count('Still working:') == 2
