@@ -17,6 +17,8 @@ def compact_quality(raw):
             number=record.get(key)
             if type(number) in (int,float) and math.isfinite(number) and number>=0:
                 selected[key]=number
+        if type(record.get('view_shot')) is int and record['view_shot'] >= 0:
+            selected['view_shot'] = record['view_shot']
         for key in ('evidence_crop_sha256', 'evidence_pixel_sha256', 'evidence_thumbnail_id'):
             fingerprint = record.get(key)
             if isinstance(fingerprint,str) and len(fingerprint)==64 and all(c in '0123456789abcdef' for c in fingerprint):
