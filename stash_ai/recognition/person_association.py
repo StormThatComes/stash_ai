@@ -78,8 +78,7 @@ def resolve(faces, people, choices):
         for p in choices[i]:
             distances = []
             landmarks = getattr(face, 'landmarks', ())
-            for k, j in enumerate((2, 1, 0)):
-                point = people[p]['keypoints'][k]
+            for point, j in zip(people[p]['keypoints'], (2, 1, 0)):
                 if min(point) >= 0 and j < len(landmarks):
                     distances.append(math.dist(point, landmarks[j]) / min(face.box[2:]))
             if len(distances) >= 2 and max(distances) <= .20:
