@@ -32,7 +32,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v12-independent-tracks',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v13-rear-recovery',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -230,7 +230,11 @@ def _load_scene(db,scan,config):
     from .body_origins import origins_for_scene, ordered_owners
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
     origins=origins_for_scene(db,record)
-    return dict(record),rows,roots,origins,ordered_owners(db,origins)
+    record = dict(record)
+    record['occupied_cues'] = [r[0] for r in db.execute(
+        'SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION SELECT cue FROM observations WHERE scan=?',
+        (scan,expected,scan))]
+    return record,rows,roots,origins,ordered_owners(db,origins)
 
 
 def scene_plan(db,scan,config):
@@ -346,7 +350,7 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
                 if decisions[row['id']]['reason']=='body_anchor_quality':
                     decisions[row['id']]['reason']=regional['reason']
     from .body_perspectives import recover
-    recover(rows, decisions, seeds, settings, scores, guard)
+    recover(rows, decisions, seeds, settings, scores, guard, occupied=record.get('occupied_cues', ()))
     from .local_body_hints import observe
     observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
     resolve_claims(rows,decisions,config,scores=scores)
@@ -415,6 +419,8 @@ def rebuild(database,selected,config,result):
                 reconcile(database,selected,config)
                 from .body_recovery import recover
                 recover(database,selected,config)
+                from .rear_recovery import recover as recover_rear
+                recover_rear(db,selected,config)
             cache_stamp(db,selected,config)
         from .derived_cache import current
         store=current()

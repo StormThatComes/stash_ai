@@ -22,6 +22,7 @@ def diagnose(db, config, ids, selected):
         LEFT JOIN body_observations b ON b.scan=a.scan AND b.cue=a.cue AND b.contract=s.contract
         ORDER BY a.id
         """, args)
+    from .body_identity import policy
     result = {}
     nearby_rejections = {}
     for row in rows:
@@ -30,6 +31,15 @@ def diagnose(db, config, ids, selected):
         if linked:
             reason = (row['rejected'] or ('embedding_missing' if not row['ready'] else
                       'query_only' if row['auxiliary'] else 'ready_for_matching'))
+            if row['ready'] and row['rejected'] is None:
+                member = db.execute('SELECT proof FROM body_members WHERE observation=? AND policy=?',
+                                    (row['detection'],policy(config))).fetchone()
+                if member:
+                    import json
+                    blocker = json.loads(member[0]).get('track_blocker')
+                    if blocker:
+                        result[oid] = ('track_' + blocker['reason'],blocker['cue'])
+                        continue
             result[oid] = (reason, row['cue'])
         else:
             nearby_rejections.setdefault(oid, set()).add(row['rejected'])
