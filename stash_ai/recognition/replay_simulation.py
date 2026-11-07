@@ -44,9 +44,9 @@ def impact(before, after):
 
 
 @contextmanager
-def prepared_history(db, config, scope, ns, installation):
+def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=()):
     """One disk-backed immutable seed; each experiment still gets fresh RAM."""
-    if any(source is db and key == (scope, ns, installation) for source, key in _prepared_sources.get()):
+    if not excluded_scenes and any(source is db and key == (scope, ns, installation) for source, key in _prepared_sources.get()):
         yield db
         return
     from .database import SCHEMA
@@ -60,7 +60,8 @@ def prepared_history(db, config, scope, ns, installation):
             try:
                 from .snapshot_import import bulk
                 with bulk(seed):
-                    copy_history(db, seed, [], scope, ns, commit=False)
+                    hidden = [dict(scene=scene) for scene in excluded_scenes]
+                    copy_history(db, seed, hidden, scope, ns, commit=False)
             except sqlite3.OperationalError as error:
                 if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
                     raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error

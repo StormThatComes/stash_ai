@@ -99,7 +99,11 @@ def defer_new_groups(db,config,hints,established):
         common=None
         for row in rows:
             q=vector(row)
-            matches={i for i,v,p in frozen if float(np.dot(q,v))>=threshold and pose_matches(row['geometry'],p)}
+            angle = pose_view(row['geometry'])
+            # Negative birth hints may defer a neutral/unknown mismatch.
+            # These hints cannot authorize assignment or train a view.
+            matches={i for i,v,p in frozen if float(np.dot(q,v))>=threshold and
+                     (pose_matches(row['geometry'],p) or {angle,p} == {'neutral','unknown'})}
             common=matches if common is None else common.intersection(matches)
             if not common:break
         if not common:continue

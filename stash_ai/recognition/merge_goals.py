@@ -127,12 +127,20 @@ def execute(args, config):
             import sys
             print('Merge solver execution: request ' + request_text(execution, maximum=args.max_trials),
                   file=sys.stderr, flush=True)
+    validation_path = getattr(args, 'solver_validation', None)
+    validation_manifest = None
+    excluded_scenes = ()
+    if validation_path:
+        from .solver_validation import read_manifest
+        validation_manifest = read_manifest(validation_path)
+        excluded_scenes = validation_manifest[0]
     sets = args.performer_set or [args.performer_id or args.identity_id]
     from .report_snapshot import snapshot
     from contextlib import ExitStack
     with ExitStack() as snapshots:
         with report_phase('Prepare report inputs'):
-            db = snapshots.enter_context(snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None))
+            db = snapshots.enter_context(snapshot(config, sets[0][0], scope=args.scope, by_performer=args.identity_id is None,
+                                                  excluded_scenes=excluded_scenes))
             with report_phase('Resolve goals'):
                 result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
                                  policy=getattr(args, 'goal_policy', 'identity'),
@@ -166,11 +174,10 @@ def execute(args, config):
                                             ('split_pairs', 'max_outside_split_pairs'),
                                             ('newly_joined_pairs', 'max_outside_joined_pairs'),
                                             ('new_outsider_observations', 'max_new_outsider_observations'))}))
-            validation_path = getattr(args, 'solver_validation', None)
             if validation_path and result.get('best_result') and not result.get('interrupted'):
                 from .solver_validation import validate_winner
                 with report_phase('Validate finalist on held-out scenes'):
-                    result['holdout_validation'] = validate_winner(config, db, result, validation_path)
+                    result['holdout_validation'] = validate_winner(config, db, result, validation_path, manifest=validation_manifest)
         elif args.simulate:
             with report_phase('Replay merge goals'):
                 result['simulation'] = evaluate(config, result, db)

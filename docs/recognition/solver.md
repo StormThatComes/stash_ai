@@ -525,12 +525,13 @@ and timing scope are in `benchmarks/results/merge_solver_targeted_comparison.jso
 ### Validating a finalist on back views and entangled people
 
 Pass `--solver-validation holdout.json` to `report-merge --solve`. The solver
-selects its winner first. The validation manifest identifies an independent
-recognition database and scene IDs absent from the training snapshot, in the
-same scope and encoder namespace. Example:
+excludes all versions of the listed scenes from its private training snapshot,
+selects its winner and then replays the held-out scenes. The default is the
+configured recognition database. An optional `database` path can point at a
+separate holdout database with the same scope and encoder namespace. Example:
 
 ```json
-{"database":"holdout.sqlite","scenes":["42"],"observations":{
+{"scenes":["42"],"observations":{
   "observation-A":{"truth":"Alice","slices":["back","entangled"]},
   "observation-B":{"truth":"Bob","slices":["entangled"]}},"series":[["42",8,12]]}
 ```

@@ -39,3 +39,23 @@ def test_back_slice_counts_joins_to_frontal_partner():
                       {k:{'identity':'mixed'} for k in labels})
     assert scores['back']['pairs_touching_slice'] == dict(true_pairs=1,joined_pairs=2,
         false_merge_pairs=1,recall=1.,precision=.5)
+
+
+def test_same_database_holdout_excludes_raw_inputs_before_solver_replay(tmp_path):
+    from stash_ai.recognition.replay_simulation import prepared_history
+    from stash_ai.recognition.database import FaceDatabase
+    from types import SimpleNamespace
+    cfg, labels = fixture(tmp_path)
+    with closing(_open_readonly(cfg.database)) as source:
+        scope,namespace = source.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
+        installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))
+        held = {r[0] for r in source.execute("SELECT o.id FROM observations o JOIN scans s ON s.id=o.scan WHERE s.scene='2'")}
+        plan = tmp_path/'holdout.json'
+        plan.write_text(json.dumps(dict(scenes=['2'],observations={
+            oid:{'truth':labels[oid],'slices':['back']} for oid in held})))
+        with prepared_history(source,cfg,scope,namespace,installation,excluded_scenes=['2']) as training:
+            assert {r[0] for r in training.execute('SELECT scene FROM scans')} == {'1'}
+            assert not held & {r[0] for r in training.execute('SELECT id FROM observations')}
+            result = validate_winner(cfg,training,dict(scope=scope,namespace=namespace,
+                                     best_result={'changes':[]}),plan)
+            assert result['metrics']['winner/joint']['back']['observations']==len(held)

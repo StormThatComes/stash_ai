@@ -68,7 +68,7 @@ def _locations(source, selected, ids):
     return result
 
 
-def validate_winner(config, training, result, manifest_path):
+def read_manifest(manifest_path):
     path = Path(manifest_path)
     def unique(pairs):
         values = dict(pairs)
@@ -88,18 +88,22 @@ def validate_winner(config, training, result, manifest_path):
                 or not isinstance(row.get('slices'),list) or any(s not in ('back','entangled') for s in row['slices'])):
             raise ValueError('Each validation observation needs truth and a list of back/entangled slices.')
         labels[oid] = row['truth']
+    database = document.get('database')
+    if database is not None and (not isinstance(database,str) or not database):
+        raise ValueError('Validation database must be a filename.')
+    return scenes, samples, labels, (path.parent/database).resolve() if database else None, document.get('series', [])
+
+
+def validate_winner(config, training, result, manifest_path, *, manifest=None):
+    scenes, samples, labels, database, series = manifest or read_manifest(manifest_path)
     conflict = training.execute('SELECT DISTINCT scene FROM scans WHERE scope=? AND namespace=? AND '
                                 'scene IN (SELECT value FROM json_each(?)) LIMIT 1',
                                 (result['scope'],result['namespace'],encoded(scenes))).fetchone()
     if conflict:
         raise ValueError(f'Holdout scene {conflict[0]} occurs in the training snapshot.')
-    database = document.get('database')
-    if not isinstance(database,str) or not database:
-        raise ValueError('Validation requires a holdout database path.')
-    settings = replace(config,database=(path.parent/database).resolve())
+    settings = replace(config,database=database or config.database)
     changes = {item['parameter']:item['proposed'] for item in result['best_result']['changes']}
     winner = patched(settings,changes)
-    series = document.get('series', [])
     if not isinstance(series,list) or len(series)>3:
         raise ValueError('At most three validation cue series are supported.')
     with closing(_open_readonly(settings.database)) as source:
