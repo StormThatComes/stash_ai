@@ -2,11 +2,16 @@
 import numpy as np
 
 
-def change(previous, current, adjacent):
+def measurements(previous, current):
     residual = current - previous
     difference = np.abs(residual).mean()
     structure = np.abs(residual - residual.mean(axis=0)).mean()
     colour = np.ptp(residual.mean(axis=0))
+    return difference,structure,colour
+
+
+def change(previous, current, adjacent):
+    difference,structure,colour = measurements(previous,current)
     if structure > 16 or colour > 30:
         return 'cut'
     return 'continuous' if adjacent and difference <= 20 else 'uncertain'

@@ -73,7 +73,20 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if any(geometry[r['id']][0].get('detected_people', len(members)) != len(members) for r in members):
             by_cue.pop(cue)
 
-    def transition(a, b):
+    outgoing_failures, incoming_failures = {}, {}
+    def transition(a, b, *, diagnose=False):
+        def fail(order, reason, measured, limit):
+            if diagnose:
+                # Retain one candidate per endpoint, preferring the one that
+                # cleared the most gates and came closest to the failed gate.
+                priority = (order,-abs(measured-limit),a['id'],b['id'])
+                for row,peer,failures in ((a,b,outgoing_failures),(b,a,incoming_failures)):
+                    prior = failures.get(row['id'])
+                    if prior is None or priority > prior[0]:
+                        detail = dict(reason=reason,cue=peer['cue'],observation_cue=row['cue'],
+                                      peer=peer['id'],measured=round(float(measured),7),limit=limit)
+                        failures[row['id']] = priority,detail
+            return None
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
         gap = b['seconds'] - a['seconds']
@@ -82,18 +95,35 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
         else:
             continuous = boundary[b['cue']] == 'continuous'
-        if not 0 < gap <= 12 or not continuous:
-            return None
+        if not 0 < gap <= 12:
+            return fail(0,'elapsed_seconds',gap,12)
+        if not continuous:
+            if not diagnose:
+                return None
+            from .perspective_shots import measurements
+            difference,structure,colour = measurements(sa.reshape(-1,3),sb.reshape(-1,3))
+            if skipped and shot_ids[a['cue']]!=shot_ids[b['cue']]:
+                return fail(1,'shot_change',1,0)
+            if structure>16:
+                return fail(1,'cut_structure',structure,16)
+            if colour>30:
+                return fail(1,'cut_colour',colour,30)
+            return fail(1,'uncertain_shot',difference,8 if skipped else 20)
         wa, ha = ba[2]-ba[0], ba[3]-ba[1]
         wb, hb = bb[2]-bb[0], bb[3]-bb[1]
-        if min(wa,ha,wb,hb) <= 0 or max(wa/wb,wb/wa,ha/hb,hb/ha) > 1.5:
-            return None
+        if min(wa,ha,wb,hb)<=0:
+            return fail(2,'empty_box',min(wa,ha,wb,hb),0)
+        scale = max(wa/wb,wb/wa,ha/hb,hb/ha)
+        if scale>1.5:
+            return fail(3,'box_scale',scale,1.5)
         displacement = math.hypot((ba[0]+ba[2]-bb[0]-bb[2])/2,
                                   (ba[1]+ba[3]-bb[1]-bb[3])/2)
-        if displacement > .30 * min(math.hypot(wa,ha), math.hypot(wb,hb)):
-            return None
+        relative = displacement/min(math.hypot(wa,ha), math.hypot(wb,hb))
+        if relative>.30:
+            return fail(4,'displacement',relative,.30)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
-        return similarity if similarity >= settings['cohesion_threshold'] else None
+        return similarity if similarity >= settings['cohesion_threshold'] else fail(
+            5,'body_similarity',similarity,settings['cohesion_threshold'])
 
     # Ambiguous transitions, cuts and sparse cue gaps end a track.
     next_row, stops = {}, {}
@@ -110,23 +140,27 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         forward, backward = defaultdict(list), defaultdict(list)
         for a in left:
             for b in right:
-                score = transition(a,b)
+                score = transition(a,b,diagnose=True)
                 if score is not None:
                     forward[a['id']].append((score,b['id']))
                     backward[b['id']].append((score,a['id']))
         for a in left:
             edges = sorted(forward[a['id']], reverse=True)
             if not edges:
+                if a['id'] in outgoing_failures and right:
+                    stops[a['id']] = outgoing_failures[a['id']][1]
                 continue
             if len(edges)>1 and edges[0][0]-edges[1][0] < margin:
-                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=edges[1][1])
+                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=edges[1][1],
+                                          measured=edges[0][0]-edges[1][0], limit=margin)
                 continue
             _, bid = edges[0]
             rivals = sorted(backward[bid], reverse=True)
             if rivals[0][1] == a['id'] and (len(rivals)==1 or rivals[0][0]-rivals[1][0] >= margin):
                 next_row[a['id']] = bid
             else:
-                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=rivals[0][1])
+                stops[a['id']] = dict(reason='competing_transition', cue=target, rival=rivals[0][1],
+                                          measured=edges[0][0]-max((v for v,i in rivals if i!=a['id']),default=-1.), limit=margin)
     # A side/uncertain cue can query a rear bank only when bracketed by two
     # back observations on unique links. It never trains the rear bank.
     previous = {end:start for start,end in next_row.items()}
@@ -214,8 +248,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     for row in rows:
         decision = decisions[row['id']]
         if not row.get('face_person') and decision.get('status') != 'accepted':
-            decision.setdefault('track_blocker', stops.get(row['id']) if row['id'] not in next_row
-                                and row['id'] in stops else dict(reason='no_independent_view', cue=row['cue']))
+            failure = incoming_failures.get(row['id'])
+            stop = stops.get(row['id']) if row['id'] not in next_row else None
+            if failure and (stop is None or stop['reason'] in ('cue_gap','geometry_or_appearance')):
+                stop = failure[1]
+            decision.setdefault('track_blocker', stop or dict(reason='no_independent_view',cue=row['cue']))
     from .crossing_tracks import crossings
     crossed = crossings(by_cue,root,decisions,transition,margin)
     if not banks and not crossed:

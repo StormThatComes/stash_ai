@@ -32,7 +32,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v16-independent-tracks',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v17-track-measurements',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -352,6 +352,9 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
     from .body_perspectives import recover
     recover(rows, decisions, seeds, settings, scores, guard, occupied=record.get('occupied_cues', ()))
     for row in rows:
+        blocker = decisions[row['id']].get('track_blocker')
+        if blocker:
+            blocker['scene'] = record['scene']
         q = quality(row)
         if q.get('query_only'):
             decisions[row['id']]['query_only_reason'] = q.get('query_only_reason','uncertain_body_geometry')

@@ -22,7 +22,10 @@ def test_holdout_replays_one_winner_and_removes_only_private_cues(tmp_path):
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
         events = []
         result = validate_winner(cfg,training,goal,manifest,progress=events.append)
-        assert [e.split(' · ')[0] for e in events] == ['Holdout baseline', 'Holdout winner', 'Holdout omission 1/1']
+        assert [e.split(' · ')[0] for e in events] == ['Holdout baseline', 'Holdout winner',
+            'Holdout incremental face_first','Holdout incremental rear_first','Holdout omission 1/1']
+        assert result['incremental']['face_first']['order'] == list(reversed(result['incremental']['rear_first']['order']))
+        assert {row['mode'] for row in result['omissions']}=={'empty','rejected'}
         from stash_ai.recognition.solver_explanation import holdout_summary
         text = holdout_summary(result)
         assert 'back (9)' in text and 'entangled (9)' in text and '1:0-0 lost=' in text
@@ -90,3 +93,27 @@ def test_single_physical_target_cannot_recover_itself():
     result = partner_metrics([ids],labels,dict.fromkeys(ids,('scene',3)),decisions,())
     assert result['target_pairs']==result['recovered']==0
     assert result['partner_pairs']==1
+
+
+def test_turn_and_partner_recovery_give_one_vote_per_cue_and_performer():
+    from stash_ai.recognition.sequence_validation import sequence_metrics
+    labels,locations,samples,decisions = {},{},{},{}
+    for cue in range(3):
+        for truth in ('A','B'):
+            oid=f'{truth}-{cue}'
+            labels[oid],locations[oid]=truth,('1',cue)
+            samples[oid]={'slices':['back','entangled'] if cue==1 else []}
+            decisions[oid]={'accepted_identity':truth}
+    def measure():
+        return sequence_metrics(labels,samples,locations,decisions)
+    initial=measure()
+    assert initial['turns']==2 and initial['macro_turn_recovery']==1
+    assert initial['crossings']==initial['both_recovered']==1
+    decisions['B-1']['accepted_identity']='A'
+    mixed=measure()
+    assert mixed['macro_turn_recovery']==.5 and mixed['macro_crossing_recovery']==0
+    assert mixed['id_switches']==2
+    decisions['B-1']['accepted_identity']=None
+    assert measure()['both_recovered']==1
+    decisions['A-2']['accepted_identity']='B'
+    assert measure()['both_recovered']==0
