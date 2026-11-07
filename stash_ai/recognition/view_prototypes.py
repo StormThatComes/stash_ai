@@ -192,8 +192,10 @@ class _Cluster:
             first=max(range(len(self.examples)),key=lambda i:(float(np.dot(self.examples[i],centre))+.01*self.qualities[i],-i))
             chosen=[first]
             while len(chosen)<maximum:
+                shots = {self.shots[j] for j in chosen if len(self.shots[j]) == 3}
                 chosen.append(max((i for i in range(len(self.examples)) if i not in chosen),
-                    key=lambda i:(1.-max(float(np.dot(self.examples[i],self.examples[j])) for j in chosen)+.03*self.qualities[i],-i)))
+                    key=lambda i:(len(self.shots[i]) == 3 and self.shots[i] not in shots,
+                                  1.-max(float(np.dot(self.examples[i],self.examples[j])) for j in chosen)+.03*self.qualities[i],-i)))
             chosen.sort()
             self.examples=[self.examples[i] for i in chosen]
             self.observations=[self.observations[i] for i in chosen]

@@ -41,7 +41,7 @@ def orientation(person):
 
 def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
-    from .body_identity import quality, independent
+    from .body_identity import quality
     if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
         for row in rows:
             if not row.get('face_person') and quality(row).get('orientation') == 'back':
@@ -190,22 +190,25 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         path = []
         successor = next_row.get(start)
         skipped = 0
+        previous = lookup[start]
         while successor and successor not in root:
             member = lookup[successor]
-            previous = path[-1] if path else lookup[start]
             skipped += member['cue']-previous['cue']-1
+            previous = member
             if skipped > 1 or member['seconds'] - lookup[start]['seconds'] > 60:
                 successor = None
                 break
             if member.get('face_person') is not None:
-                break
-            path.append(member)
+                if decisions[successor].get('person') != owner:
+                    break
+            else:
+                path.append(member)
             successor = next_row.get(successor)
         if not path:
             continue
         last = path[-1]
         if successor in root and (lookup[successor]['seconds'] - lookup[start]['seconds'] > 60
-                or skipped + lookup[successor]['cue'] - last['cue'] - 1 > 1):
+                or skipped + lookup[successor]['cue'] - previous['cue'] - 1 > 1):
             successor = None
         if root.get(successor) != owner:
             stop = stops.get(last['id'], dict(reason='no_returning_face', cue=last['cue']))
@@ -235,18 +238,18 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             assessed = geometry[row['id']][0]
             return (-assessed.get('overlap', 0.), assessed.get('keypoints', 0),
                     assessed.get('sharpness', 0.), pixels(row['quality']) or 0, row['id'])
-        from .rooted_witnesses import select
-        kept = select(tracks,settings,scores,witness_rank,lambda row:shot_ids[row['cue']])
-        for start,end,witness in kept:
-            decisions[witness['id']]['rooted_track'] = dict(owner=key[0], perspective=key[1],
-                                                            roots=[start,end])
-        witnesses = [r for _,_,r in kept]
-        if len(kept)>=2 and len(independent(witnesses, settings)) >= max(2,settings['attach_min_support']):
-            proof = [(start,end,r['id']) for start,end,r in kept]
-            banks[key] = witnesses, proof
-            for start,end,witness in proof:
-                decisions[witness]['rooted_view'] = dict(owner=key[0], perspective=key[1],
-                                                         roots=[start,end], tracks=proof)
+        from .rooted_witnesses import modes
+        for number, kept in enumerate(modes(tracks,settings,scores,witness_rank,lambda row:shot_ids[row['cue']])):
+            for start,end,witness in kept:
+                decisions[witness['id']]['rooted_track'] = dict(owner=key[0], perspective=key[1],
+                                                                roots=[start,end])
+            if len(kept) >= max(2,settings['attach_min_support']):
+                witnesses = [r for _,_,r in kept]
+                proof = [(start,end,r['id']) for start,end,r in kept]
+                banks[(*key,number)] = witnesses, proof
+                for start,end,witness in proof:
+                    decisions[witness]['rooted_view'] = dict(owner=key[0], perspective=key[1],
+                                                             roots=[start,end], tracks=proof)
 
     for row in rows:
         decision = decisions[row['id']]
@@ -281,7 +284,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 decision['status']=='accepted' and decision.get('reason')!='body_scene_core'):
             continue
         kind = decision.get('query_perspective') or geometry[row['id']][0].get('orientation')
-        for (owner, perspective), (bank, proof) in banks.items():
+        for (owner, perspective, _), (bank, proof) in banks.items():
             if decision.get('open_face_root', {}).get('owner', owner) != owner:
                 continue
             if perspective != kind or copresent([row],owner_rows[owner]) or not guard.allows(row,bank,owner):
@@ -302,7 +305,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             competing = [(scores.compare([row],others)[0], p) for p,others in owner_rows.items()
                          if p not in (owner,decision['person']) and not copresent([row],others)
                          and guard.allows(row,others)]
-            competing.extend((scores.compare([row],other)[0], p) for (p,_),(other,_) in banks.items() if p!=owner)
+            competing.extend((scores.compare([row],other)[0], p) for (p,_,_),(other,_) in banks.items() if p!=owner)
             runner, rival = max(competing, default=(-1.,None))
             if rival is not None:
                 rival_evidence[row['id'],owner,mean] = dict(rival=rival,runner=runner)
@@ -310,6 +313,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:
                 candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
+    # Several modes can support one claim. Keep its strongest independent proof.
+    best = {}
+    for item in candidates:
+        address = item[:2]
+        if address not in best or item[-1] > best[address][-1]:
+            best[address] = item
+    candidates = list(best.values())
     proposed = {oid: owner for oid, owner, *_ in candidates}
     # Check all core votes before moving anything. Weak satellites cannot
     # veto a coherent core, but a measured face or simultaneous claim can.

@@ -91,3 +91,5 @@ def resolve_claims(rows, decisions, config, *, scores=None):
                 decision = decisions[row['id']]
                 if decision['reason'] != 'measured_face_association':
                     decision.update(person=None, status='withheld', reason='body_copresence_conflict')
+                    decision.pop('rooted_view', None)
+                    decision.pop('rooted_track', None)
