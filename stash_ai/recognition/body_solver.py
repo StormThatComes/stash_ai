@@ -1,6 +1,6 @@
 """Measured independent-person hints; production replay validates every trial."""
 from .body_identity import enabled,available
-from .body_global import report
+from .body_global import banks
 from .merge_report_policy import _floor
 from .threshold_boundaries import sides
 from .body_parameters import active
@@ -73,7 +73,7 @@ def analyse(db,config,goals,*,frozen_goals=None):
     output['proposals']=quality_proposals
     if not enabled(config) or not available(db):return output
     owners={m['identity_id']:g.get('index',i) for i,g in enumerate(goals['groups']) for m in g['members']}
-    evidence=report(db,config,goals['scope'],goals['namespace'],focus=owners)
+    evidence=focused_evidence(db,config,goals,owners)
     output['evidence']=evidence
     output['proposals']=[]
     proposals=[]
@@ -104,3 +104,30 @@ def analyse(db,config,goals,*,frozen_goals=None):
         output['proposals']=[joint,*proposals]
     output['proposals'].extend(quality_proposals)
     return output
+
+def focused_evidence(db, config, goals, focus):
+    """Measure goal pairs/incident candidates and the exact strongest outside rivals."""
+    from .body_global_search import Search, exact_pairs
+    from .memory_size import size
+    from .resource_errors import ResourceLimit
+    active = config.data['sapiensid']['global_matching']['enabled']
+    result = dict(enabled=active, pairs=[], nearest_competitors=[], pair_coverage='incident_to_solver_goals')
+    if not active or not focus:
+        return result
+    bank = banks(db,config,goals['scope'],goals['namespace'])
+    labels = {p:g for p,g in focus.items() if p in bank}
+    if not labels:
+        return result
+    limit = config.data['sapiensid']['execution']['plan_bytes']
+    with Search(db,config,bank) as search:
+        measured = {}
+        used = 0
+        for pair in exact_pairs(search.dense_nominations(labels,incident_only=True), bank, config, search.evidence):
+            used += size(pair) + 512
+            if used > limit:
+                raise ResourceLimit('Focused body evidence exceeds sapiensid.execution.plan_bytes.')
+            measured[tuple(pair['people'])] = pair
+            result['pairs'].append(pair)
+        rivals, = search.nearest([labels],measured)
+        result.update(nearest_competitors=list(rivals.values()), search=dict(search.stats))
+    return result

@@ -41,6 +41,8 @@ class Feasibility:
                     alternatives[row['face']].append(row['id'])
                 if row['scan'] in selected and row['rejected'] is None and row['ready']:
                     eligible.add(row['id'])
+        from .solver_body_inputs import diagnose
+        body_inputs = diagnose(db, config, ids, selected)
         self.addresses = ids | body_ids
         self.groups = []
         for group in goals['groups']:
@@ -80,8 +82,17 @@ class Feasibility:
             if core < evidence['core_required']:
                 certificates.append(dict(reason='insufficient_available_core_units', available=core,
                                          required=evidence['core_required']))
+            samples = {r['id'] for r in members}
+            input_reasons = Counter(body_inputs.get(oid, ('no_retained_goal_address', None))[0] for oid in samples)
+            examples = {}
+            for oid in sorted(samples):
+                reason, cue = body_inputs.get(oid, ('no_retained_goal_address', None))
+                examples.setdefault(reason, dict(observation=oid, cue=cue))
             self.groups.append(dict(index=group['index'], evidence=evidence, addresses=addresses,
-                certificates=certificates, inputs=dict(goal_observations=len({r['id'] for r in members}),
+                certificates=certificates, inputs=dict(body_routes=dict(collection=config.data['sapiensid']['collection']['enabled'],
+                    encoder=config.data['sapiensid']['enabled'], local=enabled(config),
+                    global_enabled=config.data['sapiensid']['global_matching']['enabled']),
+                    body_input_counts=dict(input_reasons), body_input_examples=examples, goal_observations=len({r['id'] for r in members}),
                     available_addresses=len(addresses & eligible), body_addresses=len(addresses & body_ids),
                     linked_body_alternatives=len(addresses & body_ids - ids))))
 
@@ -156,6 +167,13 @@ def lines(report):
                   f"core={best['core_support']}/{best['core_required']}" if best else '')
         result.append(f"  Set {group['index']+1}: {group['status']} "
                       f"witness={group['witness_trial'] or 'none'}{detail}")
+        inputs = group.get('inputs', {})
+        routes = inputs.get('body_routes', {})
+        counts = inputs.get('body_input_counts', {})
+        if counts and routes.get('encoder') and not group.get('status')=='possible':
+            common = sorted(counts.items(), key=lambda item:(-item[1],item[0]))[:3]
+            result.append('    Body inputs: ' + ', '.join(f'{reason}={n}' for reason,n in common)
+                          + f"; local={routes['local']} global={routes['global_enabled']}.")
         for certificate in group['input_certificates']:
             result.append('    Input block: '+str(certificate))
         for blocker in (best or {}).get('observed_blockers', ())[:5]:

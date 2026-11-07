@@ -4,7 +4,7 @@ No model loading, media reads, writer lock, schema migration or Stash calls.
 Trials explicitly choose cold or retained external history. Batched admission
 excludes future selected scenes. Unlabelled observations remain competitors.
 """
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import replace
 import json
 import sqlite3
@@ -79,7 +79,7 @@ def _copy_scene(source, target, scan):
 
 def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_sizes=(0, 1),
              scene_orders=('numeric',), shuffle_seed=0, history_modes=('cold',), repeat_runs=1,
-             retune_from_baseline=False):
+             retune_from_baseline=False, source_snapshot=None, omitted_cues=None):
     """Labels map retained observation IDs to human person labels, not predictions."""
     if not isinstance(labels, dict) or not labels or any(not isinstance(k, str) or not k or
             not isinstance(v, str) or not v.strip() for k, v in labels.items()):
@@ -104,7 +104,7 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
             raise ValueError('Evaluation variants must preserve the model, person, detection and VTT scan contracts.')
         configurations[name] = variant
     predictions, trials = {}, {}
-    with closing(_open_readonly(config.database)) as source:
+    with (nullcontext(source_snapshot) if source_snapshot is not None else closing(_open_readonly(config.database))) as source:
         tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         from .database import SCHEMA_V5, TABLES_V5, SCHEMA_V6, TABLES_V6, SCHEMA_V8, TABLES_V8, SCHEMA_V9, TABLES_V9, SCHEMA_V11, TABLES_V11, SCHEMA_V12,TABLES_V12
         schema, expected = (SCHEMA_V12,TABLES_V12) if source.execute('PRAGMA user_version').fetchone()[0]==12 else (SCHEMA_V11,TABLES_V11) if source.execute('PRAGMA user_version').fetchone()[0]==11 else (SCHEMA, TABLES) if 'body_members' in tables else (SCHEMA_V9,TABLES_V9) if 'body_observations' in tables else (SCHEMA_V8,TABLES_V8) if 'evidence_thumbnails' in tables else (SCHEMA_V6,TABLES_V6) if 'person_evidence' in tables else (SCHEMA_V5,TABLES_V5)
@@ -149,6 +149,17 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
                             for scan in batch:
                                 if scan['id'] not in loaded:
                                     _copy_scene(source, target, scan)
+                                    if omitted_cues and omitted_cues[0] == scan['scene']:
+                                        first, last = omitted_cues[1:]
+                                        args = (scan['id'],first,last)
+                                        # Copy-on-write in this disposable replay only. Keep cue markers
+                                        # so the body stage still has a complete selected-scene contract.
+                                        condition = 'scan=? AND cue BETWEEN ? AND ?'
+                                        target.execute('DELETE FROM person_evidence WHERE observation IN '
+                                            '(SELECT id FROM observations WHERE '+condition+')',args)
+                                        for table in ('observations','body_observations'):
+                                            target.execute(f"UPDATE {table} SET rejected='validation_omission',"
+                                                           'embedding=NULL WHERE '+condition,args)
                                     loaded.add(scan['id'])
                             rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in batch], settings)
                     if retuning:

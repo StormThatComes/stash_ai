@@ -166,6 +166,11 @@ def execute(args, config):
                                             ('split_pairs', 'max_outside_split_pairs'),
                                             ('newly_joined_pairs', 'max_outside_joined_pairs'),
                                             ('new_outsider_observations', 'max_new_outsider_observations'))}))
+            validation_path = getattr(args, 'solver_validation', None)
+            if validation_path and result.get('best_result') and not result.get('interrupted'):
+                from .solver_validation import validate_winner
+                with report_phase('Validate finalist on held-out scenes'):
+                    result['holdout_validation'] = validate_winner(config, db, result, validation_path)
         elif args.simulate:
             with report_phase('Replay merge goals'):
                 result['simulation'] = evaluate(config, result, db)
