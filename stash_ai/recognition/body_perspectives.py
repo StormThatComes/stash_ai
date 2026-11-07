@@ -162,7 +162,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if successor is not None:
                 stop = dict(reason='different_face_root', cue=lookup[successor]['cue'])
             for member in path:
-                decisions[member['id']]['track_blocker'] = stop
+                decision = decisions[member['id']]
+                decision['track_blocker'] = stop
+                if stop['reason'] == 'different_face_root':
+                    decision.update(person=None, role='auxiliary', status='withheld', reason='different_face_root')
                 if stop['reason'] not in ('competing_transition','different_face_root'):
                     decisions[member['id']]['open_face_root'] = dict(owner=owner, observation=start)
             continue
@@ -219,7 +222,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     candidates = []
     for row in rows:
         decision = decisions[row['id']]
-        if (row['id'] not in geometry or row.get('face_person') or
+        if (decision.get('track_blocker', {}).get('reason') in ('different_face_root','competing_transition')
+                or row['id'] not in geometry or row.get('face_person') or
                 decision['status']=='accepted' and decision.get('reason')!='body_scene_core'):
             continue
         kind = geometry[row['id']][0].get('orientation')

@@ -32,7 +32,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v14-core-retry',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v15-incremental-rear',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
