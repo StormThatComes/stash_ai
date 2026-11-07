@@ -53,6 +53,8 @@ class InputCache:
             self.owner=dict(format=1,installation=database.installation,path=str(database.path))
             stamps=[(item['scan'],version(database.connection,'raw-observations',item['scan']),
                      version(database.connection,'pixel-scan',item['scan'])) for item in selected]
+            self.schema_stamp=digest([ENGINE,expected_schema()])
+            self.stamps={scan:(raw,pixel) for scan,raw,pixel in stamps}
             self.key=digest(['raw-input-v2-no-bindings',ENGINE,self.owner,selected,scope,namespace,stamps,
                 digest(expected_schema()),config.data['clustering']['max_anchor_pose_deviation'] is not None])
             self.directory=database.path.with_name(database.path.name+'.rebuild-input')
@@ -112,7 +114,8 @@ class InputCache:
             self.owned();source=raw(replay)
             if source.in_transaction:raise ValueError('Raw replay cache requires a committed image.')
             size=source.execute('PRAGMA page_count').fetchone()[0]*source.execute('PRAGMA page_size').fetchone()[0]
-            if size>self.limit:return
+            shards=self.directory/'shards.sqlite3'
+            if size+(shards.stat().st_size if shards.exists() else 0)>self.limit:return
             from .disk_budget import check
             check(size,self.directory)
             path=self.directory/(str(uuid.uuid4())+'.sqlite3')

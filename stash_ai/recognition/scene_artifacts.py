@@ -16,7 +16,11 @@ def face_keys(db, selected, config, *, source=None):
     audited=source is not None and source.execute('PRAGMA user_version').fetchone()[0]>=8
     if audited:validate_triggers(source,required=True)
     grouping=config.data['clustering']
-    settings=[plain(grouping),config.data['recognition']['min_identity_support'],
+    # Only inputs read by local_cohorts, pose_policy and view witnesses.
+    local={k:v for k,v in grouping.items() if k.startswith(('min_anchor_','min_auxiliary_')) or k in (
+        'anchor_view_matching','max_anchor_pose_deviation','view_cohesion_threshold','view_match_threshold',
+        'max_view_witnesses','adaptive_view_witnesses','max_view_prototypes_per_person','view_min_support','max_reference_bytes','max_people_per_lookup')}
+    settings=['local-order-v2',plain(local),config.data['recognition']['min_identity_support'],
               config.data['recognition']['match_threshold']]
     keys={}
     for item in selected:
