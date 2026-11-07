@@ -28,12 +28,21 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     targets = deficits(goals, membership, membership)
     set_targets = {item['set']:item['target'] for item in targets['sets']}
     wrong = {}
+    destination_sets = {}
+    for group in goals['groups']:
+        for member in group['members']:
+            for row in member['observations']:
+                owner = membership.get(row['id'])
+                if owner:
+                    destination_sets.setdefault(owner,set()).add(group['index'])
     for group in goals['groups']:
         wanted = set_targets.get(group['index'])
         for member in group['members']:
             for row in member['observations']:
                 owner = membership.get(row['id'])
-                if owner and wanted and owner != wanted:
+                if owner and len(destination_sets[owner])>1:
+                    wrong[row['id']] = dict(expected=wanted,constraint='between_sets')
+                elif owner and wanted and owner != wanted:
                     wrong[row['id']] = dict(expected=wanted, constraint='positive_set')
     for item in negatives:
         forbidden = {membership.get(oid) for oid in item['target_observation_ids']} - {None}

@@ -122,3 +122,28 @@ def test_turn_and_partner_recovery_give_one_vote_per_cue_and_performer():
     assert sparse['crossings']==0 and sparse['unscored_episodes']>0
     decisions['A-2']['accepted_identity']='B'
     assert measure()['both_recovered']==0
+
+
+def test_track_threshold_is_independently_ranked_and_inherits_body_cohesion(tmp_path):
+    from tests.test_recognition_body_global import configured
+    from stash_ai.recognition.merge_report_policy import parameter,patched
+    from stash_ai.recognition.merge_solver_tighten import TRACK,route_parameters,tier
+    cfg = configured(tmp_path)
+    local = cfg.data['sapiensid']['identities']
+    assert local['track_similarity_threshold'] is None
+    assert parameter(cfg.data,TRACK)==local['cohesion_threshold']
+    tuned = patched(cfg,{TRACK:.4})
+    assert tuned.data['sapiensid']['identities']['cohesion_threshold']==local['cohesion_threshold']
+    accepted = dict(status='accepted',evidence_kind='person',reason='face_rooted_body_view')
+    assert route_parameters([accepted])[TRACK]==1 and tier(TRACK)==4
+
+
+def test_accepted_exclusion_keeps_measured_route_witnesses_and_margin(tmp_path):
+    from tests.test_recognition_body_global import configured
+    from stash_ai.recognition.merge_solver_diagnostics import diagnostic_record
+    row = dict(observation='back',status='accepted',reason='face_rooted_body_view',owner='B',
+               rival='A',witnesses=[('left','right','rear')],measurements={'score':.93,'runner':.87})
+    [trace] = diagnostic_record(configured(tmp_path),[row],{},{},[],
+        wrong={'back':dict(expected=None,constraint='exclusion')})['blocker_trace']
+    assert trace['route']==row['reason'] and trace['rival']=='A' and trace['witnesses']==row['witnesses']
+    assert abs(trace['margin']-.06)<1e-10

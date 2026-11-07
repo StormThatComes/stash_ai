@@ -263,11 +263,12 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
         if ranked and max(r[5] for r in ranked)>=settings['match_threshold']-settings['ambiguity_margin']:
             choices=[r for r in ranked if r[4]]
             mean,minimum,person,bank,admissible,_=(choices or ranked)[0]
-            runner=max((r[5] for r in ranked if r[2]!=person),default=-1.)
+            runner,rival=max(((r[5],r[2]) for r in ranked if r[2]!=person),default=(-1.,None))
             good=admissible and mean-runner>=settings['ambiguity_margin']
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
-                score=mean,minimum=minimum,runner=runner)
+                score=mean,minimum=minimum,runner=runner,rival=rival,
+                witness_ids=[w['id'] for w in bank[:8]])
         else:remaining.append(row)
     groups=[];weak=[]
     for row in remaining:

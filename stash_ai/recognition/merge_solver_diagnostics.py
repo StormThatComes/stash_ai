@@ -95,7 +95,7 @@ def latest_decisions(db, observation_ids):
     import json
     from .reference_roles import observation_sql, index
     index(db)  # The solver calls this only on its disposable replay database.
-    rows = db.execute('SELECT o.id,c.scan,c.status,c.payload FROM observations o '
+    rows = db.execute('SELECT o.id,c.scan,c.person,c.status,c.payload FROM observations o '
         'JOIN candidates c ON c.rowid=(SELECT c2.rowid FROM candidates c2 WHERE '+
         observation_sql('c2')+'=o.id ORDER BY c2.rowid DESC LIMIT 1) '
         'WHERE o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id', (encoded(sorted(observation_ids)),))
@@ -104,12 +104,21 @@ def latest_decisions(db, observation_ids):
         payload = json.loads(row['payload'])
         merge_proofs = [payload[k] for k in ('strict_partition', 'global_view_merge', 'final_subcomponent_merge')
                         if isinstance(payload.get(k), dict)]
+        evidence = payload.get('hybrid_query') or payload.get('view_prototype') or payload.get('strict_confirmation') or {}
+        samples = evidence.get('core_observations') or evidence.get('support_examples') or evidence.get('support_ids') or ()
+        scores = payload.get('scores') or ()
+        measurements = {k:v for k,v in payload.items() if type(v) in (int,float,bool)
+                        and any(t in k for t in ('score','similarity','threshold','support','margin'))}
+        for key,value in [('score',evidence.get('score',evidence.get('match_score',scores[0] if scores else None))),
+                          ('runner',evidence.get('rival_score',scores[1] if len(scores)>1 else None))]:
+            if type(value) in (int,float):
+                measurements[key] = value
         result.append(dict(observation=row['id'], scan=row['scan'], status=row['status'],
+            owner=row['person'], witnesses=list(samples)[:8],
             reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
             face_view=any(p.get('authority') == 'strict_view' for p in merge_proofs),
             cooccurring_merge=any(p.get('cooccurring') for p in merge_proofs),
-            hybrid_query=payload.get('hybrid_query'), measurements={k: v for k, v in payload.items()
-                if type(v) in (int, float, bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
+            hybrid_query=payload.get('hybrid_query'), measurements=measurements))
     from .body_identity import available
     if available(db):
         for row in db.execute('SELECT b.id,b.scan,m.status,m.person,m.proof FROM body_members m '
@@ -118,7 +127,7 @@ def latest_decisions(db, observation_ids):
             proof=json.loads(row['proof'])
             result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
                 reason=proof.get('reason'),evidence_kind='person',owner=row['person'],
-                witnesses=list(proof.get('source_tracks', ()))[:8], rival=proof.get('rival'),
+                witnesses=list(proof.get('source_tracks') or proof.get('witness_ids') or ())[:8], rival=proof.get('rival'),
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
                 body_global=bool(proof.get('global_merge')),

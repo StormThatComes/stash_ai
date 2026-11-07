@@ -261,6 +261,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     if not banks and not crossed:
         return
     owner_rows = defaultdict(list)
+    rival_evidence = {}
     for r in rows:
         p = decisions[r['id']]['person']
         if p is not None:
@@ -303,6 +304,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                          and guard.allows(row,others)]
             competing.extend((scores.compare([row],other)[0], p) for (p,_),(other,_) in banks.items() if p!=owner)
             runner, rival = max(competing, default=(-1.,None))
+            if rival is not None:
+                rival_evidence[row['id'],owner,mean] = dict(rival=rival,runner=runner)
             if mean-runner < margin:
                 decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:
@@ -343,4 +346,6 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                               source_tracks=proof, score=score)
         if angle == 'crossing':
             decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
+        if angle != 'crossing':
+            decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
         decisions[oid].update(rooted)
