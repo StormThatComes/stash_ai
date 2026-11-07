@@ -3,7 +3,7 @@ from collections import defaultdict
 from itertools import combinations
 
 
-def sequence_metrics(labels, samples, locations, decisions, excluded=()):
+def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timing=None):
     by_scene = defaultdict(lambda: defaultdict(dict))
     for oid,truth in labels.items():
         if oid in excluded:
@@ -13,7 +13,19 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=()):
         rows.append((decisions[oid]['accepted_identity'], samples[oid]['slices']))
     counts = defaultdict(lambda: defaultdict(int))
 
-    def episodes(cues, active):
+    missing_boundaries = 0
+
+    def continuous(scene, a, b):
+        if b != a + 1:
+            return False
+        if not timing:
+            return True
+        start, left = timing[scene,a]
+        end, right = timing[scene,b]
+        return 0 < end-start <= 12 and (left is None or right is None or left == right)
+
+    def episodes(scene, cues, active):
+        nonlocal missing_boundaries
         # Use the nearest labelled observation before and after one contiguous
         # run of hard cues. Missing boundary labels cannot establish a result.
         first = None
@@ -23,8 +35,16 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=()):
                     first = i
             elif first is not None:
                 if first>0:
-                    yield cues[first-1:i+1]
+                    window = cues[first-1:i+1]
+                    if all(continuous(scene,a,b) for a,b in zip(window,window[1:])):
+                        yield window
+                    else:
+                        missing_boundaries += 1
+                else:
+                    missing_boundaries += 1
                 first = None
+        if first is not None:
+            missing_boundaries += 1
 
     def identity(rows):
         owners = {owner for owner,_ in rows}
@@ -34,9 +54,10 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=()):
         return any(name in slices for _,slices in rows)
 
     crossings = correct_pairs = 0
-    for people in by_scene.values():
+    endpoint_returns = foreign_ids = abstentions = 0
+    for scene,people in by_scene.items():
         for person,track in people.items():
-            for window in episodes(sorted(track),lambda cue:tagged(track[cue],'back')):
+            for window in episodes(scene,sorted(track),lambda cue:tagged(track[cue],'back')):
                 ids = [identity(track[c]) for c in window]
                 counts[person]['turns'] += 1
                 counts[person]['one_id_turns'] += int(None not in ids and len(set(ids))==1)
@@ -51,17 +72,22 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=()):
                  for pair in combinations(sorted(owners),2)}
         for a,b in pairs:
             common = sorted(people[a].keys() & people[b].keys())
-            for window in episodes(common,lambda c:any(tagged(people[p][c],'entangled') for p in (a,b))):
+            for window in episodes(scene,common,lambda c:any(tagged(people[p][c],'entangled') for p in (a,b))):
                 crossings += 1
                 expected = [identity(people[p][window[0]]) for p in (a,b)]
                 result = [identity(people[p][window[-1]]) for p in (a,b)]
                 recovered = None not in expected and len(set(expected))==2 and expected==result
                 # A measured swap or mixed projection during contact cannot count
                 # as success; abstention inside contact is allowed.
-                for person,partner in ((a,expected[1]),(b,expected[0])):
-                    if partner is not None and any(owner==partner for c in window[1:-1]
-                                                   for owner,_ in people[person][c]):
-                        recovered = False
+                endpoint_returns += int(recovered)
+                wrong = withheld = False
+                for person, own in zip((a,b), expected):
+                    middle = [owner for cue in window[1:-1] for owner,_ in people[person][cue]]
+                    wrong |= own is not None and any(owner is not None and owner != own for owner in middle)
+                    withheld |= None in middle
+                foreign_ids += int(wrong)
+                abstentions += int(withheld)
+                recovered = recovered and not wrong
                 correct_pairs += int(recovered)
                 for person in (a,b):
                     counts[person]['crossings'] += 1
@@ -72,7 +98,9 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=()):
     return dict(turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),
-                crossings=crossings,both_recovered=correct_pairs,
+                crossings=crossings,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,
+                foreign_id_crossings=foreign_ids,abstained_crossings=abstentions,
+                unscored_episodes=missing_boundaries,
                 macro_turn_recovery=macro('one_id_turns','turns'),
                 macro_crossing_recovery=macro('recovered_crossings','crossings'),
                 per_performer={p:dict(c) for p,c in sorted(counts.items())})

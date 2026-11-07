@@ -113,7 +113,12 @@ def test_turn_and_partner_recovery_give_one_vote_per_cue_and_performer():
     mixed=measure()
     assert mixed['macro_turn_recovery']==.5 and mixed['macro_crossing_recovery']==0
     assert mixed['id_switches']==2
+    decisions['B-1']['accepted_identity']='X'
+    assert measure()['both_recovered']==0 and measure()['foreign_id_crossings']==1
     decisions['B-1']['accepted_identity']=None
-    assert measure()['both_recovered']==1
+    assert measure()['both_recovered']==1 and measure()['abstained_crossings']==1
+    distant = {k:(scene,cue*60) for k,(scene,cue) in locations.items()}
+    sparse = sequence_metrics(labels,samples,distant,decisions)
+    assert sparse['crossings']==0 and sparse['unscored_episodes']>0
     decisions['A-2']['accepted_identity']='B'
     assert measure()['both_recovered']==0

@@ -22,7 +22,7 @@ GATES.update({
     'body_group_ambiguous':('sapiensid.identities.cohesion_threshold','sapiensid.identities.ambiguity_margin'),
     'ambiguous_or_insufficient_face_body_bank':tuple('sapiensid.identities.'+k for k in
         ('match_threshold','cohesion_threshold','ambiguity_margin','attach_min_support','min_appearance_distance')),
-    'track_body_similarity':('sapiensid.identities.cohesion_threshold',),
+    'track_body_similarity':('sapiensid.identities.track_similarity_threshold',),
     'body_similarity':('sapiensid.global_matching.match_threshold',),
     'body_cohesion':('sapiensid.global_matching.match_threshold','sapiensid.global_matching.cohesion_threshold'),
     'independent_support':('sapiensid.global_matching.min_support','sapiensid.identities.min_appearance_distance'),
@@ -112,12 +112,14 @@ def latest_decisions(db, observation_ids):
                 if type(v) in (int, float, bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
     from .body_identity import available
     if available(db):
-        for row in db.execute('SELECT b.id,b.scan,m.status,m.proof FROM body_members m '
+        for row in db.execute('SELECT b.id,b.scan,m.status,m.person,m.proof FROM body_members m '
             'JOIN body_observations b ON b.id=m.observation WHERE b.id IN (SELECT value FROM json_each(?)) ORDER BY b.id',
             (encoded(sorted(observation_ids)),)):
             proof=json.loads(row['proof'])
             result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
-                reason=proof.get('reason'),evidence_kind='person',measurements={k:v for k,v in proof.items()
+                reason=proof.get('reason'),evidence_kind='person',owner=row['person'],
+                witnesses=list(proof.get('source_tracks', ()))[:8], rival=proof.get('rival'),
+                measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
                 body_global=bool(proof.get('global_merge')),
                 **({'track_blocker':proof['track_blocker']} if proof.get('track_blocker') else {}),
@@ -125,7 +127,7 @@ def latest_decisions(db, observation_ids):
     return result
 
 
-def diagnostic_record(settings, decisions, queries, hybrid, quality):
+def diagnostic_record(settings, decisions, queries, hybrid, quality, *, wrong=None):
     trace, active = [], Counter()
     def add(stage, reason, observation=None, **detail):
         parameters = GATES.get(reason, ())
@@ -135,6 +137,15 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
     # Candidate reasons are terminal production decisions, not inferred failures.
     terminal = {r['observation']:r for r in decisions}
     for row in terminal.values():
+        conflict = (wrong or {}).get(row['observation'])
+        if conflict and row['status'] == 'accepted':
+            measured = row.get('measurements', {})
+            add('assignment', 'accepted_wrong_owner', row['observation'],
+                route=row['reason'], witnesses=row.get('witnesses', []),
+                owner=row.get('owner'), rival=row.get('rival'), **conflict,
+                score=measured.get('score'), runner=measured.get('runner'),
+                margin=(measured['score'] - measured['runner']
+                        if 'score' in measured and 'runner' in measured else None))
         if row['status'] != 'accepted':
             blocker = row.get('track_blocker')
             if blocker:

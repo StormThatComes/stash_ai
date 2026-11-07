@@ -15,9 +15,13 @@ def observations(db,config,scans):
         'WHERE b.scan IN (SELECT value FROM json_each(?)) AND b.contract=?',(encoded(list(scans)),contract(config))))
 
 
-def members(db,config=None):
+def members(db,config=None,*,ids=None):
     if not available(db) or config is not None and not enabled(config):return {}
-    return dict(db.execute("SELECT observation,person FROM body_members WHERE status='accepted'"))
+    sql = "SELECT observation,person FROM body_members WHERE status='accepted'"
+    if ids is None:
+        return dict(db.execute(sql))
+    return dict(db.execute(sql+' AND observation IN (SELECT value FROM json_each(?))',
+                           (encoded(sorted(ids)),)))
 
 
 def goal_rows(db,config,person):

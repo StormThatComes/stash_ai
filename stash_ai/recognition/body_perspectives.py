@@ -73,6 +73,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if any(geometry[r['id']][0].get('detected_people', len(members)) != len(members) for r in members):
             by_cue.pop(cue)
 
+    track_threshold = settings.get('track_similarity_threshold')
+    if track_threshold is None:
+        track_threshold = settings['cohesion_threshold']
     outgoing_failures, incoming_failures = {}, {}
     def transition(a, b, *, diagnose=False):
         def fail(order, reason, measured, limit):
@@ -122,8 +125,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if relative>.30:
             return fail(4,'displacement',relative,.30)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
-        return similarity if similarity >= settings['cohesion_threshold'] else fail(
-            5,'body_similarity',similarity,settings['cohesion_threshold'])
+        return similarity if similarity >= track_threshold else fail(
+            5,'body_similarity',similarity,track_threshold)
 
     # Ambiguous transitions, cuts and sparse cue gaps end a track.
     next_row, stops = {}, {}
