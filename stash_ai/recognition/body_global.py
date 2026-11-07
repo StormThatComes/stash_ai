@@ -100,9 +100,12 @@ def plan(db,config,bank,*,focus=None,compact=False):
                 if i not in incomplete:
                     groups.append(people)
                     continue
-                result['decisions'].append(dict(people=people, outcome='blocked',
-                                                blockers=['incomplete_body_component']))
                 if len(people) > 128:
+                    if compact:
+                        result['decisions'].append(dict(people=people, outcome='blocked',
+                                                        blockers=['incomplete_body_component']))
+                    else:
+                        groups.append(people)
                     continue
                 graph = Edges(max(0, limit - plan_bytes) // 4)
                 for owner in people:
@@ -117,7 +120,14 @@ def plan(db,config,bank,*,focus=None,compact=False):
                     if all(floors[p] - graph.score(p, q) >= margin for p in proposal
                            for q in edges[p] if q not in proposal):
                         separated.append(proposal)
-                groups.extend(nonoverlapping(separated))
+                chosen = nonoverlapping(separated)
+                if chosen or compact:
+                    result['decisions'].append(dict(people=people, outcome='blocked',
+                                                    blockers=['incomplete_body_component']))
+                    groups.extend(list(group) for group in chosen)
+                else:
+                    # Detailed reports preserve the original component's full veto proof.
+                    groups.append(people)
             components = groups
             membership = {p: i for i, group in enumerate(groups) for p in group}
             rivals,goal_rivals=search.nearest([membership,focus],pairs)
