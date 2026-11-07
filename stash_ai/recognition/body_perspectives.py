@@ -58,6 +58,11 @@ def recover(rows, decisions, seeds, settings, scores, guard):
     if not geometry:
         return
 
+    # A filtered partner is still an unknown competitor in a crowded transition.
+    for cue, members in list(by_cue.items()):
+        if any(geometry[r['id']][0].get('detected_people', len(members)) != len(members) for r in members):
+            by_cue.pop(cue)
+
     def transition(a, b):
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
@@ -126,6 +131,8 @@ def recover(rows, decisions, seeds, settings, scores, guard):
             kept.append((start,end,row))
             roots.update((start,end))
             shots.append(signature)
+            if len(kept) >= max(8,settings['attach_min_support']):
+                break
         witnesses = [r for _,_,r in kept]
         if len(kept)>=2 and len(independent(witnesses, settings)) >= max(2,settings['attach_min_support']):
             banks[key] = (witnesses, [(start,end,r['id']) for start,end,r in kept])

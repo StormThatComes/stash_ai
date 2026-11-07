@@ -59,6 +59,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
         signature = frame_signature(image)
         for person, (measurement, _) in zip(people, measurements):
             measurement['frame_signature'] = signature
+            measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     items=[]
     # Keep unavailable face projections for the existing hybrid/report path.
