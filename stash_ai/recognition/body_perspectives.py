@@ -241,12 +241,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if mean < settings['match_threshold'] or low < settings['cohesion_threshold']:
                 continue
             # Every foreign owner including provisional scene groups competes.
-            runner = max((scores.compare([row],others)[0] for p, others in owner_rows.items()
-                          if p not in (owner,decision['person']) and not copresent([row],others)
-                          and guard.allows(row,others)),default=-1.)
-            rivals = [scores.compare([row], other)[0] for (p,_), (other,_) in banks.items() if p!=owner]
-            if mean-max([runner,*rivals]) < margin:
-                decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'])
+            competing = [(scores.compare([row],others)[0], p) for p,others in owner_rows.items()
+                         if p not in (owner,decision['person']) and not copresent([row],others)
+                         and guard.allows(row,others)]
+            competing.extend((scores.compare([row],other)[0], p) for (p,_),(other,_) in banks.items() if p!=owner)
+            runner, rival = max(competing, default=(-1.,None))
+            if mean-runner < margin:
+                decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:
                 candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
     proposed = {oid: owner for oid, owner, *_ in candidates}
