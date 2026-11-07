@@ -30,6 +30,7 @@ def pose(config):
     else:
         from .pmpose_registry import contract
         model=contract(p)
+        for gate in ('presence_threshold','visibility_threshold'):model.pop(gate,None)
     return ['pose-estimator-v1',model,config.data['models']['device'],
             config.data['execution']['vitpose_precision'] if backend=='vitpose_plus_large' else 'fp32']
 

@@ -55,7 +55,11 @@ def load(config, device):
 
 def _pipeline(pose, config, device):
     """Assemble optional stages around one shared first-pass pose estimator."""
+    from .cached_pose import RawPMPose
     settings = config.data['sapiensid']['pose'].get('refinement', {})
+    from .inference_cache import current
+    if current() is not None:
+        pose=RawPMPose(pose,device)
     refined = None
     if settings.get('enabled', False):
         from .sam_pose2seg import load as load_segmenter

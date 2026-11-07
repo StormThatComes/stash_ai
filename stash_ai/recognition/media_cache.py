@@ -78,16 +78,27 @@ class MediaCache:
                 db.execute('CREATE TABLE IF NOT EXISTS manifests(key TEXT PRIMARY KEY,etag TEXT,sha TEXT,size INTEGER,touched INTEGER)')
                 db.execute('CREATE INDEX IF NOT EXISTS manifests_touched ON manifests(touched,key)')
                 db.execute('BEGIN IMMEDIATE')
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE name='usage'").fetchone():
+                    db.execute('CREATE TABLE usage(bytes INTEGER, manifests INTEGER)')
+                    db.execute('INSERT INTO usage SELECT COALESCE(SUM(length(body)),0),(SELECT COUNT(*) FROM manifests) FROM media')
+                    for name,table,event,delta in (
+                            ('mi','media','INSERT','bytes=bytes+length(new.body)'),
+                            ('md','media','DELETE','bytes=bytes-length(old.body)'),
+                            ('mu','media','UPDATE OF body','bytes=bytes+length(new.body)-length(old.body)'),
+                            ('vi','manifests','INSERT','manifests=manifests+1'),
+                            ('vd','manifests','DELETE','manifests=manifests-1')):
+                        db.execute(f'CREATE TRIGGER usage_{name} AFTER {event} ON {table} BEGIN UPDATE usage SET {delta}; END')
                 key=self.key(url)
                 db.execute('DELETE FROM media WHERE key=?',(key,))
-                size=db.execute('SELECT COALESCE(SUM(length(body)),0) FROM media').fetchone()[0]
+                size=db.execute('SELECT bytes FROM usage').fetchone()[0]
                 for old,length in db.execute('SELECT key,length(body) FROM media ORDER BY touched,key'):
                     if size+len(body)<=self.limit:break
                     db.execute('DELETE FROM media WHERE key=?',(old,));size-=length
                 sha=body.sha256 if isinstance(body,VerifiedBytes) else hashlib.sha256(body).hexdigest()
-                db.execute('INSERT OR REPLACE INTO manifests VALUES (?,?,?,?,?)',(key,etag,sha,len(body),time.time_ns()))
+                db.execute('INSERT INTO manifests VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET etag=excluded.etag,sha=excluded.sha,size=excluded.size,touched=excluded.touched',(key,etag,sha,len(body),time.time_ns()))
                 maximum=min(250000,max(1024,self.limit//512))
-                db.execute('DELETE FROM manifests WHERE key IN (SELECT key FROM manifests ORDER BY touched DESC,key LIMIT -1 OFFSET ?)',(maximum,))
+                if db.execute('SELECT manifests FROM usage').fetchone()[0]>maximum:
+                    db.execute('DELETE FROM manifests WHERE key IN (SELECT key FROM manifests ORDER BY touched,key LIMIT ?)',(max(1,maximum//16),))
                 db.execute('INSERT INTO media VALUES (?,?,?,?,?)',
                     (key,etag,body.sha256 if isinstance(body,VerifiedBytes) else hashlib.sha256(body).hexdigest(),body,time.time_ns()))
         except (sqlite3.Error,OSError):pass # Recomputable transport optimization only.
