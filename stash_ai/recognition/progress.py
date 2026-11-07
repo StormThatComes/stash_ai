@@ -105,7 +105,7 @@ def status_lines(row, fields, width, *, verbose=False):
         lines = ['Status: ' + row['phase']]
         if fields.get('stage'):
             lines.append('Stage: ' + fields['stage'])
-        work = ('scene', 'person', 'batch', 'frame_cache', 'checkpoint')
+        work = ('scene', 'person', 'batch', 'frame_cache', 'checkpoint', 'portrait_cpu')
         details = ' · '.join(f'{key}={fields[key]}' for key in work if key in fields)
         if details:
             lines.append(details)
@@ -136,7 +136,7 @@ def heartbeat_line(row, fields, *, verbose=False):
                 if fields.get(key + suffix):
                     text += f" {label}={fields[key + suffix]}"
             parts.append(text)
-    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'wait', 'process', 'vram', 'disk', 'scratch', 'backoff remaining', 'deadline remaining'):
+    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'portrait_cpu', 'wait', 'process', 'vram', 'disk', 'scratch', 'backoff remaining', 'deadline remaining'):
         if fields.get(key):
             parts.append(f'{key}={fields[key]}')
     if verbose and fields.get('references'):
@@ -193,6 +193,7 @@ class WorkProgress:
         self.started = self.last_render = time.monotonic()
         self.window = WindowRate(self.started, initial) if estimate else None
         self.postfix = {}
+        self.last_advance = self.started
         self.observer = _update_observer.get()
         self.last_observed = self.started
 
@@ -200,8 +201,8 @@ class WorkProgress:
         console = getattr(self.report, 'console', None)
         self.enabled = console is not None and console.style != 'off'
         self.suspended = next((row for row in reversed(_work_rows.get())
-                               if row.position == self.position and row.bar is not None), None)
-        if self.suspended is not None:
+                               if row.position == self.position and row.report is self.report and self.enabled), None)
+        if self.suspended is not None and self.suspended.bar is not None:
             self.suspended.bar.close()
             self.suspended.bar = None
         self._row_token = _work_rows.set((*_work_rows.get(), self))
@@ -244,9 +245,13 @@ class WorkProgress:
         eta = ('unknown' if self.total is None else '00:00' if self.n == self.total else
                tqdm.format_interval((self.total - self.n) / rate) if rate else 'warming up')
         delta = self.n - self.rendered
+        if delta > 0:
+            self.last_advance = now
+        deadline = self.last_advance + 30 if rate and self.n != self.total else None
         status(self.report, completed=delta, **{
             self.key: f'{self.n}/{self.total if self.total is not None else "?"}', self.key + '_eta': eta if self.window is not None else None,
             self.key + '_rate': f'{rate:.2f} {self.unit}/s' if rate else ('warming up' if self.window else None),
+            '_eta_until_' + self.key: deadline,
             self.key + '_label': self.label,
             self.key + '_counts': ', '.join(f'{k}={v}' for k, v in self.postfix.items()) or None,
         })
@@ -258,6 +263,7 @@ class WorkProgress:
                     if self.total is not None:
                         estimates['ETA'] = eta
                 self.bar.set_postfix(refresh=False, **self.postfix, **estimates)
+                self.bar.expiring_postfix = (deadline, dict(self.postfix)) if deadline else None
             if delta:
                 self.bar.update(delta)
         self.rendered, self.last_render = self.n, now
@@ -271,6 +277,7 @@ class WorkProgress:
             if self.bar is not None:
                 self.bar.close()
             status(self.report, **{self.key + suffix: None for suffix in ('', '_eta', '_rate', '_label', '_counts')})
+            status(self.report, **{'_eta_until_' + self.key: None})
             _work_rows.reset(self._row_token)
             if self.suspended is not None:
                 self.suspended._open_bar()

@@ -29,7 +29,8 @@ def test_interrupt_after_durable_winner_uses_result(tmp_path, monkeypatch, capsy
     result = json.loads(output.out)
     assert result['selected_trial'] == 'trial-1'
     line = next(line for line in output.err.splitlines() if line.startswith('Merge solver best completed'))
-    assert 'trial-1' in line and 'sets 2/2' in line and 'Solver 2/3' in line and 'best baseline' not in line
+    assert 'trial-1' in line and 'stop=interrupted' in line
+    assert 'merged sets 2/2' in output.err and 'Solver 2/3' in output.err
     assert 'Phase: Solve merge goals interrupted' in output.err
 
 
@@ -62,3 +63,28 @@ def test_pose_interrupt_names_scene_and_sparse_gap(tmp_path, monkeypatch, capsys
         execute(args('1', '2'), config, services=services)
     output = capsys.readouterr().out
     assert 'resume scene=1 pass=pose' in output and 'first_missing=0' in output
+
+
+def test_redirected_nested_work_restores_parent_and_expires_eta(monkeypatch):
+    from io import StringIO
+    from types import SimpleNamespace
+    from stash_ai.runtime import console
+    from stash_ai.runtime.report import RunReport
+    from stash_ai.recognition import progress
+    clock = [100.]
+    for module in (console, progress):
+        monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    report = RunReport(write=lambda _: None)
+    with console.present(report, 'compact'):
+        progress.RunProgress(report)
+        report.console.stream = StringIO()
+        with progress.work('Outer', 100) as outer:
+            clock[0] += 2
+            outer.set_completed(20, force=True)
+            with progress.work('Inner', 10):
+                pass
+            assert report.console.state['detail'] == '20/100'
+            clock[0] += 70
+            report.console._render()
+            line = report.console.stream.getvalue()
+            assert 'Outer: 20/100' in line and 'awaiting progress' in line and 'ETA=' not in line

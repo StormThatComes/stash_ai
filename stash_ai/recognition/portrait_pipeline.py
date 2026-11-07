@@ -401,7 +401,7 @@ class Pipeline:
                         if value is not None:
                             self.identity_scores[(row['id'],row['dimensions'],row['embedding'])]=value
                     completed+=len(batch)
-                    status(current_report(),portrait_cpu=f'{completed}/{len(rows)} observations')
+                    status(current_report(), completed=len(batch), portrait_cpu=f'{completed}/{len(rows)} observations')
         finally:
             from stash_ai.runtime.console import current_report, status
             status(current_report(),portrait_cpu=None)

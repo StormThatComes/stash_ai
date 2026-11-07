@@ -8,10 +8,14 @@ def clock(seconds):
     return f'{hours:02d}:{minutes:02d}:{seconds:02d}'
 
 
+def duration(seconds):
+    return f'{max(0, seconds)*1000:.0f} ms' if seconds < 1 else clock(seconds)
+
+
 def time_line(elapsed, phases):
     slowest = sorted(phases, key=phases.get, reverse=True)[:3]
-    suffix = ', '.join(f'{name} {clock(phases[name])}' for name in slowest)
-    return 'total=' + clock(elapsed) + (' | longest: ' + suffix if suffix else '')
+    suffix = ', '.join(f'{name} {duration(phases[name])}' for name in slowest)
+    return 'total=' + duration(elapsed) + (' | longest: ' + suffix if suffix else '')
 
 
 def compact(lines, width):
