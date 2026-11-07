@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='joint-landmark-assignment-v3', containment_tolerance=.05,
+    return dict(version='visible-landmark-track-retry-v4', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -12,6 +12,11 @@ def _inside(point, bounds):
     x, y = point
     left, top, right, bottom = bounds
     return math.isfinite(x) and math.isfinite(y) and x >= 0 and y >= 0 and left <= x <= right and top <= y <= bottom
+
+
+def _visibility(person, index):
+    values = person.get('keypoint_visibility')
+    return 1. if values is None else float(values[index])
 
 
 def association_rejection(face, person):
@@ -32,7 +37,8 @@ def association_rejection(face, person):
         overlap = max(0, min(x+w, right)-max(x, left)) * max(0, min(y+h, bottom)-max(y, top))
         if overlap < settings['min_partial_face_coverage'] * w * h:
             return 'face_outside_person_box'
-    head = [(px, py) for px, py in person['keypoints'][:3] if px >= 0 and py >= 0]
+    head = [(px,py) for i,(px,py) in enumerate(person['keypoints'][:3])
+            if px>=0 and py>=0 and _visibility(person,i)>=.5]
     if not head:
         return 'no_valid_head_keypoints'
     if not any(x <= px <= x+w and y <= py <= y+h for px, py in head):
@@ -43,7 +49,7 @@ def association_rejection(face, person):
         if pose_index >= len(person['keypoints']) or face_index >= len(landmarks):
             continue
         pose_point, face_point = person['keypoints'][pose_index], landmarks[face_index]
-        if (_inside(pose_point, (left, top, right, bottom)) and
+        if (_visibility(person,pose_index)>=.5 and _inside(pose_point, (left, top, right, bottom)) and
                 _inside(face_point, (x, y, x+w, y+h))):
             pairs.append((pose_point, face_point))
     if contained:
@@ -81,11 +87,13 @@ def resolve(faces, people, choices):
         for p in choices[i]:
             distances = []
             landmarks = getattr(face, 'landmarks', ())
-            for point, j in zip(people[p]['keypoints'], (2, 1, 0)):
-                if min(point) >= 0 and j < len(landmarks):
+            weights_visible = []
+            for k,(point,j) in enumerate(zip(people[p]['keypoints'], (2, 1, 0))):
+                if min(point) >= 0 and j < len(landmarks) and _visibility(people[p],k)>=.5:
+                    weights_visible.append(_visibility(people[p],k))
                     distances.append(math.dist(point, landmarks[j]) / min(face.box[2:]))
             if len(distances) >= 2 and max(distances) <= .20:
-                weights[row, columns[p]] = 1 - sum(distances) / len(distances)
+                weights[row, columns[p]] = 1 - np.average(distances,weights=weights_visible)
     rows, cols = linear_sum_assignment(weights, maximize=True)
     total = weights[rows, cols].sum()
     for row, col in zip(rows, cols):

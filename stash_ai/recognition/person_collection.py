@@ -243,6 +243,8 @@ class PersonCollector:
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
+            from .crowd_context import attach_context
+            attach_context(self.model,image,scan,index,seconds,db=db,contract=body_contract(self.config))
             self.model.detect(image,faces=faces)
             from .body_collection import collect
             if self.pipeline is None:

@@ -216,7 +216,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if not row.get('face_person') and decision.get('status') != 'accepted':
             decision.setdefault('track_blocker', stops.get(row['id']) if row['id'] not in next_row
                                 and row['id'] in stops else dict(reason='no_independent_view', cue=row['cue']))
-    if not banks:
+    from .crossing_tracks import crossings
+    crossed = crossings(by_cue,root,decisions,transition,margin)
+    if not banks and not crossed:
         return
     owner_rows = defaultdict(list)
     for r in rows:
@@ -224,9 +226,16 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if p is not None:
             owner_rows[p].append(r)
     candidates = []
+    for oid,(owner,first,last,score) in crossed.items():
+        row = lookup[oid]
+        prior = decisions[oid]
+        if prior.get('status')=='accepted' and prior.get('reason')!='body_scene_core':
+            continue
+        if not copresent([row],owner_rows[owner]) and guard.allows(row,seeds[owner],owner):
+            candidates.append((oid,owner,'crossing',[(first['id'],last['id'],oid)],score))
     for row in rows:
         decision = decisions[row['id']]
-        if (decision.get('track_blocker', {}).get('reason') in ('different_face_root','competing_transition')
+        if (row['id'] in crossed or decision.get('track_blocker', {}).get('reason') in ('different_face_root','competing_transition')
                 or row['id'] not in geometry or row.get('face_person') or
                 decision['status']=='accepted' and decision.get('reason')!='body_scene_core'):
             continue
@@ -292,4 +301,6 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',
                               reason='face_rooted_body_view', perspective=angle,
                               source_tracks=proof, score=score)
+        if angle == 'crossing':
+            decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
         decisions[oid].update(rooted)
