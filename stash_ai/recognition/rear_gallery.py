@@ -3,7 +3,7 @@ from collections import defaultdict
 import json
 import numpy as np
 
-from .body_identity import policy, vector, independent
+from .body_identity import policy, vector
 from .body_observations import contract
 from .pose_policy import anchor_sql
 from .reference_roles import strict_sql
@@ -26,6 +26,8 @@ def load(db, config, scope, namespace):
     for raw in db.execute(sql,(scope,namespace,contract(config),policy(config))):
         row = dict(raw)
         membership = json.loads(row.pop('proof'))
+        if membership.get('reason') in ('body_copresence_conflict','different_face_root'):
+            continue
         proof = membership.get('rooted_view') or membership['rooted_track']
         owner = proof['owner']
         if row['person'] not in (None,owner) and membership.get('reason') != 'body_scene_core':
@@ -46,26 +48,32 @@ def load(db, config, scope, namespace):
         row['roots'] = roots
         groups[owner,row['scan']].append(row)
     banks = []
-    for (owner,scan), rows in groups.items():
-        witnesses = independent(rows,settings)
-        if len(witnesses)>=max(2,settings['attach_min_support']):
-            banks.append((owner,scan,witnesses))
     from .body_identity import Scores
-    from .rooted_witnesses import select
+    from .rooted_witnesses import modes
+    scores = Scores(config)
+
+    def rank(item):
+        q = json.loads(item[2]['quality']).get('quality',{})
+        return (-q.get('overlap',0),q.get('keypoints',0),q.get('sharpness',0),item[2]['id'])
+
+    for (owner,scan), rows in groups.items():
+        tracks = [(*row['roots'],row) for row in rows]
+        def local_shot(row):
+            shot = json.loads(row['quality']).get('quality',{}).get('view_shot')
+            return tuple(row['roots']) if shot is None else shot
+        for kept in modes(tracks,settings,scores,rank,local_shot):
+            if len(kept)>=max(2,settings['attach_min_support']):
+                banks.append((owner,scan,[r for _,_,r in kept]))
     by_owner = defaultdict(list)
     for (owner,scan), rows in groups.items():
         for row in rows:
             by_owner[owner].append((*row['roots'],row))
-    scores = Scores(config)
     for owner, tracks in sorted(by_owner.items()):
         if len({row['scan'] for _,_,row in tracks}) < 2:
             continue
-        def rank(item):
-            q = json.loads(item[2]['quality']).get('quality',{})
-            return (-q.get('overlap',0),q.get('keypoints',0),q.get('sharpness',0),item[2]['id'])
-        kept = select(tracks,settings,scores,rank,lambda row:row['scan'])
-        if len(kept) >= max(2,settings['attach_min_support']):
-            banks.append((owner,kept[0][2]['scan'],[row for _,_,row in kept]))
+        for kept in modes(tracks,settings,scores,rank,lambda row:row['scan']):
+            if len(kept) >= max(2,settings['attach_min_support']):
+                banks.append((owner,kept[0][2]['scan'],[row for _,_,row in kept]))
     return Gallery(banks)
 
 
@@ -107,8 +115,10 @@ class Gallery:
         result = []
         for index in candidates:
             owner,source,rows = self.banks[index]
-            if source == scan or any(row.get('scan')==scan for row in rows):
+            rows = [row for row in rows if row.get('scan',source)!=scan]
+            if not rows:
                 continue
+            source = rows[0].get('scan',source)
             scored = [(float(np.dot(query,row['_vector'])),row) for row in rows]
             rival_score = sum(score for score,_ in scored)/len(scored)
             independent = [(score,row) for score,row in scored

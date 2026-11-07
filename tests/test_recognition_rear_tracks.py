@@ -246,3 +246,31 @@ def test_pending_scan_only_wakes_when_a_reachable_gallery_or_recorded_rival_chan
         assert run(-axis)==[]
         assert run(np.roll(axis,1))==[]
         assert run(axis)==[item['scan']]
+
+
+def test_cross_scene_gallery_uses_only_external_witnesses():
+    from stash_ai.recognition.rear_gallery import Gallery
+    vector = np.array([1.,0.])
+    rows = [dict(_vector=vector,scan=scan,id=scan,quality='{}') for scan in 'ABC']
+    gallery = Gallery([('owner','A',rows)])
+    [winner] = gallery.rank(vector,'A',dict(match_threshold=.85,ambiguity_margin=.05,attach_min_support=2),None)
+    assert winner[0]==1 and [r['scan'] for r in winner[4]]==['B','C']
+
+
+def test_weak_face_of_same_owner_allows_route_to_next_strict_face():
+    from types import SimpleNamespace
+    from stash_ai.recognition.body_perspectives import recover
+    from stash_ai.recognition.body_identity import defaults
+    rows, decisions = [], {}
+    for cue, owner in enumerate(['A',None,'A','A']):
+        row = dict(id=str(cue),cue=cue,seconds=float(cue),scan='s',face_person=owner,
+                   geometry=encoded(dict(bounds=[0,0,80,100])),_vector=np.array([1.,0.]),
+                   quality=encoded(dict(quality=dict(orientation='front' if owner else 'back',
+                                                      frame_signature='11'*48,pixel_digest=str(cue)))))
+        rows.append(row)
+        decisions[row['id']] = dict(person=owner,status='accepted' if owner else 'withheld',
+                                    reason='measured_face_association' if owner else 'body_anchor_quality')
+    recover(rows,decisions,{'A':[rows[0],rows[3]]},defaults(),SimpleNamespace(face_similarity=np.dot),
+            SimpleNamespace(allows=lambda *args:True))
+    assert decisions['1']['rooted_track']['roots']==['0','3']
+    assert decisions['2']['reason']=='measured_face_association'

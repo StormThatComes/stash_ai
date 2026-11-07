@@ -32,7 +32,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v17-track-measurements',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v18-independent-view-modes',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):

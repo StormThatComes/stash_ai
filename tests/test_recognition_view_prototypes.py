@@ -298,3 +298,15 @@ def test_single_shot_auxiliary_view_remains_local(tmp_path):
         [local] = confirmed_views(*args,remaining_bytes=2**20,include_local=True)
         assert local.local_scan == selected[0]['scan']
         assert all(row['status']=='withheld' for row in policy_membership(db,config,selected[1]['scan']))
+
+
+def test_ninth_exemplar_preserves_second_shot():
+    from stash_ai.recognition.view_prototypes import _Cluster,prioritized
+    import json
+    import numpy as np
+    slot = _Cluster('neutral','0')
+    for i in range(9):
+        quality = dict(view_shot=int(i==8), evidence_pixel_sha256=f'{i+1:064x}')
+        slot.add(dict(id=str(i),scan='s',seconds=i,quality=json.dumps(quality)),np.array([1.,0.]))
+    assert len(set(slot.shots))==2
+    assert prioritized([slot],1,primary=True)==[slot]
