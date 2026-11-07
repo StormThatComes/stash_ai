@@ -49,14 +49,14 @@ def _scene(db, scan, stamp, gallery, search, config):
         if kind != 'back':
             continue
         query = vector(row)
-        ranked = gallery.rank(query,scan,settings)
+        ranked = gallery.rank(query,scan,settings,quality(row).get('pixel_digest'))
         if not ranked:
             continue
-        mean,low,owner,source,witnesses = ranked[0]
+        mean,low,owner,source,witnesses,_ = ranked[0]
         if (owner==old or decision.get('open_face_root',{}).get('owner',owner)!=owner
                 or mean<settings['match_threshold'] or low<settings['cohesion_threshold']):
             continue
-        if any(r[2]!=owner and mean-r[0]<settings['ambiguity_margin'] for r in ranked):
+        if any(r[2]!=owner and mean-max(r[0],r[5])<settings['ambiguity_margin'] for r in ranked):
             continue
         bank = search.bank.get(owner)
         if bank is None or (scan,row['cue']) in bank['cues']:

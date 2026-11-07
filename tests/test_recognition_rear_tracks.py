@@ -68,3 +68,15 @@ def test_long_vtt_turn_allows_a_single_empty_cue_and_keeps_open_root():
     assert decisions['19']['reason']=='face_rooted_body_view'
     sources = decisions['19']['source_tracks']
     assert {(start,end) for start,end,_ in sources}=={('0','8'),('11','13')}
+
+
+def test_duplicate_pixels_in_another_scene_cannot_confirm_the_query():
+    from stash_ai.recognition.rear_gallery import Gallery
+    query = np.array([1.,0.])
+    rows = [dict(_vector=query,id=str(i),quality=encoded({'quality':{'pixel_digest':str(i)}})) for i in range(2)]
+    gallery = Gallery([('source owner','source scan',rows)])
+    settings = dict(match_threshold=.85,ambiguity_margin=.1,attach_min_support=2)
+    [duplicate] = gallery.rank(query,'other scan',settings,'0')
+    assert duplicate[0]==-1 and duplicate[5]==1
+    [independent] = gallery.rank(query,'other scan',settings,'new')
+    assert independent[0]==1 and len(independent[4])==2
