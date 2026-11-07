@@ -206,6 +206,9 @@ class SapiensIDV1Encoder:
         # namespace implementation; threshold calibration is still required.
         return [normalized_embedding(row, EMBEDDING_DIMENSIONS) for row in values]
 
+    def resident_modules(self):
+        return [m for m in (self.model,self.aligner) if m is not None]
+
     def close(self):
         """Release held modules; caller owns any shared CUDA cache."""
         if get_ident() != self.owner:

@@ -76,6 +76,8 @@ class PMPose:
     def __init__(self, model, *, device, batch_size):
         self.model, self.device, self.batch_size = model, device, batch_size
 
+    def resident_modules(self):return [self.model]
+
     def predict(self, image, bounds, masks=None):
         return self.predict_many([(image, bounds, masks)])[0]
 
