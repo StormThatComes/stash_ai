@@ -94,7 +94,31 @@ def test_partial_v2_pose_defaults_and_explicit_v1_opt_out(tmp_path):
     path.write_text('version: 1\n')
     legacy = load(path)
     assert not body_observations.enabled(legacy)
+    assert not legacy.data['sapiensid']['identities']['enabled']
+    assert not legacy.data['sapiensid']['global_matching']['enabled']
     assert legacy.data['sapiensid']['pose']['detector'] == 'yolo'
+
+
+@pytest.mark.parametrize(('override', 'local', 'global_matching'), [
+    ('', True, True),
+    ('body: {enabled: false}', False, False),
+    ('body: {collection: {enabled: false}}', False, False),
+    ('matching: {body: {identities: {enabled: false}}}', False, False),
+    ('matching: {body: {global: {enabled: false}}}', True, False),
+])
+def test_v2_body_matching_defaults_follow_enabled_prerequisites(tmp_path, override, local, global_matching):
+    path = tmp_path / 'recognition.yml'
+    path.write_text(f'version: 2\n{override}\n')
+    body = load(path).data['sapiensid']
+    assert body['identities']['enabled'] is local
+    assert body['global_matching']['enabled'] is global_matching
+
+
+def test_v2_explicit_global_matching_requires_enabled_local_identities(tmp_path):
+    path = tmp_path / 'recognition.yml'
+    path.write_text('version: 2\nmatching: {body: {identities: {enabled: false}, global: {enabled: true}}}\n')
+    with pytest.raises(ValueError, match=r'matching\.body\.global\.enabled'):
+        load(path)
 
 
 def test_point_quality_inheritance_and_explicit_local_overrides_survive_export(tmp_path):

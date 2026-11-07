@@ -180,6 +180,11 @@ def apply_v2(data, supplied):
     source_body = supplied.get('body', {})
     if 'enabled' not in source_body.get('collection', {}):
         body['collection']['enabled'] = body['enabled']
+    source_matching = supplied.get('matching', {}).get('body', {})
+    if 'enabled' not in source_matching.get('identities', {}):
+        body['identities']['enabled'] = body['collection']['enabled']
+    if 'enabled' not in source_matching.get('global', {}):
+        body['global_matching']['enabled'] = body['identities']['enabled']
     source_pose = supplied.get('pose', {})
     for stage in POINT_STAGES:
         for field in POINT_FIELDS:
