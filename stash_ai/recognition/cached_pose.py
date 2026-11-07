@@ -12,6 +12,12 @@ def detections(owner,images,calculate):
             record=dict(boxes=value.boxes.xyxy.detach().cpu().numpy(),scores=value.boxes.conf.detach().cpu().numpy())
             if getattr(value,'keypoints',None) is not None:
                 record.update(points=value.keypoints.xy.detach().cpu().numpy(),confidence=value.keypoints.conf.detach().cpu().numpy())
+            import numpy as np
+            scores,boxes=record['scores'],record['boxes']
+            if (scores.ndim!=1 or boxes.shape!=(len(scores),4)
+                    or any(not np.isfinite(array).all() for array in record.values())
+                    or np.any((scores<0)|(scores>1))):
+                raise ValueError('Person detector returned malformed/non-finite geometry; result was not cached.')
             results.append(record)
         return results
     values=many('person_detection',[detector(owner.config),owner.device],images,compute)

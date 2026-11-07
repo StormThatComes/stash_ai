@@ -100,23 +100,23 @@ class RFDETRDetector:
         validate(device,precision)
         self.precision=precision
         self.model, self.device, self.batch_size = model, device, batch_size
+        from .adaptive_gpu import Batches
+        self.batches=Batches(batch_size,'RF-DETR')
 
     def predict(self, source, *, conf, iou, max_det, device=None, verbose=False, nms=True):
         import torch
         images = source if isinstance(source, list) else [source]
-        results = []
+        def calculate(batch):
+            outputs=self._forward([image for _,image in batch])
+            return self._decode(outputs,[image.size for _,image in batch],conf,iou,max_det,nms,
+                                frame_offset=batch[0][0])
         with torch.inference_mode():
-            for start in range(0, len(images), self.batch_size):
-                batch = images[start:start+self.batch_size]
-                outputs = self._forward(batch)
-                results.extend(self._decode(outputs, [image.size for image in batch], conf, iou, max_det,
-                                            nms, frame_offset=start))
-                del outputs
-        return results
+            return self.batches.run(list(enumerate(images)),calculate,self.device)
 
     def _forward(self, batch):
         import torch
         from torchvision.transforms import functional as transforms
+        from .gpu_transfers import to_device
         with ExitStack() as stack:
             rgb = [image if image.mode == 'RGB' else stack.enter_context(image.convert('RGB')) for image in batch]
             # Match the pinned upstream predict(): RGB /255, bilinear square
@@ -124,10 +124,10 @@ class RFDETRDetector:
             if len({image.size for image in rgb})==1:
                 # One transfer for the usual fixed-size VTT frames. Resize stays
                 # on the original device with identical interpolation settings.
-                inputs=torch.stack([transforms.to_tensor(image) for image in rgb]).to(self.device)
+                inputs=to_device(torch.stack([transforms.to_tensor(image) for image in rgb]),self.device)
                 inputs=transforms.resize(inputs,[registry.RESOLUTION,registry.RESOLUTION],antialias=False)
             else:
-                inputs = torch.stack([transforms.resize(transforms.to_tensor(image).to(self.device),
+                inputs = torch.stack([transforms.resize(to_device(transforms.to_tensor(image),self.device),
                     [registry.RESOLUTION, registry.RESOLUTION], antialias=False) for image in rgb])
             inputs = transforms.normalize(inputs, registry.MEAN, registry.STD)
             from .inference_precision import autocast

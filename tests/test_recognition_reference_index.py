@@ -1,4 +1,6 @@
 import sqlite3
+from contextlib import closing
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -7,6 +9,30 @@ from stash_ai.recognition.clustering import _groups, cluster_scene, reference_co
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.reference_index import _active, references
 from tests.test_recognition_clustering import setup, scan
+
+
+@pytest.mark.parametrize('storage', ['memory', 'disk'])
+def test_lazy_references_initialize_while_prefetch_holds_schema_read_lock(tmp_path, storage):
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.rebuild import REPLAY_SCHEMA
+    from stash_ai.recognition.reference_index import current
+    from stash_ai.recognition.replay_memory import memory_replay
+
+    config = setup(tmp_path)
+    data = plain(config.data)
+    data['execution']['rebuild_storage'] = storage
+    config = replace(config, data=data)
+    with memory_replay(config) as (db, uri):
+        db.executescript(REPLAY_SCHEMA)
+        with references(db, 'scope', 'ns', config) as lazy:
+            assert lazy.value is None
+            with closing(sqlite3.connect(uri, uri=True)) as reader:
+                # Keep a real cursor open, making the race deterministic without
+                # sleeps: shared-cache readers prohibit main-schema writes.
+                with closing(reader.execute('SELECT name FROM sqlite_master')) as rows:
+                    assert rows.fetchone() is not None
+                    index = current(db)
+                    assert index is not None and index is current(db)
 
 
 def baseline(db, config):
