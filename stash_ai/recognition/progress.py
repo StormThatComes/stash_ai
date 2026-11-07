@@ -13,15 +13,18 @@ from stash_ai.runtime.console import status, activity, current_report, phase, sk
 _work_rows = ContextVar('recognition_work_rows', default=())
 _stage_observer = ContextVar('recognition_stage_observer', default=None)
 _update_observer = ContextVar('recognition_update_observer', default=None)
+_observer_totals = ContextVar('recognition_observer_totals', default=True)
 
 
 @contextmanager
-def observe_updates(callback):
+def observe_updates(callback, *, count_totals=True):
     """Observe stages and completed work without installing a console in workers."""
     token = _update_observer.set(callback)
+    totals = _observer_totals.set(count_totals)
     try:
         yield
     finally:
+        _observer_totals.reset(totals)
         _update_observer.reset(token)
 
 
@@ -280,8 +283,11 @@ def work(label, total=None, *, unit='item', position=1, initial=0, **values):
     console = getattr(report, 'console', None)
     if callable(total):
         # Counting is optional telemetry, never another BLOB materialization.
-        if console is None or console.style == 'off' or (
-                hasattr(report, 'recognition_progress') and console.style != 'verbose'):
+        if console is None or console.style == 'off':
+            use_total = _update_observer.get() is not None and _observer_totals.get()
+        else:
+            use_total = console.style == 'verbose' or not hasattr(report, 'recognition_progress')
+        if not use_total:
             total = None
         else:
             try:

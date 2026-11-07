@@ -29,7 +29,7 @@ def evaluate(name, settings, *, seed, source, scope, namespace, installation, sc
     try:
         with heartbeat(name, progress) as live:
             reporter = ReplayProgress(name, live) if live else None
-            with observe_updates(reporter.update) if reporter else nullcontext():
+            with observe_updates(reporter.update, count_totals=False) if reporter else nullcontext():
                 result = _evaluate(name, settings, seed=seed, source=source, scope=scope,
                     namespace=namespace, installation=installation, scans=scans,
                     observations=observations, rebuild=rebuild, inspect_trial=inspect_trial,

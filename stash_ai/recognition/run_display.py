@@ -29,6 +29,8 @@ class RunDisplay:
                  f'reused={self.scans["reused"]} scenes_failed={c["scenes_failed"]}',
                  f'published={c["scenes_processed"] - c["publications_unchanged"]} '
                  f'unchanged={c["publications_unchanged"]}']
+        if 'portrait_people_selected' in c:
+            parts.append(f'portrait_people_selected={c["portrait_people_selected"]}')
         if self.rebuild:
             parts.append('rebuild ' + ' '.join(f'{k}={v}' for k, v in self.rebuild.items()))
         if self.debt is not None:

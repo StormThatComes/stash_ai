@@ -84,7 +84,7 @@ def phase(label, *, quiet=False):
             else:
                 with heartbeat('report',progress,label) as live:
                     reporter=ReplayProgress('report',live)
-                    with observe_updates(reporter.update):yield
+                    with observe_updates(reporter.update, count_totals=False):yield
     finally:
         state.depth -= 1
 
