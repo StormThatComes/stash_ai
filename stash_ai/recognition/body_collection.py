@@ -64,9 +64,12 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
     else:measurements=[quality(image,person,people,settings) for person in people]
     if people and image is not None:
         from .body_perspectives import frame_signature, orientation
-        signature = frame_signature(image)
+        captured = getattr(image, '_recognition_cue_signature', None)
+        signature = captured[2] if captured and captured[0]==cue else frame_signature(image)
         for person, (measurement, _) in zip(people, measurements):
             measurement['frame_signature'] = signature
+            if captured and captured[0]==cue and captured[1] is not None:
+                measurement['view_shot'] = captured[1]
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     items=[]

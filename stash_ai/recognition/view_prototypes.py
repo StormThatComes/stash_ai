@@ -101,6 +101,7 @@ class _Cluster:
     cue_times: dict = field(default_factory=dict)
     cue_representatives: dict = field(default_factory=dict)
     qualities: list = field(default_factory=list)
+    shots: list = field(default_factory=list)
     total: object = field(default=None,repr=False)
     pose_hints: set = field(default_factory=set)
     scene_minimum: int = 0
@@ -119,6 +120,8 @@ class _Cluster:
         from .independent_evidence import unit
         cue = unit(row)
         stamp = row['scan'], row['seconds']
+        q = metadata(row['quality']) if 'quality' in row.keys() else {}
+        shot = (row['scan'], 'shot', q['view_shot']) if q.get('view_shot') is not None else stamp
         from .run_cache import current
         shared = current()
         if shared is not None and shared.working is not None:
@@ -139,10 +142,12 @@ class _Cluster:
                 if identifier in self.observations:
                     index = self.observations.index(identifier)
                     self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
+                    self.shots[index] = shot
                 else:
                     self.examples.append(query)
                     self.observations.append(row['id'])
                     self.qualities.append(new_score)
+                    self.shots.append(shot)
                 if self.first == identifier:
                     self.first = row['id']
                 for witnesses in self.scene_witnesses.values():
@@ -173,6 +178,7 @@ class _Cluster:
         from .reference_selection import quality
         self.total = query.astype('float64').copy() if self.total is None else self.total + query
         self.examples.append(query)
+        self.shots.append(shot)
         self.observations.append(row['id'])
         self.qualities.append(quality(row['quality']) if 'quality' in row.keys() else 0.)
         self._reduce(maximum)
@@ -192,6 +198,7 @@ class _Cluster:
             self.examples=[self.examples[i] for i in chosen]
             self.observations=[self.observations[i] for i in chosen]
             self.qualities=[self.qualities[i] for i in chosen]
+            self.shots=[self.shots[i] for i in chosen]
 
     def medoid(self):
         import numpy as np
@@ -233,13 +240,13 @@ def prioritized(slots,maximum,cohesion=.8):
         ids = set(slot.observations)
         stamps = {oid:stamp for stamp,(oid,_) in slot.cue_times.items() if oid in ids}
         pixels = {oid:unit for unit,(oid,_) in slot.cue_representatives.items() if oid in ids}
-        examples = [(v, stamps[oid], pixels[oid]) for oid,v in zip(slot.observations,slot.examples)
+        examples = [(v, shot, pixels[oid]) for oid,v,shot in zip(slot.observations,slot.examples,slot.shots)
                     if oid in stamps and oid in pixels]
         features[id(slot)] = examples
     covered = set()
     def independent_hits(slot):
         examples = features[id(slot)]
-        return {pixel for value,stamp,pixel in examples
+        return {stamp for value,stamp,pixel in examples
                 if any(other_stamp != stamp and other_pixel != pixel and float(np.dot(value,other)) >= cohesion
                        for other,other_stamp,other_pixel in examples)}
     hits = {id(slot):independent_hits(slot) for slot in remaining}
@@ -250,7 +257,12 @@ def prioritized(slots,maximum,cohesion=.8):
             different = slot.pose in ('left','right','neutral') and all(slot.pose!=item.pose for item in chosen)
             distance = 1-max((float(np.dot(slot.medoid()[0], item.medoid()[0])) for item in chosen),default=1.)
             return (bool(gain),different and bool(gain),gain,distance,len(slot.cues),slot.first)
-        winner = 0 if not chosen else max(range(len(remaining)), key=priority)
+        if chosen:
+            winner = max(range(len(remaining)), key=priority)
+        else:
+            measured = any(len(shot)==3 for slot in remaining for shot in slot.shots)
+            winner = (max(range(len(remaining)),key=lambda i:len(hits[id(remaining[i])]))
+                      if measured else 0)
         selected = remaining.pop(winner)
         chosen.append(selected)
         # Mark also the exemplars of other candidates retrievable by this view.
@@ -258,7 +270,7 @@ def prioritized(slots,maximum,cohesion=.8):
             for value,stamp,pixel in features[id(slot)]:
                 if any(stamp!=s and pixel!=p and float(np.dot(value,v)) >= cohesion
                        for v,s,p in features[id(selected)]):
-                    covered.add(pixel)
+                    covered.add(stamp)
     return chosen+remaining
 
 
