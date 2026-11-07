@@ -101,11 +101,11 @@ def plan(db,config,bank,*,focus=None,compact=False):
                     groups.append(people)
                     continue
                 if len(people) > 128:
-                    if compact:
-                        result['decisions'].append(dict(people=people, outcome='blocked',
-                                                        blockers=['incomplete_body_component']))
-                    else:
-                        groups.append(people)
+                    from .frozen_subgroups import large_subgroups
+                    chosen,reason = large_subgroups(people,edges,pairs,settings['match_threshold'],
+                        max(settings['ambiguity_margin'],1e-6),max(0,limit-plan_bytes)//4)
+                    result['decisions'].append(dict(people=people,outcome='blocked',blockers=[reason]))
+                    groups.extend(list(group) for group in chosen)
                     continue
                 graph = Edges(max(0, limit - plan_bytes) // 4)
                 for owner in people:

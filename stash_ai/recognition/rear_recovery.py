@@ -35,13 +35,20 @@ def _scene(db, scan, stamp, gallery, search, config):
     settings = config.data['sapiensid']['identities']
     proposals = {}
     required = defaultdict(set)
+    satellites = defaultdict(dict)
+    face_owners = set()
     for raw in _rows(db,scan,stamp):
         row = dict(raw)
         old = row['person']
         decision = json.loads(row['proof'])
         if old is not None:
-            required[old].add(row['id'])
-        if (row['face'] or row['status']=='accepted' and decision.get('reason')!='body_scene_core'
+            if row['face']:
+                face_owners.add(old)
+            if row['role']=='anchor' or decision.get('reason')=='body_scene_core':
+                required[old].add(row['id'])
+            else:
+                satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
+        if (row['face'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
                 or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root')):
             continue
         person = json.loads(row['geometry'])
@@ -74,14 +81,27 @@ def _scene(db, scan, stamp, gallery, search, config):
     # Freeze competing simultaneous claims and move a pre-existing fragment atomically.
     simultaneous = Counter((owner,cue) for owner,cue,_,_ in proposals.values())
     viable = {oid for oid,(owner,cue,_,_) in proposals.items() if simultaneous[owner,cue]==1}
-    blocked = {p for p,ids in required.items()
-               if not ids <= viable or len({proposals[i][0] for i in ids})!=1}
+    targets = {}
+    for old,ids in required.items():
+        if old not in face_owners and ids <= viable:
+            destinations = {proposals[i][0] for i in ids}
+            if len(destinations)==1:
+                targets[old] = destinations.pop()
     for oid in sorted(viable):
         owner,_,old,proof = proposals[oid]
-        if old in blocked:
+        if old and targets.get(old)!=owner:
             continue
         db.execute("UPDATE body_members SET person=?,status='accepted',role='auxiliary',proof=? WHERE observation=?",
                    (owner,encoded(proof),oid))
+    for old,owner in targets.items():
+        for oid,old_proof in satellites[old].items():
+            if oid in viable and proposals[oid][0]==owner:
+                continue
+            proof = dict(person=None,status='withheld',role='auxiliary',reason='external_rear_satellite',
+                         retry_when='confirmed_core_changes',retry_owner=owner,previous=old_proof)
+            db.execute("UPDATE body_members SET person=NULL,status='withheld',role='auxiliary',proof=? WHERE observation=?",
+                       (encoded(proof),oid))
+
 
 
 def recover(db, selected, config):
@@ -95,7 +115,7 @@ def recover(db, selected, config):
     # frozen local decisions before taking a rival index or recomputing.
     db.execute("""CREATE TEMP TABLE rear_prior AS SELECT m.observation,b.scan,s.scene,m.person,m.proof
         FROM body_members m JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan
-        WHERE s.scope=? AND s.namespace=? AND json_extract(m.proof,'$.reason')='external_rear_view'
+        WHERE s.scope=? AND s.namespace=? AND json_extract(m.proof,'$.reason') IN ('external_rear_view','external_rear_satellite')
         AND """+predicate(),(scope,namespace))
     try:
         scans = {s['scan']:s['scene'] for s in selected}

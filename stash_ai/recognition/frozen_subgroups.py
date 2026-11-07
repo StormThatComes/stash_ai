@@ -48,3 +48,55 @@ def nonoverlapping(proposals):
     """Incompatible frozen proposals veto each other instead of greedy wins."""
     maximal = [p for p in proposals if not any(set(p) < set(q) for q in proposals)]
     return [p for p in maximal if not any(set(p) & set(q) and p != q for q in maximal)]
+
+
+def large_subgroups(people, edges, pairs, threshold, margin, budget, maximum=8):
+    """Search short score prefixes on the existing sparse graph. All adjacent
+    outsiders still compete, including neighbours beyond the nomination limit.
+    """
+    from heapq import nsmallest
+    def score(a,b):
+        return pairs[tuple(sorted((a,b)))]['score']
+
+    proposals = set()
+    used = 0
+    limited = False
+    for owner in people:
+        best = nsmallest(maximum, edges[owner], key=lambda p:(-score(owner,p),p))
+        for size in range(1,min(len(best),maximum-1)+1):
+            if size<len(best) and score(owner,best[size-1])-score(owner,best[size]) < margin:
+                continue
+            group = tuple(sorted([owner,*best[:size]]))
+            if group in proposals:
+                continue
+            members = set(group)
+            for p in group:
+                internal = members-{p}
+                if not internal <= edges[p]:
+                    break
+                weakest = min(score(p,q) for q in internal)
+                if weakest<threshold or any(weakest-score(p,q)<margin for q in edges[p] if q not in members):
+                    break
+            else:
+                cost = 512+len(group)*192
+                if used+cost > budget:
+                    # An undiscovered conflicting proposal must not lose by iteration order.
+                    return (), 'subgroup_budget'
+                proposals.add(group)
+                used += cost
+        if len(edges[owner])>=maximum:
+            limited = True
+    # Exact separated sets can be nested. Incomparable overlapping sets veto
+    # each other. Index memberships to avoid a library-wide Cartesian product.
+    by_owner = {}
+    maximal = []
+    for group in sorted(proposals,key=lambda g:(-len(g),g)):
+        overlap = set().union(*(by_owner.get(p,()) for p in group))
+        if any(set(group)<=set(maximal[i]) for i in overlap):
+            continue
+        index = len(maximal)
+        maximal.append(group)
+        for p in group:
+            by_owner.setdefault(p,set()).add(index)
+    return [g for g in maximal if all(len(by_owner[p])==1 for p in g)], (
+        'subgroup_size_limit' if limited else 'incomplete_body_component')

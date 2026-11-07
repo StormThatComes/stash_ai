@@ -251,13 +251,34 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             else:
                 candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
     proposed = {oid: owner for oid, owner, *_ in candidates}
-    # An established body fragment moves as a unit or remains available as a rival.
-    protected = {p for p, members in owner_rows.items()
-                 if any(decisions[r['id']]['reason']=='body_scene_core' for r in members)
-                 and (any(r['id'] not in proposed for r in members)
-                      or len({proposed.get(r['id']) for r in members}) != 1)}
+    # Check all core votes before moving anything. Weak satellites cannot
+    # veto a coherent core, but a measured face or simultaneous claim can.
+    from collections import Counter
+    claims = Counter((owner,lookup[oid]['cue']) for oid,owner in proposed.items())
+    protected = set()
+    retry = {}
+    for old,members in owner_rows.items():
+        core = [r for r in members if decisions[r['id']]['reason']=='body_scene_core']
+        if not core:
+            continue
+        targets = {proposed.get(r['id']) for r in core}
+        if None in targets or len(targets)!=1:
+            protected.add(old)
+            continue
+        target = next(iter(targets))
+        if (any(r.get('face_person') or not guard.allows(r,seeds[target],target) for r in members)
+                or any(claims[target,r['cue']]!=1 for r in core)):
+            protected.add(old)
+            continue
+        for r in members:
+            if proposed.get(r['id']) != target:
+                retry[r['id']] = target
+    for oid,target in retry.items():
+        decisions[oid] = dict(person=None,status='withheld',role='auxiliary',
+                              reason='fragment_auxiliary_retry',retry_owner=target,
+                              retry_when='confirmed_core_changes')
     for oid,owner,angle,proof,score in candidates:
-        if decisions[oid]['person'] in protected:
+        if oid in retry or decisions[oid]['person'] in protected or claims[owner,lookup[oid]['cue']] != 1:
             continue
         rooted = decisions[oid].get('rooted_view')
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',

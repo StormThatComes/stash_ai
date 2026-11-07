@@ -70,6 +70,53 @@ def test_long_vtt_turn_allows_a_single_empty_cue_and_keeps_open_root():
     assert {(start,end) for start,end,_ in sources}=={('0','8'),('11','13')}
 
 
+def test_large_component_recovers_strong_pair_without_stealing_tied_partner():
+    from stash_ai.recognition.frozen_subgroups import large_subgroups
+    owners = [f'p{i:03}' for i in range(135)]
+    edges = {p:set() for p in owners}
+    pairs = {}
+    for i,(a,b) in enumerate(zip(owners,owners[1:])):
+        edges[a].add(b)
+        edges[b].add(a)
+        pairs[a,b] = {'score':.99 if i in (0,3,4) else .86}
+    groups,reason = large_subgroups(owners,edges,pairs,.85,.05,2**20)
+    assert groups == [tuple(owners[:2])]
+    assert reason=='incomplete_body_component'
+    assert large_subgroups(owners,edges,pairs,.85,.05,64) == ((), 'subgroup_budget')
+
+
+@pytest.mark.parametrize('weak_has_face',[False,True])
+def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_has_face):
+    from stash_ai.recognition.body_perspectives import recover
+    from stash_ai.recognition.body_identity import defaults, Scores
+    from types import SimpleNamespace
+    settings = dict(defaults(), min_appearance_distance=0)
+    scores = Scores(SimpleNamespace(data={'sapiensid':{'execution':{
+        'max_witness_comparisons':1000,'reference_bytes':2**20}}}))
+    rows, decisions, seeds = [], {}, {'A':[]}
+    for cue in (0,1,2,5,6,7,11,15):
+        face = cue in (0,2,5,7)
+        weak = cue==15
+        row = dict(id=str(cue),cue=cue,scan='scan',seconds=cue,
+                   face_person='A' if face else 'B' if weak and weak_has_face else None,
+                   geometry=encoded(dict(bounds=[0,0,80,100])),_face_vector=None,
+                   _vector=np.array([0.,1.] if weak else [1.,0.]),
+                   quality=encoded(dict(quality=dict(orientation='front' if face or weak else 'back',
+                       frame_signature=(bytes([15 if cue<5 else 180,15,15])*16).hex(),pixel_digest=str(cue)))))
+        rows.append(row)
+        if face: seeds['A'].append(row)
+        decisions[str(cue)] = dict(person='A' if face else 'B',status='accepted',
+                                   role='auxiliary' if weak else 'anchor',
+                                   reason='measured_face_association' if face or weak and weak_has_face
+                                          else 'body_core_attachment' if weak else 'body_scene_core')
+    recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *args:True))
+    if weak_has_face:
+        assert decisions['11']['person']=='B'
+    else:
+        assert decisions['11']['person']=='A'
+        assert decisions['15']['person'] is None and decisions['15']['retry_owner']=='A'
+
+
 def test_duplicate_pixels_in_another_scene_cannot_confirm_the_query():
     from stash_ai.recognition.rear_gallery import Gallery
     query = np.array([1.,0.])
