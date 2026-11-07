@@ -12,33 +12,61 @@ from .scan_heads import predicate as current_scan
 ROUTES=('body_global','body_scene')
 
 
-def diverse_references(witnesses, maximum):
+def diverse_references(witnesses, maximum, reserve=lambda _: None):
     """Bounded scan/appearance coverage, then evenly spaced independent witnesses."""
     import hashlib
+    import heapq
+    def address(row):
+        return {key: row[key] for key in ('id','scan','cue')}
     if len(witnesses) <= maximum:
-        return list(witnesses)
-    representatives = {}
+        reserve(768 * len(witnesses))
+        return [address(row) for row in witnesses]
+    # A rare rear/side view must survive a flood of frontal appearances. Each
+    # orientation holds a bounded deterministic sample of scan/appearance strata.
+    buckets = {}
+    retained = 0
     for row in witnesses:
         quality = json.loads(row['quality']).get('quality', {})
-        # A coarse crop hash separates looks without charging another vector read.
-        bucket = (row['scan'], quality.get('orientation', 'unknown'),
-                  str(quality.get('appearance_hash') or '')[:2])
-        rank = hashlib.blake2b(encoded(bucket).encode(), digest_size=8).digest()
-        if rank in representatives:
+        direction = quality.get('orientation', 'unknown')
+        if direction not in ('front', 'side', 'back'):
+            direction = 'unknown'
+        representatives, heap = buckets.setdefault(direction, ({}, []))
+        bucket = (row['scan'], str(quality.get('appearance_hash') or '')[:2])
+        rank = int.from_bytes(hashlib.blake2b(encoded(bucket).encode(), digest_size=8).digest(), 'big')
+        if rank in representatives or len(heap) == maximum and rank >= -heap[0]:
             continue
-        if len(representatives) == maximum:
-            last = max(representatives)
-            if rank >= last:
-                continue
-            del representatives[last]
-        representatives[rank] = row
-    chosen = {row['id']: row for row in representatives.values()}
+        if len(heap) == maximum:
+            del representatives[-heapq.heappop(heap)]
+        else:
+            retained += 1
+            reserve(768 * retained)
+        representatives[rank] = address(row)
+        heapq.heappush(heap, -rank)
+    queues = []
+    for direction in ('front','side','back','unknown'):
+        if direction in buckets:
+            records, _ = buckets[direction]
+            queues.append(iter([records[k] for k in sorted(records)]))
+    chosen = {}
+    while queues and len(chosen) < maximum:
+        remaining = []
+        for queue in queues:
+            row = next(queue, None)
+            if row is not None:
+                chosen[row['id']] = row
+                remaining.append(queue)
+            if len(chosen) == maximum:
+                break
+        queues = remaining
     step = max(1, len(witnesses) // maximum)
     for offset in range(0, len(witnesses), step):
         if len(chosen) == maximum:
             break
         row = witnesses[offset]
-        chosen[row['id']] = row
+        if row['id'] not in chosen:
+            retained += 1
+            reserve(768 * retained)
+            chosen[row['id']] = address(row)
     return sorted(chosen.values(), key=lambda row: (row['scan'], row['cue'], row['id']))
 
 
@@ -87,7 +115,7 @@ def _banks(db,config,scope,namespace):
                 yield dict(raw)
         rows=page_rows(source_rows())
         witnesses=independent(rows,settings,presorted=True,paged=True,reserve=reserve)
-        selected=diverse_references(witnesses,config.data['sapiensid']['global_matching']['max_references'])
+        selected=diverse_references(witnesses,config.data['sapiensid']['global_matching']['max_references'],reserve)
         if not selected and rows:selected=rows[:1]
         core=page_rows(dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows)
         selected_ids={r['id'] for r in selected}
