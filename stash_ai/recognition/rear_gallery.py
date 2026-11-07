@@ -26,7 +26,7 @@ def load(db, config, scope, namespace):
         FROM proofs p JOIN json_each(p.claim,'$.roots') root
         JOIN body_observations rb ON rb.id=root.value AND rb.scan=p.scan
         JOIN observations o ON o.id=rb.face JOIN members m ON m.observation=o.id
-        WHERE p.reason NOT IN ('body_copresence_conflict','different_face_root')
+        WHERE COALESCE(p.reason,'') NOT IN ('body_copresence_conflict','different_face_root')
         AND (p.person IS NULL OR p.person=m.person OR p.reason='body_scene_core')
         AND m.person=json_extract(p.claim,'$.owner') AND o.rejected IS NULL
         AND """ + strict_sql() + ' AND ' + anchor_sql('o',config.data['clustering']) + """
@@ -126,6 +126,7 @@ class Gallery:
                            if not pixel or json.loads(row['quality']).get('quality',{}).get('pixel_digest') != pixel]
             if len(independent)>=max(2,settings['attach_min_support']):
                 scores, witnesses = zip(*independent)
+                source = witnesses[0].get('scan',source)
                 result.append((sum(scores)/len(scores), min(scores), owner, source, witnesses, rival_score))
             else:
                 # Losing independent support cannot remove a plausible rival.

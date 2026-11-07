@@ -49,6 +49,17 @@ def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, i
             return [dict(r) for r in db.execute('SELECT * FROM body_members WHERE observation IN (?,?,?)',queries)]
         assert all(r['person']=='A' and r['role']=='auxiliary' and
                    json.loads(r['proof'])['reason']=='external_rear_view' for r in members())
+        if not incremental and not missing_root:
+            db.execute('CREATE TEMP TABLE touched_rear(observation)')
+            db.execute('CREATE TEMP TRIGGER audit_rear AFTER UPDATE ON main.body_members '
+                       'BEGIN INSERT INTO touched_rear VALUES(new.observation); END')
+            unrelated,_ = scene(db,config,'3',[[0.,-1.]]*2)
+            rebuild(state,[unrelated],config,{})
+            assert not {r[0] for r in db.execute('SELECT observation FROM touched_rear')} & set(queries)
+            new_rival,_ = scene(db,config,'4',[[.55,.835]]*3)
+            rebuild(state,[new_rival],config,{})
+            assert all(r['person']!='A' and json.loads(r['proof'])['rear_retry']['reason']=='competing_owner'
+                       for r in members())
         if missing_root:
             db.execute('DELETE FROM members WHERE observation=?',('face-'+ids[0],))
             db.commit()
