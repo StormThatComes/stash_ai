@@ -44,6 +44,14 @@ def quality(image,person,people,settings):
     return measured,reason
 
 
+def public_person(person):
+    """Keep frame-local encoder pixels out of retained observation metadata."""
+    if person is None or 'encoder_mask' not in person.get('pose_refinement', {}):
+        return person
+    details = {k:v for k,v in person['pose_refinement'].items() if k != 'encoder_mask'}
+    return dict(person, pose_refinement=details)
+
+
 def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
     expected=contract(config)
     people=model.frame_people
@@ -80,13 +88,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
                 _, measured['pixel_digest'], measured['foreground_hash'] = _pixels(
                     foreground, (0, 0, foreground.width, foreground.height))
             measured['appearance_hash'] = measured['foreground_hash']
-        public_person = dict(person)
-        if 'encoder_mask' in refinement:
-            public_person['pose_refinement'] = {k:v for k,v in refinement.items() if k != 'encoder_mask'}
         face_accepted=row is not None and row['rejected'] is None
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None
-        metadata=dict(person=public_person,quality=measured,identity_rejection=reason,
+        metadata=dict(person=public_person(person),quality=measured,identity_rejection=reason,
             face_status='accepted' if face_accepted else 'rejected' if row is not None else 'absent',
             _body=dict(scan=scan,cue=cue,seconds=seconds,contract=expected,
                        face=row['id'] if row is not None else None,

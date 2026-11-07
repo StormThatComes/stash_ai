@@ -318,9 +318,9 @@ class SapiensIDFaces(YuNetDetector):
     def observation_quality(self, image, face):
         self._owner()
         person = self._person(image, face)
-        from .body_collection import quality
+        from .body_collection import quality, public_person
         measured=quality(image,person,self.frame_people,self.config.data['sapiensid']['collection'])[0] if person else {}
-        return {'identity_input': input_contract(self.config), 'person': person, 'quality': measured,
+        return {'identity_input': input_contract(self.config), 'person': public_person(person), 'quality': measured,
                 'identity_rejection': None if person else 'person_face_association_unavailable'}
 
     def _person_geometry(self, image, face):
