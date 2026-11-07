@@ -103,6 +103,8 @@ class RFDETRDetector:
         from .adaptive_gpu import Batches
         self.batches=Batches(batch_size,'RF-DETR')
 
+    def resident_modules(self):return [self.model]
+
     def predict(self, source, *, conf, iou, max_det, device=None, verbose=False, nms=True):
         import torch
         images = source if isinstance(source, list) else [source]

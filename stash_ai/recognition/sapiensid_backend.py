@@ -97,19 +97,25 @@ class SapiensIDFaces(YuNetDetector):
             if load_detector:
                 super().__init__(config, paths)
             from .sapiensid_inference import resolve_device
-            if load_identity:
-                self.encoder = load_encoder(config)
-            self.device = str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
-            self.pose = load_pose(config)
+            from .resident_models import current,Stage,Encoder
+            lazy=current() is not None
+            if lazy:
+                self.device=str(resolve_device(config.data['models']['device']))
+                if load_identity:self.encoder=Encoder(config,lambda:load_encoder(config),self.device)
+                self.pose=Stage('person_detector',lambda:load_pose(config),self.device)
+            else:
+                if load_identity:self.encoder=load_encoder(config)
+                self.device=str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
+                self.pose=load_pose(config)
             if config.data['sapiensid']['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
                 from .vitpose_pose import load
-                self.pose_refiner = load(config, self.device)
+                self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'sapiens':
                 from .sapiens_pose import load
-                self.pose_refiner = load(config, self.device)
+                self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'pmpose':
                 from .pmpose_pose import load
-                self.pose_refiner = load(config, self.device)
+                self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
             if self.pose_refiner is not None:
                 from .cached_pose import Pose
                 self.pose_refiner=Pose(self.pose_refiner,config,self.device)
@@ -384,12 +390,14 @@ class SapiensIDFaces(YuNetDetector):
         self._owner()
         self._person_frame = None
         self._prepared_frames.clear()
-        self.pose = None
+        detector,self.pose=self.pose,None
         refiner=self.pose_refiner
         self.pose_refiner = None
         try:
             from stash_ai.runtime.cleanup import cleanup
             actions=[]
+            from .resident_models import Stage
+            if isinstance(detector,Stage):actions.append(('close person detector',detector.close))
             if refiner is not None and callable(getattr(refiner,'close',None)):actions.append(('close pose refiner',refiner.close))
             if self.encoder is not None:actions.append(('close person encoder',self.encoder.close))
             cleanup(actions)
