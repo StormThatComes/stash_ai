@@ -74,7 +74,9 @@ def _pipeline(pose, config, device):
 
 class PMPose:
     def __init__(self, model, *, device, batch_size):
+        from .adaptive_gpu import Batches
         self.model, self.device, self.batch_size = model, device, batch_size
+        self.batches=Batches(batch_size,'PMPose')
 
     def resident_modules(self):return [self.model]
 
@@ -103,22 +105,42 @@ class PMPose:
                 raise ValueError('PMPose requires finite, non-empty person boxes.')
             jobs.extend((frame, index, box, None if masks is None else masks[index])
                         for index, box in enumerate(boxes))
-        with torch.inference_mode():
-            for start in range(0, len(jobs), self.batch_size):
-                batch = jobs[start:start + self.batch_size]
-                crops = [prepare(frames[frame][0], box, mask) for frame, _, box, mask in batch]
-                inputs = torch.from_numpy(np.stack([crop for crop, _, _ in crops])).to(self.device)
-                output = self._forward(inputs)
-                flipped = self._forward(inputs.flip(-1))
-                values = [(a + (b[:, registry.FLIP].flip(-1) if i == 0 else b[:, registry.FLIP])) * .5
-                          for i, (a, b) in enumerate(zip(output, flipped))]
-                heatmaps, scores, presence, visibility = [v.cpu().numpy() for v in values]
-                for offset, (frame, index, _, _) in enumerate(batch):
-                    _, center, scale = crops[offset]
-                    result[frame][0][index] = decode(heatmaps[offset], center, scale)
-                    result[frame][1][index] = scores[offset]
-                    result[frame][2]['presence'][index] = presence[offset]
-                    result[frame][2]['visibility'][index] = visibility[offset]
+        from contextlib import nullcontext
+        from concurrent.futures import ThreadPoolExecutor
+        from .gpu_transfers import to_device
+        cuda=str(self.device).split(':')[0]=='cuda'
+
+        def prepare_batch(batch):
+            return [(job,prepare(frames[job[0]][0],job[2],job[3])) for job in batch]
+
+        def infer(prepared):
+            inputs=to_device(torch.from_numpy(np.stack([crop for _,(crop,_,_) in prepared])),self.device)
+            output=self._forward(inputs);flipped=self._forward(inputs.flip(-1))
+            values=[(a+(b[:,registry.FLIP].flip(-1) if i==0 else b[:,registry.FLIP]))*.5
+                    for i,(a,b) in enumerate(zip(output,flipped))]
+            centers=np.stack([c for _,(_,c,_) in prepared]);scales=np.stack([s for _,(_,_,s) in prepared])
+            if cuda:
+                from .pmpose_decode_batch import decode_batch
+                points=decode_batch(values[0],centers,scales)
+            else:
+                points=[decode(h,c,s) for h,c,s in zip(values[0].cpu().numpy(),centers,scales)]
+            scores,presence,visibility=[v.cpu().numpy() for v in values[1:]]
+            return list(zip(points,scores,presence,visibility))
+
+        # A single future owns at most one additional batch of CPU crops.
+        if not jobs:return result
+        with torch.inference_mode(), (ThreadPoolExecutor(max_workers=1) if cuda else nullcontext()) as pool:
+            position=0;pending=None
+            while position<len(jobs):
+                batch=jobs[position:position+self.batches.maximum] if pending is None else queued
+                prepared=pending.result() if pending is not None else prepare_batch(batch)
+                position+=len(batch)
+                queued=jobs[position:position+self.batches.maximum]
+                pending=pool.submit(prepare_batch,queued) if pool is not None and queued else None
+                outputs=self.batches.run(prepared,infer,self.device)
+                for ((frame,index,_,_),_), (points,scores,presence,visibility) in zip(prepared,outputs):
+                    result[frame][0][index]=points;result[frame][1][index]=scores
+                    result[frame][2]['presence'][index]=presence;result[frame][2]['visibility'][index]=visibility
         return result
 
     def _forward(self, inputs):
