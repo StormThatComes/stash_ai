@@ -61,12 +61,21 @@ class PersonCollector:
             backfill(db,scan,source,self.config)
             return 0
         self._load()
-        frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
         from bisect import bisect_right
         from .body_perspectives import frame_signature
         saved_shots = next(iter(db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,))),None)
         shots = json.loads(saved_shots[0]) if saved_shots else []
+        # Old face scans have no durable cue-to-shot map. During their first
+        # body backfill, traverse the VTT once but infer only missing poses.
+        reconstruct = enabled(self.config) and (not shots or shots[0][0]!=0 or shots[0][1] is None)
+        if reconstruct:
+            shots = []
+            frames = source.frames(0)
+        else:
+            frames = (source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices')
+                      else source.frames(min(missing)))
         starts = [item[0] for item in shots]
+        shot = None
         self.resume_rows=[]
         # Read only narrow geometry columns; cap each ordered lookup to 64 cues.
         blocks={cue:cue//64 for cue in missing}
@@ -76,6 +85,12 @@ class PersonCollector:
                 with work('Collect SapiensID evidence', len(missing), unit='cue') as progress:
                     for index,cue,image in stream:
                         with image:
+                            if reconstruct:
+                                from .perspective_shots import advance
+                                shot = advance(image,index,shot)
+                                image._recognition_cue_signature = shot
+                                if not shots or shots[-1][1]!=shot[1]:
+                                    shots.append([index,shot[1]])
                             if index in missing:
                                 if loaded!=blocks[index]:
                                     loaded=blocks[index]
@@ -91,6 +106,19 @@ class PersonCollector:
                                 self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
                                 progress.advance()
             self.flush()
+            if reconstruct and shot is not None and shot[0]+1==len(source.cues):
+                from .database import encoded
+                from .body_observations import contract as body_contract
+                with db:
+                    for i,(first,number) in enumerate(shots):
+                        end = shots[i+1][0] if i+1<len(shots) else len(source.cues)
+                        args = (number,scan,first,end,number)
+                        db.execute("UPDATE observations SET quality=json_set(quality,'$.view_shot',?) "
+                                   "WHERE scan=? AND cue>=? AND cue<? AND json_extract(quality,'$.view_shot') IS NOT ?",args)
+                        db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.view_shot',?) "
+                                   "WHERE scan=? AND cue>=? AND cue<? AND json_extract(quality,'$.quality.view_shot') IS NOT ? "
+                                   "AND contract=?",(*args,body_contract(self.config)))
+                    db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',('cue-view-shots:'+scan,encoded(shots)))
         finally:
             # Only sealed, completely inferred cues enter this buffer. Preserve
             # them even when a later inference fails; never publish partial cues.
