@@ -54,7 +54,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
     if len(people)>1 and config.data['execution']['scan_cpu_workers']>1:
         measurements=list(pipeline.stage.ordered(lambda pixels,person:quality(pixels,person,people,settings),image,people,extra=16384))
     else:measurements=[quality(image,person,people,settings) for person in people]
-    if people:
+    if people and image is not None:
         from .body_perspectives import frame_signature, orientation
         signature = frame_signature(image)
         for person, (measurement, _) in zip(people, measurements):
