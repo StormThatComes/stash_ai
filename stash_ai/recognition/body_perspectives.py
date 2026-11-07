@@ -13,7 +13,10 @@ def frame_signature(image):
 
 def orientation(person):
     points = person['keypoints']
-    if any(min(points[i]) < 0 for i in (5, 6, 11, 12)):
+    visibility = person.get('keypoint_visibility')
+    def visible(i):
+        return min(points[i]) >= 0 and (visibility is None or visibility[i] >= .5)
+    if not all(visible(i) for i in (5, 6, 11, 12)):
         return 'unknown'
     ls, rs, lh, rh = (np.asarray(points[i]) for i in (5, 6, 11, 12))
     height = float(np.linalg.norm((ls+rs-lh-rh)/2))
@@ -33,7 +36,7 @@ def orientation(person):
     if shoulders > 0:
         return 'front'
     # A reversed torso with visible frontal eyes is ambiguous (twist/mirror).
-    return 'unknown' if all(min(points[i]) >= 0 for i in (1,2)) else 'back'
+    return 'unknown' if all(visible(i) for i in (1,2)) else 'back'
 
 
 def recover(rows, decisions, seeds, settings, scores, guard):
@@ -52,12 +55,16 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         box = person.get('bounds')
         if box is None:
             continue
+        if person.get('keypoints') is not None:
+            q['orientation'] = orientation(person)
         signature = np.frombuffer(bytes.fromhex(q['frame_signature']), dtype=np.uint8).astype(float)
         geometry[row['id']] = (q, box, signature)
         by_cue[row['cue']].append(row)
     if not geometry:
         return
 
+    from .perspective_shots import boundaries
+    shot_ids, boundary = boundaries(by_cue, geometry)
     # A filtered partner is still an unknown competitor in a crowded transition.
     for cue, members in list(by_cue.items()):
         if any(geometry[r['id']][0].get('detected_people', len(members)) != len(members) for r in members):
@@ -67,7 +74,7 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
         gap = b['seconds'] - a['seconds']
-        if not 0 < gap <= 12 or sa.shape != sb.shape or np.abs(sa-sb).mean() > 20:
+        if not 0 < gap <= 12 or boundary[b['cue']] != 'continuous':
             return None
         wa, ha = ba[2]-ba[0], ba[3]-ba[1]
         wb, hb = bb[2]-bb[0], bb[3]-bb[1]
@@ -108,6 +115,7 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         if assigned.get('reason') == 'measured_face_association':
             measured[assigned['person']].append(row)
     looks = defaultdict(list)
+    source_paths = {}
     for start, owner in root.items():
         path = []
         successor = next_row.get(start)
@@ -120,6 +128,7 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         if root.get(successor) != owner or not path:
             continue
         for r in path:
+            source_paths[r['id']] = (start, successor)
             q = geometry[r['id']][0]
             if (q.get('orientation') in ('front','back','side') and not q.get('query_only')
                     and not copresent([r], measured[owner]) and guard.allows(r,seeds[owner],owner)):
@@ -128,21 +137,33 @@ def recover(rows, decisions, seeds, settings, scores, guard):
     # Keep training routes independent by shot, face roots, pixels and cue.
     banks = {}
     for key, tracks in looks.items():
-        kept, roots, shots = [], set(), []
-        for start, end, row in tracks:
-            signature = geometry[start][2]
-            if start in roots or end in roots or any(np.abs(signature-s).mean() < 12 for s in shots):
+        from .person_anchor import pixels
+        def witness_rank(track):
+            row = track[2]
+            assessed = geometry[row['id']][0]
+            return (-assessed.get('overlap', 0.), assessed.get('keypoints', 0),
+                    assessed.get('sharpness', 0.), pixels(row['quality']) or 0, row['id'])
+        kept, roots, shots = [], set(), set()
+        for start, end, row in sorted(tracks, key=witness_rank, reverse=True):
+            shot = shot_ids[row['cue']]
+            if start in roots or end in roots or shot in shots:
                 continue
-            if kept and scores.compare([row], [r for _,_,r in kept])[1] < settings['cohesion_threshold']:
+            if any(scores.face_similarity(row['_vector'], other['_vector']) < settings['cohesion_threshold']
+                   for _, _, other in kept):
                 continue
             kept.append((start,end,row))
             roots.update((start,end))
-            shots.append(signature)
+            shots.add(shot)
             if len(kept) >= max(8,settings['attach_min_support']):
                 break
+        kept.sort(key=lambda item: item[2]['cue'])
         witnesses = [r for _,_,r in kept]
         if len(kept)>=2 and len(independent(witnesses, settings)) >= max(2,settings['attach_min_support']):
-            banks[key] = (witnesses, [(start,end,r['id']) for start,end,r in kept])
+            proof = [(start,end,r['id']) for start,end,r in kept]
+            banks[key] = witnesses, proof
+            for start,end,witness in proof:
+                decisions[witness]['rooted_view'] = dict(owner=key[0], perspective=key[1],
+                                                         roots=[start,end], tracks=proof)
 
     if not banks:
         return
@@ -161,7 +182,16 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         for (owner, perspective), (bank, proof) in banks.items():
             if perspective != kind or copresent([row],owner_rows[owner]) or not guard.allows(row,bank,owner):
                 continue
-            mean, low = scores.compare([row],bank)
+            # A rooted track has its own temporal proof, but cannot vote for
+            # its own appearance. Exact source pixels never add a second vote.
+            pixel = geometry[row['id']][0].get('pixel_digest')
+            external = [(w, track) for w, track in zip(bank, proof)
+                        if track[:2] != source_paths.get(row['id'])
+                        and not (pixel and pixel == geometry[w['id']][0].get('pixel_digest'))]
+            if not external:
+                continue
+            comparisons = [scores.face_similarity(row['_vector'], w['_vector']) for w, _ in external]
+            mean, low = sum(comparisons)/len(comparisons), min(comparisons)
             if mean < settings['match_threshold'] or low < settings['cohesion_threshold']:
                 continue
             # Every foreign owner including provisional scene groups competes.
@@ -170,7 +200,7 @@ def recover(rows, decisions, seeds, settings, scores, guard):
                           and guard.allows(row,others)),default=-1.)
             rivals = [scores.compare([row], other)[0] for (p,_), (other,_) in banks.items() if p!=owner]
             if mean-max([runner,*rivals]) >= margin:
-                candidates.append((row['id'],owner,perspective,proof,mean))
+                candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
     proposed = {oid: owner for oid, owner, *_ in candidates}
     # An established body fragment moves as a unit or remains available as a rival.
     protected = {p for p, members in owner_rows.items()
@@ -180,6 +210,9 @@ def recover(rows, decisions, seeds, settings, scores, guard):
     for oid,owner,angle,proof,score in candidates:
         if decisions[oid]['person'] in protected:
             continue
+        rooted = decisions[oid].get('rooted_view')
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',
                               reason='face_rooted_body_view', perspective=angle,
                               source_tracks=proof, score=score)
+        if rooted is not None:
+            decisions[oid]['rooted_view'] = rooted

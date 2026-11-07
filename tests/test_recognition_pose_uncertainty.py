@@ -82,3 +82,10 @@ def test_external_root_is_inserted_and_recovered_queries_never_train(tmp_path):
         history=capture(db.connection,[],config,scope,namespace,'test')
         assert all(not ids.intersection(v.support) for v in history.views)
         assert all(not ids.intersection(g.sample_ids) for g in history.groups)
+
+
+@pytest.mark.parametrize('offset,side,opposite', [(-.11,'left','right'),(.11,'right','left')])
+def test_neutral_boundary_preserves_yaw_direction(offset,side,opposite):
+    g = [16,16,128,128,49,60,111,60,80+62*offset,84,56,108,104,108,.99]
+    assert pose_matches(g, 'neutral') and pose_matches(g, side)
+    assert not pose_matches(g, opposite)

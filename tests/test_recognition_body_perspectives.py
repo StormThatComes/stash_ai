@@ -20,7 +20,8 @@ def test_rear_requires_anatomical_torso_and_no_conflicting_head():
 
 
 @pytest.mark.parametrize('second_shot,expected', [(15, 'provisional'), (180, 'accepted')])
-def test_views_require_two_disjoint_confirmations_and_preserve_sources(second_shot,expected):
+@pytest.mark.parametrize('self_only', [False, True])
+def test_views_require_two_disjoint_confirmations_and_preserve_sources(second_shot,expected,self_only):
     from stash_ai.recognition.body_identity import defaults
     settings = dict(defaults(), min_appearance_distance=0)
     scores = Scores(SimpleNamespace(data={'sapiensid':{'execution':{
@@ -31,16 +32,24 @@ def test_views_require_two_disjoint_confirmations_and_preserve_sources(second_sh
                                  (10,80,False)]:
         oid = str(cue)
         q = dict(pixel_digest=oid, keypoints=10, sharpness=100, orientation='front' if face else 'back',
-                 frame_signature=(bytes([brightness])*48).hex())
+                 frame_signature=(bytes([brightness,15,15])*16).hex())
         row = dict(id=oid,scan='s',cue=cue,seconds=float(cue),quality=json.dumps({'quality':q}),
                    geometry='{"bounds":[0,0,80,100]}',face_person='A' if face else None,
                    _vector=np.array([1.,0.],dtype='float32'),_face_vector=None)
+        if self_only:
+            angle = np.deg2rad(17 if face else 34 if cue==6 else 0)
+            row['_vector'] = np.asarray([np.cos(angle),np.sin(angle)],dtype='float32')
         rows.append(row)
         if face:
             seeds['A'].append(row)
         decisions[oid] = dict(person='A' if face else 'B', status='accepted' if face else 'provisional',
                               reason='measured_face_association' if face else 'body_scene_core')
     recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *a:True))
+    if self_only:
+        # Two shots agree at .829. Including oneself would inflate both to .915.
+        assert decisions['1'].get('reason') != 'face_rooted_body_view'
+        assert decisions['6'].get('reason') != 'face_rooted_body_view'
+        return
     assert decisions['10']['status'] == expected
     if expected=='accepted':
         assert decisions['10']['person']=='A' and decisions['10']['role']=='auxiliary'
@@ -56,3 +65,14 @@ def test_representative_limit_covers_supported_rear_appearance():
     selected = diverse_references(rows,4)
     assert len(selected)==4
     assert {json.loads(rows[int(r['id'])]['quality'])['quality']['orientation'] for r in selected}=={'front','back'}
+
+
+def test_predicted_hidden_eyes_do_not_veto_rear_torso():
+    points = [[-1,-1] for _ in range(17)]
+    for i, value in {1:(32,8),2:(60,8),5:(30,20),6:(65,20),11:(36,80),12:(61,80)}.items():
+        points[i] = value
+    visibility = [1.]*17
+    visibility[1] = visibility[2] = .1
+    assert orientation(dict(keypoints=points, keypoint_visibility=visibility)) == 'back'
+    visibility[6] = .1
+    assert orientation(dict(keypoints=points, keypoint_visibility=visibility)) == 'unknown'

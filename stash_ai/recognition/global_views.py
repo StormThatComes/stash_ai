@@ -75,7 +75,7 @@ def _catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_sce
         if owner is None:
             return
         maximum=grouping['max_view_prototypes_per_person']
-        for slot in supported_cohorts(slots,cover,minimum or grouping['view_min_support'],maximum,complete=complete):
+        for slot in supported_cohorts(slots,cover,minimum or grouping['view_min_support'],maximum,complete=complete,cohesion=grouping['view_cohesion_threshold']):
             sample, medoid = slot.medoid()
             from .paged_references import pack
             examples=pack(slot.examples)

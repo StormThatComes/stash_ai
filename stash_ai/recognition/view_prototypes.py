@@ -54,7 +54,7 @@ def pose_matches(geometry, pose, *, neutral=.12, uncertainty=.02):
         return True
     signed=_signed_pose(geometry)
     return bool(signed is not None and abs(abs(signed)-neutral)<=uncertainty and
-                (hint=='neutral' or pose=='neutral') and pose != 'unknown')
+                (pose=='neutral' or hint=='neutral' and pose==('left' if signed<0 else 'right')))
 
 
 def query_pose_matches(geometry, pose, *, relaxed=False):
@@ -221,24 +221,44 @@ class ViewPrototype:
         return self.pose + ':' + self.medoid
 
 
-def prioritized(slots,maximum):
+def prioritized(slots,maximum,cohesion=.8):
     """Frequent first, then appearance diversity; reserve cohorts remain usable."""
     import numpy as np
     remaining=sorted(slots,key=lambda s:(-len(s.cues),s.pose,s.first))
     chosen=[]
+    # Bounded exemplars serve as held-out queries. Never credit a view for
+    # retrieving its own pixels or timestamp, even in overlapping cohorts.
+    features = {}
+    for slot in remaining:
+        ids = set(slot.observations)
+        stamps = {oid:stamp for stamp,(oid,_) in slot.cue_times.items() if oid in ids}
+        pixels = {oid:unit for unit,(oid,_) in slot.cue_representatives.items() if oid in ids}
+        examples = [(v, stamps[oid], pixels[oid]) for oid,v in zip(slot.observations,slot.examples)
+                    if oid in stamps and oid in pixels]
+        features[id(slot)] = examples
+    covered = set()
+    def independent_hits(slot):
+        examples = features[id(slot)]
+        return {pixel for value,stamp,pixel in examples
+                if any(other_stamp != stamp and other_pixel != pixel and float(np.dot(value,other)) >= cohesion
+                       for other,other_stamp,other_pixel in examples)}
+    hits = {id(slot):independent_hits(slot) for slot in remaining}
     while remaining and len(chosen)<maximum:
-        # Remove by position: broad/narrow cohorts may share pose/first while
-        # containing different NumPy vectors, which cannot be compared by ==.
         def priority(index):
             slot=remaining[index]
-            known = slot.pose in ('left', 'right', 'neutral')
-            new_perspective = known and all(slot.pose != c.pose for c in chosen)
-            distance = 1.-max(float(np.dot(slot.medoid()[0], c.medoid()[0])) for c in chosen)
-            covered = {oid for c in chosen for oid in c.observations}
-            new_witnesses = sum(oid not in covered for oid in slot.observations)
-            return (new_perspective and new_witnesses > 0, distance, new_witnesses, len(slot.cues), slot.first)
-        winner=0 if not chosen else max(range(len(remaining)),key=priority)
-        chosen.append(remaining.pop(winner))
+            gain = len(hits[id(slot)] - covered)
+            different = slot.pose in ('left','right','neutral') and all(slot.pose!=item.pose for item in chosen)
+            distance = 1-max((float(np.dot(slot.medoid()[0], item.medoid()[0])) for item in chosen),default=1.)
+            return (bool(gain),different and bool(gain),gain,distance,len(slot.cues),slot.first)
+        winner = 0 if not chosen else max(range(len(remaining)), key=priority)
+        selected = remaining.pop(winner)
+        chosen.append(selected)
+        # Mark also the exemplars of other candidates retrievable by this view.
+        for slot in remaining:
+            for value,stamp,pixel in features[id(slot)]:
+                if any(stamp!=s and pixel!=p and float(np.dot(value,v)) >= cohesion
+                       for v,s,p in features[id(selected)]):
+                    covered.add(pixel)
     return chosen+remaining
 
 
@@ -277,14 +297,14 @@ def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8):
     return (len(slot.examples)-before)*sample.nbytes
 
 
-def supported_cohorts(slots,cover,minimum,maximum,*,complete):
+def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8):
     # Narrow cohorts need their own independent support. A singleton endpoint
     # cannot borrow the broad cohort's votes to become a new reference centre.
     eligible={}
     for slot in list(cover)+list(slots):
         if len(slot.cues)>=minimum:
             eligible.setdefault(slot.medoid()[1],slot)
-    ordered=prioritized(list(eligible.values()),maximum)
+    ordered=prioritized(list(eligible.values()),maximum,cohesion)
     return ordered if complete else ordered[:maximum]
 
 
@@ -316,7 +336,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
         nonlocal used
         if owner is None:
             return
-        for slot in supported_cohorts(slots,cover,minimum,maximum,complete=complete):
+        for slot in supported_cohorts(slots,cover,minimum,maximum,complete=complete,cohesion=cohesion):
             sample, identifier = slot.medoid()
             if used + sample.nbytes > remaining_bytes:
                 raise ResourceLimit('Confirmed view prototypes exceed clustering.max_reference_bytes; '
