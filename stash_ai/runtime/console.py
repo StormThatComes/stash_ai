@@ -81,6 +81,7 @@ class ConsolePresenter:
         self.degraded = False
         self.status_layout = None
         self.heartbeat_layout = None
+        self.live_fields = None
         self.heartbeat_on_progress = False
 
     def start(self):
@@ -279,6 +280,11 @@ class ConsolePresenter:
         for key, label in (('_backoff_until', 'backoff remaining'), ('_deadline', 'deadline remaining')):
             if key in row['values']:
                 fields[label] = f"{max(0., float(row['values'][key])-time.monotonic()):.1f}s"
+        if self.live_fields is not None:
+            try:
+                fields.update(self.live_fields())
+            except Exception:
+                self.count('resource_sample_failures')
         values = ' | '.join(f'{k}={v}' for k, v in fields.items())
         age = 'none yet' if row['last_progress_age'] is None else f"{row['last_progress_age']:.1f}s ago"
         line = (f"Status: {row['phase']} elapsed={row['elapsed']:.1f}s "

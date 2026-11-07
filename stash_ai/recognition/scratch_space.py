@@ -20,6 +20,7 @@ _BLOCK=4*1024**2
 class Budget:
     def __init__(self,limit,directory):
         self.limit,self.directory=limit,directory
+        self.free = None
         self.leases={};self.writes={};self.used=0;self.peak=0
     def set(self,owner,size):
         total=self.used-self.leases.get(owner,0)+size
@@ -30,8 +31,9 @@ class Budget:
         if growth:
             from .disk_budget import check
             check(growth,self.directory)
-        if growth and shutil.disk_usage(self.directory).free<growth:
-            raise ResourceLimit('Insufficient free space in recognition scratch directory.')
+            self.free = shutil.disk_usage(self.directory).free
+            if self.free < growth:
+                raise ResourceLimit('Insufficient free space in recognition scratch directory.')
         self.used=total;self.peak=max(self.peak,total)
         if size:self.leases[owner]=size
         else:self.leases.pop(owner,None)
@@ -52,7 +54,9 @@ def scope(config):
         token=_active.set(budget)
         from .disk_budget import temporary
         try:
-            with temporary(path):yield budget
+            from .live_resources import scratch_usage
+            with temporary(path), scratch_usage(budget):
+                yield budget
         finally:
             from .profiling import count
             count('scratch_reserved_peak_bytes',budget.peak)

@@ -16,6 +16,7 @@ class RunDisplay:
         self.rejections = {key: Counter() for key in ('face', 'body', 'person_evidence_unavailable')}
         self.references = {}
         self.rebuild = {}
+        self.gpu = None
         self.debt = None
         self.selected = 0
         self.retention = 'skipped'
@@ -44,6 +45,11 @@ class RunDisplay:
         if self.references:
             r = self.references
             parts.append(f'face references={usage_line(r)} samples={r["samples"]} stage={r["stage"]}')
+        if self.gpu is not None and self.gpu.peaks:
+            from .live_resources import gib
+            peak = self.gpu.peaks
+            parts.append(f'VRAM sampled peak: process {gib(peak.get("process_bytes"))}, '
+                         f'torch reserved {gib(peak.get("reserved_bytes"))}')
         if self.interrupted_cursor is not None:
             scene, cursor = self.interrupted_cursor
             parts.append(f'resume scene={scene} committed_cues={cursor}')

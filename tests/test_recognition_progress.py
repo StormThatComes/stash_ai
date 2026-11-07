@@ -80,8 +80,8 @@ def test_terminal_has_scene_frame_publication_and_performer_bars_with_one_owner(
     # All other ordinary log lines remain suppressed in compact terminal mode.
     assert all(line.startswith(('Recognition success:', 'VRAM ')) for line in lines)
     if log_vram:
-        assert lines[0].startswith('VRAM vtt before:')
-        assert lines[-2].startswith('VRAM final after_release:')
+        assert len(lines) == 2
+        assert lines[0] == 'VRAM measurement unavailable for this process.'
         assert lines[-1].startswith('Recognition success:')
     else:
         assert len(lines) == 1 and lines[0].startswith('Recognition success:')

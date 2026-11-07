@@ -114,7 +114,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     def checkpoint():
         nonlocal pending_bytes
         supplemental=collector.take_records() if grouped else []
-        with db:
+        from stash_ai.runtime.console import current_report, activity
+        with activity(current_report(), 'save VTT checkpoint', wait='SQLite write'), db:
             from .pixel_storage import compact
             from .cold_payloads import put,available
             cold=available(db)

@@ -36,7 +36,7 @@ bar and a second bar for VTT frames in the active scene, with elapsed time,
 throughput and estimated remaining time. Publication has its own scene bar;
 names and portraits have a performer bar. ETAs describe the current stage,
 not the whole invocation, and remain unavailable until work has completed.
-The frame bar starts at the saved checkpoint cursor; cached scenes show all
+The scene bar counts fresh, resumed and reused scans separately. It omits a blended ETA for different kinds of work. The frame bar starts at the saved checkpoint cursor; cached scenes show all
 frames reused without treating them as newly inferred work. Frame progress
 updates independently of the configured SQLite checkpoint interval.
 
@@ -65,6 +65,12 @@ summary, including aggregate rejection reasons and reference usage. Repeated
 scan/publication errors are grouped; failed scenes still count as inspected
 work and are reported separately from successful scans and reused evidence.
 
+Compact progress shows process CPU in cores, current RSS and disk figures. The run displays the last
+per-volume budget snapshot (charged files, outstanding reservations and free space). When no budget
+snapshot exists, the disk line names the source SQLite files and their volume. Refreshing the display
+does not enumerate the cache. A current wait label identifies VTT prefetch, SQLite checkpoint writes,
+ordered CPU work or HTTP backoff.
+
 ## Recognition GPU memory
 
 ```yaml
@@ -92,7 +98,7 @@ keeps face/visibility models through rebuild for the legacy scan/portrait reuse
 behavior; person models still close after VTT. All modes reclaim unused cache at
 run exit, including failures, after workers relinquish their resources.
 
-`log_vram` writes phase snapshots and bounded `gpu_memory` run history. PyTorch
+`log_vram` shows the latest phase measurement and sampled maximum on one terminal row. A missing measurement is reported once in compact output. Verbose output includes boundary samples. The option writes phase snapshots and bounded `gpu_memory` run history. PyTorch
 `allocated` measures live tensors; `reserved` includes its reusable cache. If
 `nvidia-smi` is available, `process` sums this PID's compute-process usage across
 NVIDIA GPUs, including ONNX allocations. Missing/unsupported values (including

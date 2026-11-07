@@ -164,9 +164,13 @@ def _execute(args, config, *, services, display):
     from .disk_budget import scope as disk_scope
     from .inference_cache import scope as inference_scope
     from .resident_models import scope as model_scope
-    with disk_scope(config), inference_scope(config), model_scope(config), sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
+    with disk_scope(config) as disk_budget, inference_scope(config), model_scope(config), sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
-        with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
+        from .live_resources import ConsoleResources, monitor
+        resources = ConsoleResources(config, budget=disk_budget) if args.progress_style != 'off' else None
+        with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2), monitor(resources.meter if resources else None):
+            if resources is not None:
+                report.console.live_fields = resources.fields
             client.report = report
             ui = RunProgress(report, portraits=portraits_only, metadata=bool(services.metadata))
             with ui.phase('Recognition selection'):
@@ -206,6 +210,9 @@ def _execute(args, config, *, services, display):
             inputs = None
             from .gpu_memory import GpuMemory
             gpu = GpuMemory(config, report, database, run)
+            display.gpu = gpu
+            if resources is not None:
+                resources.gpu = gpu
             model_policy = config.data['execution']['gpu_model_policy']
             sequential = model_policy == 'sequential' and config.data['sapiensid']['enabled']
             try:
@@ -242,7 +249,7 @@ def _execute(args, config, *, services, display):
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
-                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered), estimate=False) as scenes:
                         from .scene_batches import Batches
                         batch_size=config.data['execution']['sequential_scene_batch_size'] if sequential else 1
                         def release_faces():
@@ -326,7 +333,8 @@ def _execute(args, config, *, services, display):
                                             ('close person models', person_collector.close),
                                             ('unload face models', backend.unload),
                                             ('unload face visibility', visibility.close)], scene=identifier))], report=report)
-                                scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
+                                scenes.advance(fresh=display.scans['fresh'], resumed=display.scans['resumed'],
+                                               reused=display.scans['reused'], failed=counts['scenes_failed'])
                                 if pass_kind!='body':inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                                 database.progress(run, 'run', dict(counts))
                     inputs.close()

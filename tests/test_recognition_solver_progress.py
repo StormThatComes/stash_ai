@@ -63,6 +63,7 @@ def test_full_transport_retries_latest_snapshot_without_changing_work_time():
     name, snapshot = queue.get_nowait()
     assert name == 'trial-1'
     assert snapshot.pop('reported') >= initial['started']
+    assert {'rss', 'cores'} <= snapshot.pop('resources').keys()
     assert snapshot == latest
     live.publish()
     assert queue.get_nowait()[1]['updated'] == latest['updated']

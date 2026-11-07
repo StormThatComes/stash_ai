@@ -145,6 +145,11 @@ also prints parameter changes, group details, worker timestamps and PID. Use `--
 to disable progress. Numeric durations on work rows describe observed work. An old completion
 time during a live heartbeat can indicate blocking native or SQLite work.
 
+Worker rows include current process RSS, measured CPU in cores and the planned per-trial
+memory budget. The coordinator has its own process row. RSS includes shared pages and planned
+memory is an admission figure. Scratch leases report reserved bytes on the scratch volume.
+Replay uses retained observations and does not initialize GPU models to collect telemetry.
+
 Preparation, prediction collection and solver feedback are named stages too.
 Worker snapshots use a bounded, nonblocking channel and are retried once a second;
 slow output cannot create an unbounded telemetry backlog. Only the coordinator

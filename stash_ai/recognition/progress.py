@@ -112,10 +112,11 @@ def status_lines(row, fields, width, *, verbose=False):
         age = row['last_progress_age']
         lines.append(f"Time: total {clock(row.get('total_elapsed', row['elapsed']))} · phase {clock(row['elapsed'])}"
                      + (f' · last completed {clock(age)} ago' if age is not None else ''))
-        reasons = ('cpu_workers', 'cpu_wait', 'backoff remaining', 'deadline remaining')
+        reasons = ('cpu_workers', 'wait', 'cpu_wait', 'backoff remaining', 'deadline remaining')
         info = ' · '.join(f'{key}={fields[key]}' for key in reasons if fields.get(key))
         if info:
             lines.append(info)
+        lines.extend(f'{key.upper()}: {fields[key]}' for key in ('process', 'vram', 'disk', 'scratch') if fields.get(key))
         return compact(lines, width)
     return layout(row, fields, width)
 
@@ -135,7 +136,7 @@ def heartbeat_line(row, fields, *, verbose=False):
                 if fields.get(key + suffix):
                     text += f" {label}={fields[key + suffix]}"
             parts.append(text)
-    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'backoff remaining', 'deadline remaining'):
+    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'wait', 'process', 'vram', 'disk', 'scratch', 'backoff remaining', 'deadline remaining'):
         if fields.get(key):
             parts.append(f'{key}={fields[key]}')
     if verbose and fields.get('references'):
@@ -183,14 +184,14 @@ def _stage(label, **values):
 
 class WorkProgress:
     """Throttle UI updates independently of inference and SQLite checkpoints."""
-    def __init__(self, report, label, total, *, unit='scene', key='scenes', initial=0, transient=False, position=None):
+    def __init__(self, report, label, total, *, unit='scene', key='scenes', initial=0, transient=False, position=None, estimate=True):
         self.report, self.label, self.total = report, label, total
         self.unit, self.key, self.initial = unit, key, initial
         self.n = self.rendered = initial
         self.transient, self.bar = transient, None
         self.position = (1 if transient else 0) if position is None else position
         self.started = self.last_render = time.monotonic()
-        self.window = WindowRate(self.started, initial)
+        self.window = WindowRate(self.started, initial) if estimate else None
         self.postfix = {}
         self.observer = _update_observer.get()
         self.last_observed = self.started
@@ -239,19 +240,19 @@ class WorkProgress:
             return
         if not force and now - self.last_render < .25:
             return
-        rate = self.window.sample(now, self.n)
+        rate = self.window.sample(now, self.n) if self.window is not None else None
         eta = ('unknown' if self.total is None else '00:00' if self.n == self.total else
                tqdm.format_interval((self.total - self.n) / rate) if rate else 'warming up')
         delta = self.n - self.rendered
         status(self.report, completed=delta, **{
-            self.key: f'{self.n}/{self.total if self.total is not None else "?"}', self.key + '_eta': eta,
-            self.key + '_rate': f'{rate:.2f} {self.unit}/s' if rate else 'warming up',
+            self.key: f'{self.n}/{self.total if self.total is not None else "?"}', self.key + '_eta': eta if self.window is not None else None,
+            self.key + '_rate': f'{rate:.2f} {self.unit}/s' if rate else ('warming up' if self.window else None),
             self.key + '_label': self.label,
             self.key + '_counts': ', '.join(f'{k}={v}' for k, v in self.postfix.items()) or None,
         })
         if self.bar is not None:
             if self.enabled and getattr(self.report.console, 'tty', False):
-                estimates = dict(rate='warming up')
+                estimates = dict(rate='warming up') if self.window else {}
                 if rate:
                     estimates['rate'] = f'{rate:.1f} {self.unit}/s'
                     if self.total is not None:
@@ -350,7 +351,7 @@ def frame_progress(report, scene, on_start=None):
         nonlocal work
         if work is None:
             work = WorkProgress(report, f'VTT scene {scene}', total, unit='frame', key='frames',
-                                initial=completed, transient=True)
+                                initial=completed, transient=True, estimate=not reused)
             work.__enter__()
             mode = 'reused' if reused else 'resumed' if completed else 'fresh'
             if on_start is not None:

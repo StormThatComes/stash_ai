@@ -180,7 +180,9 @@ class ScenePrefetch:
         if self.pending is None or self.identifier != identifier:
             raise RuntimeError('Recognition scene prefetch order changed.')
         try:
-            result = self.pending.result()
+            from stash_ai.runtime.console import activity
+            with activity(self.report, 'wait for VTT input', scene=identifier, wait='VTT input'):
+                result = self.pending.result()
         except Exception:
             self.queued.pop(identifier)
             raise
