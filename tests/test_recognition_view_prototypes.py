@@ -287,13 +287,8 @@ def test_repeated_shot_cannot_outvote_a_view_confirmed_in_two_shots():
 def test_single_shot_auxiliary_view_remains_local(tmp_path):
     config = multiview(tmp_path)
     with FaceDatabase(config.database) as db:
-        from tests.test_recognition_clustering import scan
-        selected = []
-        for scene, values, profiles in [('1',[FRONT]*3+[SEED]*3,range(3,6)),('2',[LATER]*2,range(2))]:
-            sid,_ = scan(db,config,scene,values,count=len(values))
-            for cue in profiles:
-                db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.pose_deviation',0.8) WHERE scan=? AND cue=?", (sid,cue))
-            selected.append(dict(scan=sid,scene=scene))
+        selected = run_example(db,config)
+        assert all(row['status']=='accepted' for row in policy_membership(db,config,selected[1]['scan']))
         db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.view_shot',0) WHERE scan=?",
                               (selected[0]['scan'],))
         db.connection.commit()

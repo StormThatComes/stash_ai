@@ -219,3 +219,30 @@ def test_two_separately_rooted_scenes_build_one_external_view(tmp_path):
         rebuild(state,selected,config,{s['scan']:[] for s in selected})
         rows = db.execute('SELECT person,proof FROM body_members WHERE observation IN (?,?,?)',ids).fetchall()
         assert all(person=='A' and len(json.loads(proof)['source_scans'])==2 for person,proof in rows)
+
+
+def test_pending_scan_only_wakes_when_a_reachable_gallery_or_recorded_rival_changes(tmp_path):
+    from types import SimpleNamespace
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.rear_gallery import Gallery
+    from stash_ai.recognition.rear_pending import Pending
+    config=configured(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        item,ids=scene(db,config)
+        stamp=policy(config)
+        for oid in ids:
+            db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(oid,None,'auxiliary','withheld',stamp,'{}'))
+        search=SimpleNamespace(bank={},mean_versions={})
+        axis=np.zeros(4096);axis[0]=1.
+        def gallery(far):
+            def bank(owner,value):
+                return owner,'source', [dict(id=owner,roots=['start','end'],quality='{}',_vector=value)]
+            return Gallery([bank('near',axis),bank('far',far)])
+        def run(far):
+            pending=Pending(db,gallery(far),search,config.data['sapiensid']['identities'])
+            return [s for s,_ in pending.candidates('scope','ns',set(),stamp)]
+        assert run(-axis)==[item['scan']]
+        assert run(-axis)==[]
+        assert run(np.roll(axis,1))==[]
+        assert run(axis)==[item['scan']]

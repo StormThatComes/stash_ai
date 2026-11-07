@@ -192,11 +192,12 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery):
     references = banks(db,config,scope,namespace)
     if any(b['stale_policy'] or b['missing_original'] for b in references.values()):
         return
-    from .rear_pending import matching_scans
+    from .rear_pending import Pending
     from .rear_gallery import revision
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
-        scans.update(matching_scans(db,scope,namespace,scans,stamp,gallery,search,
-                                    config.data['sapiensid']['identities']))
-        for scan in sorted(scans):
+        pending = Pending(db,gallery,search,config.data['sapiensid']['identities'])
+        selected = set(scans)
+        for scan,scene in pending.candidates(scope,namespace,selected,stamp):
             _scene(db,scan,stamp,gallery,search,config)
+            scans[scan] = scene
