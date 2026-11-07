@@ -527,14 +527,14 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .replay_input_cache import InputCache
         inputs=InputCache(database,selected,config,scope,namespace)
         partitioned=len(selected)>1
-        if partitioned or not inputs.restore(replay):
+        if not inputs.restore(replay):
             _copy_selection(database, replay, selected, scope, namespace,
                             retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False,
                             inputs=inputs if partitioned else None)
             from .evidence_pixels import canonicalize
             canonicalize(replay)
             replay.commit()
-            if not partitioned:inputs.save(replay)
+            # Keep the direct restore path for a cold selection and repair damaged\n            # images. Appends reuse shards without rewriting every old scene.\n            if inputs.reused==0 or inputs.replace_invalid:inputs.save(replay)
         _copy_bindings(database,replay,selected,scope,namespace)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')

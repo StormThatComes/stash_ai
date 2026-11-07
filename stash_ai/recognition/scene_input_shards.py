@@ -60,7 +60,7 @@ class Shards:
         except (ValueError,TypeError,sqlite3.DatabaseError):
             replay.execute('ROLLBACK TO shard_import');replay.execute('RELEASE shard_import')
             count('input_shard_rejections');return False
-        replay.execute('RELEASE shard_import');count('input_shard_restores');return True
+        replay.execute('RELEASE shard_import');self.cache.reused+=1\n        count('input_shard_restores');return True
 
     def admit(self,replay,scan):
         from .disk_budget import reserve_file
