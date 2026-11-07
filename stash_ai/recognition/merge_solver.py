@@ -247,6 +247,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     baseline_outsiders = None
     robustness = {}
     restored_count = 0
+    restored_name = None
     written_winner = None
     probe_state = None
     def changes_for(name):
@@ -563,8 +564,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 trials += 1
                 previous_name, previous_changes = name, changes
     def restore(name,settings):
-        nonlocal baseline,baseline_outsiders,best,best_rank,restored_count
+        nonlocal baseline,baseline_outsiders,best,best_rank,restored_count,restored_name
         if journal is None or name not in journal.records:return None
+        restored_name = name
         record=journal.get(name)
         if record['configuration']!=digest(settings.data):
             raise ValueError('Checkpoint search reconstruction diverged; completed trials were not reused.')
@@ -607,9 +609,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         elif winner_text is not None:winner_writer.write(winner_text)
         if winner_text is not None:written_winner=best
     last_stage_progress = 0.
+    reported_best = None
+    winner_state = {}
     def trial_progress(name, stage, item):
         nonlocal probe_state
-        nonlocal last_stage_progress
+        nonlocal last_stage_progress, reported_best, winner_state
         if stage.startswith('stage: '):
             import time
             now = time.monotonic()
@@ -628,7 +632,23 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
                         **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         try:
-            if progress:progress(name, stage, item)
+            if progress:
+                event = item
+                if getattr(progress, 'show_winner', False) and stage in ('complete', 'failed'):
+                    event = dict(item, restored_result=name == restored_name or item.get('recovered_evaluation', False))
+                    if stage == 'complete' and best != reported_best:
+                        reported_best = best
+                        winner = summaries[best]
+                        groups = winner['groups']
+                        merged = sum(g.get('identity_fully_merged', g['fully_merged']) for g in groups)
+                        winner_state = dict(
+                            sets=f'{merged}/{len(groups)}', solved=winner['fully_solved'], disjoint=winner['disjoint'],
+                            outsiders=sum(g.get('outsider_observations', 0) for g in groups),
+                            assigned=sum(g.get('assigned', 0) for g in groups),
+                            strength=tuple(round(x, 4) for x in tightening.score(changes_for(best))))
+                    if stage == 'complete':
+                        event.update(best_trial=best, winner_state=winner_state)
+                progress(name, stage, event)
         finally:
             if compact_report and stage == 'complete':
                 trim_completed(name, item, config, changes_for(name), locations)

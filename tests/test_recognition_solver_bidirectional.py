@@ -196,7 +196,7 @@ def test_lane_stops_at_its_budget_and_single_sets_can_explore(tmp_path):
     assert single.enabled and single.next(2, feedback) is not None
 
 
-@pytest.mark.parametrize('style', ['auto', 'off'])
+@pytest.mark.parametrize('style', ['verbose', 'off'])
 def test_cli_explains_permissive_trial_and_keeps_json_clean(tmp_path, monkeypatch, capsys, style):
     from stash_ai.recognition.cli import main
     from tests.test_recognition_merge_trial_progress import arguments

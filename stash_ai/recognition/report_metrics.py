@@ -13,6 +13,10 @@ from .console_layout import time_line
 _active = ContextVar('recognition_report_metrics', default=None)
 
 
+def current_console():
+    return _active.get().console
+
+
 def command(function):
     @wraps(function)
     def wrapped(args, config):

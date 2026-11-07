@@ -7,7 +7,7 @@ class ReplayInputError(ValueError):
         super().__init__('Replay input validation failed before baseline.\n' + describe(diagnostics))
 
 
-def describe(diagnostics):
+def describe(diagnostics, *, max_scenes=None):
     excluded = diagnostics['excluded_scans']
     if not excluded:
         return 'All latest retained scans are compatible and complete.'
@@ -19,7 +19,10 @@ def describe(diagnostics):
     for reason in ('scan_policy_mismatch', 'incomplete_scan'):
         scenes = [s['scene'] for s in excluded if reason in s['reasons']]
         if scenes:
-            lines.append(reason + ': scenes=' + ','.join(scenes) + '.')
+            shown = scenes[:max_scenes]
+            omitted = len(scenes) - len(shown)
+            suffix = f' (+{omitted} more)' if omitted else ''
+            lines.append(reason + ': scenes=' + ','.join(shown) + suffix + '.')
     if any('scan_policy_mismatch' in s['reasons'] for s in excluded):
         lines.append('Scan policy covers detection settings, execution.max_cues and visibility measurements; '
                      'sapiensid.matching.* changes alone do not require a rescan. '

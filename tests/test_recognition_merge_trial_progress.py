@@ -32,7 +32,7 @@ def scripted_search(monkeypatch):
     monkeypatch.setattr(Tightener, 'next', next_tightening)
 
 
-def arguments(config, goals, tmp_path, style='auto'):
+def arguments(config, goals, tmp_path, style='verbose'):
     config.source_path.write_text(yaml.safe_dump(plain(config.data)))
     argv = ['report-merge','--face-config',str(config.source_path),'--faces-db',str(config.database),
             '--solve','--targeted-trials','0','--feasibility-trials','0','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
@@ -41,7 +41,7 @@ def arguments(config, goals, tmp_path, style='auto'):
     return argv
 
 
-@pytest.mark.parametrize('style', ['auto', 'off'])
+@pytest.mark.parametrize('style', ['verbose', 'off'])
 def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tmp_path, monkeypatch, capsys, style):
     from stash_ai.recognition.cli import main
     config, goals = auxiliary_goals(tmp_path, sets=2)

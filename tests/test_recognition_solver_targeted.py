@@ -204,7 +204,7 @@ def test_targeted_budget_respects_total_and_opt_out(tmp_path,maximum):
     if maximum>1:assert disabled['simulation']['trials']['trial-1']['search_phase']=='feasibility'
 
 
-@pytest.mark.parametrize('style',['auto','off'])
+@pytest.mark.parametrize('style',['verbose','off'])
 def test_cli_logs_target_and_preserves_json(tmp_path,capsys,style):
     from stash_ai.recognition.cli import main,parser
     c,_=seeded(tmp_path)

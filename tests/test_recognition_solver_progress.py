@@ -189,7 +189,7 @@ def test_disabled_telemetry_creates_no_transport(tmp_path):
         pool.harvest()
 
 
-@pytest.mark.parametrize('style', ['auto', 'off'])
+@pytest.mark.parametrize('style', ['verbose', 'off'])
 def test_parallel_cli_keeps_json_clean_and_reports_ready_and_completion(tmp_path, capsys, style):
     import json
     from benchmarks.benchmark_merge_solver import fixture
@@ -218,3 +218,47 @@ def test_parallel_cli_keeps_json_clean_and_reports_ready_and_completion(tmp_path
         assert 'trial-1: complete disjoint=' in captured.err
         assert 'completed=3/3' in captured.err
         assert 'running/queued=' not in captured.err
+
+
+def test_compact_four_slot_cli_and_resume_separate_restored_work(tmp_path, capsys, monkeypatch):
+    import json
+    from benchmarks.benchmark_merge_solver import fixture
+    from stash_ai.recognition.cli import main
+    from tests.test_recognition_solver_yaml_diff import arguments
+    # Admission is deterministic even on a CI runner with fewer visible cores.
+    monkeypatch.setattr('stash_ai.recognition.solver_execution.os.cpu_count', lambda: 4)
+    monkeypatch.setattr(os, 'process_cpu_count', lambda: 4, raising=False)
+    config, goals = fixture(tmp_path/'inputs', 'query')
+    checkpoint = tmp_path/'trials.json'
+    argv = arguments(config, goals, checkpoint, maximum=6)
+    argv[argv.index('--yaml-output')] = '--checkpoint'
+    argv[argv.index('off')] = 'compact'
+    argv += ['--solver-cpus', '4', '--solver-trials', '4', '--solver-memory-gib', '32']
+    assert main(argv) == 0
+    first = capsys.readouterr()
+    report = json.loads(first.out)
+    attempts = report['search']['attempted']
+    assert report['search']['execution']['trials'] == 4 and attempts >= 2
+    assert 'restored 0' in first.err and 'merged sets' in first.err
+    assert 'Face auxiliary:' not in first.err
+    assert main(argv + ['--resume']) == 0
+    second = capsys.readouterr()
+    assert json.loads(second.out)['selected_trial'] == report['selected_trial']
+    assert f'fresh 0 · restored {attempts}' in second.err
+
+
+def test_trial_rows_explain_liveness_and_fit_a_narrow_terminal():
+    from stash_ai.recognition.solver_display import SolverDisplay
+    console = SimpleNamespace(message=lambda *args, **kwargs: None)
+    display = SolverDisplay(console, 500, 4)
+    now = time.monotonic()
+    for name in ('trial-10', 'trial-11', 'trial-12', 'trial-13'):
+        display(name, 'start', {})
+    display('trial-10', 'status', dict(text='running', snapshot=dict(started=now-30, stage='SQLite',
+            reported=now-20, updated=now-20, last_completed=None, work=[])))
+    display('trial-12', 'ready', dict(text='ready', compact='ready · waiting for trial-10'))
+    rows = display.layout(dict(phase='Solve merge goals', elapsed=30, total_elapsed=37), {}, 79)
+    assert sum(line.startswith('trial-') for line in rows) == 4
+    assert 'no telemetry' in next(line for line in rows if line.startswith('trial-10'))
+    assert 'waiting for trial-10' in next(line for line in rows if line.startswith('trial-12'))
+    assert all(len(line) <= 79 for line in rows)

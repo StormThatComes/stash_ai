@@ -133,37 +133,17 @@ the configured ceiling exceeds detected available RAM. An explicit
 `--solver-memory-gib` replaces automatic admission and must be chosen to fit
 the machine; it does not allocate or enforce an operating-system RAM limit.
 
-`trial-N: start` describes the submitted configuration; a spawned worker may
-still be starting up. `--progress-style off` hides both startup and worker lines.
+Auto and compact display the trial budget, fresh and restored attempts, failures, best result
+and one live row per pending trial. Baseline runs alone. Candidate rows distinguish startup,
+evaluation and completed results waiting for application. Batch scheduling shows the earlier
+trial holding up application. Free slots can mean the search needs a pending result before it
+can propose another configuration. The median uses recent fresh evaluations only.
 
-Every five seconds while waiting, the coordinator prints pool counts and one
-status line per pending trial. For example (illustrative values):
-
-```text
-Merge solver workers: pool running=1 queued/starting=0 ready=1 retired=0 limit=2 elapsed=65s scheduling=batch waiting_for=trial-1
-Merge solver trial-1: status pid=1234 elapsed=60s stage=Match selected scene stage_elapsed=12s last_update=1s ago scene=7 | Rebuild selected identities=6/33 scene | Match face observations=128/400 item | last_completed=1s ago
-Merge solver trial-2: status result ready; awaiting application
-```
-
-- `running` counts trials whose worker has reported its start. `queued/starting`
-  means a worker start has not yet been observed, including process startup.
-- `ready` counts finished/restored results waiting for application. `retired`
-  counts parallel results handed to the coordinator, excluding baseline.
-- Worker lines show PID, trial and stage durations, scene when available, and
-  up to two current work counters. Unknown totals are shown as `?`; there is no
-  fabricated overall trial percentage or ETA.
-- `last_update` is the age of the last observed stage/work update;
-  `last_completed` is the age of the last observed increase in completed work.
-  Periodic worker telemetry does **not** reset those ages. A long age can mean
-  blocking SQL/native work or a phase without counters; it does not diagnose a
-  deadlock. `last_report` separately shows how recently the worker reporting
-  thread sent its snapshot, without claiming computational progress.
-  Counters are sampled and may lag very short bursts of work.
-- `ready evaluation=finished` (or `failed`) is printed once as soon as the
-  coordinator collects a result, even if batch ordering delays its application.
-  `waiting_for=trial-N` identifies that ordering dependency. The existing
-  `complete` line and set details appear after application, with trial duration,
-  completed-trial count (including baseline), and the best applied result.
+A persistent event records the baseline, first feasible solution, a change in the best result
+or a trial error. Redirected output uses one periodic summary per minute. The verbose style
+also prints parameter changes, group details, worker timestamps and PID. Use `--progress-style off`
+to disable progress. Numeric durations on work rows describe observed work. An old completion
+time during a live heartbeat can indicate blocking native or SQLite work.
 
 Preparation, prediction collection and solver feedback are named stages too.
 Worker snapshots use a bounded, nonblocking channel and are retried once a second;

@@ -314,7 +314,7 @@ def test_interrupt_during_probe_keeps_only_completed_results(tmp_path, monkeypat
     assert not result['feasibility']['failed_probes']
 
 
-@pytest.mark.parametrize('style', ['auto', 'off'])
+@pytest.mark.parametrize('style', ['verbose', 'off'])
 def test_cli_exposes_feasibility_and_rejects_negative_budget(tmp_path, capsys, style):
     from stash_ai.recognition.cli import main, parser
     c, _ = seeded(tmp_path)
@@ -324,7 +324,7 @@ def test_cli_exposes_feasibility_and_rejects_negative_budget(tmp_path, capsys, s
     output = capsys.readouterr()
     result = json.loads(output.out)
     assert result['explanation']['feasibility_status'] == 'possible'
-    if style == 'auto':
+    if style == 'verbose':
         assert 'Search: phase=feasibility profile=matching_floor' in output.err
         assert 'Construction: possible merged_sets=[1]' in output.err
         assert 'Merge feasibility: possible' in output.err
