@@ -3,7 +3,8 @@ import json
 from collections import defaultdict
 from contextlib import closing
 
-from .body_observations import contract, enabled, save_records
+from . import body_observations
+from .body_observations import contract, save_records
 from .crowd_context import pair, follows
 from .config import digest
 from .database import encoded
@@ -49,7 +50,7 @@ def plans(db, scan, expected):
 
 def recover(collector, db, scan, source):
     config = collector.config
-    if not enabled(config) or config.data['sapiensid']['pose']['backend']=='yolo':
+    if not body_observations.enabled(config) or config.data['sapiensid']['pose']['backend']=='yolo':
         return
     expected = contract(config)
     key = 'future-crowd:'+scan
