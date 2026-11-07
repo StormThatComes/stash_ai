@@ -88,3 +88,18 @@ def test_redirected_nested_work_restores_parent_and_expires_eta(monkeypatch):
             report.console._render()
             line = report.console.stream.getvalue()
             assert 'Outer: 20/100' in line and 'awaiting progress' in line and 'ETA=' not in line
+
+
+def test_reconciliation_failure_is_a_publication_error_before_rebuild(tmp_path, monkeypatch, capsys):
+    import stash_ai.recognition.run as runner
+    config, _, services, _ = setup(tmp_path, monkeypatch)
+    def fail(*args):
+        raise RuntimeError('reconciliation failure')
+    monkeypatch.setattr(runner, 'reconcile_unlinks', fail)
+    monkeypatch.setattr(runner, 'rebuild_selected', lambda *a, **kw: pytest.fail('rebuild before reconciliation'))
+    assert execute(args('1','2'), config, services=services) == 1
+    output = capsys.readouterr().out
+    assert 'ERROR recognition publication:' in output and 'ERROR recognition rebuild:' not in output
+    with FaceDatabase(config.database) as db:
+        totals = json.loads(db.connection.execute('SELECT summary FROM runs').fetchone()[0])['counts']
+        assert totals['publication_not_attempted'] == 2 and totals['publication_aborted'] == 1
