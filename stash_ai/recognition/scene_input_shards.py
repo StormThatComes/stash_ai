@@ -34,7 +34,9 @@ class Shards:
             h.update(b'V'+len(value).to_bytes(8,'big'));h.update(value)
 
     def restore(self,replay,scan):
-        meta=self.db.execute('SELECT stamp,checksum FROM shards WHERE scan=?',(scan,)).fetchone()
+        try:meta=self.db.execute('SELECT stamp,checksum FROM shards WHERE scan=?',(scan,)).fetchone()
+        except sqlite3.DatabaseError:
+            count('input_shard_rejections');return False
         if not meta or meta[0]!=self.stamp(scan):return False
         h=hashlib.sha256()
         replay.execute('SAVEPOINT shard_import')
@@ -49,7 +51,7 @@ class Shards:
                     if hashlib.sha256(pixels).hexdigest()!=thumb:raise ValueError('Changed shard thumbnail.')
                     replay.execute('INSERT OR IGNORE INTO evidence_thumbnails VALUES (?,?)',(thumb,pixels))
             if h.hexdigest()!=meta[1]:raise ValueError('Changed replay shard.')
-        except (ValueError,TypeError,sqlite3.IntegrityError):
+        except (ValueError,TypeError,sqlite3.DatabaseError):
             replay.execute('ROLLBACK TO shard_import');replay.execute('RELEASE shard_import')
             count('input_shard_rejections');return False
         replay.execute('RELEASE shard_import');count('input_shard_restores');return True
@@ -95,6 +97,7 @@ def open_shards(cache,shared):
         schema=tuple(r[0] for r in db.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid"))
         if not schema:
             with db:
+                db.execute('BEGIN IMMEDIATE')
                 for sql in SCHEMA:db.execute(sql)
         elif schema!=SCHEMA:raise ValueError('Unrecognized shard schema.')
         db.execute(f'PRAGMA max_page_count={available//4096}')

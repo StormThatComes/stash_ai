@@ -87,6 +87,11 @@ class RefinedPMPose:
     def __init__(self, pose, segmenter, settings):
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
 
+    def close(self):
+        from .resident_models import release
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup([('close raw pose',lambda:release(self.pose)),('close segmenter',lambda:release(self.segmenter))])
+
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
 
