@@ -63,7 +63,7 @@ def command(function):
 
 
 @contextmanager
-def phase(label, *, quiet=False):
+def phase(label, *, quiet=False, interrupted=None):
     state = _active.get()
     if state is None:
         yield
@@ -85,7 +85,7 @@ def phase(label, *, quiet=False):
             last[:]=[now,item['stage']]
             print('Merge report: '+worker_text(item,now),file=sys.stderr,flush=True)
     try:
-        with (state.console.phase(label) if state.console and not nested else nullcontext()), state.metrics.stage(label):
+        with (state.console.phase(label, interrupted=interrupted) if state.console and not nested else nullcontext()), state.metrics.stage(label):
             if quiet or nested or not state.progress:
                 yield
             else:

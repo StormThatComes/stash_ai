@@ -116,7 +116,7 @@ class ConsolePresenter:
                 self.counts[name] += amount
 
     @contextmanager
-    def phase(self, name, *, errors=None, **values):
+    def phase(self, name, *, errors=None, interrupted=None, **values):
         before_errors = errors() if errors is not None else 0
         with self.lock:
             previous = self.phase_name, self.phase_started, dict(self.state)
@@ -139,6 +139,8 @@ class ConsolePresenter:
                 self.begin_stopping()
             raise
         finally:
+            if status == 'complete' and interrupted is not None and interrupted():
+                status = 'interrupted'
             if status == 'complete' and errors is not None and errors() > before_errors:
                 status = 'partial'
             self.message(f'Phase: {name} {status}{suffix}', decorative=True)

@@ -22,6 +22,8 @@ class RunDisplay:
         self.retention = 'skipped'
         self.recognition = 'failed'
         self.interrupted_cursor = None
+        self.pose_resume = None
+        self.run_id = None
 
     def finish(self, outcome):
         c = self.counts
@@ -30,13 +32,23 @@ class RunDisplay:
                  f'reused={self.scans["reused"]} scenes_failed={c["scenes_failed"]}',
                  f'published={c["scenes_processed"] - c["publications_unchanged"]} '
                  f'unchanged={c["publications_unchanged"]}']
+        if self.run_id is not None:
+            parts.append(f'run={self.run_id}')
+        if self.scans:
+            parts.append(f'VTT complete={c["vtt_complete"]}/{self.selected} · face cues={c["face_cues"]}'
+                         f' · pose cues={c["pose_cues"]} (backfilled={c["pose_backfilled"]})')
+        if self.pose_resume is not None:
+            scene, missing = self.pose_resume
+            detail = 'durable coverage unavailable' if missing is None else (
+                f'missing_cues={len(missing)} first_missing={min(missing) if missing else "none"}')
+            parts.append(f'resume scene={scene} pass=pose {detail}')
         if 'portrait_people_selected' in c:
             parts.append(f'portrait_people_selected={c["portrait_people_selected"]}')
         if self.rebuild:
             parts.append('rebuild ' + ' '.join(f'{k}={v}' for k, v in self.rebuild.items()))
         if self.debt is not None:
             parts.append(f'pending selected={self.debt["pending_selected"]} outside={self.debt["pending_outside_selection"]}')
-        for name in ('people_failed', 'metadata_failed', 'scene_links_removed', 'other_model_links_removed'):
+        for name in ('publication_failed', 'publication_not_attempted', 'people_failed', 'metadata_failed', 'scene_links_removed', 'other_model_links_removed'):
             if c[name]:
                 parts.append(f'{name}={c[name]}')
         for kind, reasons in self.rejections.items():

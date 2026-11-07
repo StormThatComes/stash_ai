@@ -248,6 +248,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     robustness = {}
     restored_count = 0
     restored_name = None
+    restored_names = set()
     written_winner = None
     probe_state = None
     def changes_for(name):
@@ -567,6 +568,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         nonlocal baseline,baseline_outsiders,best,best_rank,restored_count,restored_name
         if journal is None or name not in journal.records:return None
         restored_name = name
+        restored_names.add(name)
         record=journal.get(name)
         if record['configuration']!=digest(settings.data):
             raise ValueError('Checkpoint search reconstruction diverged; completed trials were not reused.')
@@ -729,6 +731,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 validated=bool(confidence(robustness.get(best,[]))),
                 candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
             search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
+                        recovered_evaluations=sum(bool(t.get('recovered_evaluation')) for items in
+                            (result['trials'], failures) for n,t in items.items() if n not in restored_names),
                         attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
                         scheduling='targeted_then_feasibility_and_bidirectional_beam_then_tightening',
                         tightening=tightening.report(changes_for(best) if best is not None else None),
