@@ -44,8 +44,12 @@ def pose_view(geometry, *, neutral=.12):
 
 
 def pose_matches(geometry, pose, *, neutral=.12, uncertainty=.02):
-    pose = 'neutral' if pose == 'other' else pose
     hint=pose_view(geometry,neutral=neutral)
+    # Stored legacy views used 'other' for both neutral and missing geometry.
+    if pose == 'other':
+        if hint == 'unknown':
+            return True
+        pose = 'neutral'
     if hint==pose:
         return True
     signed=_signed_pose(geometry)
@@ -60,9 +64,11 @@ def query_pose_matches(geometry, pose, *, relaxed=False):
     embedding, rival and co-presence gates. Unknown geometry and opposite side
     categories do not qualify for this fallback.
     """
+    if pose_matches(geometry, pose):
+        return True
     pose = 'neutral' if pose == 'other' else pose
-    return pose_matches(geometry, pose) or bool(relaxed and _signed_pose(geometry) is not None
-        and pose in ('left', 'right', 'neutral') and 'neutral' in (pose_view(geometry), pose))
+    return bool(relaxed and _signed_pose(geometry) is not None and
+                pose in ('left', 'right', 'neutral') and 'neutral' in (pose_view(geometry), pose))
 
 
 def pose_fallback(geometry, pose):
