@@ -160,12 +160,10 @@ class SolverDisplay:
                     self.first_solution = best
                     prefix = 'first feasible'
                 if not restored or self.restored == 1:
-                    from .solver_explanation import short_parameter
+                    from .solver_explanation import parameter_change
                     delta = item.get('winning_delta', ())
                     if delta:
-                        change = delta[0]
-                        detail += (f" · {change['parameter']} {short_parameter(change['previous'])}"
-                                   f" → {short_parameter(change['current'])}")
+                        detail += ' · ' + parameter_change(delta[0])
                         if len(delta) > 1:
                             detail += f' (+{len(delta)-1} more)'
                     evidence = item.get('blockers', ())

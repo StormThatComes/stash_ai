@@ -85,6 +85,7 @@ def solver_scope(function):
             if callback is not None:return callback(name, phase, item)
         progress.telemetry_enabled = callback is not None and getattr(callback, 'telemetry_enabled', True)
         progress.show_winner = getattr(callback, 'show_winner', False)
+        progress.show_diagnostics = getattr(callback, 'show_diagnostics', progress.show_winner)
         kwargs['progress'] = progress
         try:
             with heartbeat('initialization', kwargs.get('progress'), 'Plan solver resources'), metrics.stage('Plan solver resources'):

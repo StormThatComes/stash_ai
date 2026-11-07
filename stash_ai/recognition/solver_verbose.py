@@ -9,6 +9,10 @@ def verbose_progress(maximum):
     def progress(name, stage, item):
         nonlocal completed_trials
         detail = ''
+        if stage == 'partial':
+            print(f"Partial {item['kind']} diagnostics · {item['reason']} · {str(item.get('detail', ''))[:160]}",
+                  file=sys.stderr, flush=True)
+            return
         if stage == 'start':
             if item['previous_trial'] is None:
                 detail = (' (input configuration with capped support)' if item['changes_from_previous']
@@ -59,4 +63,5 @@ def verbose_progress(maximum):
         elif stage == 'failed':
             print(f"  Trial incomplete: {item['reason']}; stage={item['stage']}; "
                   f"elapsed={item['elapsed_seconds']:.1f}s; {item['error']}", file=sys.stderr, flush=True)
+    progress.show_diagnostics = True
     return progress

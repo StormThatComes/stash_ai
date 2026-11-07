@@ -222,7 +222,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                    if scans else {})
     partial_diagnostics = set()
     def report_coverage(measurements):
-        if not getattr(progress, 'show_winner', False):
+        if not getattr(progress, 'show_diagnostics', False):
             return
         for kind, data in measurements.get('measurement_coverage', {}).items():
             if data.get('complete') is False and kind not in partial_diagnostics:
@@ -645,13 +645,16 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         try:
             if progress:
                 event = item
+                if stage == 'complete':
+                    report_coverage(hybrid)
                 if getattr(progress, 'show_winner', False) and stage in ('complete', 'failed'):
                     event = dict(item, restored_result=name == restored_name or item.get('recovered_evaluation', False))
                     if stage == 'complete' and best != reported_best:
                         previous = reported_best
                         reported_best = best
                         from .solver_explanation import blockers
-                        event['winning_delta'] = transition(previous, changes_for(previous), changes_for(best))['changes_from_previous']
+                        event['winning_delta'] = (transition(previous, changes_for(previous), changes_for(best))['changes_from_previous']
+                            if previous is not None else input_patch(best)['changes'])
                         event['winning_phase'] = origins.get(best, {}).get('search_phase', 'baseline')
                         event['blockers'] = blockers(summaries[best]['groups'],
                             feedback.get(best, {}).get('provenance', {}).get('blocker_trace', ()), locations, feasibility.groups)
@@ -664,7 +667,6 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                             assigned=sum(g.get('assigned', 0) for g in groups),
                             strength=tuple(round(x, 4) for x in tightening.score(changes_for(best))))
                     if stage == 'complete':
-                        report_coverage(hybrid)
                         event.update(best_trial=best, winner_state=winner_state)
                 progress(name, stage, event)
         finally:
