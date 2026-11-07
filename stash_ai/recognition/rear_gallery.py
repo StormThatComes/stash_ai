@@ -13,33 +13,34 @@ from .scan_heads import predicate
 
 def load(db, config, scope, namespace):
     # Read proof addresses first. No general auxiliary membership trains this bank.
-    sql = """SELECT b.id,b.scan,b.cue,b.seconds,b.quality,b.embedding,m.proof,m.person
+    sql = """WITH proofs AS MATERIALIZED (
+        SELECT b.id,b.scan,m.person,json_extract(m.proof,'$.reason') AS reason,
+            COALESCE(json_extract(m.proof,'$.rooted_view'),json_extract(m.proof,'$.rooted_track')) AS claim
         FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.status='complete'
-        AND b.contract=? AND b.rejected IS NULL AND m.policy=?
+        AND b.contract=? AND b.rejected IS NULL AND m.policy=? AND """ + predicate() + """
         AND COALESCE(json_extract(m.proof,'$.rooted_view.perspective'),
-                     json_extract(m.proof,'$.rooted_track.perspective'))='back' AND """ + predicate()
+                     json_extract(m.proof,'$.rooted_track.perspective'))='back'),
+        certified AS MATERIALIZED (
+        SELECT p.id,json_extract(p.claim,'$.owner') AS owner,json_extract(p.claim,'$.roots') AS roots
+        FROM proofs p JOIN json_each(p.claim,'$.roots') root
+        JOIN body_observations rb ON rb.id=root.value AND rb.scan=p.scan
+        JOIN observations o ON o.id=rb.face JOIN members m ON m.observation=o.id
+        WHERE COALESCE(p.reason,'') NOT IN ('body_copresence_conflict','different_face_root')
+        AND (p.person IS NULL OR p.person=m.person OR p.reason='body_scene_core')
+        AND m.person=json_extract(p.claim,'$.owner') AND o.rejected IS NULL
+        AND """ + strict_sql() + ' AND ' + anchor_sql('o',config.data['clustering']) + """
+        GROUP BY p.id HAVING count(DISTINCT rb.id)=2)
+        SELECT b.id,b.scan,b.cue,b.seconds,b.quality,b.embedding,c.owner,c.roots
+        FROM certified c JOIN body_observations b ON b.id=c.id ORDER BY b.scan,b.cue,b.id"""
     settings = config.data['sapiensid']['identities']
     limit = config.data['sapiensid']['execution']['reference_bytes'] // 8
     groups = defaultdict(list)
     used = 0
     for raw in db.execute(sql,(scope,namespace,contract(config),policy(config))):
         row = dict(raw)
-        membership = json.loads(row.pop('proof'))
-        if membership.get('reason') in ('body_copresence_conflict','different_face_root'):
-            continue
-        proof = membership.get('rooted_view') or membership['rooted_track']
-        owner = proof['owner']
-        if row['person'] not in (None,owner) and membership.get('reason') != 'body_scene_core':
-            continue
-        roots = proof['roots']
-        # The strict face at each endpoint must still belong to this owner.
-        valid = db.execute("""SELECT count(*) FROM body_observations b JOIN observations o ON o.id=b.face
-            JOIN members m ON m.observation=o.id WHERE b.id IN (?,?) AND b.scan=?
-            AND m.person=? AND o.rejected IS NULL AND """+strict_sql()+' AND '+anchor_sql('o',config.data['clustering']),
-            (*roots,row['scan'],owner)).fetchone()[0]
-        if valid!=2:
-            continue
+        owner = row.pop('owner')
+        roots = json.loads(row.pop('roots'))
         used += 5*len(row['embedding']) + len(row['quality']) + 2048
         if used>limit:
             raise ResourceLimit('Rear-view gallery exceeds sapiensid.execution.reference_bytes.')
@@ -125,6 +126,7 @@ class Gallery:
                            if not pixel or json.loads(row['quality']).get('quality',{}).get('pixel_digest') != pixel]
             if len(independent)>=max(2,settings['attach_min_support']):
                 scores, witnesses = zip(*independent)
+                source = witnesses[0].get('scan',source)
                 result.append((sum(scores)/len(scores), min(scores), owner, source, witnesses, rival_score))
             else:
                 # Losing independent support cannot remove a plausible rival.

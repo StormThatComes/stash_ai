@@ -15,7 +15,18 @@ def _global_rivals(search, batch):
     ids, queries, ignored, floors = zip(*batch)
     queries = np.stack(queries, axis=1).astype(np.float64)
     rivals = {}
+    bounds = getattr(search,'rear_bounds',None)
+    if bounds is None and hasattr(search,'stack') and len(search.entries)>search.block:
+        from .rear_bounds import RivalBounds
+        search.rear_bounds = bounds = RivalBounds(search)
+    norms = np.linalg.norm(queries,axis=0)
+    floors = np.asarray(floors)
     for start in range(0, len(search.entries), search.block):
+        if bounds is not None:
+            possible = bounds.possible(start//search.block,queries,norms,floors)
+            if not any(possible[col] and oid not in rivals for col,oid in enumerate(ids)):
+                search.stats['rear_rival_blocks_skipped'] = search.stats.get('rear_rival_blocks_skipped',0)+1
+                continue
         count = min(search.block, len(search.entries)-start)
         search.index.seek(start*4096*8)
         tile = np.frombuffer(search.index.read(count*4096*8), dtype='<f8').reshape(count,4096)
@@ -58,6 +69,7 @@ def _scene(db, scan, stamp, gallery, search, config):
     guard = FaceGuard(db, config)
     batch = []
     waiting = {}
+    decisions = {}
     def verify_batch():
         for oid, rival in _global_rivals(search, batch).items():
             _, _, _, proof = proposals.pop(oid)
@@ -68,6 +80,8 @@ def _scene(db, scan, stamp, gallery, search, config):
         row = dict(raw)
         old = row['person']
         decision = json.loads(row['proof'])
+        decision.update(person=old,status=row['status'],role=row['role'])
+        decision.pop('rear_retry',None)
         if old is not None:
             if row['face_owner'] or row['face_rejection'] is None and row['face_embedding'] is not None:
                 face_owners.add(old)
@@ -119,7 +133,7 @@ def _scene(db, scan, stamp, gallery, search, config):
     verify_batch()
     for oid, (previous, rival, reason) in waiting.items():
         proof = dict(previous, rear_retry=dict(reason=reason, rival=rival, references=gallery.revision))
-        db.execute('UPDATE body_members SET proof=? WHERE observation=? AND proof<>?', (encoded(proof),oid,encoded(proof)))
+        decisions[oid] = proof
     # Freeze competing simultaneous claims and move a pre-existing fragment atomically.
     simultaneous = Counter((owner,cue) for owner,cue,_,_ in proposals.values())
     viable = {oid for oid,(owner,cue,_,_) in proposals.items() if simultaneous[owner,cue]==1}
@@ -133,16 +147,15 @@ def _scene(db, scan, stamp, gallery, search, config):
         owner,_,old,proof = proposals[oid]
         if old and targets.get(old)!=owner:
             continue
-        db.execute("UPDATE body_members SET person=?,status='accepted',role='auxiliary',proof=? WHERE observation=?",
-                   (owner,encoded(proof),oid))
+        decisions[oid] = proof
     for old,owner in targets.items():
         for oid,old_proof in satellites[old].items():
             if oid in viable and proposals[oid][0]==owner:
                 continue
             proof = dict(person=None,status='withheld',role='auxiliary',reason='external_rear_satellite',
                          retry_when='confirmed_core_changes',retry_owner=owner,previous=old_proof)
-            db.execute("UPDATE body_members SET person=NULL,status='withheld',role='auxiliary',proof=? WHERE observation=?",
-                       (encoded(proof),oid))
+            decisions[oid] = proof
+    return decisions
 
 
 
@@ -153,47 +166,35 @@ def recover(db, selected, config):
     from .assignment_delta import enqueue
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     stamp = policy(config)
-    # Snapshot only previously derived claims on disk, then restore their
-    # frozen local decisions before taking a rival index or recomputing.
-    db.execute("""CREATE TEMP TABLE rear_prior AS SELECT m.observation,b.scan,s.scene,m.person,m.proof
-        FROM body_members m JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan
-        WHERE s.scope=? AND s.namespace=? AND json_extract(m.proof,'$.reason') IN ('external_rear_view','external_rear_satellite')
-        AND """+predicate(),(scope,namespace))
-    try:
+    # Present the frozen local memberships to all reference readers. Derived
+    # claims remain durable until we have a verified replacement for their scan.
+    from .rear_snapshot import frozen, apply
+    with frozen(db,scope,namespace) as active:
         scans = {s['scan']:s['scene'] for s in selected}
-        scans.update(db.execute('SELECT DISTINCT scan,scene FROM rear_prior'))
-        for oid,raw in db.execute('SELECT observation,proof FROM rear_prior'):
-            prior = json.loads(raw)['previous']
-            db.execute('UPDATE body_members SET person=?,role=?,status=?,proof=? WHERE observation=?',
-                       (prior['person'],prior['role'],prior['status'],encoded(prior),oid))
-        if config.data['sapiensid']['global_matching']['enabled']:
-            gallery = load(db,config,scope,namespace)
-            if gallery.tree is not None:
-                _recover_scans(db,scope,namespace,scans,config,stamp,gallery)
-        changed = set(db.execute("""SELECT DISTINCT p.scan,p.scene FROM rear_prior p JOIN body_members m
-            ON m.observation=p.observation WHERE m.person IS NOT p.person OR m.proof<>p.proof"""))
-        # New assignments in selected scenes can change publication even when
-        # the cached local stage was identical.
-        for scan, scene in scans.items():
-            active = db.execute("""SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation
-                WHERE b.scan=? AND json_extract(m.proof,'$.reason')='external_rear_view' LIMIT 1""",(scan,)).fetchone()
-            if active or (scan,scene) in changed:
+        gallery = load(db,config,scope,namespace) if config.data['sapiensid']['global_matching']['enabled'] else None
+        if gallery and gallery.tree is not None and _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
+            return
+        # Incompatible or withdrawn evidence revokes previously derived claims.
+        from .config import digest
+        for scan,scene in active.items():
+            db.execute('DELETE FROM metadata WHERE key=?',('rear-pending:'+digest([scope,namespace,scene]),))
+            if apply(db,scan,{}):
                 enqueue(db,scope,namespace,dict(scan=scan,scene=scene),config,True,'rear_view_attachment')
-    finally:
-        db.execute('DROP TABLE rear_prior')
 
 
-def _recover_scans(db,scope,namespace,scans,config,stamp,gallery):
+def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     from .body_observations import compatible_contracts
-    from .body_global_banks import banks
+    from .body_global_banks import _banks
     from .body_global_search import Search
+    from .rear_snapshot import apply
+    from .assignment_delta import enqueue
     stale = db.execute("""SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND m.person IS NOT NULL
         AND m.role='anchor' AND b.contract NOT IN (SELECT value FROM json_each(?)) AND """+predicate()+
         ' LIMIT 1',(scope,namespace,encoded(compatible_contracts(config)))).fetchone()
     if stale:
         return
-    references = banks(db,config,scope,namespace)
+    references = _banks(db,config,scope,namespace)
     if any(b['stale_policy'] or b['missing_original'] for b in references.values()):
         return
     from .rear_pending import Pending
@@ -201,7 +202,8 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery):
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
         pending = Pending(db,gallery,search,config.data['sapiensid']['identities'])
-        selected = set(scans)
-        for scan,scene in pending.candidates(scope,namespace,selected,stamp):
-            _scene(db,scan,stamp,gallery,search,config)
-            scans[scan] = scene
+        for scan,scene in pending.candidates(scope,namespace,set(scans),stamp,active=active):
+            decisions = _scene(db,scan,stamp,gallery,search,config)
+            if apply(db,scan,decisions):
+                enqueue(db,scope,namespace,dict(scan=scan,scene=scene),config,True,'rear_view_attachment')
+    return True

@@ -53,6 +53,7 @@ class Pending:
         self.banks = _bank_versions(gallery)
         self.radius = np.sqrt(2*(1-settings['match_threshold']+settings['ambiguity_margin']))+.003
         self.owners = {}
+        self.floor = settings['match_threshold']-settings['ambiguity_margin']
 
     def owner_revision(self, owner):
         if owner not in self.owners:
@@ -78,31 +79,46 @@ class Pending:
         return digest([sorted(self.banks[i] for i in banks),
                        [(owner,self.owner_revision(owner)) for owner in sorted(owners)]])
 
-    def candidates(self,scope,namespace,selected,stamp):
+    def candidates(self,scope,namespace,selected,stamp,*,active=()):
+        from .rear_bounds import changed_modes
+        catalogue = 'rear-rivals:'+digest([scope,namespace,stamp])
+        old = self.db.execute('SELECT value FROM metadata WHERE key=?',(catalogue,)).fetchone()
+        previous = json.loads(old[0]) if old else None
+        budget = self.search.config.data['sapiensid']['execution']['reference_bytes'] if self.search.mean_versions else 0
+        changed = changed_modes(self.search,previous,budget)
         for scan,scene in self.db.execute("SELECT s.id,s.scene FROM scans s WHERE scope=? AND namespace=? "
                                           "AND status='complete' AND "+predicate(),(scope,namespace)):
             key = 'rear-pending:' + digest([scope,namespace,scene])
             saved = self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
             entry = json.loads(saved[0]) if saved else {}
-            identity = [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None]
+            identity = [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None,
+                        version(self.db,'raw-observations',scan) if self.audited else None]
             refresh = scan in selected or not self.audited or entry.get('identity')!=identity or 'balls' not in entry
             if refresh:
                 balls,owners = _envelopes(self.db,scan,stamp)
                 entry = dict(identity=identity,balls=balls,local=owners)
             banks = set()
+            near_change = changed is None
             for pivot,radius in entry['balls']:
                 query = np.frombuffer(base64.b64decode(pivot),dtype='<f4')
+                if not near_change and changed:
+                    near_change = any(float(query@mean) + radius*norm + .003 >= self.floor
+                                      for mean,norm in changed)
                 for address in self.gallery.tree.query_ball_point(query,self.radius+radius):
                     banks.add(self.gallery.addresses[address])
             revision = self.generation(entry,banks)
-            if not refresh and entry.get('checked')==revision:
+            if not refresh and not near_change and entry.get('checked')==revision:
                 continue
-            if scan in selected or banks:
+            if scan in selected or scan in active or banks:
                 yield scan,scene
                 # The actual veto returned by the exact global search may be new.
                 entry['rivals'] = [r[0] for r in self.db.execute("""SELECT DISTINCT json_extract(m.proof,'$.rear_retry.rival') AS rival
-                    FROM body_observations b JOIN body_members m ON m.observation=b.id
+                    FROM body_observations b JOIN main.body_members m ON m.observation=b.id
                     WHERE b.scan=? AND rival IS NOT NULL ORDER BY rival""",(scan,))]
                 revision = self.generation(entry,banks)
             entry['checked'] = revision
-            self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(key,encoded(entry)))
+            value = encoded(entry)
+            if not saved or saved[0]!=value:
+                self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(key,value))
+        if previous != self.search.mean_versions:
+            self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(catalogue,encoded(self.search.mean_versions)))

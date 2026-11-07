@@ -49,6 +49,17 @@ def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, i
             return [dict(r) for r in db.execute('SELECT * FROM body_members WHERE observation IN (?,?,?)',queries)]
         assert all(r['person']=='A' and r['role']=='auxiliary' and
                    json.loads(r['proof'])['reason']=='external_rear_view' for r in members())
+        if not incremental and not missing_root:
+            db.execute('CREATE TEMP TABLE touched_rear(observation)')
+            db.execute('CREATE TEMP TRIGGER audit_rear AFTER UPDATE ON main.body_members '
+                       'BEGIN INSERT INTO touched_rear VALUES(new.observation); END')
+            unrelated,_ = scene(db,config,'3',[[0.,-1.]]*2)
+            rebuild(state,[unrelated],config,{})
+            assert not {r[0] for r in db.execute('SELECT observation FROM touched_rear')} & set(queries)
+            new_rival,_ = scene(db,config,'4',[[.55,.835]]*3)
+            rebuild(state,[new_rival],config,{})
+            assert all(r['person']!='A' and json.loads(r['proof'])['rear_retry']['reason']=='competing_owner'
+                       for r in members())
         if missing_root:
             db.execute('DELETE FROM members WHERE observation=?',('face-'+ids[0],))
             db.commit()
@@ -274,3 +285,40 @@ def test_weak_face_of_same_owner_allows_route_to_next_strict_face():
             SimpleNamespace(allows=lambda *args:True))
     assert decisions['1']['rooted_track']['roots']==['0','3']
     assert decisions['2']['reason']=='measured_face_association'
+
+
+def test_rival_bounds_exclude_blocks_without_changing_exact_results():
+    from contextlib import ExitStack
+    from io import BytesIO
+    from types import SimpleNamespace
+    from stash_ai.recognition.rear_recovery import _global_rivals
+    matrix = np.zeros((12,4096))
+    matrix[:9,0],matrix[9:,1] = 1.,1.
+    batch = [('q',matrix[-1],set(),.99)]
+    with ExitStack() as stack:
+        search = SimpleNamespace(entries=[(i,[]) for i in range(12)],identities=list(range(12)),
+                                 block=3,index=BytesIO(matrix.astype('<f8').tobytes()),stats={})
+        exact = _global_rivals(search,batch)
+        search.stack = stack
+        assert _global_rivals(search,batch)==exact=={'q':9}
+        assert search.stats['rear_rival_blocks_skipped']==3
+
+
+def test_incremental_rear_does_not_rewrite_identical_claims(tmp_path):
+    from stash_ai.recognition.rear_snapshot import frozen,apply
+    from stash_ai.recognition.body_identity import policy
+    cfg = configured(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db=state.connection
+        item,ids=scene(db,cfg)
+        db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',('A','scope','ns',1,None,'A'))
+        original=dict(person=None,status='withheld',role='auxiliary',reason='body_anchor_quality')
+        proof=dict(person='A',status='accepted',role='auxiliary',reason='external_rear_view',previous=original)
+        db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(ids[0],'A','auxiliary','accepted',policy(cfg),encoded(proof)))
+        with frozen(db,'scope','ns') as active:
+            assert active=={item['scan']:item['scene']}
+            assert db.execute('SELECT person FROM body_members').fetchone()[0] is None
+            changes=db.total_changes
+            assert not apply(db,item['scan'],{ids[0]:proof}) and db.total_changes==changes
+            assert apply(db,item['scan'],{})
+        assert db.execute('SELECT person,proof FROM body_members').fetchone()[0] is None
