@@ -269,3 +269,16 @@ def test_historical_other_view_accepts_both_preexisting_geometry_categories():
         assert query_pose_matches(geometry, 'other')
     assert not pose_matches([], 'neutral')
     assert not pose_matches(neutral, 'unknown')
+
+
+def test_repeated_shot_cannot_outvote_a_view_confirmed_in_two_shots():
+    from stash_ai.recognition.view_prototypes import _Cluster, prioritized
+    import numpy as np
+    slots=[]
+    for label,shots in [('left',[0]*5),('neutral',[5,8])]:
+        slot=_Cluster(label,label)
+        for i,shot in enumerate(shots):
+            row=dict(id=label+str(i),scan='s',seconds=i,quality=json.dumps(dict(view_shot=shot)))
+            slot.add(row,np.asarray([1.,0.],dtype='float32'))
+        slots.append(slot)
+    assert prioritized(slots,1)[0].pose=='neutral'
