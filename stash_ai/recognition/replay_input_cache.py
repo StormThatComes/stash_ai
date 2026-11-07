@@ -40,7 +40,7 @@ def raw(db):
 class InputCache:
     def __init__(self,database,selected,config,scope,namespace):
         self.database,self.config=database,config
-        self.enabled=False
+        self.enabled=False;self.reused=0;self.replace_invalid=False
         if not config.data['execution']['rebuild_checkpoint_scenes']:return
         try:
             from .database import FaceDatabase
@@ -53,6 +53,8 @@ class InputCache:
             self.owner=dict(format=1,installation=database.installation,path=str(database.path))
             stamps=[(item['scan'],version(database.connection,'raw-observations',item['scan']),
                      version(database.connection,'pixel-scan',item['scan'])) for item in selected]
+            self.schema_stamp=digest([ENGINE,expected_schema()])
+            self.stamps={scan:(raw,pixel) for scan,raw,pixel in stamps}
             self.key=digest(['raw-input-v2-no-bindings',ENGINE,self.owner,selected,scope,namespace,stamps,
                 digest(expected_schema()),config.data['clustering']['max_anchor_pose_deviation'] is not None])
             self.directory=database.path.with_name(database.path.name+'.rebuild-input')
@@ -77,7 +79,7 @@ class InputCache:
             self.owned()
             manifest,_=_json(self.directory/'current.json')
             if manifest.get('key')!=self.key:return False
-            name=manifest['file']
+            self.replace_invalid=True\n            name=manifest['file']
             if name!=str(uuid.UUID(name.removesuffix('.sqlite3')))+'.sqlite3':raise ValueError('Invalid cache filename.')
             path=self.directory/name;lease=_lease(path)
             if lease[2]>self.limit or checksum(path)!=manifest['checksum']:raise ValueError('Invalid raw replay checksum.')
@@ -112,7 +114,8 @@ class InputCache:
             self.owned();source=raw(replay)
             if source.in_transaction:raise ValueError('Raw replay cache requires a committed image.')
             size=source.execute('PRAGMA page_count').fetchone()[0]*source.execute('PRAGMA page_size').fetchone()[0]
-            if size>self.limit:return
+            shards=self.directory/'shards.sqlite3'
+            if size+(shards.stat().st_size if shards.exists() else 0)>self.limit:return
             from .disk_budget import check
             check(size,self.directory)
             path=self.directory/(str(uuid.uuid4())+'.sqlite3')

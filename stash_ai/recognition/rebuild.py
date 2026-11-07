@@ -127,13 +127,14 @@ REPLAY_SCHEMA = SCHEMA + '''
 
 @measured('copy')
 @stage('Copy selected face evidence')
-def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False,bindings=True):
+def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False,bindings=True,inputs=None):
     db = database.connection
     replay.executescript(REPLAY_SCHEMA)
     from .replay_vector_inputs import prepare
     shared_vectors = prepare(db, replay)
     from .snapshot_import import bulk
-    with bulk(replay):
+    from .scene_input_shards import open_shards
+    with bulk(replay),open_shards(inputs,shared_vectors) as shards:
         with tracking(
             selected,
             'Copy selected evidence',
@@ -146,6 +147,7 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
                         or record['namespace'] != namespace or record['scene'] != item['scene']):
                     raise ValueError('Identity rebuild requires complete compatible selected scans.')
                 replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
+                if shards is not None and shards.restore(replay,item['scan']):continue
                 with tracking(
                     _copy_observations(db, replay, item['scan'], retain_pose=retain_pose, share_vectors=shared_vectors),
                     'Copy face observations',
@@ -157,6 +159,7 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
                 ) as tracked:
                     for row in tracked:
                         pass  # The bounded copy iterator has completed both inserts.
+                if shards is not None:shards.save(replay,item['scan'])
     if bindings:_copy_bindings(database,replay,selected,scope,namespace)
     with work('Commit replay evidence', 1, unit='transaction', position=0) as committed:
         replay.commit()
@@ -523,13 +526,15 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         replay = connection(replay)
         from .replay_input_cache import InputCache
         inputs=InputCache(database,selected,config,scope,namespace)
+        partitioned=len(selected)>1
         if not inputs.restore(replay):
             _copy_selection(database, replay, selected, scope, namespace,
-                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False)
+                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False,
+                            inputs=inputs if partitioned else None)
             from .evidence_pixels import canonicalize
             canonicalize(replay)
             replay.commit()
-            inputs.save(replay)
+            # Keep the direct restore path for a cold selection and repair damaged\n            # images. Appends reuse shards without rewriting every old scene.\n            if inputs.reused==0 or inputs.replace_invalid:inputs.save(replay)
         _copy_bindings(database,replay,selected,scope,namespace)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
