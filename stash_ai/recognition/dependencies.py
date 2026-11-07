@@ -65,7 +65,7 @@ def cached(db, kind, key, policy, compute, *, dependency='global', dependency_ke
 
 
 def store(db, kind, key, policy, generation, value):
-    if not _writable.get() or db.execute('PRAGMA query_only').fetchone()[0]:
+    if not cache_writable(db):
         return
     try:
         db.execute('INSERT OR REPLACE INTO evidence_fingerprints VALUES (?,?,?,?,?)',
@@ -117,3 +117,7 @@ def cached_many(db,kind,keys,policy,compute,*,dependency,dependency_keys=None):
                 store(db,kind,key,policy,generation,value)
             result[key]=value
     return result
+
+
+def cache_writable(db):
+    return _writable.get() and not db.execute('PRAGMA query_only').fetchone()[0]

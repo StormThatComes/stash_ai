@@ -612,3 +612,5 @@ success, error and close. CPU/MPS retain their ordinary transfer path. The small
 CI fixtures simulate OOM and transfer events without a GPU. Measure throughput,
 peak VRAM and output tolerance on a real CUDA machine with the manual benchmark;
 no full 10,000-scene inference is part of CI.
+
+During recognition, the SSD line names the volume with the least remaining capacity under either the data cap or the free-space reserve, including the age of that measurement. VTT prefetch reports ready inputs over all pickups and time actually spent waiting. CUDA OOM recovery reports the failed batch size, the reduced size and retry count even with VRAM logging disabled. Process VRAM comes from a rate-limited background query and can be unavailable on some drivers. Rejection counts for an unchanged scan reuse its retained evidence revisions and active face/body contracts.

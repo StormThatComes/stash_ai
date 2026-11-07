@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from time import monotonic
+from threading import Lock, Thread
 
 from stash_ai.runtime.cleanup import cleanup
 from stash_ai.runtime import shutdown
@@ -69,13 +70,51 @@ class GpuMemory:
         self.peaks = {}
         self.display = ''
         self.reported_unavailable = False
+        self.batch_sizes = {}
+        self.batch_lock = Lock()
+        self.process_thread = None
+        self.process_latest = (None, None)
+        self.process_requested = float('-inf')
+        self.sampled_batches = {}
         self.sampled_scene = None
         self.scene_sample_at = float('-inf')
+
+    def batch_change(self, kind, previous, maximum, retry):
+        with self.batch_lock:
+            row = self.batch_sizes.setdefault(kind, dict(retries=0))
+            row['maximum'] = maximum
+            if retry:
+                row.update(previous=previous, reduced_to=maximum, retries=row['retries']+1)
+
+    def batch_line(self):
+        with self.batch_lock:
+            return ', '.join(f"{kind} {v['previous']}→{v['reduced_to']} · effective {v['maximum']} · {v['retries']} retries"
+                             for kind, v in sorted(self.batch_sizes.items()) if v['retries'])
+
+    def poll_process(self):
+        if self.executable is None:
+            return None
+        now = monotonic()
+        if now-self.process_requested >= 10 and not (self.process_thread and self.process_thread.is_alive()):
+            self.process_requested = now
+            def probe():
+                try:
+                    value = process_memory(self.executable)
+                except (OSError, subprocess.SubprocessError, ValueError):
+                    value = None
+                self.process_latest = (monotonic(), value)
+            self.process_thread = Thread(target=probe, name='recognition-vram', daemon=True)
+            self.process_thread.start()
+        return self.process_latest[1]
+
+    def live_display(self):
+        sampled, _ = self.process_latest
+        return self.display + (f' · process sample {monotonic()-sampled:.0f}s ago' if sampled is not None else '')
 
     def snapshot(self):
         values = {}
         for name, query in (('torch', torch_memory),
-                            ('process_bytes', lambda: process_memory(self.executable))):
+                            ('process_bytes', self.poll_process)):
             try:
                 values[name] = query()
             except Exception:
@@ -87,12 +126,24 @@ class GpuMemory:
             self.report.optional('recognition_vram', self._record, stage, point, scene)
 
     def _record(self, stage, point, scene):
+        if stage in ('faces', 'scene') and scene is None:
+            if point == 'before_release':
+                last, _ = self.sampled_batches.get(stage, (float('-inf'), False))
+                now = monotonic()
+                keep = now-last >= 10
+                self.sampled_batches[stage] = (now if keep else last, keep)
+            if not self.sampled_batches.get(stage, (0, False))[1]:
+                return
         if scene is not None and scene != self.sampled_scene:
             now = monotonic()
             if now - self.scene_sample_at < 10:
                 return
             self.sampled_scene, self.scene_sample_at = scene, now
+        if stage == 'final' and point == 'after_release' and self.process_thread:
+            self.process_thread.join(timeout=2.25)
         values = self.snapshot()
+        if self.process_latest[0] is not None:
+            values['process_sample_age_seconds'] = max(0., monotonic()-self.process_latest[0])
         self.samples += 1
         key = stage + ':' + point
         # Stage names are fixed by orchestration. Retain only the last scene
@@ -123,7 +174,7 @@ class GpuMemory:
         unavailable = current is None and not any(v is not None for v in tensor.values())
         if self.report.verbose:
             self.report.detail(line)
-        elif unavailable and not self.reported_unavailable:
+        elif unavailable and not self.reported_unavailable and not (self.process_thread and self.process_thread.is_alive()):
             self.reported_unavailable = True
             self.report.write('VRAM measurement unavailable for this process.')
 

@@ -223,6 +223,8 @@ def _execute(args, config, *, services, display):
             inputs = None
             from .gpu_memory import GpuMemory
             gpu = GpuMemory(config, report, database, run)
+            from .adaptive_gpu import observe_batches
+            resources_stack.enter_context(observe_batches(gpu.batch_change))
             display.gpu = gpu
             if resources is not None:
                 resources.gpu = gpu
@@ -261,6 +263,9 @@ def _execute(args, config, *, services, display):
                     selected = []
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
+                    display.prefetch = inputs
+                    if resources:
+                        resources.prefetch = inputs
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
                     with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered), estimate=False) as scenes:
                         from .scene_batches import Batches
@@ -546,6 +551,10 @@ def _execute(args, config, *, services, display):
                         summary['rebuild_profile'] = report.recognition_rebuild_profile
                     if references:
                         summary['references'] = dict(references)
+                    if inputs and inputs.taken:
+                        summary['vtt_prefetch'] = dict(taken=inputs.taken, ready=inputs.ready, blocked_seconds=inputs.blocked_seconds)
+                    if gpu.batch_sizes:
+                        summary['cuda_batches'] = gpu.batch_sizes
                     if gpu.enabled:
                         summary['gpu_memory'] = gpu.summary()
                     database.finish_run(run, outcome, summary, failure)
