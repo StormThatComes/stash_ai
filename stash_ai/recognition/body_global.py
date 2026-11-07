@@ -234,11 +234,14 @@ def reconcile(database,selected,config):
         'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND '+current_scan(),(scope,namespace))}
     for source in sorted(origins):
         if canonical(db,source)!=source or db.execute('SELECT 1 FROM members WHERE person=? LIMIT 1',(source,)).fetchone():continue
-        rows=list(db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.quality,m.person,m.status,s.scene FROM body_origins i '
+        rows=list(db.execute("SELECT b.id,b.scan,b.cue,b.seconds,b.quality,m.person,m.status,s.scene,"
+            "json_extract(m.proof,'$.reason') AS reason FROM body_origins i "
             'JOIN body_observations b ON b.id=i.observation JOIN scans s ON s.id=b.scan LEFT JOIN body_members m ON m.observation=b.id '
             'WHERE i.person=? AND b.contract=? AND '+current_scan(),(source,contract(config))))
         targets={r['person'] for r in rows}
-        if not rows or len(targets)!=1 or None in targets or source in targets or any(r['status']!='accepted' for r in rows):continue
+        if not rows or len(targets)!=1 or None in targets or source in targets or any(
+                r['status']!='accepted' or r['reason']=='face_rooted_body_view' for r in rows):
+            continue
         target=next(iter(targets));scenes={r['scene'] for r in rows}|_scenes(db,[source,target])
         if not scenes<=selection or not db.execute('SELECT 1 FROM members WHERE person=? LIMIT 1',(target,)).fetchone():continue
         if len(independent(rows,config.data['sapiensid']['identities']))<config.data['sapiensid']['identities']['min_support']:continue
