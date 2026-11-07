@@ -43,6 +43,10 @@ def test_failed_inference_resumes_only_completed_cues(tmp_path):
         next_backend = Backend()
         scan_scene(state, 'scope', client.scene, settings, 'ns', source, lambda: next_backend)
         assert next_backend.calls == 2
+        shot_ids = [json.loads(r[0])['view_shot'] for r in state.connection.execute(
+            'SELECT quality FROM observations ORDER BY cue')]
+        assert shot_ids == [0,0,0]
+        assert not state.connection.execute("SELECT 1 FROM metadata WHERE key LIKE 'partial-view-shot:%'").fetchone()
         assert state.connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0] == 3
 
 

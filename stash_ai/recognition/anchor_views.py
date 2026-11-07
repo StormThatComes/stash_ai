@@ -87,7 +87,7 @@ def _build_strict(rows,grouping,usage):
     def emit():
         if key is None:
             return
-        for slot in supported_cohorts(slots,cover,minimum,grouping['max_view_prototypes_per_person'],complete=True):
+        for slot in supported_cohorts(slots,cover,minimum,grouping['max_view_prototypes_per_person'],complete=True,cohesion=grouping['view_cohesion_threshold']):
             sample, medoid = slot.medoid()
             usage.add((sample,), kind='Anchor view')
             result.append(AnchorView(

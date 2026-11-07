@@ -100,6 +100,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     if record['cursor'] == record['total']:
         with db:
             db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))
+            db.execute('DELETE FROM metadata WHERE key=?',('partial-view-shot:' + identifier,))
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True
@@ -107,6 +108,10 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     backend = backend_factory()
     pending, cursor = [], record['cursor']
     pending_bytes=0
+    from .perspective_shots import advance
+    shot_key = 'partial-view-shot:' + identifier
+    checkpoint_shot = db.execute('SELECT value FROM metadata WHERE key=?',(shot_key,)).fetchone()
+    shot_state = json.loads(checkpoint_shot[0]) if checkpoint_shot else None
     collector=getattr(on_cue,'__self__',None)
     grouped=callable(getattr(collector,'collect_records',None))
     columns=('id','scan','cue','seconds','source','rect','geometry','quality','rejected','dimensions','embedding','crop')
@@ -126,6 +131,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             if supplemental:
                 collector.write_records(db,supplemental)
             db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
+            if shot_state and shot_state[0]+1 == cursor:
+                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(shot_key,encoded(shot_state)))
         pending.clear();pending_bytes=0
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
 
@@ -140,17 +147,23 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             with closing(cue_batches(frames, maximum, config.data['execution']['scan_queue_bytes']//2),
                          name='close cue microbatch') as batches:
                 for batch in batches:
+                    images = {i:image for i,_,image in batch}
                     for index, cue, records in process_cues(batch, backend, visibility, config, stage=cpu,
                             assess=assess,rejection=rejection,crop_bytes=crop_bytes,geometry_contract=geometry_contract):
+                        image = images[index]
+                        next_shot = advance(image,index,shot_state)
+                        image._recognition_cue_signature = next_shot
                         start=len(pending)
                         for face_index, face, quality, reason, vector, crop in records:
+                            if next_shot[1] is not None:
+                                quality['view_shot'] = next_shot[1]
                             observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                             pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
+                        shot_state = next_shot
                         cursor = index + 1
                         frame_progress(completed=cursor, total=record['total'])
                         if grouped:
-                            image=next(image for i,_,image in batch if i==index)
                             collector.collect_records(db,identifier,index,image,
                                 sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']),seconds=cue.start,
                                 frame_owner=batch)
@@ -160,12 +173,12 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         if (on_cue is not None and not grouped or cursor % config.data['execution']['checkpoint_cues'] == 0
                                 or pending_bytes+supplemental_bytes>=config.data['execution']['scan_queue_bytes']//4):checkpoint()
                         if on_cue is not None and not grouped:
-                            image=next(image for i,_,image in batch if i==index)
                             on_cue(db,identifier,index,image)
 
         checkpoint()
         with db:
             db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))
+            db.execute('DELETE FROM metadata WHERE key=?',('partial-view-shot:' + identifier,))
         return identifier, False
     except BaseException:
         # Only completed cues are durable. The current cue's tentative faces
