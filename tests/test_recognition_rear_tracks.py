@@ -115,3 +115,15 @@ def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_ha
     else:
         assert decisions['11']['person']=='A'
         assert decisions['15']['person'] is None and decisions['15']['retry_owner']=='A'
+
+
+def test_duplicate_pixels_in_another_scene_cannot_confirm_the_query():
+    from stash_ai.recognition.rear_gallery import Gallery
+    query = np.array([1.,0.])
+    rows = [dict(_vector=query,id=str(i),quality=encoded({'quality':{'pixel_digest':str(i)}})) for i in range(2)]
+    gallery = Gallery([('source owner','source scan',rows)])
+    settings = dict(match_threshold=.85,ambiguity_margin=.1,attach_min_support=2)
+    [duplicate] = gallery.rank(query,'other scan',settings,'0')
+    assert duplicate[0]==-1 and duplicate[5]==1
+    [independent] = gallery.rank(query,'other scan',settings,'new')
+    assert independent[0]==1 and len(independent[4])==2

@@ -58,7 +58,7 @@ class Gallery:
         self.addresses = [index for index,(_,_,rows) in enumerate(banks) for row in rows]
         self.tree = cKDTree([row['_vector'] for _,_,rows in banks for row in rows]) if banks else None
 
-    def rank(self, query, scan, settings):
+    def rank(self, query, scan, settings, pixel):
         # A mean above the floor requires at least one witness above the floor.
         floor = settings['match_threshold'] - settings['ambiguity_margin']
         nearby = self.tree.query_ball_point(query, np.sqrt(2*(1-floor)) + .002)
@@ -68,6 +68,14 @@ class Gallery:
             owner,source,rows = self.banks[index]
             if source == scan:
                 continue
-            scores = [float(np.dot(query, row['_vector'])) for row in rows]
-            result.append((sum(scores)/len(scores), min(scores), owner, source, rows))
+            scored = [(float(np.dot(query,row['_vector'])),row) for row in rows]
+            rival_score = sum(score for score,_ in scored)/len(scored)
+            independent = [(score,row) for score,row in scored
+                           if not pixel or json.loads(row['quality']).get('quality',{}).get('pixel_digest') != pixel]
+            if len(independent)>=max(2,settings['attach_min_support']):
+                scores, witnesses = zip(*independent)
+                result.append((sum(scores)/len(scores), min(scores), owner, source, witnesses, rival_score))
+            else:
+                # Losing independent support cannot remove a plausible rival.
+                result.append((-1., -1., owner, source, (), rival_score))
         return sorted(result,key=lambda r:(-r[0],-r[1],r[2],r[3]))
