@@ -129,7 +129,18 @@ class SolverDisplay:
     def finish(self, result):
         search = result.get('search', {})
         best = result.get('best_result')
-        phrase = f"{best['trial']} · {best['quality']}" if best else 'no completed trial'
+        if best:
+            phrase = f"best completed trial: {best['trial']} ({best['quality']})"
+            phrase += ' · configuration=' + ('changed' if best['changed'] else 'unchanged')
+        else:
+            phrase = 'no completed trial'
         coverage = self.best_state.get('sets', 'unknown')
-        return (f'Merge solver finished · {phrase} · merged sets {coverage} · {self.header()} · '
-                f"stop={search.get('stop_reason', 'unknown')}")
+        line = (f'Merge solver {phrase} · merged sets {coverage} · assigned={self.best_state.get("assigned", 0)}'
+                f' · {self.header()} · stop={search.get("stop_reason", "unknown")}')
+        if best and best['unmet_conditions']:
+            from collections import Counter
+            reasons = Counter()
+            for condition in best['unmet_conditions']:
+                reasons[condition['reason']] += condition.get('count', 1)
+            line += ' · unmet: ' + ', '.join(f'{key} ({count})' for key, count in reasons.most_common(3))
+        return line
