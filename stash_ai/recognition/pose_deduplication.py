@@ -126,6 +126,10 @@ class DeduplicatedPMPose:
     def __init__(self, pose, settings, refined=None):
         self.pose, self.settings, self.refined = pose, settings, refined
 
+    def close(self):
+        from .resident_models import release
+        release(self.refined or self.pose)
+
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
 

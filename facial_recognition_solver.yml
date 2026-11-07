@@ -458,7 +458,8 @@ execution:
     log_vram: true
     # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
     cpu_residency_bytes: 0
-    # Maximum CPU bytes for parked model weights between sequential scene windows. Zero disables parking. Range: 0..68719476736.
+    # Maximum CPU bytes for parked model weights between sequential scene windows. Zero disables parking. Range:
+    # 0..68719476736.
     sequential_scene_batch_size: 4
     # Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range:
     # 1..16.
