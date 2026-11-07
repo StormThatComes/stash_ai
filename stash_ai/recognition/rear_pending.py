@@ -66,7 +66,8 @@ class Pending:
                     value.update(str(version(self.db,'owner',owner)).encode())
                 for face in bank['face_ids']:
                     value.update(encoded(face).encode())
-                for cue in bank['cues']:
+                cues = bank['cues']
+                for cue in (sorted(cues) if isinstance(cues,set) else cues):
                     value.update(encoded(cue).encode())
                 self.owners[owner] = value.hexdigest()
         return self.owners[owner]
