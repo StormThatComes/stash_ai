@@ -241,3 +241,27 @@ def test_separate_pose_phase_receives_same_shot_labels_as_face_scan(tmp_path):
             assert seen == expected and seen
     finally:
         collector.close()
+
+
+def test_older_scan_recovers_shots_for_missing_poses_once(tmp_path):
+    import json
+    from tests.test_recognition_body_collection import Persons, settings
+    cfg = settings(tmp_path)
+    client,model = MediaClient(),Persons(0)
+    collector = PersonCollector(cfg,{},factory=lambda *args:model)
+    try:
+        with FaceDatabase(cfg.database) as state,SpriteInput(client,client.scene,cfg) as source:
+            db=state.connection
+            scan,_=scan_scene(state,'scope',client.scene,cfg,'ns',source,Backend)
+            key='cue-view-shots:'+scan
+            expected=db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()[0]
+            with db:
+                db.execute('DELETE FROM metadata WHERE key=?',(key,))
+                db.execute("UPDATE observations SET quality=json_remove(quality,'$.view_shot') WHERE scan=?",(scan,))
+            collector.enrich(db,scan,source)
+            assert db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()[0]==expected
+            assert all('view_shot' in json.loads(q) for q, in db.execute('SELECT quality FROM observations WHERE scan=?',(scan,)))
+            assert model.calls==len(source.cues)
+            assert collector.enrich(db,scan,source)==0
+    finally:
+        collector.close()
