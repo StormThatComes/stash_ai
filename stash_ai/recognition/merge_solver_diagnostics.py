@@ -28,6 +28,7 @@ GATES.update({
     'body_ambiguity':('sapiensid.global_matching.ambiguity_margin',),
 })
 HARD = {'body_anchor_keypoint_rules_missing','missing_person_evidence','missing_original_core_evidence','invalid_alignment',
+        'track_cut','track_cue_gap','track_no_face_root','track_different_face_root',
         'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness','body_anchor_pixels_missing'}
 
 
@@ -118,6 +119,7 @@ def latest_decisions(db, observation_ids):
                 reason=proof.get('reason'),evidence_kind='person',measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
                 body_global=bool(proof.get('global_merge')),
+                **({'track_blocker':proof['track_blocker']} if proof.get('track_blocker') else {}),
                 **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))
     return result
 
@@ -133,6 +135,10 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
     terminal = {r['observation']:r for r in decisions}
     for row in terminal.values():
         if row['status'] != 'accepted':
+            blocker = row.get('track_blocker')
+            if blocker:
+                details = {k:blocker[k] for k in ('cue','rival') if k in blocker}
+                add('body_track','track_' + blocker['reason'],row['observation'],**details)
             add('assignment', row['reason'], row['observation'],
                 **({'keypoint_rules':row['keypoint_rules']} if 'keypoint_rules' in row else {}))
     for row in queries.get('decisions', ()):
