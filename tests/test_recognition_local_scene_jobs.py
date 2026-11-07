@@ -23,16 +23,19 @@ def test_parallel_local_scenes_match_serial(tmp_path,monkeypatch,backend):
 
 
 def test_reference_scope_defers_allocation(monkeypatch):
+    import sqlite3
+    from contextlib import closing
     from stash_ai.recognition import reference_index as index
     calls=[]
     class Fake:
         def __init__(self,*args):calls.append('build');self.enabled=True
         def close(self):calls.append('close')
     monkeypatch.setattr(index,'ReferenceIndex',Fake)
-    db=object()
-    with index.references(db,'scope','namespace',None):assert calls==[]
-    with index.references(db,'scope','namespace',None):
-        assert index.current(db) is index.current(db)
+    with closing(sqlite3.connect(':memory:')) as db:
+        db.execute('CREATE TABLE candidates(payload TEXT,scan TEXT,status TEXT)')
+        with index.references(db,'scope','namespace',None):assert calls==[]
+        with index.references(db,'scope','namespace',None):
+            assert index.current(db) is index.current(db)
     assert calls==['build','close']
 
 

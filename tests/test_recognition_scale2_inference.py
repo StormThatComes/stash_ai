@@ -33,18 +33,19 @@ def test_visibility_batches_across_cues_without_reassessing(tmp_path,monkeypatch
 
 def test_vitpose_reuses_workers_and_prepares_next_batch_during_inference(monkeypatch):
     import torch
+    from stash_ai.recognition import gpu_transfers
     from stash_ai.recognition.vitpose_pose import ViTPoseLarge
     started=Event();prepared=Event();owner=get_ident();threads=[];calls=[]
     zeros=torch.zeros
     monkeypatch.setattr(torch,'zeros',lambda *args,**kwargs:zeros(*args,**dict(kwargs,device='cpu')))
-    class Inputs(dict):
-        def to(self,device):return self
+    # Exercise CUDA scheduling on CPU; transfer behavior has its own tests.
+    monkeypatch.setattr(gpu_transfers,'to_device',lambda value,device:value)
     class Processor:
         def __call__(self,**kwargs):
             threads.append(get_ident())
             if len(threads)==2:
                 assert started.wait(5);prepared.set()
-            return Inputs(pixel_values=zeros(1,3,8,8))
+            return dict(pixel_values=zeros(1,3,8,8))
     def model(**kwargs):
         calls.append(1)
         if len(calls)==1:

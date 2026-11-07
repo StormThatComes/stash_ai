@@ -23,8 +23,6 @@ class ReferenceIndex:
         self.enabled=False
         self.role_dirty, self.owners = set(), {}
         self.incremental, self.scene_by_id = {}, {}
-        from .reference_roles import index
-        index(db)
         from .pose_policy import is_anchor
         self.is_anchor = lambda q: is_anchor(q, config.data['clustering'])
         self.dirty = set()
@@ -303,6 +301,10 @@ def current(db):
 @contextmanager
 def references(db, scope, namespace, config):
     from stash_ai.runtime.cleanup import cleanup
+    from .reference_roles import index as prepare_indexes
+    # Main-schema DDL must precede lookahead readers. Keep the large in-memory
+    # reference snapshot lazy, but never create SQLite indexes during matching.
+    prepare_indexes(db)
     index = LazyIndex(db, scope, namespace, config)
     token = _active.set(index)
     try:
