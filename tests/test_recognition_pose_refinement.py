@@ -62,7 +62,7 @@ class Segmenter:
         finally:
             self.resets += 1
 
-    def predict(self, points):
+    def predict(self, points, negative=()):
         self.prompts += 1
         if self.failure:
             raise RuntimeError('inference failed')
@@ -285,3 +285,22 @@ def test_identity_mask_preserves_only_the_selected_pixels():
     with encoder_crop(image, (1, 0, 3, 1), mask) as crop:
         assert crop.getpixel((0, 0)) == (251, 12, 19)
         assert crop.getpixel((1, 0)) == (127, 127, 127)
+
+
+def test_shared_foreground_disables_both_encoder_masks_and_prompts_against_partner():
+    model = wrapper()
+    model.settings.update(masked_identity_crop=True, max_foreign_coverage=1.)
+    negatives = []
+    def split_mask(points, negative=()):
+        negatives.append(list(negative))
+        mask = np.zeros((100,150), dtype=bool)
+        # Distinct heads and torsos, with the same large distal region.
+        x = 20 if points[0,0] < 65 else 67
+        mask[10:65,x:x+40] = True
+        mask[65:90,35:97] = True
+        return mask, .99
+    model.segmenter.predict = split_mask
+    with Image.new('RGB',(150,100)) as image:
+        records = model.predict(image, [[20,10,80,90],[64,10,125,90]])[3]
+    assert all(negatives) and all(r['mask_conflict'] for r in records)
+    assert all(not r['separated'] and 'encoder_mask' not in r for r in records)

@@ -113,6 +113,8 @@ class RefinedPMPose:
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
         jobs = []
+        seen_masks = {}
+        retained_bytes = 0
         for i, box in enumerate(bounds):
             if settings['mode'] == 'overlap' and not any(
                     overlaps(box, other, settings['overlap_threshold']) for j, other in enumerate(bounds) if i != j):
@@ -132,7 +134,14 @@ class RefinedPMPose:
             pending = []
             for i, indices, foreign in jobs:
                 prompts = points[i, indices]
-                mask, score = self.segmenter.predict(prompts)
+                neighbours = [j for j, other in enumerate(bounds) if j != i
+                              and overlaps(bounds[i], other, settings['overlap_threshold'])]
+                negatives = [points[j,k] for j in neighbours for k in cores[j]
+                             if np.linalg.norm(prompts - points[j,k], axis=1).min() >
+                             max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))]
+                negatives = negatives[:settings['max_prompt_points']]
+                mask, score = (self.segmenter.predict(prompts, negatives) if negatives
+                               else self.segmenter.predict(prompts))
                 record = records[i]
                 record.update(status='rejected', mask_score=score, prompt_indices=indices.tolist(),
                               prompt_points=prompts.tolist())
@@ -144,8 +153,22 @@ class RefinedPMPose:
                     continue
                 record['mask_pixels'] = int(mask.sum())
                 torso = [k for k in cores[i] if k in (5, 6, 11, 12)]
-                neighbours = [j for j, other in enumerate(bounds) if j != i
-                              and overlaps(bounds[i], other, settings['overlap_threshold'])]
+                if neighbours:
+                    record['negative_points'] = np.asarray(negatives).tolist()
+                    packed = np.packbits(mask, axis=None)
+                    for j in neighbours:
+                        if j not in seen_masks:
+                            continue
+                        intersection = np.unpackbits(packed & seen_masks[j]).sum()
+                        if intersection > .15 * min(record['mask_pixels'], records[j]['mask_pixels']):
+                            record['mask_conflict'] = records[j]['mask_conflict'] = True
+                    if retained_bytes + packed.nbytes <= 16 * 1024**2:
+                        seen_masks[i] = packed
+                        retained_bytes += packed.nbytes
+                    else:
+                        record['mask_conflict'] = True
+                        for j in neighbours:
+                            records[j]['mask_conflict'] = True
                 # Require positive ownership and measurable negative evidence for every neighbour.
                 record['separated'] = bool(neighbours and len(torso) >= 2 and
                     inside(mask, points[i, torso]).all() and all(len(cores[j]) >= 2 and
@@ -156,6 +179,10 @@ class RefinedPMPose:
                     pending.clear()
             if pending:
                 self._second_pass(image, pending, result, records, points)
+        for record in records:
+            if record.get('mask_conflict'):
+                record.update(separated=False, reason='shared_mask_pixels')
+                record.pop('encoder_mask', None)
         return (*result, records)
 
     @pipeline_stage('pmpose_masked_second_pass')

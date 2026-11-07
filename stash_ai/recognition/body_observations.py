@@ -48,9 +48,10 @@ def compatible_contracts(config):
 def _previous_contracts(config):
     # Old association/crop policies and grayscale digests cannot train current
     # cores; retain their frozen banks only as conservative competitors.
-    return list(dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
-        for association,boundaries in ((False,False),('partial',False),(True,False),(True,True))
-        for version in ('independent-person-v2-rgb-pixels','independent-person-v1')))
+    recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
+    return [recent, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
+        for association,boundaries in ((False,False),('joint',False),('partial',False),(True,False),(True,True))
+        for version in ('independent-person-v2-rgb-pixels','independent-person-v1'))]
 
 
 def identifier(scan, cue, person, expected):

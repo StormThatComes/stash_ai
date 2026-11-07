@@ -121,3 +121,34 @@ def test_joint_assignment_uses_landmark_evidence_and_abstains_on_tie():
     assert associate(faces,[first,second]) == [0,1]
     assert associate(faces,[second,first]) == [1,0]
     assert associate([faces[0]], [first,deepcopy(first)]) == [None]
+
+
+def test_contained_singleton_rejects_contradiction_and_accepts_profile():
+    pose = person((0,0,100,140))
+    pose['keypoints'][1] = [-1,-1]
+    assert associate([FACE], [pose]) == [0]
+    pose['keypoints'][0] = [70.,78.]
+    assert association_rejection(FACE, pose) == 'head_landmark_mismatch'
+
+
+def test_merged_box_retries_only_after_two_distinct_heads(monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.recognition.crowded_retry import retry_people
+    import numpy as np
+    calls = []
+    class Tensor:
+        def __init__(self, value): self.value = np.asarray(value)
+        def detach(self): return self
+        def cpu(self): return self
+        def numpy(self): return self.value
+    heads = [FACE, checked_detection([v+80 if i in (0,4,6,8,10,12) else v for i,v in enumerate(FACE.row)])]
+    poses = [person((0,0,100,140)), person((80,0,190,140))]
+    poses[1]['keypoints'][:3] = [[130.,60.], [145.,45.], [115.,45.]]
+    raw = SimpleNamespace(boxes=SimpleNamespace(xyxy=Tensor([[0,0,100,140],[80,0,190,140]]),conf=Tensor([.9,.9])))
+    model = SimpleNamespace(config=SimpleNamespace(data={'sapiensid':{'pose':{'max_people_per_frame':4,
+        'score_threshold':.5}}}), pose_refiner=SimpleNamespace(predict=lambda *a: ()), _people=lambda *a:poses,
+        _predict_pose=lambda crop:calls.append(crop.size) or [raw])
+    original = [dict(bounds=[0,0,190,140])]
+    with Image.new('RGB', (200,150)) as image:
+        assert retry_people(model,image,[FACE,FACE],original) is original and not calls
+        assert retry_people(model,image,heads,original) == poses and len(calls)==1

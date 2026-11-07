@@ -182,7 +182,11 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
         evidence['face_person_association'] = policy()
         if legacy_association == 'partial':
             evidence['face_person_association']['version'] = 'landmark-supported-partial-face-v1'
-    if legacy_association and 'refinement' in evidence.get('pose_refiner', {}):
+        if legacy_association == 'joint':
+            evidence['face_person_association']['version'] = 'joint-landmark-assignment-v2'
+    if legacy_association == 'joint' and 'refinement' in evidence.get('pose_refiner', {}):
+        evidence['pose_refiner']['refinement']['version'] = 'pmpose-sam-pose2seg-refinement-v2'
+    elif legacy_association and 'refinement' in evidence.get('pose_refiner', {}):
         old = evidence['pose_refiner']['refinement']
         old.pop('masked_identity_crop', None)
         old['version'] = 'pmpose-sam-pose2seg-refinement-v1'

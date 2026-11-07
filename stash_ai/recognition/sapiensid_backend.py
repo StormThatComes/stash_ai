@@ -304,6 +304,8 @@ class SapiensIDFaces(YuNetDetector):
         self._prepared_frames=prepared
 
     def _activate(self, image, faces, people):
+        from .crowded_retry import retry_people
+        people = retry_people(self, image, faces, people)
         matches = associate(faces, people)
         self.frame_people, self.face_matches = people, matches
         self._person_frame = image, {tuple(face.row): people[index] if index is not None else None

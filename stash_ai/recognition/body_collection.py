@@ -89,6 +89,8 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
             measured['query_only'] = True
         if ambiguous and separated:
             measured['query_only'] = True
+        if refinement.get('mask_conflict'):
+            reason = 'person_mask_conflict'
         if refinement.get('encoder_mask'):
             from .person_geometry import encoder_crop
             with encoder_crop(image, person['bounds'], refinement['encoder_mask']) as foreground:
