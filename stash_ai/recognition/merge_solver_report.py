@@ -9,7 +9,7 @@ def fields(row, names):
 
 
 def observation_locations(goals):
-    return {row['id']: (group['index'], member.get('performer_id'), row['scene'])
+    return {row['id']: (group['index'], member.get('performer_id'), row['scene'], row.get('cue'))
             for group in goals['groups'] for member in group['members'] for row in member['observations']}
 
 
@@ -59,7 +59,7 @@ def feedback_summary(feedback, hybrid, config, changes, locations):
         location = locations.get(row.get('observation'))
         if location is None or row['stage'] not in ('assignment', 'quality', 'body_track'):
             continue
-        index, performer, scene = location
+        index, performer, scene = location[:3]
         key = index, row['stage']
         if key in examples:
             continue
