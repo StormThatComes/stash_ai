@@ -94,12 +94,13 @@ def scores(left,right):
         if not count:raise ValueError('Body mode has no independent scoring witnesses.')
         return dict(minimum=low,mean=total/count)
     from .run_cache import packed
-    right64=packed(right)
-    left64=packed(left)
+    from .run_cache import products
     for start in range(0,len(left),16):
-        from .run_cache import products
-        values=products(left64[start:start+16],right64)
-        low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
+        a=packed(left if len(left)<=16 else left[start:start+16])
+        for other in range(0,len(right),64):
+            b=packed(right if len(right)<=64 else right[other:other+64])
+            values=products(a,b)
+            low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
     return dict(minimum=low,mean=total/count)
 
 

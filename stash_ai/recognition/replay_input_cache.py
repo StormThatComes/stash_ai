@@ -79,7 +79,8 @@ class InputCache:
             self.owned()
             manifest,_=_json(self.directory/'current.json')
             if manifest.get('key')!=self.key:return False
-            self.replace_invalid=True\n            name=manifest['file']
+            self.replace_invalid = True
+            name = manifest['file']
             if name!=str(uuid.UUID(name.removesuffix('.sqlite3')))+'.sqlite3':raise ValueError('Invalid cache filename.')
             path=self.directory/name;lease=_lease(path)
             if lease[2]>self.limit or checksum(path)!=manifest['checksum']:raise ValueError('Invalid raw replay checksum.')

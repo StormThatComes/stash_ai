@@ -32,7 +32,6 @@ def _recover(database, selected, config, claims, *, births=()):
         core_modes.update((id(core[2]),modes) for core,modes in zip(identity.query_cores,identity.query_core_modes))
     groups=[group for _,group,_,_ in banks]
     from .hybrid_query_index import QueryIndex
-    index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
     from .hybrid_query_observer import query_observer, query_decision
     observe=query_observer(db,banks,config,births,selected)
     policy=matching_policy(config)
@@ -49,58 +48,61 @@ def _recover(database, selected, config, claims, *, births=()):
         for row in rows:
             if config.data['clustering']['auxiliary_matching'] or is_anchor(row['quality'],config.data['clustering']):
                 yield row,vector(row)
-    for row,face,candidates in index.batch(queries(),settings['face_floor']):
-        body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
-        if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
-            raise ValueError('Invalid retained SapiensID query feature.')
-        choices=[];face_choices=[];query_modes={}
-        face_batch=np.asarray([face],dtype='float64')
-        body_batch=np.asarray([body],dtype='float64') if body is not None else None
-        if observe is not None:
-            observe(row,face_batch,body_batch)
-        for identity,group,bodies,faces in candidates:
-            if identity.person in births:continue
-            f=scores(face_batch,faces)
-            if f is None or f['minimum']<settings['face_floor']:continue
-            admissible=(not identity.guard_face_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
-            face_choices.append((f['mean'],identity.person,admissible,group))
-            if body is None:continue
-            from .hybrid_modes import query_score
-            modes=identity.body_modes if bodies is identity.persons else core_modes.get(id(bodies),())
-            measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
-            measures=[m for m in measures if m is not None]
-            if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
-            score=max((m['mean'] for m in measures),default=None)
-            admissible=bool(measures and not identity.guard_missing and not identity.unsupported_body_modes and
-                len(identity.independent)>=settings['min_support'] and
-                any(m['minimum']>=settings['person_threshold'] for m in measures))
-            choices.append((score,identity.person,admissible,group))
-        # Prefer a strict face proof; body scores never compete with face scores.
-        winner=choose(face_choices,config.data['recognition']['ambiguity_margin'])
-        signal='face'
-        if winner is None:
-            winner=choose(choices,settings['ambiguity_margin']);signal='face_and_body'
-        if winner is None:
-            if observe is not None:query_decision(row['id'],'choice','no_unambiguous_query_winner',
-                face_choices=len(face_choices),body_choices=len(choices))
-            continue
-        score,owner,_,group,rival_score=winner
-        if not co_presence_allows(db,row,group,groups,face,config,
-                peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):
-            if observe is not None:query_decision(row['id'],'copresence','copresence_conflict',owner=owner)
-            continue
-        proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
-                   core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
-                   reference_role='attachment',reference_selected=False,
-                   body_mode=query_modes.get((owner,id(group))) if signal=='face_and_body' else None,
-                   independent_query_support=None)
-        from .independent_evidence import body_vote
-        vote=(body_vote(row) if signal=='face_and_body' else
-              {k:row[k] for k in ('scan','seconds','quality')})
-        claim=(row['candidate'],row['id'],owner,proof,row['prior_owner'],vote)
-        family=((owner,'face') if signal=='face' else
-                (owner,'face_and_body',tuple(proof['core_observations']),proof['body_mode']))
-        claims.add(row,claim,family)
+    from contextlib import closing
+    with closing(QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])) as index:
+        for row,face,candidates in index.batch(queries(),settings['face_floor']):
+            body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
+            if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
+                raise ValueError('Invalid retained SapiensID query feature.')
+            choices=[];face_choices=[];query_modes={};body_candidates=[]
+            face_batch=np.asarray([face],dtype='float64')
+            body_batch=np.asarray([body],dtype='float64') if body is not None else None
+            if observe is not None:
+                observe(row,face_batch,body_batch)
+            for identity,group,bodies,faces in candidates:
+                if identity.person in births:continue
+                f=scores(face_batch,faces)
+                if f is None or f['minimum']<settings['face_floor']:continue
+                admissible=(not identity.guard_face_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
+                face_choices.append((f['mean'],identity.person,admissible,group))
+                if body is not None:body_candidates.append((identity,group,bodies))
+            # Prefer a strict face proof; body scores never compete with face scores.
+            winner=choose(face_choices,config.data['recognition']['ambiguity_margin'])
+            signal='face'
+            if winner is None:
+                for identity,group,bodies in body_candidates:
+                    from .hybrid_modes import query_score
+                    modes=identity.body_modes if bodies is identity.persons else core_modes.get(id(bodies),())
+                    measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
+                    measures=[m for m in measures if m is not None]
+                    if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
+                    score=max((m['mean'] for m in measures),default=None)
+                    admissible=bool(measures and not identity.guard_missing and not identity.unsupported_body_modes and
+                        len(identity.independent)>=settings['min_support'] and
+                        any(m['minimum']>=settings['person_threshold'] for m in measures))
+                    choices.append((score,identity.person,admissible,group))
+                winner=choose(choices,settings['ambiguity_margin']);signal='face_and_body'
+            if winner is None:
+                if observe is not None:query_decision(row['id'],'choice','no_unambiguous_query_winner',
+                    face_choices=len(face_choices),body_choices=len(choices))
+                continue
+            score,owner,_,group,rival_score=winner
+            if not co_presence_allows(db,row,group,groups,face,config,
+                    peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):
+                if observe is not None:query_decision(row['id'],'copresence','copresence_conflict',owner=owner)
+                continue
+            proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
+                       core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
+                       reference_role='attachment',reference_selected=False,
+                       body_mode=query_modes.get((owner,id(group))) if signal=='face_and_body' else None,
+                       independent_query_support=None)
+            from .independent_evidence import body_vote
+            vote=(body_vote(row) if signal=='face_and_body' else
+                  {k:row[k] for k in ('scan','seconds','quality')})
+            claim=(row['candidate'],row['id'],owner,proof,row['prior_owner'],vote)
+            family=((owner,'face') if signal=='face' else
+                    (owner,'face_and_body',tuple(proof['core_observations']),proof['body_mode']))
+            claims.add(row,claim,family)
     # Resolve against every new claim and existing accepted face in each cue,
     # even when the winning queries used different original merged cores.
     from .decision_resolution import conflicting_claims
