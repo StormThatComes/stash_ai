@@ -1,5 +1,8 @@
 """Small presentation state retained until command resources have closed."""
 from collections import Counter
+from time import monotonic
+
+from .console_layout import time_line
 
 from .reference_usage import usage_line
 
@@ -7,6 +10,7 @@ from .reference_usage import usage_line
 class RunDisplay:
     def __init__(self, report):
         self.report = report
+        self.started = monotonic()
         self.counts = Counter()
         self.scans = Counter()
         self.rejections = {key: Counter() for key in ('face', 'body', 'person_evidence_unavailable')}
@@ -43,5 +47,7 @@ class RunDisplay:
         if self.interrupted_cursor is not None:
             scene, cursor = self.interrupted_cursor
             parts.append(f'resume scene={scene} committed_cues={cursor}')
+        console = getattr(self.report, 'console', None)
+        parts.append(time_line(monotonic() - self.started, console.phase_totals if console else {}))
         self.report.optional('recognition_summary', self.report.write,
                              f'Recognition {outcome}: ' + ' | '.join(parts))

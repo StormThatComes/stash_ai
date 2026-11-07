@@ -250,7 +250,8 @@ def parser():
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
-    merge_report.add_argument('--progress-style', choices=('auto','off'), default='auto')
+    merge_report.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto',
+        help='Live progress on a terminal, sparse events when redirected, or detailed verbose output.')
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
     merge_report.add_argument('--yaml-mode', choices=('full', 'diff'), default='full',
         help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')

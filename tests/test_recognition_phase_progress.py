@@ -64,7 +64,7 @@ def test_cold_rebuild_has_scene_observation_binding_and_committed_transaction_pr
             seen.append(active.n)
         return original(row)
     monkeypatch.setattr(clustering, 'vector', vector)
-    assert execute(args('1', '2'), config, services=services) == 0
+    assert execute(args('1', '2', style='verbose'), config, services=services) == 0
     rows = {bar.desc: bar for bar in bars}
     assert rows['Copy selected evidence'].n == rows['Copy selected evidence'].total == 2
     assert rows['Rebuild selected identities'].n == rows['Rebuild selected identities'].total == 2
@@ -111,7 +111,7 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
             seen[active.desc].append(active.n)
             assert report.console.state['work'] == f'{(len(seen[active.desc])-1)//3}/2'
             assert report.console.state['detail'] == f'{active.n}/3'
-            if active.n:
+            if report.console.state['detail_rate'] != 'warming up':
                 assert report.console.state['detail_eta'] != 'warming up'
                 assert report.console.state['detail_rate'].endswith('observation/s')
         return original(hasher, row)
@@ -179,7 +179,7 @@ def test_same_scene_context_reports_scene_support_and_assignment_work(tmp_path, 
     vectors = {'1': [[1., 0., 0., 0.]] * 3 + [[.63, math.sqrt(1 - .63**2), 0., 0.]]}
     config, _, services, _ = library(tmp_path, monkeypatch, vectors)
     bars, owners = terminal
-    assert execute(args('1'), config, services=services) == 0
+    assert execute(args('1', style='verbose'), config, services=services) == 0
     rows = {bar.desc: bar for bar in bars}
     for phase, count in [('Apply same-scene context', 1), ('Validate same-scene support', 3),
                          ('Match same-scene observations', 1)]:
@@ -228,7 +228,7 @@ def test_portrait_candidates_advance_within_a_single_performer(tmp_path, monkeyp
         from tests.test_recognition_metadata import setup as prepare
         config, client, services = prepare(tmp_path, monkeypatch)
         label, expected = 'Check video portrait frames', 2
-    assert execute(args('1'), config, services=services) == 0
+    assert execute(args('1', style='verbose'), config, services=services) == 0
     row = next(bar for bar in terminal[0] if bar.desc == label)
     assert row.n == row.total == expected and row.disable
     assert client.images
@@ -471,3 +471,22 @@ def test_assignment_preparation_reports_candidate_batches_and_cleans_up_on_inter
         assert db.in_transaction == pending and list(db.iterdump()) == before
         assert not db.execute("SELECT 1 FROM sqlite_temp_master WHERE name LIKE 'rebuild_assignments_%'").fetchone()
     assert all(b.disable for b in bars)
+
+
+def test_compact_run_skips_optional_sql_counts(terminal):
+    from stash_ai.recognition.progress import RunProgress
+    report = RunReport(write=lambda _: None)
+    with present(report, 'compact'):
+        RunProgress(report)
+        with work('Scan records', lambda: pytest.fail('counted rows only for UI')) as row:
+            row.advance()
+            assert row.total is None
+
+
+def test_rate_window_restarts_after_idle_or_resume():
+    from stash_ai.recognition.console_layout import WindowRate
+    window = WindowRate(0., 200)
+    assert window.sample(.2, 202) is None
+    assert window.sample(2., 204) == 2
+    assert window.sample(60., 204) is None
+    assert window.sample(61., 207) == 3
