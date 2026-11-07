@@ -65,11 +65,11 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
         if position%32==0:probe.prepare(selected[position:position+32],rebuilt)
         scene, scan = item['scene'], item['scan']
         counts['publication_attempted'] += 1
-        groups = rebuilt[scan]
-        accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
-        counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
-        counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
         try:
+            groups = rebuilt[scan]
+            accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
+            counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
+            counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
             from .publication_queue import current,acknowledge
             from .publication_queue import validate,body_policy
             from .publication_snapshot import Snapshot
@@ -291,6 +291,7 @@ def _execute(args, config, *, services, display):
                                     nonlocal cursor, initial, scan_mode
                                     initial = cursor = completed
                                     scan_mode = mode
+                                    display.scans[mode] += 1
                                 scene_work = False
                                 try:
                                     with activity(report, 'prepare VTT input', scene=identifier):
@@ -310,7 +311,8 @@ def _execute(args, config, *, services, display):
                                                 scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
                                                     backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
                                                     on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] and not sequential else None)
-                                            display.scans[scan_mode or ('reused' if reused else 'fresh')] += 1
+                                            if scan_mode is None:
+                                                display.scans['reused' if reused else 'fresh'] += 1
                                             new_cues = 0 if reused else cue_total - (initial or 0)
                                             counts['face_cues'] += new_cues
                                             if config.data['sapiensid']['enabled'] and not sequential:
@@ -362,6 +364,11 @@ def _execute(args, config, *, services, display):
                                     report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
                                                     safe_error(error, key))
                                 finally:
+                                    if scan is None and scan_mode in ('fresh', 'resumed'):
+                                        committed = max(0, cursor - initial)
+                                        counts['face_cues'] += committed
+                                        if config.data['sapiensid']['enabled'] and not sequential:
+                                            counts['pose_cues'] += committed
                                     if sequential and batch_size==1 and (scene_work or backend.model is not None or
                                                        visibility.model is not None or person_collector.model is not None):
                                         cleanup([('release scene GPU models', lambda: gpu.release('scene', [
@@ -386,8 +393,11 @@ def _execute(args, config, *, services, display):
                                               max_samples_per_person=config.data['clustering']['max_samples_per_person'], **values)
                             status(report, references=usage_line(references), reference_people=values['people'],
                                    reference_samples=values['samples'], reference_stage=values['stage'])
+                        counts['publication_selected'] = len(selected)
+                        reconciling = True
+                        reconcile_scene = 'selected scenes'
                         try:
-                            with gpu.phase('rebuild'), ui.phase('Recognition identity rebuild'):
+                            with phase(report, 'Recognition Stash reconciliation'):
                                 with work('Reconcile previous merges', 1, unit='step', position=0) as merges:
                                     reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
                                     merges.advance()
@@ -398,7 +408,10 @@ def _execute(args, config, *, services, display):
                                     position=0,
                                 ) as publications:
                                     for item in publications:
-                                        reconcile_unlinks(database, client, scope, item['scene'])
+                                        reconcile_scene = item['scene']
+                                        reconcile_unlinks(database, client, scope, reconcile_scene)
+                            reconciling = False
+                            with gpu.phase('rebuild'), ui.phase('Recognition identity rebuild'):
                                 rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
                                 from .decision_evidence import summary as decision_summary
                                 database.progress(run, 'identity_decisions', decision_summary(
@@ -418,8 +431,14 @@ def _execute(args, config, *, services, display):
                             raise
                         except Exception as error:
                             rebuilt = None
-                            counts['scenes_failed'] += len(selected)
-                            report.optional('recognition_error', report.issue, 'recognition', 'rebuild', 'selected scenes', error, safe_error(error, key))
+                            if reconciling:
+                                counts['publication_aborted'] += 1
+                                report.optional('recognition_error', report.issue, 'recognition', 'publication',
+                                                reconcile_scene, error, safe_error(error, key))
+                            else:
+                                counts['scenes_failed'] += len(selected)
+                                report.optional('recognition_error', report.issue, 'recognition', 'rebuild',
+                                                'selected scenes', error, safe_error(error, key))
                         finally:
                             if references:
                                 database.progress(run, 'references', references)
@@ -432,7 +451,6 @@ def _execute(args, config, *, services, display):
                                     _publish_selection(database, client, report, config, scope, model_namespace,
                                                        selected, rebuilt, ready, counts, key, run, publication)
                             except Exception as error:
-                                counts['publication_not_attempted'] = len(selected) - counts['publication_attempted']
                                 counts['publication_aborted'] += 1
                                 report.optional('recognition_error', report.issue, 'recognition', 'publication',
                                                 'selected scenes', error, safe_error(error, key))
@@ -520,6 +538,8 @@ def _execute(args, config, *, services, display):
                 def show_errors():
                     report.optional('recognition_error_summary', render_errors, report, summary['errors'])
                 def finish_history():
+                    if counts['publication_selected']:
+                        counts['publication_not_attempted'] = counts['publication_selected'] - counts['publication_attempted']
                     summary.update(counts=dict(counts), mutations=dict(report.counts),
                                    rejections={kind:dict(reasons) for kind,reasons in rejection_totals.items()})
                     if publication_debt is not None:summary['publication_debt'] = publication_debt

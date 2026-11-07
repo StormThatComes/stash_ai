@@ -38,8 +38,9 @@ class RunDisplay:
                         f'pose_cues={c["pose_cues"]} backfilled={c["pose_backfilled"]}')
         if self.prefetch and self.prefetch.taken:
             work.append('prefetch ' + self.prefetch.line())
-        if c['scenes_processed']:
-            work.append(f'published={c["scenes_processed"]-c["publications_unchanged"]} unchanged={c["publications_unchanged"]}')
+        if c['publication_selected']:
+            work.append(f'publication {c["publication_attempted"]}/{c["publication_selected"]} attempted · '
+                        f'published={c["scenes_processed"]-c["publications_unchanged"]} unchanged={c["publications_unchanged"]}')
         if 'portrait_people_selected' in c:
             work.append(f'portrait_people_selected={c["portrait_people_selected"]}')
         if self.rebuild:
