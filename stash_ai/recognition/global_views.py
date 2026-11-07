@@ -75,7 +75,7 @@ def _catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_sce
         if owner is None:
             return
         maximum=grouping['max_view_prototypes_per_person']
-        for slot in supported_cohorts(slots,cover,minimum or grouping['view_min_support'],maximum,complete=complete,cohesion=grouping['view_cohesion_threshold']):
+        for slot in supported_cohorts(slots,cover,minimum or grouping['view_min_support'],maximum,complete=complete,cohesion=grouping['view_cohesion_threshold'],primary=not complete):
             sample, medoid = slot.medoid()
             from .paged_references import pack
             examples=pack(slot.examples)
@@ -121,7 +121,7 @@ def catalogue(db,config,scope,namespace,*,usage,policy=None,excluded_scenes=(),s
                 "s.scene,s.scope,s.namespace,s.policy_sha,s.status,(SELECT representative FROM pixel_catalogue_aliases a WHERE a.scope=s.scope AND a.namespace=s.namespace AND a.fingerprint=json_extract(o.quality,'$.evidence_pixel_sha256')),"+strict_sql()+','+predicate()+
                 ' FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
                 'WHERE m.person=? ORDER BY o.id')
-        contract=digest(['global-views-v2',options,config.data['clustering'],config.data['recognition'],version(db,'heads')])
+        contract=digest(['global-views-v3',options,config.data['clustering'],config.data['recognition'],version(db,'heads')])
         candidate_inputs=('SELECT c.id,c.policy,c.person,c.status,c.payload FROM candidates c JOIN observations o '
             "ON o.id=CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,'$.observation') END JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY c.id")
         signed=cached(db,'global-view-input',owner,contract,lambda:fingerprint(db,[(inputs,(owner,)),(candidate_inputs,(owner,))],contract),

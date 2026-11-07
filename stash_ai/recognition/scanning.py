@@ -116,6 +116,10 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     grouped=callable(getattr(collector,'collect_records',None))
     columns=('id','scan','cue','seconds','source','rect','geometry','quality','rejected','dimensions','embedding','crop')
 
+    shots_key = 'cue-view-shots:' + identifier
+    saved = db.execute('SELECT value FROM metadata WHERE key=?',(shots_key,)).fetchone()
+    shots = json.loads(saved[0]) if saved else []
+
     def checkpoint():
         nonlocal pending_bytes
         supplemental=collector.take_records() if grouped else []
@@ -131,6 +135,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             if supplemental:
                 collector.write_records(db,supplemental)
             db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
+            if shots:
+                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(shots_key,encoded(shots)))
             if shot_state and shot_state[0]+1 == cursor:
                 db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(shot_key,encoded(shot_state)))
         pending.clear();pending_bytes=0
@@ -160,6 +166,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                             observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                             pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
+                        if not shots or shots[-1][1] != next_shot[1]:
+                            shots.append([index,next_shot[1]])
                         shot_state = next_shot
                         cursor = index + 1
                         frame_progress(completed=cursor, total=record['total'])

@@ -189,3 +189,33 @@ def test_two_different_face_roots_veto_independent_local_gallery():
     recover(rows,decisions,seeds,defaults(),scores,SimpleNamespace(allows=lambda *args:True))
     assert decisions['11']['person'] is None
     assert decisions['11']['track_blocker']['reason']=='different_face_root'
+
+
+def test_two_separately_rooted_scenes_build_one_external_view(tmp_path):
+    config = configured(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',('A','scope','ns',1,None,'A'))
+        selected = []
+        front, back = [1.,0.], [.82,.5724]
+        for scene_id in ('1','2','3'):
+            source = scene_id != '3'
+            item, ids = scene(db,config,scene_id,[front,back,front] if source else [back]*3)
+            selected.append(item)
+            for cue, oid in enumerate(ids):
+                rooted = source and cue != 1
+                q = dict(pixel_digest=oid,keypoints=10,sharpness=100,orientation='front' if rooted else 'back',
+                         frame_signature=(bytes([15,15,15])*16).hex())
+                db.execute('UPDATE body_observations SET quality=?,geometry=? WHERE id=?',
+                           (encoded(dict(quality=q)),encoded(dict(bounds=[0,0,80,100])),oid))
+                if rooted:
+                    fid = 'face-'+oid
+                    db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                               (fid,item['scan'],cue,float(cue),'','[]','[]',encoded(dict(pixels=100,sharpness=100,
+                                pose_deviation=0.,visible_face_fraction=1.)),None,2,np.array(front,dtype='<f4').tobytes(),None))
+                    db.execute('INSERT INTO members VALUES (?,?)',(fid,'A'))
+                    db.execute('UPDATE body_observations SET face=? WHERE id=?',(fid,oid))
+        db.commit()
+        rebuild(state,selected,config,{s['scan']:[] for s in selected})
+        rows = db.execute('SELECT person,proof FROM body_members WHERE observation IN (?,?,?)',ids).fetchall()
+        assert all(person=='A' and len(json.loads(proof)['source_scans'])==2 for person,proof in rows)

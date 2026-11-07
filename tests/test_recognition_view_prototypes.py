@@ -282,3 +282,24 @@ def test_repeated_shot_cannot_outvote_a_view_confirmed_in_two_shots():
             slot.add(row,np.asarray([1.,0.],dtype='float32'))
         slots.append(slot)
     assert prioritized(slots,1)[0].pose=='neutral'
+
+
+def test_single_shot_auxiliary_view_remains_local(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        from tests.test_recognition_clustering import scan
+        selected = []
+        for scene, values, profiles in [('1',[FRONT]*3+[SEED]*3,range(3,6)),('2',[LATER]*2,range(2))]:
+            sid,_ = scan(db,config,scene,values,count=len(values))
+            for cue in profiles:
+                db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.pose_deviation',0.8) WHERE scan=? AND cue=?", (sid,cue))
+            selected.append(dict(scan=sid,scene=scene))
+        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.view_shot',0) WHERE scan=?",
+                              (selected[0]['scan'],))
+        db.connection.commit()
+        rebuild_selected(db,selected,config)
+        args = (db.connection,matching_policy(config),config.data['clustering'])
+        assert not confirmed_views(*args,remaining_bytes=2**20)
+        [local] = confirmed_views(*args,remaining_bytes=2**20,include_local=True)
+        assert local.local_scan == selected[0]['scan']
+        assert all(row['status']=='withheld' for row in policy_membership(db,config,selected[1]['scan']))

@@ -80,7 +80,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         person = json.loads(row['geometry'])
         kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
-        if kind != 'back':
+        if kind != 'back' and decision.get('query_perspective') != 'back':
             continue
         query = vector(row)
         ranked = gallery.rank(query,scan,settings,quality(row).get('pixel_digest'))
@@ -106,7 +106,8 @@ def _scene(db, scan, stamp, gallery, search, config):
         proof = dict(person=owner, status='accepted', role='auxiliary',
                      reason='external_rear_view', source_scan=source, perspective='back', score=mean,
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
-                     source_tracks=[[*w['roots'],w['id']] for w in witnesses])
+                     source_tracks=[[*w['roots'],w['id']] for w in witnesses],
+                     source_scans=sorted({w['scan'] for w in witnesses}))
         proposals[row['id']] = (owner,row['cue'],old,proof)
         batch.append((row['id'], query, {owner,old}, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):

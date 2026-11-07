@@ -62,6 +62,11 @@ class PersonCollector:
             return 0
         self._load()
         frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
+        from bisect import bisect_right
+        from .body_perspectives import frame_signature
+        saved_shots = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
+        shots = json.loads(saved_shots[0]) if saved_shots else []
+        starts = [item[0] for item in shots]
         self.resume_rows=[]
         # Read only narrow geometry columns; cap each ordered lookup to 64 cues.
         blocks={cue:cue//64 for cue in missing}
@@ -79,6 +84,9 @@ class PersonCollector:
                                     for row in db.execute('SELECT cue,id,geometry,rejected FROM observations WHERE scan=? '
                                             'AND cue IN (SELECT value FROM json_each(?)) ORDER BY cue,id',(scan,json.dumps(cues))):
                                         lookup[row['cue']].append(row)
+                                which = bisect_right(starts,index)-1
+                                if which>=0:
+                                    image._recognition_cue_signature = (index,shots[which][1],frame_signature(image))
                                 rows=lookup[index]
                                 self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
                                 progress.advance()
@@ -134,6 +142,8 @@ class PersonCollector:
                     if size <= limit:
                         from .frame_ownership import Lease
                         lease = frame_owner.retain(image) if frame_owner is not None else Lease(image.copy())
+                        if lease.image is not image and hasattr(image,'_recognition_cue_signature'):
+                            lease.image._recognition_cue_signature = image._recognition_cue_signature
                         self.pose_frames.append((db, scan, index, lease.image, rows, seconds, fresh, lease))
                         self.pose_bytes += size
                         if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:

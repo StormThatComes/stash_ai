@@ -42,7 +42,7 @@ def orientation(person):
 def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
     from .body_identity import quality, independent
-    if not seeds:
+    if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
         for row in rows:
             if not row.get('face_person') and quality(row).get('orientation') == 'back':
                 decisions[row['id']]['track_blocker'] = dict(reason='no_face_root', cue=row['cue'])
@@ -127,6 +127,19 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 next_row[a['id']] = bid
             else:
                 stops[a['id']] = dict(reason='competing_transition', cue=target, rival=rivals[0][1])
+    # A side/uncertain cue can query a rear bank only when bracketed by two
+    # back observations on unique links. It never trains the rear bank.
+    previous = {end:start for start,end in next_row.items()}
+    for oid, (measurement, _, _) in geometry.items():
+        if measurement.get('orientation') not in ('side','unknown'):
+            continue
+        neighbours = (previous.get(oid), next_row.get(oid))
+        if all(i in geometry and geometry[i][0].get('orientation')=='back' for i in neighbours):
+            decisions[oid]['query_perspective'] = 'back'
+    if not seeds:
+        for row in rows:
+            decisions[row['id']].setdefault('track_blocker',dict(reason='no_face_root',cue=row['cue']))
+        return
     lookup = {r['id']: r for r in rows}
     from .body_identity import copresent
     measured = defaultdict(list)
@@ -185,20 +198,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             assessed = geometry[row['id']][0]
             return (-assessed.get('overlap', 0.), assessed.get('keypoints', 0),
                     assessed.get('sharpness', 0.), pixels(row['quality']) or 0, row['id'])
-        kept, roots, shots = [], set(), set()
-        for start, end, row in sorted(tracks, key=witness_rank, reverse=True):
-            shot = shot_ids[row['cue']]
-            if start in roots or end in roots or shot in shots:
-                continue
-            if any(scores.face_similarity(row['_vector'], other['_vector']) < settings['cohesion_threshold']
-                   for _, _, other in kept):
-                continue
-            kept.append((start,end,row))
-            roots.update((start,end))
-            shots.add(shot)
-            if len(kept) >= max(8,settings['attach_min_support']):
-                break
-        kept.sort(key=lambda item: item[2]['cue'])
+        from .rooted_witnesses import select
+        kept = select(tracks,settings,scores,witness_rank,lambda row:shot_ids[row['cue']])
+        for start,end,witness in kept:
+            decisions[witness['id']]['rooted_track'] = dict(owner=key[0], perspective=key[1],
+                                                            roots=[start,end])
         witnesses = [r for _,_,r in kept]
         if len(kept)>=2 and len(independent(witnesses, settings)) >= max(2,settings['attach_min_support']):
             proof = [(start,end,r['id']) for start,end,r in kept]
@@ -226,7 +230,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 or row['id'] not in geometry or row.get('face_person') or
                 decision['status']=='accepted' and decision.get('reason')!='body_scene_core'):
             continue
-        kind = geometry[row['id']][0].get('orientation')
+        kind = decision.get('query_perspective') or geometry[row['id']][0].get('orientation')
         for (owner, perspective), (bank, proof) in banks.items():
             if decision.get('open_face_root', {}).get('owner', owner) != owner:
                 continue
@@ -284,9 +288,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     for oid,owner,angle,proof,score in candidates:
         if oid in retry or decisions[oid]['person'] in protected or claims[owner,lookup[oid]['cue']] != 1:
             continue
-        rooted = decisions[oid].get('rooted_view')
+        rooted = {k:v for k,v in decisions[oid].items() if k in ('rooted_view','rooted_track')}
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',
                               reason='face_rooted_body_view', perspective=angle,
                               source_tracks=proof, score=score)
-        if rooted is not None:
-            decisions[oid]['rooted_view'] = rooted
+        decisions[oid].update(rooted)

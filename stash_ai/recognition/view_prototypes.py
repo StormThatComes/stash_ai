@@ -218,6 +218,7 @@ class ViewPrototype:
     support_count: int
     authority: str = 'verified_view'
     promotion: object = None
+    local_scan: str | None = None
 
     @property
     def source_ids(self):
@@ -228,7 +229,7 @@ class ViewPrototype:
         return self.pose + ':' + self.medoid
 
 
-def prioritized(slots,maximum,cohesion=.8):
+def prioritized(slots,maximum,cohesion=.8,*,primary=False,reserves=False):
     """Frequent first, then appearance diversity; reserve cohorts remain usable."""
     import numpy as np
     remaining=sorted(slots,key=lambda s:(-len(s.cues),s.pose,s.first))
@@ -243,12 +244,16 @@ def prioritized(slots,maximum,cohesion=.8):
         examples = [(v, shot, pixels[oid]) for oid,v,shot in zip(slot.observations,slot.examples,slot.shots)
                     if oid in stamps and oid in pixels]
         features[id(slot)] = examples
+    measured = any(len(shot)==3 for slot in remaining for shot in slot.shots)
     covered = set()
     def independent_hits(slot):
         examples = features[id(slot)]
-        return {stamp for value,stamp,pixel in examples
-                if any(other_stamp != stamp and other_pixel != pixel and float(np.dot(value,other)) >= cohesion
-                       for other,other_stamp,other_pixel in examples)}
+        return {(stamp,pixel) for value,stamp,pixel in examples
+                if (not primary or not measured or len(stamp)==3)
+                and any(other_stamp != stamp and other_pixel != pixel
+                        and (not primary or not measured or len(other_stamp)==3)
+                        and float(np.dot(value,other)) >= cohesion
+                        for other,other_stamp,other_pixel in examples)}
     hits = {id(slot):independent_hits(slot) for slot in remaining}
     while remaining and len(chosen)<maximum:
         def priority(index):
@@ -263,6 +268,8 @@ def prioritized(slots,maximum,cohesion=.8):
             measured = any(len(shot)==3 for slot in remaining for shot in slot.shots)
             winner = (max(range(len(remaining)),key=lambda i:len(hits[id(remaining[i])]))
                       if measured else 0)
+        if primary and measured and not hits[id(remaining[winner])] - covered:
+            break
         selected = remaining.pop(winner)
         chosen.append(selected)
         # Mark also the exemplars of other candidates retrievable by this view.
@@ -270,7 +277,11 @@ def prioritized(slots,maximum,cohesion=.8):
             for value,stamp,pixel in features[id(slot)]:
                 if any(stamp!=s and pixel!=p and float(np.dot(value,v)) >= cohesion
                        for v,s,p in features[id(selected)]):
-                    covered.add(stamp)
+                    covered.add((stamp,pixel))
+    if primary:
+        # Independently validated reserves can corroborate another appearance
+        # even when a primary medoid already covers their shots.
+        return chosen + ([s for s in remaining if hits[id(s)]] if reserves else [])
     return chosen+remaining
 
 
@@ -309,18 +320,20 @@ def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8):
     return (len(slot.examples)-before)*sample.nbytes
 
 
-def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8):
+def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8,primary=False):
     # Narrow cohorts need their own independent support. A singleton endpoint
     # cannot borrow the broad cohort's votes to become a new reference centre.
     eligible={}
     for slot in list(cover)+list(slots):
         if len(slot.cues)>=minimum:
             eligible.setdefault(slot.medoid()[1],slot)
-    ordered=prioritized(list(eligible.values()),maximum,cohesion)
+    eligible=list(eligible.values())
+    measured = any(any(len(shot)==3 for shot in slot.shots) for slot in eligible)
+    ordered=prioritized(eligible,maximum,cohesion,primary=primary and measured,reserves=complete)
     return ordered if complete else ordered[:maximum]
 
 
-def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complete=False):
+def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complete=False, include_local=False):
     """Return bounded frozen per-view medoids from first-pass anchor confirmations.
 
     One SQL stream ordered by person/canonical sample key. Limited exemplars
@@ -348,7 +361,16 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
         nonlocal used
         if owner is None:
             return
-        for slot in supported_cohorts(slots,cover,minimum,maximum,complete=complete,cohesion=cohesion):
+        eligible = supported_cohorts(slots,cover,minimum,maximum,complete=complete,cohesion=cohesion,primary=True)
+        local = {}
+        if include_local:
+            primary_ids = {id(slot) for slot in eligible}
+            for slot in supported_cohorts(slots,cover,minimum,maximum,complete=True,cohesion=cohesion):
+                scans = {shot[0] for shot in slot.shots}
+                if id(slot) not in primary_ids and len(scans)==1:
+                    local[id(slot)] = scans.pop()
+                    eligible.append(slot)
+        for slot in eligible:
             sample, identifier = slot.medoid()
             if used + sample.nbytes > remaining_bytes:
                 raise ResourceLimit('Confirmed view prototypes exceed clustering.max_reference_bytes; '
@@ -356,7 +378,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
             used += sample.nbytes
             output.append(ViewPrototype(
                 Group(owner, (sample,), True), slot.pose, identifier,
-                tuple(slot.observations), len(slot.cues)))
+                tuple(slot.observations), len(slot.cues), local_scan=local.get(id(slot))))
 
     with tracking(rows, 'Build confirmed identity views', unit='observation') as tracked:
         for row in tracked:
