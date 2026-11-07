@@ -45,3 +45,14 @@ def test_views_require_two_disjoint_confirmations_and_preserve_sources(second_sh
     if expected=='accepted':
         assert decisions['10']['person']=='A' and decisions['10']['role']=='auxiliary'
         assert decisions['10']['source_tracks']==[('0','2','1'),('5','7','6')]
+
+
+def test_representative_limit_covers_supported_rear_appearance():
+    from stash_ai.recognition.body_global_banks import diverse_references
+    def witness(i,direction):
+        return dict(id=str(i), scan=str(i//3), cue=i,
+                    quality=json.dumps({'quality':{'orientation':direction,'appearance_hash':f'{i:02x}'}}))
+    rows = [witness(i,'front') for i in range(60)] + [witness(i,'back') for i in (60,61,62)]
+    selected = diverse_references(rows,4)
+    assert len(selected)==4
+    assert {json.loads(rows[int(r['id'])]['quality'])['quality']['orientation'] for r in selected}=={'front','back'}

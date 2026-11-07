@@ -101,6 +101,12 @@ def recover(rows, decisions, seeds, settings, scores, guard):
             if rivals[0][1] == a['id'] and (len(rivals)==1 or rivals[0][0]-rivals[1][0] >= margin):
                 next_row[a['id']] = bid
     lookup = {r['id']: r for r in rows}
+    from .body_identity import copresent
+    measured = defaultdict(list)
+    for row in rows:
+        assigned = decisions[row['id']]
+        if assigned.get('reason') == 'measured_face_association':
+            measured[assigned['person']].append(row)
     looks = defaultdict(list)
     for start, owner in root.items():
         path = []
@@ -115,7 +121,8 @@ def recover(rows, decisions, seeds, settings, scores, guard):
             continue
         for r in path:
             q = geometry[r['id']][0]
-            if q.get('orientation') in ('front','back','side') and not q.get('query_only'):
+            if (q.get('orientation') in ('front','back','side') and not q.get('query_only')
+                    and not copresent([r], measured[owner]) and guard.allows(r,seeds[owner],owner)):
                 looks[owner, q['orientation']].append((start, successor, r))
 
     # Keep training routes independent by shot, face roots, pixels and cue.
@@ -144,7 +151,6 @@ def recover(rows, decisions, seeds, settings, scores, guard):
         p = decisions[r['id']]['person']
         if p is not None:
             owner_rows[p].append(r)
-    from .body_identity import copresent
     candidates = []
     for row in rows:
         decision = decisions[row['id']]
