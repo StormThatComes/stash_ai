@@ -296,7 +296,7 @@ matching:
     # Identity matching using SapiensID body embeddings.
     identities:
       # Scene-local body identities and attachments.
-      enabled: false
+      enabled: true
       # Create body identities within scenes. Requires body.collection.enabled.
       match_threshold: 0.85
       # Minimum mean body similarity for a scene-local match. Range: 0..1.
@@ -330,7 +330,7 @@ matching:
         # rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.
     global:
       # Across-scene body consolidation with face contradiction checks.
-      enabled: false
+      enabled: true
       # Merge body identities across scenes. Requires matching.body.identities.enabled.
       match_threshold: 0.9
       # Minimum mean body similarity between identities for a global merge. Range: 0..1.

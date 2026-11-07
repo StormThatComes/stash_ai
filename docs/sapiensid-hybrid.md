@@ -15,8 +15,8 @@
 Hybrid recognition keeps the configured face recognizer and its namespace.
 SapiensID is an additional identity signal, stored against observations rather
 than mutable performer IDs. The shipped v2 template collects body observations
-using RF-DETR-XL boxes and ViTPose++ Large points, including cues with no face.
-Scene-local body identity creation and cross-scene body merging are separate opt-ins.
+using RF-DETR-XL boxes and PMPose points, including cues with no face.
+Both shipped profiles enable scene-local body identities and cross-scene body merging.
 
 ## Configure collection
 
@@ -250,7 +250,7 @@ Retained face vectors and their scan contracts remain unchanged.
 
 ## Scene person identities
 
-With independent collection enabled, opt in to `matching.body.identities.enabled`.
+In v2, `matching.body.identities.enabled` defaults to the value of `body.collection.enabled`.
 Scene rebuilding creates body-only identities without requiring a visible face.
 High-quality body anchors form complete-link cores; weak observations may attach
 to a frozen accepted bank, but never become new anchors through assignment.
@@ -306,7 +306,8 @@ in order to publish. The database retains derived body decisions and stable orig
 
 ## Global body consolidation
 
-Enable `matching.body.global.enabled` after calibrating scene identities.
+In v2, `matching.body.global.enabled` defaults to the value of `matching.body.identities.enabled`.
+Set the global switch to `false` to keep body matching within each scene.
 The global match, cohesion, ambiguity and support thresholds are separate from
 local assignment. Candidate banks contain accepted body anchors only. Every
 original core must agree; connected A–B–C edges do not establish A–C. Weak or
@@ -456,9 +457,8 @@ An explicit `tune` grid can compare both numeric thresholds and `null`, for exam
 Input/collection and portrait settings remain outside the solver; input/collection
 changes still require recollection. Automatic memberships are not truth labels.
 
-The opt-in defaults are starting values, not calibrated accuracy guarantees. Test
-with representative masked, out-of-frame, similar-clothing and changing-clothing
-examples before enabling global matching for a library. Synthetic lifecycle tests
+Evaluate the matching thresholds with representative masked, out-of-frame,
+similar-clothing and changing-clothing examples from your library. Synthetic lifecycle tests
 verify inference reuse, missing-face handling, replay and publication; they do not
 measure SapiensID recognition accuracy.
 

@@ -7,7 +7,7 @@ Optional video decoding is used only for portraits. It is never started by `--mo
 ## Run recognition
 
 Install the [CPU or GPU application profile](../constraints/README.md). Both
-include the dependencies used by the shipped RF-DETR-XL and ViTPose++ Large configuration:
+include the dependencies used by the shipped RF-DETR-XL and PMPose configuration:
 
 ```powershell
 python stash_ai.py recognition run --scene-id 123
@@ -44,9 +44,10 @@ The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
 setting with operator help immediately below it. The file groups settings by
 stage: face scanning, pose detection, SapiensID collection, identity matching,
 portraits, execution, storage and naming. Recognition runs use RF-DETR-XL for
-person boxes and ViTPose++ Large for COCO17 points. Body evidence collection
-is enabled, including VTT cues without an accepted face. Creating body-only
-identities and global body merging have their own switches under `matching.body`.
+person boxes and PMPose for COCO17 points in the shipped profiles. Both profiles
+collect body evidence, create scene-local identities and merge supported identities
+across scenes, including VTT cues without an accepted face. Set
+`matching.body.global.enabled: false` to keep matching local to a scene.
 
 Existing version 1 files still use their original settings and omitted-field
 defaults. To convert a local file and retain its effective policy, run:
