@@ -35,3 +35,17 @@ def test_owner_role_and_head_edits_invalidate_local_clocks(tmp_path):
         heads=version(db,'heads')
         db.execute("INSERT INTO metadata VALUES ('recognition-scan-head:synthetic','{}')")
         assert version(db,'heads')>heads
+
+def test_index_moves_owner_and_rolls_back_with_membership(tmp_path):
+    from tests.test_recognition_clustering import setup,scan
+    c=setup(tmp_path)
+    with FaceDatabase(c.database) as state:
+        db=state.connection;sid,_=scan(state,c,'1')
+        ids=[row[0] for row in db.execute('SELECT id FROM observations LIMIT 2')]
+        for owner in ('a','b'):
+            db.execute("INSERT INTO people VALUES (?,'scope','ns',0,NULL,?)",(owner,owner))
+        db.executemany("INSERT INTO members VALUES (?,'a')",[(x,) for x in ids]);db.commit()
+        db.execute("INSERT OR REPLACE INTO members VALUES (?,'b')",(ids[0],))
+        assert dict(db.execute('SELECT person,total FROM scene_owners WHERE scan=?',(sid,)))=={'a':1,'b':1}
+        db.rollback()
+        assert dict(db.execute('SELECT person,total FROM scene_owners WHERE scan=?',(sid,)))=={'a':2}

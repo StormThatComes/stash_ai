@@ -12,7 +12,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -126,13 +126,18 @@ from .pixel_catalogue import SCHEMA as PIXEL_INDEX_SCHEMA,TABLES as PIXEL_INDEX_
 SCHEMA=SCHEMA.replace(PERSON_SCHEMA,SHARED_PERSON_SCHEMA)+SHARED_SCHEMA+PIXEL_CLOCK_SCHEMA+PIXEL_INDEX_SCHEMA
 TABLES+=PIXEL_INDEX_TABLES
 SCHEMA_V12,TABLES_V12=SCHEMA,TABLES
-from .local_dependencies import SCHEMA as LOCAL_SCHEMA
+from .local_dependencies import LEGACY_SCHEMA as LOCAL_SCHEMA
 SCHEMA+=LOCAL_SCHEMA
 SCHEMA_V13,TABLES_V13=SCHEMA,TABLES
 from .cold_payloads import SCHEMA as COLD_SCHEMA
 from .decision_contexts import SCHEMA as CONTEXT_SCHEMA
 SCHEMA+=COLD_SCHEMA+CONTEXT_SCHEMA
 TABLES+=('crop_payloads','decision_contexts')
+SCHEMA_V14,TABLES_V14=SCHEMA,TABLES
+from .scene_owner_index import SCHEMA as OWNER_SCHEMA,TABLES as OWNER_TABLES
+from .local_dependencies import SCHEMA as INDEXED_LOCAL_SCHEMA,LEGACY_TRIGGERS
+SCHEMA=SCHEMA.replace(LOCAL_SCHEMA,'')+OWNER_SCHEMA+INDEXED_LOCAL_SCHEMA
+TABLES+=OWNER_TABLES
 
 
 def encoded(value):
@@ -232,9 +237,9 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12),13: (SCHEMA_V13,TABLES_V13)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12),13: (SCHEMA_V13,TABLES_V13),14: (SCHEMA_V14,TABLES_V14)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
@@ -251,11 +256,18 @@ class FaceDatabase(AbstractContextManager):
                     for sql in PIXEL_TRIGGERS.values():db.execute(sql)
                     for sql in PIXEL_INDEX_SCHEMA.split(';'):
                         if sql.strip():db.execute(sql)
-                from .local_dependencies import TRIGGERS as local_triggers
+                from .local_dependencies import LEGACY_TRIGGERS as local_triggers
                 if version<=12:
                     for sql in local_triggers.values():db.execute(sql)
-                for sql in (COLD_SCHEMA+CONTEXT_SCHEMA).split(';'):
+                for sql in ((COLD_SCHEMA+CONTEXT_SCHEMA) if version<=13 else '').split(';'):
                     if sql.strip():db.execute(sql)
+                from .scene_owner_index import TABLE_SCHEMA,TRIGGERS as owner_triggers,populate
+                from .local_dependencies import TRIGGERS as new_local
+                for sql in TABLE_SCHEMA.split(';'):
+                    if sql.strip():db.execute(sql)
+                populate(db)
+                for name in new_local:db.execute('DROP TRIGGER IF EXISTS '+name)
+                for sql in (*owner_triggers.values(),*new_local.values()):db.execute(sql)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:

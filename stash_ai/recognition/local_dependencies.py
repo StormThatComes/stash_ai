@@ -5,7 +5,7 @@ def bump(kind,query):
             "GROUP BY address ON CONFLICT(kind,key) DO UPDATE SET version=version+1;")
 
 
-def triggers():
+def triggers(*, indexed=False):
     result={}
     for table in ('scans','observations','members','candidates','people','person_evidence',
                   'body_observations','body_cues','body_members','body_origins','identity_origins','identity_merges'):
@@ -37,13 +37,26 @@ def triggers():
                     body+=bump('scene',f'SELECT json_array(s.scope,s.namespace,s.scene) AS address FROM scans s WHERE s.id IN ({scan})')
                     # Owner clocks cover all admitted face/body inputs in the scene;
                     # bounded scene fan-out also catches strict-role/head changes.
-                    body+=bump('owner',f'SELECT m.person AS address FROM members m JOIN observations o ON o.id=m.observation WHERE o.scan IN ({scan}) '
+                    body+=bump('owner',f'SELECT person AS address FROM scene_owners WHERE scan IN ({scan})' if indexed else
+                               f'SELECT m.person AS address FROM members m JOIN observations o ON o.id=m.observation WHERE o.scan IN ({scan}) '
                                f'UNION SELECT m.person FROM body_members m JOIN body_observations b ON b.id=m.observation WHERE b.scan IN ({scan})')
                 for owner in people:body+=bump('owner',f'SELECT {owner} AS address')
                 if table=='identity_merges':body+=bump('alias-head',"SELECT '*' AS address")
             operation=event
             if event=='UPDATE' and table=='people':operation='UPDATE OF id,scope,namespace,created,token'
             if event=='UPDATE' and table=='observations':operation='UPDATE OF id,scan,cue,seconds,geometry,quality,rejected,dimensions,embedding'
+            if indexed and event=='UPDATE' and table in ('body_observations','person_evidence'):
+                columns=(('id','scan','cue','seconds','contract','face','geometry','quality','rejected','embedding')
+                         if table=='body_observations' else ('observation','contract','status','metadata','embedding'))
+                meta='quality' if table=='body_observations' else 'metadata'
+                clean=lambda side: f"json_remove({side}.{meta},'$.crop_status','$.crop_attempt_limit')"
+                changes=[f'old.{c} IS NOT new.{c}' for c in columns if c!=meta]
+                changes.append(f'CASE WHEN json_valid(old.{meta}) AND json_valid(new.{meta}) THEN {clean("old")} IS NOT {clean("new")} ELSE old.{meta} IS NOT new.{meta} END')
+                operation='UPDATE OF '+','.join(columns)
+                operation+=' ON '+table+' WHEN ('+' OR '.join(changes)+')'
+                name=f'recognition_local_{table}_{event.lower()}'
+                result[name]=f'CREATE TRIGGER {name} AFTER {operation} BEGIN '+body+' END'
+                continue
             name=f'recognition_local_{table}_{event.lower()}'
             result[name]=f'CREATE TRIGGER {name} AFTER {operation} ON {table} BEGIN '+body+' END'
         # REPLACE deletes old addresses without DELETE triggers by default.
@@ -64,7 +77,9 @@ def triggers():
     return result
 
 
-TRIGGERS=triggers()
+LEGACY_TRIGGERS=triggers()
+TRIGGERS=triggers(indexed=True)
+LEGACY_SCHEMA=';\n'.join(LEGACY_TRIGGERS.values())+';\n'
 SCHEMA=';\n'.join(TRIGGERS.values())+';\n'
 
 

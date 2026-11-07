@@ -25,8 +25,8 @@ def test_resume_reads_each_cue_once_without_feature_blobs_and_commits_a_batch(tm
             scan,_=scan_scene(state,'scope',client.scene,c,'ns',source,Backend)
             sql=[];state.connection.set_trace_callback(sql.append)
             collector.enrich(state.connection,scan,source)
-            reads=[q for q in sql if q.startswith('SELECT id,geometry,rejected FROM observations')]
-            assert len(reads)==3
+            reads=[q for q in sql if q.startswith('SELECT cue,id,geometry,rejected FROM observations')]
+            assert len(reads)==1
             assert not any('SELECT * FROM observations' in q for q in sql)
             assert sum(q=='COMMIT' for q in sql)==1
             assert state.connection.execute('SELECT COUNT(*) FROM person_evidence').fetchone()[0]==3

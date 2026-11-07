@@ -14,6 +14,8 @@ def count(name, amount=1):
     metrics = _active.get()
     if metrics is not None:
         metrics['counts'][name] += amount
+    else:
+        pipeline_count(name, amount)
 
 
 def compute_summary(value):

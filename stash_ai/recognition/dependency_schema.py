@@ -186,12 +186,14 @@ def validate_triggers(db, *, required=False):
     if certificate is not None and certificate[0]==key and (certificate[1] or not required):return
     from .retention_index import TRIGGERS as pruning_triggers
     from .shared_person_evidence import TRIGGERS as shared_triggers
-    from .local_dependencies import TRIGGERS as local_triggers
-    accepted={**local_triggers,**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
+    from .local_dependencies import TRIGGERS as local_triggers,LEGACY_TRIGGERS as old_local
+    from .scene_owner_index import TRIGGERS as owner_triggers
+    accepted={**owner_triggers,**local_triggers,**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
+    legacy=db.execute('PRAGMA user_version').fetchone()[0]<15
     for kind,name,sql in rows:
-        allowed = (accepted.get(name, ''), LEGACY_ARTIFACT_TRIGGERS.get(name, ''))
+        allowed = (accepted.get(name, ''), LEGACY_ARTIFACT_TRIGGERS.get(name, ''),old_local.get(name,'') if legacy else '')
         if kind!='trigger' or name not in accepted or normalize(sql) not in {normalize(v) for v in allowed}:
             raise ValueError('Unsupported facial recognition schema triggers or views.')
     expected=set(TRIGGERS)
@@ -202,6 +204,7 @@ def validate_triggers(db, *, required=False):
     if db.execute('PRAGMA user_version').fetchone()[0]>=11:expected.update(pruning_triggers)
     if db.execute('PRAGMA user_version').fetchone()[0]>=12:expected.update(shared_triggers);expected.update(PIXEL_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=13:expected.update(local_triggers)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=15:expected.update(owner_triggers)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
 

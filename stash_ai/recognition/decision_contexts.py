@@ -9,16 +9,30 @@ CREATE INDEX candidates_context ON candidates(CASE WHEN json_valid(payload) THEN
 '''
 
 
-def pack(db, payload):
-    from .database import encoded
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='decision_contexts'").fetchone():return payload
-    value=json.loads(payload)
-    shared={k:value.pop(k) for k in FIELDS if k in value}
-    if not shared:return payload
-    raw=encoded(shared);key=hashlib.sha256(raw.encode()).hexdigest()
-    db.execute('INSERT OR IGNORE INTO decision_contexts VALUES (?,?)',(key,raw))
-    value['decision_context']=key
-    return encoded(value)
+class Packer:
+    """Scoped to one assignment iterator/transaction, so rollback cannot leave cached IDs."""
+    def __init__(self,db):
+        self.db=db
+        self.enabled=db.execute("SELECT 1 FROM sqlite_master WHERE name='decision_contexts'").fetchone()
+        self.last=None
+        self.key=None
+
+    def __call__(self,payload):
+        from .database import encoded
+        if not self.enabled:return payload
+        value=json.loads(payload)
+        shared={k:value.pop(k) for k in FIELDS if k in value}
+        if not shared:return payload
+        if shared!=self.last:
+            raw=encoded(shared);self.key=hashlib.sha256(raw.encode()).hexdigest()
+            self.db.execute('INSERT OR IGNORE INTO decision_contexts VALUES (?,?)',(self.key,raw))
+            self.last=shared
+        value['decision_context']=self.key
+        return encoded(value)
+
+
+def pack(db,payload):
+    return Packer(db)(payload)
 
 
 def unpack(db,payload):
