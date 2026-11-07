@@ -116,7 +116,7 @@ def heartbeat_line(row, fields, *, verbose=False):
                 if fields.get(key + suffix):
                     text += f" {label}={fields[key + suffix]}"
             parts.append(text)
-    for key in ('cpu_workers', 'cpu_wait', 'frame_cache', 'backoff remaining', 'deadline remaining'):
+    for key in ('cpu_workers', 'cpu_wait', 'batch', 'checkpoint', 'frame_cache', 'backoff remaining', 'deadline remaining'):
         if fields.get(key):
             parts.append(f'{key}={fields[key]}')
     if verbose and fields.get('references'):
@@ -313,7 +313,7 @@ def tracking(iterable, label, *, total=None, unit='item', position=1, **values):
 
 
 @contextmanager
-def frame_progress(report, scene):
+def frame_progress(report, scene, on_start=None):
     """The scan supplies its checkpoint cursor before loading any model."""
     work = None
     def update(*, completed, total, reused=False):
@@ -322,7 +322,10 @@ def frame_progress(report, scene):
             work = WorkProgress(report, f'VTT scene {scene}', total, unit='frame', key='frames',
                                 initial=completed, transient=True)
             work.__enter__()
-            status(report, frame_cache='reused' if reused else 'resumed' if completed else 'fresh')
+            mode = 'reused' if reused else 'resumed' if completed else 'fresh'
+            if on_start is not None:
+                on_start(mode, completed)
+            status(report, frame_cache=mode, checkpoint=completed)
         else:
             work.set_completed(completed)
     try:
@@ -330,4 +333,4 @@ def frame_progress(report, scene):
     finally:
         if work is not None:
             work.__exit__(None, None, None)
-        status(report, frame_cache=None)
+        status(report, frame_cache=None, checkpoint=None)
