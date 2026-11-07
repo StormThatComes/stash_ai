@@ -94,6 +94,8 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
             measured['query_only'] = True
         if ambiguous and separated:
             measured['query_only'] = True
+        if person.get('future_torso_retry'):
+            measured.update(query_only=True,query_only_reason='future_torso_retry')
         if refinement.get('mask_conflict'):
             reason = 'person_mask_conflict'
         if refinement.get('encoder_mask'):

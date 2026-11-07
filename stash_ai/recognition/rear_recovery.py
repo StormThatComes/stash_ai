@@ -76,7 +76,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             else:
                 satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
         if (row['face_owner'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
-                or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root')):
+                or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root','unresolved_partner')):
             continue
         person = json.loads(row['geometry'])
         kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')

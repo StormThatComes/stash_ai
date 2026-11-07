@@ -95,3 +95,37 @@ def test_masks_benchmark_counts_both_ids_and_duplicate_pose(tmp_path):
         labels={'1':{'0':[dict(a,reference=True)],'1':[dict(b,reference=True)],'2':[a,b],'3':[a,b]}}
         result=score(db,[item],labels)
         assert result['both_correct']==1 and result['duplicate_poses']==1 and result['labelled_pairs']==2
+
+
+def test_multi_cue_crossing_with_one_measured_middle_face():
+    cues = {i:[dict(id=f'{i}{name}', face_person=name if i==2 and name=='a' else None)
+               for name in 'ab'] for i in range(5)}
+    roots = {f'{i}{name}':name for i in (0,4) for name in 'ab'}
+    decisions = {r['id']:dict(person=r['face_person']) for rows in cues.values() for r in rows}
+    def transition(a,b):
+        return .99 if a['id'][1]==b['id'][1] else .70
+    claims = crossings(cues,roots,decisions,transition,.05)
+    assert {oid:p[0] for oid,p in claims.items()}=={key:key[1] for key in ('1a','1b','2b','3a','3b')}
+    assert not crossings(cues,roots,decisions,lambda a,b:None,.05)
+
+
+def test_future_context_needs_two_original_torsos_and_same_shot(tmp_path):
+    from stash_ai.recognition.future_crowd import plans
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from stash_ai.recognition.body_observations import contract
+    from tests.test_recognition_body_global import configured,scene
+    cfg = configured(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        scan,ids = scene(db,cfg,'1',[[1.,0.]]*5,times=[0,1,1,2,2])
+        for oid,x in zip(ids,[70,40,110,40,110]):
+            person = pose(x)
+            if oid == ids[0]:
+                person['bounds'] = [0,0,160,100]
+            db.execute('UPDATE body_observations SET geometry=?,quality=? WHERE id=?',
+                       (encoded(person),encoded(dict(quality=dict(view_shot=0))),oid))
+        def planned():
+            return [cue for cue,*_ in plans(db,scan['scan'],contract(cfg))]
+        assert planned()==[0]
+        db.execute("UPDATE body_observations SET geometry=json_set(geometry,'$.crowded_box_retry',1) WHERE id=?",(ids[-1],))
+        assert planned()==[]
