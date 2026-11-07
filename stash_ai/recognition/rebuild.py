@@ -534,7 +534,10 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             from .evidence_pixels import canonicalize
             canonicalize(replay)
             replay.commit()
-            # Keep the direct restore path for a cold selection and repair damaged\n            # images. Appends reuse shards without rewriting every old scene.\n            if inputs.reused==0 or inputs.replace_invalid:inputs.save(replay)
+            # Save a complete image for cold replay or to repair a damaged image.
+            # When appending scenes, reuse their shards without rewriting the full image.
+            if inputs.reused == 0 or inputs.replace_invalid:
+                inputs.save(replay)
         _copy_bindings(database,replay,selected,scope,namespace)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
