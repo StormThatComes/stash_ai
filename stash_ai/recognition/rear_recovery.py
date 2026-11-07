@@ -108,6 +108,10 @@ def _scene(db, scan, stamp, gallery, search, config):
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses],
                      source_scans=sorted({w['scan'] for w in witnesses}))
+        competitors = [(max(item[0],item[5]),item[2]) for item in ranked if item[2]!=owner]
+        if competitors:
+            runner,rival = max(competitors)
+            proof.update(runner=runner,rival=rival,rival_scope='certified_rear_views')
         proposals[row['id']] = (owner,row['cue'],old,proof)
         batch.append((row['id'], query, {owner,old}, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):

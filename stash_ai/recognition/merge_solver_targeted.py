@@ -283,7 +283,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             index = by_observation.get(oid)
             # A neighbour outside this goal can be the partner in the same cue.
             if index is not None and by_observation.get(peer)==index and row['measured']>=0:
-                key = 'sapiensid.identities.cohesion_threshold'
+                key = 'sapiensid.identities.track_similarity_threshold'
                 add(index,'local_body_track',{key:lower(key,row['measured'])},
                     observations=[oid,peer], blockers=['track_body_similarity'])
         for index in indices:

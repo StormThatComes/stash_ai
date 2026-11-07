@@ -14,6 +14,10 @@ def _floor(value):
 
 
 def parameter(data, path):
+    if path == 'sapiensid.identities.track_similarity_threshold':
+        settings = data['sapiensid']['identities']
+        threshold = settings.get('track_similarity_threshold')
+        return settings['cohesion_threshold'] if threshold is None else threshold
     for key in path.split('.'):
         data = data[int(key)] if isinstance(data, (list, tuple)) else data[key]
     return data

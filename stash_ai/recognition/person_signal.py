@@ -84,6 +84,9 @@ def validate(settings):
     validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
+    track = identity.get('track_similarity_threshold')
+    if track is not None:
+        _number(track, 'sapiensid.identities.track_similarity_threshold', 0, 1)
     for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):
         _number(identity[key],'sapiensid.identities.'+key,0,1)
     for key,low,high in (('min_support',2,100000),('attach_min_support',1,100000),

@@ -96,6 +96,9 @@ def holdout_summary(report):
     if 'sequences' in after:
         for metric,total in [('one_id_turns','turns'),('both_recovered','crossings')]:
             parts.append(f"{metric} {before['sequences'][metric]} → {after['sequences'][metric]}/{after['sequences'][total]}")
+        for metric in ('foreign_id_crossings','abstained_crossings','unscored_episodes'):
+            if metric in after['sequences']:
+                parts.append(f"{metric} {before['sequences'][metric]} → {after['sequences'][metric]}")
     stress = report['omissions']
     omissions = ', '.join(f"{w['scene']}:{w['first_cue']}-{w['last_cue']} lost={w['lost_pairs']}"
                           f" joined={w['joined_pairs']} {w.get('mode','rejected')}" for w in stress) or 'no series identified'

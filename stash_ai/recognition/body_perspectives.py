@@ -73,6 +73,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if any(geometry[r['id']][0].get('detected_people', len(members)) != len(members) for r in members):
             by_cue.pop(cue)
 
+    track_threshold = settings.get('track_similarity_threshold')
+    if track_threshold is None:
+        track_threshold = settings['cohesion_threshold']
     outgoing_failures, incoming_failures = {}, {}
     def transition(a, b, *, diagnose=False):
         def fail(order, reason, measured, limit):
@@ -122,8 +125,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if relative>.30:
             return fail(4,'displacement',relative,.30)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
-        return similarity if similarity >= settings['cohesion_threshold'] else fail(
-            5,'body_similarity',similarity,settings['cohesion_threshold'])
+        return similarity if similarity >= track_threshold else fail(
+            5,'body_similarity',similarity,track_threshold)
 
     # Ambiguous transitions, cuts and sparse cue gaps end a track.
     next_row, stops = {}, {}
@@ -258,6 +261,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     if not banks and not crossed:
         return
     owner_rows = defaultdict(list)
+    rival_evidence = {}
     for r in rows:
         p = decisions[r['id']]['person']
         if p is not None:
@@ -300,6 +304,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                          and guard.allows(row,others)]
             competing.extend((scores.compare([row],other)[0], p) for (p,_),(other,_) in banks.items() if p!=owner)
             runner, rival = max(competing, default=(-1.,None))
+            if rival is not None:
+                rival_evidence[row['id'],owner,mean] = dict(rival=rival,runner=runner)
             if mean-runner < margin:
                 decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:
@@ -340,4 +346,6 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                               source_tracks=proof, score=score)
         if angle == 'crossing':
             decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
+        if angle != 'crossing':
+            decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
         decisions[oid].update(rooted)

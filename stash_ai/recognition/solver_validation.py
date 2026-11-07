@@ -12,7 +12,7 @@ from .merge_report_policy import patched
 from .offline_evaluation import evaluate, _selection
 
 
-def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=()):
+def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(), timing=None):
     records = [dict(observation=oid, scene=locations[oid][0], truth=truth,
                     predicted=decisions[oid]['accepted_identity']) for oid, truth in labels.items() if oid not in exclude]
     all_metrics = evaluate_identities(records)
@@ -22,7 +22,7 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=())
     metrics = {'all': all_metrics, 'provisional_only': evaluate_identities(provisional),
                'partners': partner_metrics(partner_sets, labels, locations, decisions, exclude)}
     from .sequence_validation import sequence_metrics
-    metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude)
+    metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude,timing=timing)
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
         outside = [r for r in records if category not in samples[r['observation']]['slices']]
@@ -86,16 +86,19 @@ def _partition_delta(original, stressed, identifiers):
     return dict(lost_pairs=pairs(left)-common, joined_pairs=pairs(right)-common)
 
 
-def _locations(source, selected, ids):
+def _locations(source, selected, ids, *, timing=None):
     result = {}
     args = (encoded(sorted(ids)),encoded([r['id'] for r in selected]))
     for table in ('observations','body_observations'):
         if not source.execute('SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?',(table,)).fetchone():
             continue
-        for oid, scene, cue in source.execute(f'SELECT o.id,s.scene,o.cue FROM {table} o '
+        shot = '$.view_shot' if table == 'observations' else '$.quality.view_shot'
+        for oid, scene, cue, seconds, shot_id in source.execute(f"SELECT o.id,s.scene,o.cue,o.seconds,json_extract(o.quality,'{shot}') FROM {table} o "
                 'JOIN scans s ON s.id=o.scan WHERE o.id IN (SELECT value FROM json_each(?)) '
                 'AND o.scan IN (SELECT value FROM json_each(?))',args):
             result[oid] = (scene,cue)
+            if timing is not None:
+                timing[scene,cue] = seconds, shot_id if shot_id is not None else timing.get((scene,cue),(None,None))[1]
     return result
 
 
@@ -162,9 +165,10 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             if progress:
                 progress(f'Holdout {name} · {len(scans)} scenes · {len(labels)} labels')
         full = evaluate(settings,labels,variants={'winner':winner},variant_started=announce,**options)
-        locations = _locations(source,scans,labels)
+        timing = {}
+        locations = _locations(source,scans,labels,timing=timing)
         predicted = full['trials']['winner/joint']['decisions']
-        metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples)
+        metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples,timing=timing)
                    for name, trial in full['trials'].items()}
         incremental = {}
         if len(scans)>1:
@@ -184,7 +188,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 decisions = staged['trials']['baseline/batch-1']['decisions']
                 incremental[name] = dict(order=sequence, **_partition_delta(predicted,decisions,labels),
                     coverage_changes=sum((predicted[k]['accepted_identity'] is None)!=(decisions[k]['accepted_identity'] is None)
-                                         for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples))
+                                         for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
         if not windows:
             # Derive omission windows from the actual winner's recorded face roots.
             tracks = sorted({tuple(track) for row in predicted.values()
@@ -206,11 +210,11 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             scene,first,last = window
             excluded = {oid for oid,(s,c) in locations.items() if s==scene and first<=c<=last}
             group = sorted(labels.keys()-excluded)
-            before = _metrics(labels,samples,locations,predicted,excluded,triples)
+            before = _metrics(labels,samples,locations,predicted,excluded,triples,timing)
             for mode in ('rejected','empty'):
                 trial = evaluate(winner,labels,omitted_cues=window,omission_mode=mode,**options)['trials']['baseline/joint']['decisions']
                 delta = _partition_delta(predicted,trial,group)
-                after = _metrics(labels,samples,locations,trial,excluded,triples)
+                after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), **delta, reference=before, omitted=after))
     return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, omissions=stress, incremental=incremental,

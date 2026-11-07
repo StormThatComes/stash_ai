@@ -136,7 +136,7 @@ class QueryFeedback:
         membership = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                 '(SELECT value FROM json_each(?))', (encoded(sorted(self.sets)),)))
         from .body_reports import members as body_members
-        membership.update((oid,person) for oid,person in body_members(db,config).items() if oid in self.sets)
+        membership.update(body_members(db,config,ids=self.sets))
         owners = destination_owners(self.goals, membership)
 
         def measure(row, face, body):

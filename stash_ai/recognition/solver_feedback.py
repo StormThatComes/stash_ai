@@ -17,13 +17,52 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     from .merge_solver_feedback import pair_separation, quality_feedback, face_fallbacks
     target_ids = goal_index().observation_ids
     from .database import encoded
-    ids = target_ids | feasibility.addresses
+    from .merge_scene_exclusions import constraints
+    negatives = list(constraints(goals))
+    ids = target_ids | feasibility.addresses | {oid for item in negatives for oid in item['observation_ids']}
     result = latest_decisions(target, ids)
     membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
         'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
     from .body_reports import members as body_members
-    membership.update((k,v) for k,v in body_members(target,settings).items() if k in ids)
+    membership.update(body_members(target,settings,ids=ids))
     targets = deficits(goals, membership, membership)
+    set_targets = {item['set']:item['target'] for item in targets['sets']}
+    wrong = {}
+    destination_sets = {}
+    for group in goals['groups']:
+        for member in group['members']:
+            for row in member['observations']:
+                owner = membership.get(row['id'])
+                if owner:
+                    destination_sets.setdefault(owner,set()).add(group['index'])
+    for group in goals['groups']:
+        wanted = set_targets.get(group['index'])
+        for member in group['members']:
+            for row in member['observations']:
+                owner = membership.get(row['id'])
+                if owner and len(destination_sets[owner])>1:
+                    wrong[row['id']] = dict(expected=wanted,constraint='between_sets')
+                elif owner and wanted and owner != wanted:
+                    wrong[row['id']] = dict(expected=wanted, constraint='positive_set')
+    for item in negatives:
+        forbidden = {membership.get(oid) for oid in item['target_observation_ids']} - {None}
+        for oid in item['observation_ids']:
+            if membership.get(oid) in forbidden:
+                wrong[oid] = dict(expected=None, constraint='exclusion')
+    # A fragmented positive set alone does not establish which branch was wrong.
+    from .threshold_boundaries import strictly_above
+    tighter = []
+    for row in result:
+        if wrong.get(row['observation'], {}).get('constraint') != 'exclusion':
+            continue
+        if row['reason'] not in ('face_rooted_body_view', 'external_rear_view', 'frozen_face_body_bank'):
+            continue
+        score = row['measurements'].get('score')
+        if row['status'] == 'accepted' and score is not None:
+            key = 'sapiensid.identities.match_threshold'
+            threshold = strictly_above(score)
+            if parameter(settings.data,key) < threshold <= 1:
+                tighter.append({key:threshold})
     query_feedback.priorities = targets['priorities']
     current_goals = rebuilt_goals(target, goals)
     hybrid = {}
@@ -39,7 +78,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
         queries['face_proposals'].extend(face_fallbacks(target, settings, goals, targets,
             evidence=queries['face_routes'] if targeted else None))
     separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
-    directed = list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
+    directed = tighter + list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
     # Clear simultaneous query and reference blockers under one configuration.
     if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
         joint = dict(hybrid_changes[0])
@@ -62,7 +101,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
             queries['face_proposals'] + quality['proposals']),
         targets=targets,
         options=updated, hybrid_proposals=list(hybrid['proposals']),
-        provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations']))
+        provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations'], wrong=wrong))
     if targeted:
         from .merge_solver_targeted import plan as targeted_plan
         latest_feedback['targeted'] = targeted_plan(target, settings, goals, feasibility, membership, latest_feedback, hybrid)
