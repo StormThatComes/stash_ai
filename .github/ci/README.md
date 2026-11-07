@@ -21,10 +21,13 @@ and model smoke. Adding or deleting installed recognition modules also runs the
 minimal-profile updater tests. Both standalone benchmarks run once when Linux tests
 are selected. Each job-selection summary records the reasons for the choice.
 
-Every push to `main` and every manual run executes the full matrix. Only newer
-revisions of the same PR cancel older runs. Use `CI result` as the required check
-when configuring branch protection. It verifies that all selected jobs succeeded
-and accepts jobs intentionally omitted by the plan.
+Each push to `main` schedules the full matrix and cancels any unfinished run from
+an earlier push to `main`. A new PR revision cancels the previous run for that PR.
+Manual runs use the full matrix and run independently.
+
+Use `CI result` as the required check when configuring branch protection. It
+verifies that all selected jobs succeeded and accepts jobs intentionally omitted
+by the plan.
 
 Run the planner regressions locally with
 `python -m pytest tests/test_ci_jobs.py tests/test_workflow_config.py`.

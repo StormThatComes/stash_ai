@@ -6,10 +6,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Only superseded revisions of the same pull request can cancel each other.
+# Group automatic runs by branch or PR ref and give each manual run its own group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
