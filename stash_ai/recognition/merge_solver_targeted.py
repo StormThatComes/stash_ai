@@ -278,6 +278,14 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
     for row in feedback.get('provenance',{}).get('blocker_trace',[]):
         indices = {by_observation[row['observation']]} if row.get('observation') in by_observation else set()
         for key in ('left','right','target'):indices.update(owners.get(row.get(key),set()))
+        if row.get('reason')=='track_body_similarity' and type(row.get('measured')) in (int,float):
+            oid,peer = row.get('observation'),row.get('peer')
+            index = by_observation.get(oid)
+            # A neighbour outside this goal can be the partner in the same cue.
+            if index is not None and by_observation.get(peer)==index and row['measured']>=0:
+                key = 'sapiensid.identities.cohesion_threshold'
+                add(index,'local_body_track',{key:lower(key,row['measured'])},
+                    observations=[oid,peer], blockers=['track_body_similarity'])
         for index in indices:
             groups[index]['observed_blockers'][row['reason']] += 1
             for member in groups[index]['performers']:

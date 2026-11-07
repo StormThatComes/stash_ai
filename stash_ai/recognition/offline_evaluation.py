@@ -79,7 +79,7 @@ def _copy_scene(source, target, scan):
 
 def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_sizes=(0, 1),
              scene_orders=('numeric',), shuffle_seed=0, history_modes=('cold',), repeat_runs=1,
-             retune_from_baseline=False, source_snapshot=None, omitted_cues=None, variant_started=None):
+             retune_from_baseline=False, source_snapshot=None, omitted_cues=None, variant_started=None, omission_mode="rejected", ordered_scenes=None):
     """Labels map retained observation IDs to human person labels, not predictions."""
     if not isinstance(labels, dict) or not labels or any(not isinstance(k, str) or not k or
             not isinstance(v, str) or not v.strip() for k, v in labels.items()):
@@ -96,6 +96,8 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
         raise ValueError('Evaluation requires positive repeat_runs and an integer shuffle_seed.')
     if type(retune_from_baseline) is not bool:
         raise ValueError('retune_from_baseline must be boolean.')
+    if omission_mode not in ('empty','rejected'):
+        raise ValueError('Unknown cue omission mode.')
     configurations = {'baseline': config}
     for name, variant in (variants or {}).items():
         if not isinstance(name, str) or not name or name in configurations:
@@ -110,6 +112,11 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
         schema, expected = (SCHEMA_V12,TABLES_V12) if source.execute('PRAGMA user_version').fetchone()[0]==12 else (SCHEMA_V11,TABLES_V11) if source.execute('PRAGMA user_version').fetchone()[0]==11 else (SCHEMA, TABLES) if 'body_members' in tables else (SCHEMA_V9,TABLES_V9) if 'body_observations' in tables else (SCHEMA_V8,TABLES_V8) if 'evidence_thumbnails' in tables else (SCHEMA_V6,TABLES_V6) if 'person_evidence' in tables else (SCHEMA_V5,TABLES_V5)
         FaceDatabase._validate(SimpleNamespace(connection=source), schema, expected, tables)
         scope, scans = _selection(source, config, scenes, scope)
+        if ordered_scenes is not None:
+            by_scene = {item['scene']:item for item in scans}
+            if len(ordered_scenes)!=len(scans) or set(ordered_scenes)!=by_scene.keys():
+                raise ValueError('Explicit scene order must cover every selected scene exactly once.')
+            scans = [by_scene[scene] for scene in ordered_scenes]
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))
         wanted = encoded([s['id'] for s in scans])
         known = {r['id']: dict(observation=r['id'], scene=r['scene'], truth=labels[r['id']])
@@ -159,7 +166,10 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
                                         condition = 'scan=? AND cue BETWEEN ? AND ?'
                                         target.execute('DELETE FROM person_evidence WHERE observation IN '
                                             '(SELECT id FROM observations WHERE '+condition+')',args)
-                                        for table in ('observations','body_observations'):
+                                        for table in ('body_observations','observations'):
+                                            if omission_mode=='empty':
+                                                target.execute(f'DELETE FROM {table} WHERE '+condition,args)
+                                                continue
                                             target.execute(f"UPDATE {table} SET rejected='validation_omission',"
                                                            'embedding=NULL WHERE '+condition,args)
                                     loaded.add(scan['id'])

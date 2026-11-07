@@ -63,7 +63,7 @@ def feedback_summary(feedback, hybrid, config, changes, locations):
         key = index, row['stage']
         if key in examples:
             continue
-        example = fields(row, 'stage reason observation parameters requires_evidence cue rival')
+        example = fields(row, 'stage reason observation parameters requires_evidence cue rival peer observation_cue measured limit')
         rules = row.get('keypoint_rules', {})
         if rules:
             example['failed_rules'] = [fields(rule, 'parameter label measured minimum') for mode in ('all', 'any')

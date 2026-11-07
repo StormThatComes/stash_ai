@@ -90,3 +90,22 @@ def test_sharp_outlier_cannot_remove_two_agreeing_shots():
     scores = SimpleNamespace(face_similarity=np.dot)
     kept = select(tracks,defaults(),scores,lambda t:-t[2]['cue'],lambda r:r['cue'])
     assert [r['cue'] for _,_,r in kept] == [1,2]
+
+
+def test_failed_temporal_link_keeps_measured_similarity_and_cue():
+    from stash_ai.recognition.body_identity import defaults
+    scores = SimpleNamespace(face_similarity=np.dot)
+    decisions,rows = {},[]
+    for cue,angle in enumerate((0,0,60)):
+        root = cue==0
+        angle=np.deg2rad(angle)
+        row=dict(id=str(cue),cue=cue,scan='s',seconds=cue,face_person='A' if root else None,
+                 _vector=np.array([np.cos(angle),np.sin(angle)]),geometry=json.dumps(dict(bounds=[0,0,80,100])),
+                 quality=json.dumps(dict(quality=dict(frame_signature='0f'*48,orientation='front' if root else 'back'))))
+        rows.append(row)
+        decisions[str(cue)]=dict(status='accepted' if root else 'withheld',person='A' if root else None,
+                                 reason='measured_face_association' if root else 'body_anchor_quality')
+    recover(rows,decisions,{'A':[rows[0]]},defaults(),scores,SimpleNamespace(allows=lambda *args:True))
+    blocker=decisions['1']['track_blocker']
+    assert blocker['reason']=='body_similarity' and blocker['cue']==2 and blocker['peer']=='2'
+    assert blocker['measured']==.5 and blocker['limit']==defaults()['cohesion_threshold']

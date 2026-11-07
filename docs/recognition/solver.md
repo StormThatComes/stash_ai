@@ -551,3 +551,15 @@ partner, including counts per performer. Multiple projections of a person in the
 same cue have one vote per relation. Recovery requires agreement across those
 projections, and any false join counts. Primary metrics and omission deltas use
 accepted production memberships. Provisional proposals have separate metrics.
+
+A multi-scene holdout also replays the frozen finalist one scene at a time in two
+opposite orders, ranking scenes by usable face cue coverage and labelled rear cues.
+Each order reports the lost and newly joined pairs and coverage changes against the joint replay.
+Cue omissions run twice: once as a rejected observation and once as an empty physical cue.
+Both retain VTT cue markers, and both exclude omitted labels from the comparison.
+
+To measure turns, label one performer's front, back and returning front in the same scene.
+For crossings, label both people before, during (`entangled`) and after the crossing.
+Rates use observed labelled sequences; zero available sequences produce an undefined macro rate.
+A missing ID during contact can recover at the end. A swap to the partner fails that crossing.
+Body-track diagnostics include the scene, cue, peer, measured value and its actual threshold when available.

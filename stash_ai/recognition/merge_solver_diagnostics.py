@@ -22,13 +22,14 @@ GATES.update({
     'body_group_ambiguous':('sapiensid.identities.cohesion_threshold','sapiensid.identities.ambiguity_margin'),
     'ambiguous_or_insufficient_face_body_bank':tuple('sapiensid.identities.'+k for k in
         ('match_threshold','cohesion_threshold','ambiguity_margin','attach_min_support','min_appearance_distance')),
+    'track_body_similarity':('sapiensid.identities.cohesion_threshold',),
     'body_similarity':('sapiensid.global_matching.match_threshold',),
     'body_cohesion':('sapiensid.global_matching.match_threshold','sapiensid.global_matching.cohesion_threshold'),
     'independent_support':('sapiensid.global_matching.min_support','sapiensid.identities.min_appearance_distance'),
     'body_ambiguity':('sapiensid.global_matching.ambiguity_margin',),
 })
 HARD = {'body_anchor_keypoint_rules_missing','missing_person_evidence','missing_original_core_evidence','invalid_alignment',
-        'track_cut','track_cue_gap','track_no_face_root','track_different_face_root',
+        'track_elapsed_seconds','track_displacement','track_box_scale','track_empty_box','track_uncertain_shot','track_shot_change','track_cut_colour','track_cut_structure','track_cut','track_cue_gap','track_no_face_root','track_different_face_root',
         'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness','body_anchor_pixels_missing'}
 
 
@@ -137,7 +138,7 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
         if row['status'] != 'accepted':
             blocker = row.get('track_blocker')
             if blocker:
-                details = {k:blocker[k] for k in ('cue','rival') if k in blocker}
+                details = {k:blocker[k] for k in ('scene','cue','observation_cue','rival','peer','measured','limit') if k in blocker}
                 add('body_track','track_' + blocker['reason'],row['observation'],**details)
             add('assignment', row['reason'], row['observation'],
                 **({'keypoint_rules':row['keypoint_rules']} if 'keypoint_rules' in row else {}))

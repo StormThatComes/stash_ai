@@ -12,7 +12,7 @@ def blockers(groups, trace, locations, inputs):
             continue
         index = location[0]
         counts[index][reason] += 1
-        examples.setdefault((index, reason), (location[2], row.get('cue', location[3] if len(location) > 3 else None)))
+        examples.setdefault((index, reason), (location[2], row.get('cue', location[3] if len(location) > 3 else None),row))
     result = []
     for group in inputs:
         index = group['index']
@@ -20,8 +20,12 @@ def blockers(groups, trace, locations, inputs):
             continue
         if counts[index]:
             reason, n = counts[index].most_common(1)[0]
-            scene, cue = examples[index, reason]
+            scene, cue, example = examples[index, reason]
             label = f'{reason} ({n} sampled)'
+            if 'measured' in example and 'limit' in example:
+                label += f" · measured {example['measured']:.4g}, threshold {example['limit']:.4g}"
+            if example.get('requires_evidence') and cue is not None:
+                label += ' · inspect detection audit'
         elif group['certificates']:
             certificate = group['certificates'][0]
             label, scene, cue = certificate['reason'], certificate.get('scene'), None
@@ -85,7 +89,14 @@ def holdout_summary(report):
         af, bf = (m.get('pairs_touching_slice', m)['false_merge_pairs'] for m in (a, b))
         parts.append(f"{key} ({a['observations']}): fragments {a['extra_fragments']} → {b['extra_fragments']}"
                      f' · false merge pairs {af} → {bf}')
+    if 'partners' in before:
+        parts.append(f"partner false joins {before['partners']['false_joins']} → {after['partners']['false_joins']}")
+    for name,trial in report.get('incremental',{}).items():
+        parts.append(f"{name} lost={trial['lost_pairs']} joined={trial['joined_pairs']} coverage changes={trial['coverage_changes']}")
+    if 'sequences' in after:
+        for metric,total in [('one_id_turns','turns'),('both_recovered','crossings')]:
+            parts.append(f"{metric} {before['sequences'][metric]} → {after['sequences'][metric]}/{after['sequences'][total]}")
     stress = report['omissions']
     omissions = ', '.join(f"{w['scene']}:{w['first_cue']}-{w['last_cue']} lost={w['lost_pairs']}"
-                          f" joined={w['joined_pairs']}" for w in stress) or 'no series identified'
+                          f" joined={w['joined_pairs']} {w.get('mode','rejected')}" for w in stress) or 'no series identified'
     return 'Holdout baseline → winner · ' + ' | '.join(parts) + '\n  omitted windows: ' + omissions

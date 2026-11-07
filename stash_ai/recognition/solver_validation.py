@@ -21,6 +21,8 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=())
                    and decisions[row['observation']].get('status') == 'provisional']
     metrics = {'all': all_metrics, 'provisional_only': evaluate_identities(provisional),
                'partners': partner_metrics(partner_sets, labels, locations, decisions, exclude)}
+    from .sequence_validation import sequence_metrics
+    metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude)
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
         outside = [r for r in records if category not in samples[r['observation']]['slices']]
@@ -164,6 +166,25 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         predicted = full['trials']['winner/joint']['decisions']
         metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples)
                    for name, trial in full['trials'].items()}
+        incremental = {}
+        if len(scans)>1:
+            # Front-first is based on usable measured face inputs, including
+            # unlabeled roots. A source with stronger face coverage wins a tie.
+            weights = {}
+            for scan in scans:
+                faces = source.execute("SELECT COUNT(DISTINCT cue) FROM observations WHERE scan=? "
+                    "AND rejected IS NULL AND embedding IS NOT NULL",(scan['id'],)).fetchone()[0]
+                backs = {loc[1] for oid,loc in locations.items() if loc[0]==scan['scene'] and 'back' in samples[oid]['slices']}
+                weights[scan['scene']] = (bool(faces), faces, -len(backs))
+            order = sorted(counts,key=lambda scene:(weights[scene],int(scene)), reverse=True)
+            for name, sequence in [('face_first',order),('rear_first',list(reversed(order)))]:
+                if progress:
+                    progress('Holdout incremental '+name)
+                staged = evaluate(winner,labels,**dict(options,batch_sizes=(1,),ordered_scenes=sequence))
+                decisions = staged['trials']['baseline/batch-1']['decisions']
+                incremental[name] = dict(order=sequence, **_partition_delta(predicted,decisions,labels),
+                    coverage_changes=sum((predicted[k]['accepted_identity'] is None)!=(decisions[k]['accepted_identity'] is None)
+                                         for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples))
         if not windows:
             # Derive omission windows from the actual winner's recorded face roots.
             tracks = sorted({tuple(track) for row in predicted.values()
@@ -182,14 +203,15 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         for index, window in enumerate(windows, 1):
             if progress:
                 progress(f'Holdout omission {index}/{len(windows)} · scene {window[0]} cues {window[1]}–{window[2]}')
-            trial = evaluate(winner,labels,omitted_cues=window,**options)['trials']['baseline/joint']['decisions']
             scene,first,last = window
             excluded = {oid for oid,(s,c) in locations.items() if s==scene and first<=c<=last}
             group = sorted(labels.keys()-excluded)
-            delta = _partition_delta(predicted,trial,group)
             before = _metrics(labels,samples,locations,predicted,excluded,triples)
-            after = _metrics(labels,samples,locations,trial,excluded,triples)
-            stress.append(dict(scene=scene, first_cue=first, last_cue=last, scored=len(group),
-                               excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, omissions=stress,
+            for mode in ('rejected','empty'):
+                trial = evaluate(winner,labels,omitted_cues=window,omission_mode=mode,**options)['trials']['baseline/joint']['decisions']
+                delta = _partition_delta(predicted,trial,group)
+                after = _metrics(labels,samples,locations,trial,excluded,triples)
+                stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
+                                   excluded_labels=len(excluded), **delta, reference=before, omitted=after))
+    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
