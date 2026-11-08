@@ -35,3 +35,11 @@ def test_native_work_paths_and_legacy_default(tmp_path):
             validate_outputs(config, (tmp_path/'other.json',))
     assert not work.exists()
     assert os.environ.get('SQLITE_TMPDIR') == previous
+
+
+def test_trace_resolves_relative_file_removal_against_directory_fd(tmp_path):
+    from tests.recognition_write_trace import linux
+    trace = tmp_path/'native.log'
+    trace.write_text(f'100   unlinkat(12<{tmp_path}>, "observations.sqlite", 0) = 0\n'
+                     f'101  renameat(8<{tmp_path}>, "a", 9<{tmp_path}/other>, "b") = 0\n')
+    assert list(linux(trace)) == [tmp_path/'observations.sqlite', tmp_path/'a', tmp_path/'other'/'b']
