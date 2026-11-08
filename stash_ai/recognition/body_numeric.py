@@ -62,11 +62,5 @@ def publish(identity, result):
 def dot(first, second, charge, kind='body-dot'):
     # A scalar pair is below the shared/durable cache admission threshold.
     # Scene workers already retain numerical results in their local Scores.
-    if current() is None:
-        charge()
-        return float(np.dot(first, second))
-    identity, found = lookup((first,), (second,), kind)
-    if found is None:
-        charge()
-        found = publish(identity, (float(np.dot(first, second)),))
-    return found[0]
+    charge()
+    return float(np.dot(first, second))

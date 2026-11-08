@@ -93,7 +93,20 @@ def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:Non
     return save(selected())
 
 
+class SceneGroup(list):
+    def __init__(self, row):
+        super().__init__([row])
+        self.cues = {(row['scan'], row['cue']): row['id']}
+
+    def append(self, row):
+        super().append(row)
+        self.cues[row['scan'], row['cue']] = row['id']
+
+
 def copresent(first,second):
+    if isinstance(second, SceneGroup):
+        return any((other := second.cues.get((row['scan'],row['cue']))) is not None and other != row['id']
+                   for row in first)
     return any(a['scan']==b['scan'] and a['cue']==b['cue'] and a['id']!=b['id'] for a in first for b in second)
 
 
@@ -294,19 +307,21 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *
             groups[0].append(row);continue
         ranked=[]
         for index,group in enumerate(groups):
+            if copresent([row],group):
+                continue
             mean,minimum=scores.compare([row],group)
-            if not copresent([row],group) and guard.allows(row,group):ranked.append((mean,minimum,index))
+            if guard.allows(row,group):ranked.append((mean,minimum,index))
         ranked.sort(key=lambda x:(-x[0],x[2]))
         if ranked and ranked[0][0]>=settings['match_threshold']:
             mean,minimum,index=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
             if minimum<settings['cohesion_threshold']:
                 # A high mean cannot suppress a distinct complete-link core.
                 # Keep it in the frozen competition pass before publishing.
-                groups.append([row])
+                groups.append(SceneGroup(row))
             elif mean-runner>=settings['ambiguity_margin']:
                 groups[index].append(row)
             else:decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',reason='body_group_ambiguous')
-        else:groups.append([row])
+        else:groups.append(SceneGroup(row))
     # Later groups must compete with earlier assignments. Freeze all original
     # groups before pruning, so removing a query cannot improve another vote.
     retained=[]

@@ -141,7 +141,7 @@ class Cache:
     def retain_numeric(self):
         # Closed trial database handles, ownership plans and evidence partitions
         # must not survive a trial. These keys depend exclusively on content.
-        pure = {'metadata','pair','packed','matrix','body-exact','vector-sha','solver-face-stats'}
+        pure = {'metadata','pair','packed','matrix','body-exact','body-plan','vector-sha','solver-face-stats'}
         self.discard(lambda key:key[0] not in pure)
 
 

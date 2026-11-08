@@ -22,6 +22,7 @@ class Work:
     payload: object
     size: int
     ready: bool = False
+    prepare: object = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +262,12 @@ class Compute:
                         or type(job.ordinal) is not int or job.ordinal <= previous):
                     raise ValueError('Invalid recognition CPU work size/order.')
                 previous = job.ordinal
+                if job.prepare is not None:
+                    while self.pending and (self.bytes + job.size > self.limit or len(self.pending) >= 2*self.workers):
+                        yield self._take()
+                    # Input ownership starts only after older jobs have released room.
+                    self._account_queue(self.bytes + min(self.limit, job.size))
+                    job = job.prepare()
                 ready = Result(job.ordinal, job.generation, job.payload, 0., 0.) if job.ready else None
                 if job.ready and job.size > self.limit:
                     while self.pending:
