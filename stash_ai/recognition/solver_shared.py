@@ -43,6 +43,13 @@ class Arrays:
         count('shared_numeric_errors')
         self.disabled = True
 
+    def handle_error(self, error):
+        if getattr(error, 'sqlite_errorcode', 0) & 255 in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            from .profiling import count
+            count('shared_numeric_busy')
+        else:
+            self.failed()
+
     @classmethod
     def prepare(cls, directory):
         directory = Path(directory)
@@ -53,6 +60,10 @@ class Arrays:
                 columns = {r[1] for r in db.execute('PRAGMA table_info(entries)')}
                 for column in ('checksum','shape','dtype'):
                     if column not in columns:db.execute(f'ALTER TABLE entries ADD COLUMN {column} TEXT')
+                db.execute('CREATE TABLE IF NOT EXISTS usage (id INTEGER PRIMARY KEY CHECK(id=1), bytes INTEGER NOT NULL)')
+                db.execute('INSERT OR IGNORE INTO usage SELECT 1,COALESCE(SUM(bytes),0) FROM entries')
+                db.execute('CREATE TRIGGER IF NOT EXISTS reserve_bytes AFTER INSERT ON entries BEGIN UPDATE usage SET bytes=bytes+new.bytes WHERE id=1; END')
+                db.execute('CREATE TRIGGER IF NOT EXISTS release_bytes AFTER DELETE ON entries BEGIN UPDATE usage SET bytes=bytes-old.bytes WHERE id=1; END')
             return True
         except (OSError, sqlite3.Error):
             from .profiling import count
@@ -85,8 +96,8 @@ class Arrays:
                 raise ValueError('Shared numerical cache contract mismatch.')
         except FileNotFoundError:
             return None
-        except (OSError, ValueError, EOFError, sqlite3.Error):
-            self.failed()
+        except (OSError, ValueError, EOFError, sqlite3.Error) as error:
+            self.handle_error(error)
             return None
         count('shared_numeric_hits')
         return value
@@ -103,16 +114,16 @@ class Arrays:
         reserved = False
         try:
             self.db.execute('BEGIN IMMEDIATE')
-            used = self.db.execute('SELECT COALESCE(SUM(bytes),0) FROM entries').fetchone()[0]
+            used = self.db.execute('SELECT bytes FROM usage WHERE id=1').fetchone()[0]
             exists = self.db.execute('SELECT 1 FROM entries WHERE key=?', (signature,)).fetchone()
             if not exists and used + value.nbytes + 512 <= self.limit:
                 self.db.execute('INSERT INTO entries(key,bytes) VALUES (?,?)', (signature, value.nbytes+512))
                 reserved = True
             self.db.commit()
-        except sqlite3.Error:
+        except sqlite3.Error as error:
             with suppress(sqlite3.Error):
                 self.db.rollback()
-            self.failed()
+            self.handle_error(error)
             return value  # Cache contention changes cost only.
         if not reserved:
             return value
