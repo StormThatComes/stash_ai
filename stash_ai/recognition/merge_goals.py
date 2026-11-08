@@ -248,7 +248,8 @@ def assess(goals, observations, retained, predicted):
                 resulting_identities=dict(destinations), fully_assigned_to_one=complete))
         for destination in counts:
             owners.setdefault(destination, []).append(group['index'])
-        outsiders = {k for k,v in predicted.items() if v is not None and v in counts and k not in goal_ids}
+        owner_rows = predicted.for_owners(counts) if hasattr(predicted, 'for_owners') else predicted.items()
+        outsiders = {k for k,v in owner_rows if v is not None and v in counts and k not in goal_ids}
         largest = max(complete_owners.values(), default=0)
         groups.append(dict(index=group['index'], members=members, missing=missing, withheld=lost,
             outsider_observations=len(outsiders), additional_retained_identities=sorted({retained[k] for k in outsiders if retained.get(k) is not None}),

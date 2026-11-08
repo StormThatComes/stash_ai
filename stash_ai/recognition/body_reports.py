@@ -47,13 +47,18 @@ def goal_rows(db,config,person):
     return rows
 
 
-def report(db,config,scans):
-    result=coverage(db,config,scans);counts=Counter();reasons=Counter();identities=[]
+def report(db,config,scans,*,input_counts=None):
+    result=input_counts if input_counts is not None else coverage(db,config,scans);counts=Counter();reasons=Counter();identities=[]
     if available(db):
-        for row in db.execute('SELECT m.status,m.role,m.proof FROM body_members m JOIN body_observations b ON b.id=m.observation '
-            'WHERE b.scan IN (SELECT value FROM json_each(?)) AND b.contract=?',(encoded(list(scans)),contract(config))):
-            counts[row['status']]+=1;counts[row['role']]+=1
-            reasons[json.loads(row['proof']).get('reason','unknown')]+=1
+        for status, role, reason, amount in db.execute(
+                "SELECT m.status,m.role,CASE WHEN json_type(m.proof,'$.reason') IS NULL THEN 'unknown' "
+                "ELSE json_extract(m.proof,'$.reason') END,COUNT(*) FROM body_members m "
+                "JOIN body_observations b ON b.id=m.observation "
+                "WHERE b.scan IN (SELECT value FROM json_each(?)) AND b.contract=? GROUP BY 1,2,3",
+                (encoded(list(scans)),contract(config))):
+            counts[status] += amount
+            counts[role] += amount
+            reasons[reason] += amount
         identities=[dict(r) for r in db.execute('SELECT m.person,m.status,COUNT(*) AS observations,'
             "SUM(m.role='anchor') AS anchors,SUM(m.role='auxiliary') AS auxiliary FROM body_members m "
             'JOIN body_observations b ON b.id=m.observation WHERE b.scan IN (SELECT value FROM json_each(?)) '

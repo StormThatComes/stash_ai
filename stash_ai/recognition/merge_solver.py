@@ -299,12 +299,13 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         status = assess(goals, observations, retained, predicted)
         summaries[name] = status
         if baseline is None:
-            baseline = dict(predicted)
+            baseline = predicted
         from .partition_delta import PartitionImpact, Predictions
-        if isinstance(predicted, Predictions):
+        from .solver_slot_index import Slots
+        if isinstance(predicted, (Predictions, Slots)):
             if outside_comparison is None:
                 outside_comparison = PartitionImpact(baseline, baseline, target_ids)
-            outside = outside_comparison.measure(predicted.changes)
+            outside = outside_comparison.measure(predicted.changes if isinstance(predicted, Predictions) else {})
         else:
             outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                              {k:v for k,v in predicted.items() if k not in target_ids})
@@ -609,7 +610,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
         robustness.clear();robustness.update(state['robustness'])
         if name=='baseline':
-            baseline=state['baseline']
+            if 'baseline_delta' in state:
+                from .solver_slot_index import apply_baseline
+                baseline = apply_baseline(state['baseline_delta'])
+            else:
+                baseline = state['baseline']
             if 'new_outsider_observations' in outside_limits:
                 baseline_outsiders=outsiders(summaries[name],baseline,target_ids)
         best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
@@ -623,9 +628,15 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         winner_text=(configuration_document(input_config,selected(best),inputs,mode=yaml_mode)
                      if winner_writer and written_winner!=best else None)
         if journal is not None:
+            from .solver_slot_index import Slots
+            baseline_fields = {}
+            if name == 'baseline':
+                baseline_fields = (dict(baseline_delta=dict(baseline.db.execute(
+                    'SELECT id,baseline FROM slots WHERE retained IS NOT baseline')))
+                    if isinstance(baseline, Slots) else dict(baseline=baseline))
             state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],
                 feedback=latest_feedback,options=options,hybrid=hybrid,hybrid_changes=hybrid_changes,
-                robustness=robustness,**({'baseline':baseline} if name=='baseline' else {})))
+                robustness=robustness,**baseline_fields))
             journal.record(name,settings,item,state,winner_text)
         elif winner_text is not None:winner_writer.write(winner_text)
         if winner_text is not None:written_winner=best

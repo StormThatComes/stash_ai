@@ -127,14 +127,6 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         else:
             scope, scans, inputs = prepared_selection
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=db))
-        observations = {r['id']: r['scene'] for r in db.execute(
-            'SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
-            'WHERE o.scan IN (SELECT value FROM json_each(?))', (encoded([s['id'] for s in scans]),))}
-        from .body_reports import observations as body_observations, members as body_members, report as body_report
-        observations.update(body_observations(db,config,[s['id'] for s in scans]))
-        retained = dict.fromkeys(observations)
-        retained.update((r[0], r[1]) for r in db.execute('SELECT observation,person FROM members') if r[0] in observations)
-        retained.update((k,v) for k,v in body_members(db,config).items() if k in observations)
         result = dict(format=1, kind='recognition_replay_simulation', source_read_only=True,
             source='retained_vtt_embeddings', scope=scope, selection=[s['scene'] for s in scans],
             starting_state='frozen_retained_history_and_bindings', input_selection=inputs, trials={},
@@ -156,7 +148,21 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
         preparation_started = time.perf_counter()
-        with prepared_replay(db, config, scope, ns, installation, reuse_history, progress, solver=variant_stream is not None) as seed:
+        from contextlib import ExitStack
+        from .solver_images import current as images
+        from .solver_slot_index import coordinator, apply_baseline, Slots
+        with prepared_replay(db, config, scope, ns, installation, reuse_history, progress, solver=variant_stream is not None) as seed, ExitStack() as maps:
+            if variant_stream is not None and images() is not None:
+                observations, retained = maps.enter_context(coordinator(images(), seed, config, scans))
+            else:
+                observations = {r['id']: r['scene'] for r in db.execute(
+                    'SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
+                    'WHERE o.scan IN (SELECT value FROM json_each(?))', (encoded([s['id'] for s in scans]),))}
+                from .body_reports import observations as body_observations, members as body_members, report as body_report
+                observations.update(body_observations(db,config,[s['id'] for s in scans]))
+                retained = dict.fromkeys(observations)
+                retained.update((r[0], r[1]) for r in db.execute('SELECT observation,person FROM members') if r[0] in observations)
+                retained.update((k,v) for k,v in body_members(db,config).items() if k in observations)
             from .solver_execution import current as solver_execution
             from .solver_pool import Trials
             runtime = solver_execution()
@@ -234,9 +240,13 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 evaluated['prediction_encoding'] = 'baseline-delta-v1'
                             if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
                                 from .partition_delta import Predictions
-                                if baseline is None:
+                                if name == 'baseline' and isinstance(observations, Slots):
+                                    predictions = apply_baseline(evaluated.pop('prediction_delta'))
+                                    evaluated.pop('prediction_encoding')
+                                elif baseline is not None:
+                                    predictions = Predictions(baseline, evaluated['prediction_delta'])
+                                else:
                                     raise ValueError('Invalid baseline prediction delta.')
-                                predictions = Predictions(baseline, evaluated['prediction_delta'])
                             else:
                                 predictions = evaluated['predictions']
                             bodies, hybrid = evaluated['independent_person'], evaluated['hybrid']
@@ -265,6 +275,10 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                             if comparisons is None:
                                 comparisons = (PartitionImpact(retained, baseline), PartitionImpact(baseline, baseline))
                             versus_retained, versus_baseline = (c.measure(predictions.changes) for c in comparisons)
+                        elif isinstance(predictions, Slots):
+                            from .partition_delta import PartitionImpact
+                            comparisons = PartitionImpact(retained, baseline), PartitionImpact(baseline, baseline)
+                            versus_retained, versus_baseline = (c.measure({}) for c in comparisons)
                         else:
                             versus_retained, versus_baseline = impact(retained, predictions), impact(baseline, predictions)
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
