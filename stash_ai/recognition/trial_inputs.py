@@ -17,12 +17,30 @@ def prepare(target, seed):
         if getattr(target, 'budget', None) is not None:
             target.account_pages()
         return
-    from .database import TABLES
     from .profiling import count
     uri = Path(path).resolve().as_uri() + '?mode=ro&immutable=1'
     target.execute('ATTACH DATABASE ? AS retained', (uri,))
     target.execute('PRAGMA retained.cache_size=-2048')
     target.execute('PRAGMA retained.mmap_size=0')
+    from .solver_images import current
+    images = current()
+    if images is not None and images.seed != Path(path).resolve():
+        images = None
+    if images is None or not images.restore('trial.sqlite', target):
+        _copy_private(target)
+        if images is not None:
+            images.publish('trial.sqlite', target)
+    for table in SHARED:
+        target.execute(f'CREATE TEMP VIEW {table} AS SELECT rowid AS rowid,* FROM retained.{table}')
+    row = seed.execute("SELECT value FROM metadata WHERE key='replay-input-statistics'").fetchone()
+    if row:
+        import json
+        count('trial_shared_input_bytes', json.loads(row[0])['embedding_bytes'])
+    count('trial_private_pages', target.execute('PRAGMA main.page_count').fetchone()[0])
+
+
+def _copy_private(target):
+    from .database import TABLES
     target.execute('PRAGMA foreign_keys=OFF')
     triggers = list(target.execute("SELECT name,sql FROM main.sqlite_master WHERE type='trigger'"))
     target.execute('SAVEPOINT trial_prepare')
@@ -52,11 +70,3 @@ def prepare(target, seed):
         raise
     finally:
         target.execute('PRAGMA foreign_keys=ON')
-    for table in SHARED:
-        target.execute(f'CREATE TEMP VIEW {table} AS SELECT rowid AS rowid,* FROM retained.{table}')
-    # Statistics belong to the immutable seed; never rescan vectors per trial.
-    row = seed.execute("SELECT value FROM metadata WHERE key='replay-input-statistics'").fetchone()
-    if row:
-        import json
-        count('trial_shared_input_bytes', json.loads(row[0])['embedding_bytes'])
-    count('trial_private_pages', target.execute('PRAGMA main.page_count').fetchone()[0])

@@ -53,3 +53,56 @@ def test_empty_banks_have_a_stable_content_key():
     import numpy as np
     from stash_ai.recognition.solver_shared import key
     assert key('empty', (np.empty((0, 128), dtype='float64'),)) == key('empty', (np.empty((0, 128), dtype='float64'),))
+
+def test_busy_reservation_can_retry_without_disabling_worker(tmp_path):
+    Arrays.prepare(tmp_path)
+    with scope(tmp_path, 65536) as shared, sqlite3.connect(tmp_path/'ledger.sqlite') as other:
+        shared.db.execute('PRAGMA busy_timeout=1')
+        other.execute('BEGIN IMMEDIATE')
+        value = np.arange(8)
+        signature = key('lock', (value,))
+        assert shared.put(signature, value) is value
+        assert not shared.disabled
+        other.rollback()
+        shared.put(signature, value)
+        assert shared.get(signature) is not None
+        assert shared.db.execute('SELECT bytes FROM usage').fetchone()[0] == value.nbytes + 512
+
+
+def test_trial_template_restores_private_state_and_shared_views(tmp_path):
+    from contextlib import closing
+    from stash_ai.recognition.database import SCHEMA
+    from stash_ai.recognition.trial_inputs import prepare
+    from stash_ai.recognition.solver_images import session, current
+    with closing(sqlite3.connect(tmp_path/'seed.db')) as seed, session(seed, 32 << 20):
+        seed.executescript(SCHEMA)
+        seed.execute("INSERT INTO metadata VALUES ('marker','seed')")
+        seed.commit()
+        for attempt in range(2):
+            with closing(sqlite3.connect(':memory:', uri=True)) as private:
+                private.executescript(SCHEMA)
+                prepare(private, seed)
+                assert private.execute("SELECT value FROM metadata WHERE key='marker'").fetchone() == ('seed',)
+                private.execute("UPDATE metadata SET value='changed' WHERE key='marker'")
+                assert private.execute('SELECT count(*) FROM observations').fetchone() == (0,)
+                assert (current().directory/'trial.sqlite').is_file()
+
+
+def test_checksum_publication_retries_after_busy_writer(tmp_path, monkeypatch):
+    from stash_ai.recognition import solver_shared
+    Arrays.prepare(tmp_path)
+    real_replace = solver_shared.os.replace
+    with scope(tmp_path, 65536) as shared, sqlite3.connect(tmp_path/'ledger.sqlite') as other:
+        shared.db.execute('PRAGMA busy_timeout=1')
+        def publish_then_lock(source, dest):
+            real_replace(source, dest)
+            other.execute('BEGIN IMMEDIATE')
+        monkeypatch.setattr(solver_shared.os, 'replace', publish_then_lock)
+        value = np.arange(8)
+        signature = key('publish', (value,))
+        shared.put(signature, value)
+        assert not shared.disabled and signature in shared.pending
+        other.rollback()
+        assert np.array_equal(shared.get(signature), value)
+        assert not shared.pending
+        assert shared.db.execute('SELECT bytes FROM usage').fetchone()[0] == value.nbytes + 512

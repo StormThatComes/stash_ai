@@ -13,7 +13,7 @@ _context = None
 _reuse = None
 
 
-def initialize(event, updates=None, context=None):
+def initialize(event, updates=None, context=None, images=None, slots=None):
     global _cancel, _updates, _context, _reuse
     if _reuse is not None:_reuse.close()
     from .solver_worker_reuse import Reuse
@@ -26,7 +26,14 @@ def initialize(event, updates=None, context=None):
     _cancel = Cancellation()
     _cancel.event = event
     _updates = updates
+    from .solver_images import worker
+    worker(images)
     _context = context
+    if slots is not None:
+        from .solver_slot_index import open_maps
+        db, observations, baseline = open_maps(slots)
+        Finalize(_reuse, db.close, exitpriority=9)
+        _context = dict(context, observations=observations, baseline_predictions=baseline)
     if updates is not None:
         # Best-effort telemetry must never delay worker shutdown on a full pipe.
         updates.cancel_join_thread()
@@ -109,9 +116,18 @@ class Trials(AbstractContextManager):
                 shared_directory=self.shared_directory, shared_bytes=self.shared_bytes)
             context, task = split(request)
             if self.executor is None:
+                from .solver_images import current
+                from .solver_slot_index import build
+                images = current()
+                slots = None
+                if images is not None and context.get('baseline_predictions') is not None:
+                    slots = build(images, context['observations'], context['baseline_predictions'])
+                if slots is not None:
+                    context = {key: value for key, value in context.items()
+                               if key not in ('observations', 'baseline_predictions')}
                 self.executor = ProcessPoolExecutor(max_workers=self.execution.trials,
                     mp_context=multiprocessing.get_context('spawn'), initializer=initialize,
-                    initargs=(self.event, self.updates, context))
+                    initargs=(self.event, self.updates, context, images, slots))
             future = self.executor.submit(work, task)
         self.pending[name] = settings, future
         self.dispatched[name] = time.monotonic()

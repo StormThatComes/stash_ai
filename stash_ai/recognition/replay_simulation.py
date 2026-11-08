@@ -91,12 +91,15 @@ def replay(config, variants, **kwargs):
 
 
 @contextmanager
-def prepared_replay(db, config, scope, ns, installation, reuse_history, progress):
+def prepared_replay(db, config, scope, ns, installation, reuse_history, progress, solver=False):
     from contextlib import ExitStack
     from .solver_progress import heartbeat
     with ExitStack() as stack:
         with heartbeat('initialization', progress, 'Prepare immutable replay inputs'):
             seed = stack.enter_context(prepared_history(db, config, scope, ns, installation)) if reuse_history else None
+        if solver:
+            from .solver_images import session
+            stack.enter_context(session(seed, config.data['execution']['replay_snapshot_bytes']))
         yield seed
 
 
@@ -151,7 +154,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
         preparation_started = time.perf_counter()
-        with prepared_replay(db, config, scope, ns, installation, reuse_history, progress) as seed:
+        with prepared_replay(db, config, scope, ns, installation, reuse_history, progress, solver=variant_stream is not None) as seed:
             from .solver_execution import current as solver_execution
             from .solver_pool import Trials
             runtime = solver_execution()

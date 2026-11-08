@@ -33,6 +33,7 @@ class Arrays:
         self.db = None
         self.disabled = False
         self.verified = {}
+        self.pending = {}
         try:
             self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
         except sqlite3.Error:
@@ -42,6 +43,13 @@ class Arrays:
         from .profiling import count
         count('shared_numeric_errors')
         self.disabled = True
+
+    def handle_error(self, error):
+        if (getattr(error, 'sqlite_errorcode', 0) or 0) & 255 in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            from .profiling import count
+            count('shared_numeric_busy')
+        else:
+            self.failed()
 
     @classmethod
     def prepare(cls, directory):
@@ -53,14 +61,33 @@ class Arrays:
                 columns = {r[1] for r in db.execute('PRAGMA table_info(entries)')}
                 for column in ('checksum','shape','dtype'):
                     if column not in columns:db.execute(f'ALTER TABLE entries ADD COLUMN {column} TEXT')
+                db.execute('CREATE TABLE IF NOT EXISTS usage (id INTEGER PRIMARY KEY CHECK(id=1), bytes INTEGER NOT NULL)')
+                db.execute('INSERT OR IGNORE INTO usage SELECT 1,COALESCE(SUM(bytes),0) FROM entries')
+                db.execute('CREATE TRIGGER IF NOT EXISTS reserve_bytes AFTER INSERT ON entries BEGIN UPDATE usage SET bytes=bytes+new.bytes WHERE id=1; END')
+                db.execute('CREATE TRIGGER IF NOT EXISTS release_bytes AFTER DELETE ON entries BEGIN UPDATE usage SET bytes=bytes-old.bytes WHERE id=1; END')
             return True
         except (OSError, sqlite3.Error):
             from .profiling import count
             count('shared_numeric_errors')
             return False
 
+    def flush_pending(self):
+        if not self.pending or self.disabled:
+            return
+        try:
+            with self.db:
+                self.db.executemany('UPDATE entries SET checksum=?,shape=?,dtype=? WHERE key=? AND checksum IS NULL',
+                                    self.pending.values())
+        except sqlite3.Error as error:
+            self.handle_error(error)
+        else:
+            self.pending.clear()
+
     def get(self, signature):
         if signature is None or self.disabled:
+            return None
+        self.flush_pending()
+        if signature in self.pending or self.disabled:
             return None
         path = self.directory/(signature+'.npy')
         import numpy as np
@@ -85,8 +112,8 @@ class Arrays:
                 raise ValueError('Shared numerical cache contract mismatch.')
         except FileNotFoundError:
             return None
-        except (OSError, ValueError, EOFError, sqlite3.Error):
-            self.failed()
+        except (OSError, ValueError, EOFError, sqlite3.Error) as error:
+            self.handle_error(error)
             return None
         count('shared_numeric_hits')
         return value
@@ -103,16 +130,16 @@ class Arrays:
         reserved = False
         try:
             self.db.execute('BEGIN IMMEDIATE')
-            used = self.db.execute('SELECT COALESCE(SUM(bytes),0) FROM entries').fetchone()[0]
+            used = self.db.execute('SELECT bytes FROM usage WHERE id=1').fetchone()[0]
             exists = self.db.execute('SELECT 1 FROM entries WHERE key=?', (signature,)).fetchone()
             if not exists and used + value.nbytes + 512 <= self.limit:
                 self.db.execute('INSERT INTO entries(key,bytes) VALUES (?,?)', (signature, value.nbytes+512))
                 reserved = True
             self.db.commit()
-        except sqlite3.Error:
+        except sqlite3.Error as error:
             with suppress(sqlite3.Error):
                 self.db.rollback()
-            self.failed()
+            self.handle_error(error)
             return value  # Cache contention changes cost only.
         if not reserved:
             return value
@@ -124,14 +151,14 @@ class Arrays:
             fd, filename = tempfile.mkstemp(dir=self.directory, suffix='.tmp')
             with os.fdopen(fd, 'wb') as stream:
                 np.save(stream, value, allow_pickle=False)
+            with open(filename, 'rb') as stream:
+                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
             os.replace(filename, self.directory/(signature+'.npy'))
             published = True
             filename = None
-            with (self.directory/(signature+'.npy')).open('rb') as stream:
-                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
-            with self.db:
-                self.db.execute('UPDATE entries SET checksum=?,shape=?,dtype=? WHERE key=?',
-                    (checksum, json.dumps(list(value.shape)), value.dtype.str, signature))
+            # Readers ignore reserved rows. A transient writer lock can defer
+            # publication of the checksum without losing the byte reservation.
+            self.pending[signature] = (checksum, json.dumps(list(value.shape)), value.dtype.str, signature)
             count('shared_numeric_written_bytes', value.nbytes)
             found = self.get(signature)
             return value if found is None else found
@@ -139,7 +166,7 @@ class Arrays:
             self.failed()
             return value
         finally:
-            if not published or self.disabled:
+            if not published:
                 with suppress(sqlite3.Error):
                     with self.db:
                         self.db.execute('DELETE FROM entries WHERE key=?', (signature,))
@@ -149,7 +176,10 @@ class Arrays:
 
     def close(self):
         if self.db is not None:
-            self.db.close()
+            try:
+                self.flush_pending()
+            finally:
+                self.db.close()
 
 
 def current():

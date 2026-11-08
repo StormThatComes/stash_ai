@@ -527,10 +527,22 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .replay_input_cache import InputCache
         inputs=InputCache(database,selected,config,scope,namespace)
         partitioned=len(selected)>1
+        from .solver_images import current as solver_images
+        images = solver_images()
+        raw_image = None
+        if images is not None and any(r[1] == 'retained' and r[2] == str(images.seed) for r in db.execute('PRAGMA database_list')):
+            raw_image = 'raw-' + digest([selected, scope, namespace, config.data['clustering']['max_anchor_pose_deviation'] is not None]) + '.sqlite'
         if not inputs.restore(replay):
-            _copy_selection(database, replay, selected, scope, namespace,
-                            retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False,
+            restored = raw_image is not None and images.restore(raw_image, replay)
+            if restored:
+                from .replay_vector_inputs import install
+                install(replay)
+            else:
+                _copy_selection(database, replay, selected, scope, namespace,
+                                retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False,
                             inputs=inputs if partitioned else None)
+                if raw_image is not None:
+                    images.publish(raw_image, replay)
             from .evidence_pixels import canonicalize
             canonicalize(replay)
             replay.commit()
@@ -546,12 +558,14 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .checkpoint_delta import DeltaCheckpoints
         checkpoint_type=DeltaCheckpoints if config.data['execution']['rebuild_checkpoint_mode']=='incremental' else Checkpoints
         checkpoints = checkpoint_type(database, selected, config, scope, namespace)
-        late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
-            sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
+        late_context = None
+        if config.data['execution']['rebuild_checkpoint_scenes']:
+            late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
+                sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
         late = Checkpoints(database, selected, config, scope, namespace,
                            phase='selected', context=late_context)
         with read_only_dependencies():
-            ready_context = digest([late_context, rebuild_cache.binding_context(db,scope,namespace)])
+            ready_context = digest([late_context, rebuild_cache.binding_context(db,scope,namespace)]) if late_context is not None else None
         ready = Checkpoints(database, selected, config, scope, namespace,
                             phase='ready', context=ready_context)
         with stage('Restore rebuild checkpoint'):
@@ -665,8 +679,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                     converge(replay, lambda: retry_strict(temporary, selected, config))
                 global_state=None  # Release frozen exemplars before the historical bank.
             replay.commit()
-            late.phase_payload = encode_late(early, deferred_hints)
             if checkpoints.enabled:
+                late.phase_payload = encode_late(early, deferred_hints)
                 late.save(replay, len(selected), clock.value, final=True)
         with stage('Freeze historical identity references'):
             history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
@@ -727,8 +741,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             if invalid:raise InvalidatedSourceViews(invalid)
         replay.commit()
         from .ready_checkpoint import encode as encode_ready
-        ready.phase_payload = encode_ready(database, mapping, history)
         if checkpoints.enabled:
+            ready.phase_payload = encode_ready(database, mapping, history)
             ready.save(replay, len(selected), clock.value, final=True)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
