@@ -1,5 +1,7 @@
 """Portrait refresh must never replay identities or publish scene/name changes."""
+from copy import deepcopy
 import json
+from shutil import copyfile
 
 import pytest
 
@@ -188,11 +190,23 @@ def test_repeated_performer_ids_select_each_person_once_and_unknown_ids_never_br
     assert captured == [] and last_counts(config)['portrait_people_selected'] == 0
 
 
+@pytest.fixture(scope='module')
+def published_portrait_scene(tmp_path_factory):
+    with pytest.MonkeyPatch.context() as patch:
+        config, stash, services, _ = setup(tmp_path_factory.mktemp('published-portrait'), patch)
+        assert run(config, services, '1') == 0
+    return config.database, (stash.profiles, stash.links, stash.images)
+
+
 @pytest.mark.parametrize('filtered', [False, True])
 @pytest.mark.parametrize('excluded', ['scope', 'namespace', 'unpublished', 'partial', 'rejected', 'historical', 'alias', 'pending_merge'])
-def test_only_complete_current_owned_identity_memberships_are_targets(tmp_path, monkeypatch, excluded, filtered):
+def test_only_complete_current_owned_identity_memberships_are_targets(
+        tmp_path, monkeypatch, excluded, filtered, published_portrait_scene):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
-    assert run(config, services, '1') == 0
+    source, published_state = published_portrait_scene
+    config.database.parent.mkdir(parents=True, exist_ok=True)
+    copyfile(source, config.database)
+    stash.profiles, stash.links, stash.images = deepcopy(published_state)
     performer = stash.links['1'][-1]
     with FaceDatabase(config.database) as state:
         db = state.connection

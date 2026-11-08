@@ -11,7 +11,7 @@ Unavailable diffs, unclassified files and shared CI/dependency changes select al
 | Solver modules listed in `tests/ci_jobs.py` | Linux shards and Windows core, including solver process tests |
 | Other recognition code | Linux shards, CPU model smoke and both Windows lifecycle groups |
 | Tests | Linux shards and Windows jobs using those tests or their imported fixtures |
-| Updater | Linux shards and minimal-profile updater tests on both operating systems |
+| Only modifications to the standalone updater or its test | Minimal-profile updater tests on both operating systems |
 | Shared application code/configuration | Linux, updater, model smoke and Windows lifecycle tests |
 | Requirements, constraints, CI, shared fixtures, or unknown paths | Full matrix |
 
@@ -20,6 +20,16 @@ select the additional jobs. Unclassified recognition modules run both Windows gr
 and model smoke. Adding or deleting installed recognition modules also runs the
 minimal-profile updater tests. Both standalone benchmarks run once when Linux tests
 are selected. Each job-selection summary records the reasons for the choice.
+
+For recognition code PRs, Windows runs one job per selected suite. The
+`windows-*-pr.txt` manifests cover Windows file ownership and migration, solver
+processes, shutdown, FFmpeg, model loading and representative VTT/portrait
+lifecycles. Linux runs the complete suite of policy, parser, matching and
+quality permutations. Editing a Windows test module or one of its imported
+fixtures restores both full shards for that suite. Shared application or CI
+changes, missing diffs and unclassified paths retain full Windows coverage.
+The standalone solver concurrency step runs on Windows; Linux already runs
+the same module in its CPU-profile pytest shard.
 
 Each push to `main` schedules the full matrix and cancels any unfinished run from
 an earlier push to `main`. A new PR revision cancels the previous run for that PR.

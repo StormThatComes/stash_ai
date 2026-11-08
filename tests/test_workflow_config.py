@@ -40,3 +40,21 @@ def test_windows_lifecycle_lists_are_disjoint_and_resolve_to_test_modules():
     manifests = [path for suite in ('core', 'video') for path in
                  (root / '.github/ci' / f'windows-{suite}.txt').read_text().splitlines()]
     assert sorted(files) == sorted(manifests)
+
+
+def test_windows_pr_selectors_resolve_without_overlapping_modules():
+    import ast
+    from tests.ci_windows import selected
+
+    root = Path(__file__).resolve().parents[1]
+    for suite in ('core', 'video'):
+        full = set(selected(suite, 1, root) + selected(suite, 2, root))
+        focused = selected(suite, 1, root, profile='pr')
+        assert len(set(focused)) == len(focused)
+        for selector in focused:
+            path, separator, function = selector.partition('::')
+            assert path in full
+            if separator:
+                assert path not in focused
+                module = ast.parse((root / path).read_text(encoding='utf-8'))
+                assert function in {node.name for node in module.body if isinstance(node, ast.FunctionDef)}

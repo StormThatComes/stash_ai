@@ -246,16 +246,17 @@ def test_cli_interrupt_exports_logged_winner_with_default_500_trials(tmp_path, m
 def test_interrupt_in_refinement_keeps_best_completed_yaml(tmp_path):
     from stash_ai.recognition.merge_goal_output import export
     config, people = incomplete_source(tmp_path)
-    completed = []
+    completed, refinement = [], set()
     def progress(name, stage, item):
+        if stage == 'start' and item.get('search_phase') == 'refinement':
+            refinement.add(name)
         if stage == 'complete':
-            completed.append((name,item['best_trial']))
-            # The default patience is 64; this lands in the refinement window.
-            if len(completed) >= 75 and name != item['best_trial']:
+            completed.append((name, item['best_trial']))
+            if name in refinement and name != item['best_trial']:
                 raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people], by_performer=False)
-        result = dict(goals, **solve(config, goals, db, progress=progress))
+        result = dict(goals, **solve(config, goals, db, maximum=96, progress=progress))
     assert result['interrupted']
     assert result['search']['executed_by_phase']['refinement'] > 0
     assert result['selected_trial'] == completed[-1][1]
