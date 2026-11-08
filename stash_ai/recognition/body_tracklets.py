@@ -8,13 +8,16 @@ from .perspective_shots import change
 from .track_geometry import rejection, torso_points, translation
 
 
-def paths(rows, settings, scores):
+def paths(rows, settings, scores, occupied=()):
     cues = defaultdict(list)
     geometry = {}
+    physical = {}
+    occupied = set(occupied)
     for row in rows:
         q = json.loads(row['quality']).get('quality',{})
         person = json.loads(row['geometry'])
         cues[row['cue']].append(row)
+        physical[row['id']] = person
         if q.get('frame_signature') and person.get('bounds') and q.get('view_shot') is not None:
             signature = np.frombuffer(bytes.fromhex(q['frame_signature']),np.uint8).astype(float).reshape(-1,3)
             geometry[row['id']] = q,person['bounds'],torso_points(person),signature
@@ -28,30 +31,52 @@ def paths(rows, settings, scores):
                 geometry[r['id']][0].get('expected_people',0))==len(members) for r in members)
     links, incoming = {},set()
     for cue,left in sorted(cues.items()):
-        right = cues.get(cue+1,())
-        if not right or max(len(left),len(right))>4 or any(r['id'] not in geometry for r in (*left,*right)):
+        skipped = cue+1 not in cues and cue+1 not in occupied
+        right = cues.get(cue+(2 if skipped else 1),())
+        if not right or max(len(left),len(right))>4:
             continue
         partial = not (complete(left) and complete(right))
-        # A missing body on both sides has no physical location to rule out.
-        if partial and not any(len(side)>=2 and all(len(geometry[r['id']][2])>=3 for r in side)
+        left_valid = [r for r in left if r['id'] in geometry]
+        right_valid = [r for r in right if r['id'] in geometry]
+        if not left_valid or not right_valid or skipped and partial:
+            continue
+        if partial and not any(len(side)>=2 and all(len(torso_points(physical[r['id']]))>=3 for r in side)
                                for side in (left,right)):
             continue
-        qa,_,_,sa = geometry[left[0]['id']]
-        qb,_,_,sb = geometry[right[0]['id']]
-        gap = right[0]['seconds']-left[0]['seconds']
-        if qa['view_shot']!=qb['view_shot'] or not 0<gap<=12 or change(sa,sb,True)!='continuous':
+        qa,_,_,sa = geometry[left_valid[0]['id']]
+        qb,_,_,sb = geometry[right_valid[0]['id']]
+        gap = right_valid[0]['seconds']-left_valid[0]['seconds']
+        continuous = np.abs(sa-sb).mean()<=8 if skipped else change(sa,sb,True)=='continuous'
+        if qa['view_shot']!=qb['view_shot'] or not 0<gap<=12 or not continuous:
             continue
-        offset = translation(qa,qb,sa,sb)
+        offset = None if skipped else translation(qa,qb,sa,sb)
         edges = {}
-        for a in left:
+        for a in left_valid:
             _,ba,ta,_ = geometry[a['id']]
-            for b in right:
+            for b in right_valid:
                 _,bb,tb,_ = geometry[b['id']]
                 if not rejection(ba,bb,ta,tb,gap,translation=offset):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
         for (a,b),value in edges.items():
             rival = max((s for (i,j),s in edges.items() if (i==a)!=(j==b)),default=-1.)
             if partial:
+                from .crowd_context import pair
+                # An incomplete rival must be physically separated at its own cue
+                # and physically unable to take the other endpoint across the transition.
+                def excluded(r, own, dest, reverse):
+                    p = physical[r['id']]
+                    if r['id'] in geometry:
+                        return True
+                    if not p.get('bounds') or pair([p,physical[own]]) is None:
+                        return False
+                    boxes = [p['bounds'],geometry[dest][1]]
+                    torsos = [torso_points(p),geometry[dest][2]]
+                    if reverse:
+                        boxes.reverse()
+                        torsos.reverse()
+                    return bool(rejection(*boxes,*torsos,gap,translation=offset))
+                if not all(excluded(r,a,b,False) for r in left) or not all(excluded(r,b,a,True) for r in right):
+                    continue
                 left_q,_,left_torso,_ = geometry[a]
                 right_q,_,right_torso,_ = geometry[b]
                 if (left_q.get('query_only') or right_q.get('query_only') or
@@ -105,7 +130,7 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     from .body_origins import physical_key
     roots = {r['id']:owner for owner,bank in seeds.items() for r in bank}
     anonymous = {}
-    segments = (part for chain,strengths in paths(rows,settings,scores)
+    segments = (part for chain,strengths in paths(rows,settings,scores,record.get('occupied_cues',()))
                 for part in compatible_segments(chain,strengths,decisions))
     for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}

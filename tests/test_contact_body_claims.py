@@ -63,3 +63,25 @@ def test_joint_resolution_also_uses_faceless_scene_banks_with_bonus_disabled(tmp
         decisions[r['id']]=dict(person='A',status='accepted',role='auxiliary',reason='body_core_attachment')
     attach_with_scene_support(rows,groups,{},decisions,cfg,Scores(cfg),SimpleNamespace(allows=lambda *a:True))
     assert [decisions[r['id']]['person'] for r in queries]==['A','B']
+
+
+def test_incomplete_peer_must_be_physically_excluded_and_empty_cue_must_be_empty():
+    scores = SimpleNamespace(face_similarity=np.dot)
+    def chains(rows,occupied=()):
+        return [[r['id'] for r in chain] for chain,_ in paths(rows,defaults(),scores,occupied)]
+    pair = [body('A',0,30,detected_people=2),body('a',1,30,detected_people=2)]
+    peers = [body('B',0,160,frame_signature=None),body('b',1,160,frame_signature=None)]
+    assert chains(pair+peers)==[['A','a']]
+    peers[0]['geometry'] = json.dumps(pose(30))
+    assert not chains(pair+peers)
+    gap = [body('A',0,30),body('a',2,30)]
+    assert chains(gap)==[['A','a']]
+    assert not chains(gap,[1])
+
+
+def test_pan_compensation_confirms_crowded_face():
+    before = np.random.default_rng(7).integers(0,255,(4,4,3),dtype=np.uint8)
+    after = np.roll(before,1,axis=1)
+    rows = [body('a',0,40,'A',frame_size=[400,200],frame_signature=before.tobytes().hex()),
+            body('b',1,140,'A',frame_size=[400,200],frame_signature=after.tobytes().hex(),detected_people=2,overlap=.3)]
+    assert not questionable_links(rows,defaults(),SimpleNamespace(face_similarity=np.dot))

@@ -65,3 +65,22 @@ def test_face_change_withholds_only_the_unresolved_interval():
     assert [[r['id'] for r in rows] for rows,_ in parts]==[['0','1'],['4','5']]
     assert [decisions[k]['reason'] for k in ('2','3')]==['different_face_root']*2
     assert all(len(rows)==len(edges)+1 for rows,edges in parts)
+
+
+def test_borderline_fragment_is_independent_of_iteration_order(tmp_path):
+    from stash_ai.recognition.scene_fragments import preserve_fragments
+    from stash_ai.recognition.body_identity import Scores
+    from tests.test_recognition_body_identity import configuration
+    from tests.test_contact_body_claims import body
+    rows=[body(str(i),i,40) for i in range(5)]
+    for row, angle in zip(rows,(0,5,10,20,50)):
+        theta = np.deg2rad(angle)
+        row['_vector'] = np.asarray([np.cos(theta),np.sin(theta)],dtype='float32')
+    cfg = configuration(tmp_path)
+    def partition(source):
+        decisions = {r['id']:dict(reason='ambiguous_or_insufficient_face_body_bank') for r in rows}
+        preserve_fragments(dict(scene='1',scope='test',namespace='ns',input_sha='v'),source,decisions,
+                           defaults(),Scores(cfg),SimpleNamespace(allows=lambda *args:True))
+        return [decisions[r['id']].get('person') for r in rows]
+    assert partition(rows)==partition(rows[::-1])
+    assert partition(rows)[0] and len(set(partition(rows)[:3]))==1
