@@ -62,7 +62,7 @@ def identifier(scan, cue, person, expected):
 def save_records(db, config, records):
     """Publish a complete cue in the caller's face/body checkpoint transaction."""
     from .database import encoded
-    from .models import normalized_embedding
+    from .models import body_embedding
     from .person_signal import save, contract as person_contract
     from .shared_person_evidence import project, available as shared_available
     from .cold_payloads import put,available as cold_available
@@ -78,7 +78,7 @@ def save_records(db, config, records):
         if body is None:
             save(db,identity,person_contract(config),metadata,vector,crop)
             continue
-        feature=normalized_embedding(vector,4096).astype('<f4').tobytes() if vector is not None else None
+        feature=body_embedding(vector).astype('<f4').tobytes() if vector is not None else None
         public={k:v for k,v in metadata.items() if not k.startswith('_')}
         db.execute('INSERT INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?) '
             'ON CONFLICT(id) DO UPDATE SET face=excluded.face,geometry=excluded.geometry,'

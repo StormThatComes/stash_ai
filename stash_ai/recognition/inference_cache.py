@@ -39,7 +39,13 @@ def fingerprint(value):
     h=hashlib.sha256()
     def add(v):
         if hasattr(v,'mode') and hasattr(v,'tobytes'):
-            h.update(str((v.mode,v.size)).encode());h.update(v.tobytes())
+            digest = getattr(v, '_recognition_pixel_digest', None)
+            if digest is None:
+                digest = hashlib.sha256(v.tobytes()).digest()
+                if hasattr(v, '_recognition_pixel_digest'):
+                    v._recognition_pixel_digest = digest
+            h.update(str((v.mode,v.size)).encode())
+            h.update(digest)
         elif isinstance(v,np.ndarray):
             h.update(str((v.dtype.str,v.shape)).encode());h.update(v.tobytes())
         elif hasattr(v,'detach'):
@@ -95,7 +101,13 @@ def unpack(blob):
 
 
 class Store:
-    def __init__(self,path,limit):
+    def __init__(self,path,limit,*,queue_bytes=0):
+        from concurrent.futures import ThreadPoolExecutor
+        self.queue_limit = queue_bytes
+        self.writer = ThreadPoolExecutor(1, thread_name_prefix="recognition-cache") if queue_bytes else None
+        self.queued = OrderedDict()
+        self.queued_bytes = 0
+        self.queue_lock = threading.RLock()
         self.lock=threading.RLock();self.limit=limit;self.pending=0
         self.db=sqlite3.connect(path,check_same_thread=False)
         self.db.execute('PRAGMA cache_size=-1024')
@@ -121,6 +133,11 @@ class Store:
 
     def get_many(self, keys):
         result = {}
+        if self.writer is not None:
+            with self.queue_lock:
+                for key in keys:
+                    if key in self.queued:
+                        self._retire(key)
         for start in range(0, len(keys), 32):
             group = keys[start:start+32]
             with self.lock:
@@ -169,10 +186,41 @@ class Store:
             self.by_stage[stage]=self.by_stage.get(stage,0)+size
             self.used+=size-(old[0] if old else 0);self.pending+=1
             if self.pending%128==0:self.db.commit()
+    def _retire(self, key):
+        future, charge = self.queued.pop(key)
+        try:
+            future.result()
+        finally:
+            self.queued_bytes -= charge
+
+    def enqueue(self, key, value, stage):
+        if self.writer is None:
+            return self.put(key, value, stage)
+        from contextvars import copy_context
+        from copy import deepcopy
+        from .memory_size import size
+        charge = 3*size(value) + len(key) + 4096
+        with self.queue_lock:
+            if key in self.queued:
+                return
+            while self.queued and self.queued_bytes + charge > self.queue_limit:
+                self._retire(next(iter(self.queued)))
+            if charge > self.queue_limit:
+                return self.put(key,value,stage)
+            future = self.writer.submit(copy_context().run, self.put, key, deepcopy(value), stage)
+            self.queued[key] = future, charge
+            self.queued_bytes += charge
+
     def close(self):
-        with self.lock:
-            try:self.db.commit()
-            finally:self.db.close()
+        try:
+            if self.writer is not None:
+                self.writer.shutdown(wait=True)
+                for key in tuple(self.queued):
+                    self._retire(key)
+        finally:
+            with self.lock:
+                try:self.db.commit()
+                finally:self.db.close()
 
 
 @contextmanager
@@ -182,7 +230,7 @@ def scope(config):
         yield current();return
     path=Path(str(config.database)+'.inference-cache.sqlite')
     path.parent.mkdir(parents=True,exist_ok=True)
-    store=Store(path,limit)
+    store=Store(path,limit,queue_bytes=min(limit//8,config.data['execution']['scan_queue_bytes']//8))
     try:
         with using(store):yield store
     finally:store.close()
@@ -192,7 +240,7 @@ def many(stage,contract,values,calculate,*,key=fingerprint):
     store=current()
     if store is None:return calculate(values)
     from .profiling import count
-    prefix=fingerprint(['inference-cache-v1',runtime_versions(),stage,contract]);results={};missing=OrderedDict();keys=[]
+    prefix=fingerprint(['inference-cache-v2',runtime_versions(),stage,contract]);results={};missing=OrderedDict();keys=[]
     unique = {}
     for value in values:
         identity = prefix + ':' + key(value)
@@ -208,6 +256,9 @@ def many(stage,contract,values,calculate,*,key=fingerprint):
         computed=calculate(list(missing.values()))
         if len(computed)!=len(missing):raise ValueError('Cached inference returned an incompatible batch.')
         for identity,value in zip(missing,computed):
-            results[identity]=value;store.put(identity,value,stage);count('inference_'+stage+'_misses')
+            results[identity]=value;store.enqueue(identity,value,stage);count('inference_'+stage+'_misses')
     from copy import deepcopy
+    if stage == 'body_embedding':
+        from .models import certified_body
+        return [v if certified_body(v) else deepcopy(v) for v in (results[k] for k in keys)]
     return [deepcopy(results[identity]) for identity in keys]

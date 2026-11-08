@@ -198,6 +198,27 @@ class PersonCollector:
     def _flush_pose(self):
         if not self.pose_frames:return
         try:
+            from .body_observations import enabled, repair_projections
+            if enabled(self.config) and any(not frame[6] for frame in self.pose_frames):
+                # A completed body cue may only be missing its face projection.
+                # Repair these before invoking the detector on the remaining batch.
+                pending = []
+                for frame in self.pose_frames:
+                    db, scan, cue, image, rows, seconds, fresh, lease = frame
+                    done = not fresh and db.execute('SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
+                                                   (scan,self.body_contract,cue)).fetchone()
+                    if done:
+                        with db:
+                            repair_projections(db,self.config,scan,cue=cue)
+                    else:
+                        pending.append((db,scan,cue,image,rows,seconds,True,lease))
+                completed = {id(frame[7]) for frame in pending}
+                for frame in self.pose_frames:
+                    if id(frame[7]) not in completed:
+                        frame[7].close()
+                self.pose_frames = pending
+                if not pending:
+                    return
             frames = [(image, [checked_detection(json.loads(r['geometry'])) for r in rows])
                       for _, _, _, image, rows, _, _, _ in self.pose_frames]
             self.model.detect_many(frames)

@@ -217,8 +217,8 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
     from .database import encoded
     from .cold_payloads import put
     if vector is not None:
-        from .models import normalized_embedding
-        vector=normalized_embedding(vector,DIMENSIONS).astype('<f4').tobytes()
+        from .models import body_embedding
+        vector=body_embedding(vector).astype('<f4').tobytes()
     db.execute('INSERT INTO person_evidence VALUES (?,?,?,?,?,?) '
                'ON CONFLICT(observation,contract) DO UPDATE SET status=excluded.status,'
                'metadata=excluded.metadata,embedding=excluded.embedding,crop=excluded.crop',

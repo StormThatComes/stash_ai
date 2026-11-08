@@ -7,7 +7,7 @@ from pathlib import Path
 import stat
 from threading import get_ident
 
-from .models import normalized_embedding
+from .models import body_embedding
 from .sapiensid_v1 import (
     EMBEDDING_DIMENSIONS, INPUT_SIZE, preprocess,
 )
@@ -207,7 +207,7 @@ class SapiensIDV1Encoder:
             values = features.detach().float().cpu().numpy()
         # Double precision L2 normalization matches the existing embedding
         # namespace implementation; threshold calibration is still required.
-        return [normalized_embedding(row, EMBEDDING_DIMENSIONS) for row in values]
+        return [body_embedding(row) for row in values]
 
     def resident_modules(self):
         return [m for m in (self.model,self.aligner) if m is not None]

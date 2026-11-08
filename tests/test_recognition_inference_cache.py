@@ -113,3 +113,29 @@ def test_duplicate_frame_cache_preserves_cue_records_and_geometry(tmp_path):
     assert calls==[1] and [r[0] for r in result]==[0,1]
     assert [r[1].seconds for r in result]==[0,1]
     assert result[0][2][0][2]['geometry_contract']!=result[1][2][0][2]['geometry_contract']
+
+
+def test_owned_cue_reuses_pixels_and_writer_returns_private_results(tmp_path, monkeypatch):
+    from stash_ai.recognition.frame_ownership import Lease
+    calls = []
+    original = Image.Image.tobytes
+    monkeypatch.setattr(Image.Image, 'tobytes', lambda img,*a,**kw: (calls.append(img.size),original(img,*a,**kw))[1])
+    with closing(Store(tmp_path/'queued.sqlite', 1024**2,queue_bytes=65536)) as store, using(store):
+        image = Image.new('RGB',(16,16),'red')
+        with closing(Lease(image)):
+            fingerprint(image)
+            fingerprint((image, [1,2,3,4]))
+            assert calls == [(16,16)]
+            value = np.arange(12, dtype='float32')
+            store.enqueue('probe',value,'test')
+            value[:] = 0
+            assert np.array_equal(store.get('probe'),np.arange(12))
+
+
+def test_certified_body_keeps_only_complete_immutable_vectors():
+    from stash_ai.recognition.models import body_embedding, certified_body, normalized_embedding
+    row = np.random.default_rng(2).normal(size=4096).astype('float32')
+    validated = body_embedding(row)
+    assert certified_body(validated) and body_embedding(validated) is validated
+    assert not certified_body(validated[::-1]) and not certified_body(validated.copy())
+    assert validated.tobytes() == normalized_embedding(normalized_embedding(row,4096),4096).tobytes()
