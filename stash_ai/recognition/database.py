@@ -1,5 +1,6 @@
 """One independently owned SQLite for all face evidence, history and recovery."""
 from contextlib import AbstractContextManager
+from functools import lru_cache
 from stash_ai.runtime.cleanup import closing, cleanup
 import json
 import os
@@ -179,7 +180,34 @@ def _checks(connection, table):
             if depth == 0:
                 checks.append(tuple(tokens[index + 2:end]))
                 break
-    return sorted(checks)
+    return tuple(sorted(checks))
+
+
+def _columns(connection, table):
+    return tuple(tuple(row[1:]) for row in connection.execute(f'PRAGMA table_info({table})'))
+
+
+def _foreign_keys(connection, table):
+    return frozenset(tuple(row[2:]) for row in connection.execute(f'PRAGMA foreign_key_list({table})'))
+
+
+def _unique_keys(connection, table):
+    return frozenset(
+        tuple((row[2], row[4]) for row in connection.execute(
+            'SELECT * FROM pragma_index_xinfo(?) WHERE key=1 ORDER BY seqno', (index[1],)))
+        for index in connection.execute(f'PRAGMA index_list({table})')
+        if index[2] and not index[4]
+    )
+
+
+@lru_cache(maxsize=16)
+def _reference_tables(schema, tables):
+    """Only repository-owned DDL enters this cache. File contents are always read live."""
+    with closing(sqlite3.connect(':memory:')) as reference:
+        reference.executescript(schema)
+        return tuple((table, _columns(reference, table), _foreign_keys(reference, table),
+                      _unique_keys(reference, table), _checks(reference, table))
+                     for table in tables)
 
 
 class FaceDatabase(AbstractContextManager):
@@ -306,27 +334,15 @@ class FaceDatabase(AbstractContextManager):
         db = self.connection
         if actual_tables != set(tables):
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
-        # Validate full column shape, not only the existence of tables.
-        with closing(sqlite3.connect(':memory:')) as reference:
-            reference.executescript(schema)
-            for table in tables:
-                expected = [tuple(r[1:]) for r in reference.execute(f'PRAGMA table_info({table})')]
-                actual = [tuple(r[1:]) for r in db.execute(f'PRAGMA table_info({table})')]
-                if expected != actual:
-                    raise ValueError(f'Invalid facial recognition schema shape: {table}.')
-                expected_keys = {tuple(row[2:]) for row in reference.execute(f'PRAGMA foreign_key_list({table})')}
-                actual_keys = {tuple(row[2:]) for row in db.execute(f'PRAGMA foreign_key_list({table})')}
-                if expected_keys != actual_keys:
-                    raise ValueError(f'Invalid facial recognition foreign-key constraints: {table}.')
-                def unique_keys(connection):
-                    return {tuple((row[2], row[4]) for row in connection.execute(
-                                'SELECT * FROM pragma_index_xinfo(?) WHERE key=1 ORDER BY seqno', (index[1],)))
-                            for index in connection.execute(f'PRAGMA index_list({table})')
-                            if index[2] and not index[4]}
-                if not unique_keys(reference) <= unique_keys(db):
-                    raise ValueError(f'Invalid facial recognition unique constraints: {table}.')
-                if _checks(reference, table) != _checks(db, table):
-                    raise ValueError(f'Invalid facial recognition CHECK constraints: {table}.')
+        for table, columns, foreign_keys, unique_keys, checks in _reference_tables(schema, tuple(tables)):
+            if _columns(db, table) != columns:
+                raise ValueError(f'Invalid facial recognition schema shape: {table}.')
+            if _foreign_keys(db, table) != foreign_keys:
+                raise ValueError(f'Invalid facial recognition foreign-key constraints: {table}.')
+            if not unique_keys <= _unique_keys(db, table):
+                raise ValueError(f'Invalid facial recognition unique constraints: {table}.')
+            if _checks(db, table) != checks:
+                raise ValueError(f'Invalid facial recognition CHECK constraints: {table}.')
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('Facial recognition state has invalid foreign-key references.')
 

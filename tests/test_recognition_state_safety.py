@@ -56,6 +56,32 @@ def test_defaults_and_each_check_constraint_are_required(tmp_path, old, new):
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize('sql,error', [
+    ('ALTER TABLE runs ADD COLUMN unexpected TEXT', 'schema shape: runs'),
+    ("INSERT INTO progress VALUES ('missing-run','scan','{}')", 'invalid foreign-key references'),
+])
+def test_warm_reference_revalidates_modified_file_before_recovery(tmp_path, sql, error):
+    path = tmp_path / 'state.sqlite3'
+    with FaceDatabase(path) as state:
+        state.start_run('scope', ['1'], {})
+    with sqlite3.connect(path) as db:
+        db.execute(sql)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match=error):
+        FaceDatabase(path)
+    assert path.read_bytes() == before
+
+
+def test_reference_follows_ddl_even_at_the_same_version(tmp_path, monkeypatch):
+    path = tmp_path / 'state.sqlite3'
+    with FaceDatabase(path):
+        pass
+    # The expected DDL changes while the file and schema version stay the same.
+    monkeypatch.setattr(module, 'SCHEMA', module.SCHEMA + 'ALTER TABLE runs ADD COLUMN new_column TEXT;')
+    with pytest.raises(ValueError, match='schema shape: runs'):
+        FaceDatabase(path)
+
+
 def test_check_validation_accepts_sql_formatting_and_quoted_identifiers(tmp_path):
     path = tmp_path / 'state.sqlite3'
     schema = module.SCHEMA.replace('CHECK(source<>target)', 'check ( "source" /* comment */ <> [target] )')

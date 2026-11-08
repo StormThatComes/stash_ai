@@ -33,7 +33,12 @@ the same module in its CPU-profile pytest shard.
 
 Each push to `main` schedules the full matrix and cancels any unfinished run from
 an earlier push to `main`. A new PR revision cancels the previous run for that PR.
-Manual runs use the full matrix and run independently.
+Manual runs use the full matrix and run independently. Windows lifecycle tests
+run sequentially inside each job by default. Select `parallel_windows_lifecycle`
+on a manual run to compare two pytest workers on the same revision. Whole test
+files stay on one worker. Compare lifecycle step times and the JUnit test cases
+for each shard; standalone solver concurrency, model smoke and tracing keep
+their usual execution settings.
 
 Use `CI result` as the required check when configuring branch protection. It
 verifies that all selected jobs succeeded and accepts jobs intentionally omitted
