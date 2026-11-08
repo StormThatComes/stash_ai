@@ -1,0 +1,77 @@
+name: Windows core worker comparison
+on:
+  push:
+    branches: [bench/windows-core-workers]
+
+permissions:
+  contents: read
+
+jobs:
+  comparison:
+    name: core ${{ matrix.shard }} (${{ matrix.first }} first)
+    runs-on: windows-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+        first: [serial, parallel]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bf3a57fe0b22fb2f41caf88950476fac3c407cf2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.7'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv pip install --system -r requirements-dev.txt -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+      - name: Verify solver concurrency outside the worker pool
+        if: matrix.shard == 1
+        run: python -m pytest -q tests/test_recognition_solver_concurrency.py --tb=short
+      - name: Compare both modes on this runner
+        shell: python
+        env:
+          SHARD: ${{ matrix.shard }}
+          FIRST: ${{ matrix.first }}
+          OMP_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+          MKL_NUM_THREADS: '1'
+        run: |
+          import collections, json, os, pathlib, subprocess, sys, time
+          import xml.etree.ElementTree as ET
+          import psutil
+
+          shard, first = os.environ['SHARD'], os.environ['FIRST']
+          cases = {}
+          for mode in (first, 'parallel' if first == 'serial' else 'serial'):
+              report = pathlib.Path(os.environ['RUNNER_TEMP']) / f'core-{mode}.xml'
+              args = [sys.executable, '-m', 'tests.ci_windows', 'core', shard,
+                      '--tb=short', '--maxfail=1', '--durations=20', f'--junitxml={report}']
+              if mode == 'parallel':
+                  args.extend(['-n', '2', '--dist=loadfile'])
+              start = time.monotonic()
+              with subprocess.Popen(args) as child:
+                  root = psutil.Process(child.pid)
+                  peak = 0
+                  while child.poll() is None:
+                      try:
+                          processes = [root] + root.children(recursive=True)
+                      except psutil.NoSuchProcess:
+                          break
+                      rss = 0
+                      for process in processes:
+                          try:
+                              rss += process.memory_info().rss
+                          except (psutil.NoSuchProcess, psutil.AccessDenied):
+                              pass
+                      peak = max(peak, rss)
+                      time.sleep(0.5)
+                  if child.wait():
+                      raise SystemExit(child.returncode)
+              duration = time.monotonic() - start
+              cases[mode] = collections.Counter(
+                  (c.get('classname'), c.get('name'), 'skipped' if c.find('skipped') is not None else 'passed')
+                  for c in ET.parse(report).iter('testcase'))
+              print('CORE_COMPARISON', json.dumps(dict(shard=shard, mode=mode, elapsed=round(duration,1),
+                    peak_tree_rss_mib=round(peak/2**20), cases=sum(cases[mode].values()))), flush=True)
+          assert cases['serial'] and cases['serial'] == cases['parallel'], 'JUnit test cases differ'
