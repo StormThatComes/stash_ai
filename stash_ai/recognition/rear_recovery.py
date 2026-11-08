@@ -8,7 +8,7 @@ from .database import encoded
 from .scan_heads import predicate
 
 
-def _global_rivals(search, batch):
+def _global_rivals(search, batch, *, plausible=None):
     """Read each centroid tile once for all bounded queries."""
     if not batch:
         return {}
@@ -39,7 +39,7 @@ def _global_rivals(search, batch):
                 column = tile @ np.ascontiguousarray(queries[:,col])
             for offset in np.flatnonzero(column+1e-6 >= floors[col]):
                 owner = search.identities[search.entries[start+int(offset)][0]]
-                if owner not in ignored[col]:
+                if owner not in ignored[col] and (plausible is None or plausible(oid,owner,search.entries[start+int(offset)][1])):
                     rivals[oid] = owner
                     break
         if len(rivals) == len(batch):
@@ -94,11 +94,30 @@ def _scene(db, scan, stamp, gallery, search, config):
     torsos = _occupied_torsos(db,scan,stamp,config)
     waiting = {}
     decisions = {}
+    query_faces = {}
+    checked = defaultdict(set)
+    def plausible(oid,owner,refs):
+        face = query_faces.get(oid)
+        # Incomplete or historical banks stay conservative competitors.
+        if face is None or owner in search.unavailable or not refs or len(checked[oid])>=8:
+            return True
+        if owner in checked[oid]:
+            return False
+        if guard.allows({'_face_vector':face},(),owner):
+            return True
+        checked[oid].add(owner)
+        return False
+
     def verify_batch():
-        for oid, rival in _global_rivals(search, batch).items():
+        for oid, rival in _global_rivals(search, batch,plausible=plausible).items():
             _, _, _, proof = proposals.pop(oid)
             waiting[oid] = (proof['previous'], rival, 'competing_owner')
+        for oid,owners in checked.items():
+            if oid in proposals and owners:
+                proposals[oid][3]['checked_rivals'] = sorted(owners)
         batch.clear()
+        checked.clear()
+        query_faces.clear()
 
     def request(row,decision):
         old = row['person']
@@ -169,11 +188,20 @@ def _scene(db, scan, stamp, gallery, search, config):
         from .body_perspectives import owner_bonus
         bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
         best = winner(ranked,settings,owner_bonuses=bonuses)
-        if best is None:
+        endpoint = None
+        if best is None and settings.get('tracklet_matching') and hasattr(search,'endpoints'):
+            endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked)
+        if best is None and endpoint is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
             continue
-        mean,low,owner,source,witnesses,_ = best
+        if endpoint:
+            owner,face_score,witness = endpoint
+            source,witnesses = witness['scan'],[witness]
+            # Keep body competition on the ordinary body scale.
+            mean,low = settings['match_threshold'],settings['cohesion_threshold']
+        else:
+            mean,low,owner,source,witnesses,_ = best
         if (owner==old or decision.get('open_face_root',{}).get('owner',owner)!=owner
                 or low<settings['cohesion_threshold']):
             continue
@@ -193,6 +221,10 @@ def _scene(db, scan, stamp, gallery, search, config):
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses],
                      source_scans=sorted({w['scan'] for w in witnesses}))
+        if endpoint:
+            proof.pop('score')
+            proof.update(route='fragment_face_endpoints',face_score=face_score,
+                         local_roots=decision['rooted_track']['roots'])
         if mean<settings['match_threshold']:
             if context and context['owner']==owner:
                 proof['shot_context'] = context
@@ -203,6 +235,8 @@ def _scene(db, scan, stamp, gallery, search, config):
         if competitors:
             runner,rival = max(competitors)
             proof.update(runner=runner,rival=rival,rival_scope='certified_rear_views')
+        if row['face_embedding'] is not None and row['face_rejection'] is None:
+            query_faces[row['id']] = measured
         proposals[row['id']] = (owner,row['cue'],old,proof)
         batch.append((row['id'], query, {owner,old} | occupied, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):
@@ -306,6 +340,9 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
         search.unavailable = unavailable
+        if config.data['sapiensid']['identities'].get('tracklet_matching'):
+            from .fragment_endpoints import ExternalEndpoints
+            search.endpoints = ExternalEndpoints(db,gallery,config)
         settings = config.data['sapiensid']['identities']
         minimum = max(0.,settings['match_threshold'] - scene_bonus(config.data))
         pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))

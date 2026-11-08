@@ -115,7 +115,7 @@ def body_key(db, scan, config):
          'o.dimensions,o.embedding,o.quality,o.rejected,m.person,'+strict_sql()+
          ' FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
          'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? ORDER BY b.id',(scan,expected)),
-        ('SELECT b.geometry,b.cue,b.seconds,i.person,p.created FROM body_origins i JOIN body_observations b '
+        ('SELECT b.scan,b.geometry,b.cue,b.seconds,b.embedding,i.person,p.created FROM body_origins i JOIN body_observations b '
          'ON i.observation=b.id JOIN scans s ON s.id=b.scan JOIN scans t ON t.id=? LEFT JOIN people p ON p.id=i.person '
          'WHERE s.scope=t.scope AND s.namespace=t.namespace AND s.scene=t.scene AND s.input_sha=t.input_sha '
          'ORDER BY b.id,i.person',(scan,))]
@@ -134,7 +134,7 @@ def body_key(db, scan, config):
     local_clocks=local_available(db)
     def signed(kind,key,records,dependency,dependency_key):
         read=lambda:derived_cache.fingerprint(db,records,key)
-        return cached(db,kind,key,'v5-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
+        return cached(db,kind,key,'v6-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
                       dependency_key=dependency_key if local_clocks else '*') if audited else read()
     banks=[]
     for owner in sorted({root for _,root in roots}):
