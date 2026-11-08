@@ -41,16 +41,30 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
     """Use other shots of accepted body-born cores as a frozen scene roster."""
     settings = config.data['sapiensid']['identities']
     bonus = scene_bonus(config.data)
-    if not groups or not bonus:
+    if not groups:
         return
     from .body_seed_modes import FrozenSeeds
     banks = {decisions[g[0]['id']]['person']:g for g in groups}
     confirmed = {p for p,g in banks.items() if decisions[g[0]['id']]['status']=='accepted'}
-    if not confirmed or not any(decisions[r['id']]['status']!='accepted' and
-                                    quality(r).get('view_shot') is not None for r in rows):
+    if not confirmed:
+        return
+    from .contact_anchors import body_pair_queries, joint_body_claims
+    pairs = body_pair_queries(rows,decisions)
+    use_roster = bonus and any(decisions[r['id']]['status']!='accepted' and
+                               quality(r).get('view_shot') is not None for r in rows)
+    if not pairs and not use_roster:
+        return
+    modes = FrozenSeeds({**seeds,**banks},scores,settings)
+    if pairs:
+        positive = confirmed | set(seeds)
+        rankings = {}
+        for row in pairs:
+            rankings[row['id']] = [(mean,low,p,mode,good and p in positive,rival)
+                                    for mean,low,p,mode,good,rival in modes.rank(row,guard)]
+        joint_body_claims(rows,decisions,rankings,settings)
+    if not use_roster:
         return
     minimum = max(2,settings['attach_min_support'],config.data['clustering']['same_scene_min_support'])
-    modes = FrozenSeeds({**seeds,**banks},scores,settings)
     by_shot = {}
     proposals = {}
     components = defaultdict(list)
@@ -64,7 +78,10 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
         shot = q.get('view_shot')
         if decision.get('person'):
             components[decision['person']].append(row['id'])
-        if shot is None or row.get('face_person') or q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1):
+        # This local roster is a faceless recovery route. A measured face uses
+        # the ordinary face veto banks, including all external witness history.
+        if (shot is None or row.get('face_person') or row.get('_face_vector') is not None
+                or q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1)):
             continue
         rank = modes.rank(row,guard)
         choices = []

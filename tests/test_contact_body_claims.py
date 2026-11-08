@@ -41,3 +41,25 @@ def test_joint_contact_explains_second_winner_with_the_other_body():
              for r,scores in zip(rows,[(.99,.86),(.94,.93)])}
     joint_body_claims(rows,d,options,defaults())
     assert [d[r['id']]['person'] for r in rows]==['A','B']
+
+
+def test_joint_resolution_also_uses_faceless_scene_banks_with_bonus_disabled(tmp_path):
+    from stash_ai.recognition.body_identity import Scores
+    from stash_ai.recognition.scene_fragments import attach_with_scene_support
+    from tests.test_recognition_body_identity import configuration
+    cfg=configuration(tmp_path)
+    settings=cfg.data['sapiensid']['identities']
+    settings.update(scene_match_bonus=0.,ambiguity_margin=.04,match_threshold=.85,cohesion_threshold=.8)
+    def sample(oid,cue,x,angle):
+        row=body(oid,cue,x)
+        radians=np.deg2rad(angle)
+        row['_vector']=np.array([np.cos(radians),np.sin(radians)],dtype='float32')
+        return row
+    groups=[[sample(p+str(i),i,x,angle) for i in range(3)] for p,x,angle in [('A',30,0),('B',150,26)]]
+    queries=[sample('x',3,30,0),sample('y',3,150,12)]
+    rows=groups[0]+groups[1]+queries
+    decisions={r['id']:dict(person=r['id'][0],status='accepted',role='anchor',reason='body_scene_core') for r in rows[:-2]}
+    for r in queries:
+        decisions[r['id']]=dict(person='A',status='accepted',role='auxiliary',reason='body_core_attachment')
+    attach_with_scene_support(rows,groups,{},decisions,cfg,Scores(cfg),SimpleNamespace(allows=lambda *a:True))
+    assert [decisions[r['id']]['person'] for r in queries]==['A','B']
