@@ -166,7 +166,9 @@ def _scene(db, scan, stamp, gallery, search, config):
         occupied = impossible_owners(row,json.loads(row['geometry']),torsos.get(row['cue'],()))
         if occupied:
             ranked = [candidate for candidate in ranked if candidate[2] not in occupied]
-        best = winner(ranked,settings,contextual=roster,bonus=bonus)
+        from .body_perspectives import owner_bonus
+        bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
+        best = winner(ranked,settings,owner_bonuses=bonuses)
         if best is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
@@ -195,7 +197,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             if context and context['owner']==owner:
                 proof['shot_context'] = context
             else:
-                proof['roster_context'] = dict(owner=owner,bonus=bonus,
+                proof['roster_context'] = dict(owner=owner,bonus=bonuses.get(owner,0.),
                     witnesses=decision.get('roster_witnesses',{}).get(owner,[]))
         competitors = [(max(item[0],item[5]),item[2]) for item in ranked if item[2]!=owner]
         if competitors:

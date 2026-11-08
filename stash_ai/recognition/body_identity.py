@@ -16,7 +16,7 @@ from .person_anchor import pixel_gate,anchor_gate
 
 
 def defaults():
-    return dict(enabled=False,tracklet_matching=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+    return dict(enabled=False,tracklet_matching=False,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v23-local-tracklets',contract(config),matching_policy(config),
+    return digest(['body-local-v24-evidence-roster',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 

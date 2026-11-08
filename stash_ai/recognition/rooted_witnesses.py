@@ -1,5 +1,5 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
-VIEW_POLICY = 'independent-held-out-perspectives-v4'
+VIEW_POLICY = 'independent-held-out-perspectives-v5'
 
 
 def select(tracks, settings, scores, rank, shot_of):
@@ -71,13 +71,32 @@ def select_ordered(ordered, seeds, settings, scores, rank, shot_of):
     return sorted(best,key=lambda item:(item[2]['scan'],item[2]['cue'],item[2]['id']))
 
 
-def retrieves_independent_witness(kept,settings,scores):
-    for _,_,row in kept:
-        values = [scores.face_similarity(row['_vector'],other['_vector'])
-                  for _,_,other in kept if row['id']!=other['id']]
-        if values and min(values)>=settings['cohesion_threshold'] and sum(values)/len(values)>=settings['match_threshold']:
+def retrieves_independent_witness(kept, candidates, settings, scores, shot_of):
+    """Certify an additional mode on pixels and shot roots outside its retained bank."""
+    from .independent_evidence import body_vote, stamp, unit
+    roots = {root for a,b,_ in kept for root in (a,b)}
+    shots = {shot_of(row) for _,_,row in kept}
+    pixels = {unit(body_vote(row)) for _,_,row in kept}
+    cues = {stamp(body_vote(row)) for _,_,row in kept}
+    for a,b,row in candidates:
+        vote = body_vote(row)
+        if a in roots or b in roots or shot_of(row) in shots or unit(vote) in pixels or stamp(vote) in cues:
+            continue
+        values = [scores.face_similarity(row['_vector'],other['_vector']) for _,_,other in kept]
+        if min(values)>=settings['cohesion_threshold'] and sum(values)/len(values)>=settings['match_threshold']:
             return True
     return False
+
+
+def verified_extra(kept, candidates, settings, scores, shot_of):
+    if retrieves_independent_witness(kept,candidates,settings,scores,shot_of):
+        return kept
+    if len(kept)>max(2,settings['attach_min_support']):
+        for i in range(len(kept)):
+            bank = kept[:i]+kept[i+1:]
+            if retrieves_independent_witness(bank,[kept[i]],settings,scores,shot_of):
+                return bank
+    return []
 
 
 def modes(tracks, settings, scores, rank, shot_of, maximum=None):
@@ -88,8 +107,12 @@ def modes(tracks, settings, scores, rank, shot_of, maximum=None):
         kept = select(remaining,settings,scores,rank,shot_of)
         if not kept or index and len(kept)<max(2,settings['attach_min_support']):
             break
-        if index<3 or retrieves_independent_witness(kept,settings,scores):
+        original = kept
+        if index>=3:
+            kept = verified_extra(kept,remaining,settings,scores,shot_of)
+        if kept:
             yield kept
+        kept = original
         index += 1
         used = {root for a,b,_ in kept for root in (a,b)}
         def uncovered(item):

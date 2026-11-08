@@ -310,6 +310,8 @@ matching:
       scene_match_bonus: null
       # Bonus for a confirmed body owner in the same scene. Null inherits matching.face.same_scene.match_bonus.
       # Range: 0..0.1.
+      scene_bonus_mode: fixed
+      # Use fixed or evidence-weighted scene support. Set scene_match_bonus to 0 for the no-context control.
       ambiguity_margin: 0.1
       # Minimum scene-local body score lead over a competing identity/group. Range: 0..1.
       min_support: 3

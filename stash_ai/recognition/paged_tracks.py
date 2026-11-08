@@ -1,7 +1,7 @@
 """Ordered, replayable witness selection for one owner in configured workspace SQLite."""
 import json
 from .database import encoded
-from .rooted_witnesses import select_ordered, retrieves_independent_witness
+from .rooted_witnesses import select_ordered, verified_extra
 
 
 class Tracks:
@@ -46,8 +46,9 @@ class Tracks:
             kept = select_ordered(Ordered(), seeds, settings, scores, rank, shot_of)
             if not kept or index and len(kept)<max(2,settings['attach_min_support']):
                 break
-            if index<3 or retrieves_independent_witness(kept,settings,scores):
-                yield kept
+            validated = kept if index<3 else verified_extra(kept,Ordered(),settings,scores,shot_of)
+            if validated:
+                yield validated
             index += 1
             used = {root for a,b,_ in kept for root in (a,b)}
             # Stable keyset pages allow updating the active set without modifying a live cursor.
