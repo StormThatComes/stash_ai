@@ -68,9 +68,14 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 ids = [identity(track[c]) for c in window]
                 counts[person]['turns'] += 1
                 counts[person]['one_id_turns'] += int(None not in ids and len(set(ids))==1)
-                roots = {owner for cue,owner in face_roots[scene,person]
-                         if cue<=window[0] or cue>=window[-1]}
-                if roots:
+                roots_by_cue = face_roots[scene,person]
+                boundaries = {cue for cue,owner in roots_by_cue if cue in (window[0],window[-1])}
+                roots = {owner for cue,owner in roots_by_cue if cue in boundaries}
+                if len(boundaries)==1:
+                    counts[person]['one_local_root_turns'] += 1
+                elif not boundaries and roots_by_cue:
+                    counts[person]['remote_root_turns'] += 1
+                if len(boundaries)==2:
                     counts[person]['anchored_turns'] += 1
                     counts[person]['face_root_conflicts'] += len(roots)>1
                     expected = next(iter(roots)) if len(roots)==1 else None
@@ -118,6 +123,8 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 foreign_id_crossings=foreign_ids,abstained_crossings=abstentions,
                 unscored_episodes=missing_boundaries,
                 anchored_turns=sum(c['anchored_turns'] for c in counts.values()),
+                one_local_root_turns=sum(c['one_local_root_turns'] for c in counts.values()),
+                remote_root_turns=sum(c['remote_root_turns'] for c in counts.values()),
                 own_id_turns=sum(c['own_id_turns'] for c in counts.values()),
                 macro_own_id_turn_recovery=macro('own_id_turns','anchored_turns'),
                 macro_turn_recovery=macro('one_id_turns','turns'),
