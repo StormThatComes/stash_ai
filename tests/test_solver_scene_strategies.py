@@ -72,3 +72,12 @@ def test_unlabelled_face_preserves_a_turn_and_ordinary_false_joins_regress():
     verdict = holdout_verdict({'baseline/joint':good,'winner/joint':bad})
     assert verdict['status']=='regressed'
     assert verdict['measures']['physical_false_merge_pairs']['winner']==9
+
+
+def test_partner_target_recovers_from_body_when_labelled_face_is_withheld():
+    from stash_ai.recognition.solver_validation import partner_metrics
+    labels = dict(front='A',face='A',body='A',partner='B')
+    coords = {k:('1',0 if k=='front' else 1) for k in labels}
+    decisions = {k:dict(accepted_identity=None if k=='face' else truth) for k,truth in labels.items()}
+    metrics = partner_metrics([('front','face','partner')],labels,coords,decisions,())
+    assert metrics['recovered']==1 and metrics['false_joins']==0
