@@ -36,11 +36,13 @@ def _envelopes(db, scan, stamp):
 
 
 def _bank_versions(gallery):
+    if hasattr(gallery,'versions'):
+        return gallery.versions
     result = []
     for owner,source,witnesses in gallery.banks:
         stamp = hashlib.sha256(encoded([owner,source]).encode())
         for row in witnesses:
-            stamp.update(encoded([row['id'],row['roots'],row['quality']]).encode())
+            stamp.update(encoded([row['id'],row['roots'],row['quality'],row.get('perspective','back')]).encode())
             stamp.update(row['_vector'].tobytes())
         result.append(stamp.hexdigest())
     return result
@@ -80,13 +82,13 @@ class Pending:
 
     def generation(self,entry,banks):
         owners = set(entry['local']) | set(entry.get('rivals',()))
-        owners.update(self.gallery.banks[i][0] for i in banks)
+        owners.update(self.gallery.owner_at(i) for i in banks)
         return digest([sorted(self.banks[i] for i in banks),
                        [(owner,self.owner_revision(owner)) for owner in sorted(owners)]])
 
     def candidates(self,scope,namespace,selected,stamp,*,active=()):
         from .rear_bounds import changed_modes
-        catalogue = 'rear-rivals:'+digest([scope,namespace,stamp])
+        catalogue = 'rear-rivals:'+digest(['profile-v2',scope,namespace,stamp])
         old = self.db.execute('SELECT value FROM metadata WHERE key=?',(catalogue,)).fetchone()
         previous = json.loads(old[0]) if old else None
         budget = self.search.config.data['sapiensid']['execution']['reference_bytes'] if self.search.mean_versions else 0
@@ -114,8 +116,7 @@ class Pending:
                 if not near_change and changed:
                     near_change = any(float(query@mean) + radius*norm + .003 >= self.floor
                                       for mean,norm in changed)
-                for address in self.gallery.tree.query_ball_point(query,self.radius+radius):
-                    banks.add(self.gallery.addresses[address])
+                banks.update(self.gallery.nearby(query,self.radius+radius))
             revision = self.generation(entry,banks)
             certified = scan not in selected or (self.local_clocks and entry.get('checked_scope') == scope_generation)
             if certified and not refresh and not near_change and entry.get('checked')==revision:
