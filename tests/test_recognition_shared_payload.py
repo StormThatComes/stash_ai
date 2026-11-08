@@ -47,3 +47,17 @@ def test_idle_cache_memory_is_reclaimed_before_work_admission():
     assert cache.size<=1000 and cache.limit==1000
     cache.reserve('queue',0)
     assert cache.limit==4000
+
+
+def test_full_shared_volume_falls_back_to_original_rows(monkeypatch):
+    import errno
+    import os
+    import sys
+    if not sys.platform.startswith('linux') or not hasattr(os, 'posix_fallocate'):
+        pytest.skip('Linux shared-memory reservation')
+    def full(*args):
+        raise OSError(errno.ENOSPC, 'no space')
+    monkeypatch.setattr(os, 'posix_fallocate', full)
+    rows = [('a', b'data'), ('b', None)]
+    packed, segment = pack(rows)
+    assert packed is rows and segment is None

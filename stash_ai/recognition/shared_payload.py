@@ -2,6 +2,9 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 from multiprocessing.shared_memory import SharedMemory
+import errno
+import os
+import sys
 
 
 @dataclass(frozen=True)
@@ -14,7 +17,20 @@ def pack(rows):
     size=sum(len(row[-1]) for row in rows if row[-1] is not None)
     if not size:
         return rows, None
-    segment=SharedMemory(create=True,size=size)
+    try:
+        segment = SharedMemory(create=True, size=size)
+    except OSError:
+        return rows, None
+    # Linux tmpfs can accept ftruncate even when writing the mapped pages
+    # would raise SIGBUS. Commit capacity before touching the mapping.
+    if sys.platform.startswith('linux') and hasattr(os, 'posix_fallocate'):
+        try:
+            os.posix_fallocate(segment._fd, 0, size)
+        except OSError as error:
+            release(segment)
+            if error.errno in (errno.ENOSPC, errno.ENOMEM, errno.EOPNOTSUPP, errno.EINVAL, errno.ENOSYS):
+                return rows, None
+            raise
     try:
         offset=0
         records=[]
