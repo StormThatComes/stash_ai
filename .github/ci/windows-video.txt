@@ -1,4 +1,4 @@
-tests/test_recognition_aura.py
+tests/test_recognition_visibility.py
 tests/test_recognition_best_available.py
 tests/test_recognition_clustering.py
 tests/test_recognition_metadata.py
@@ -11,7 +11,7 @@ tests/test_recognition_runtime.py
 tests/test_recognition_run.py
 tests/test_recognition_video.py
 tests/test_recognition_scene_context.py
-tests/test_recognition_visibility.py
+tests/test_recognition_aura.py
 tests/test_recognition_storage.py
 tests/test_recognition_vtt_portraits.py
 tests/test_recognition_portraits.py

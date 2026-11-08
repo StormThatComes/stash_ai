@@ -15,7 +15,7 @@ class ReverseIndex:
         self.db = db
         self.prefix = 'rear-index:'+digest([scope,namespace])+':'
         self.previous = self.read('generation',{})
-        signature = digest(['v2',stamp,pending.radius,pending.floor])
+        signature = digest(['v4-directory-cover',stamp,pending.radius,pending.floor])
         if self.previous.get('signature')!=signature:
             db.execute('DELETE FROM metadata WHERE key GLOB ?',(self.prefix+'*',))
             self.previous = {}
@@ -42,6 +42,20 @@ class ReverseIndex:
         for item in saved:
             axis = np.frombuffer(base64.b64decode(item),dtype='<f4').astype(float)
             self.axes.append(axis/np.linalg.norm(axis))
+        # One nearest landmark per envelope retains useful selectivity when
+        # unrelated high-dimensional vectors all project near zero on a few axes.
+        landmarks = self.read('landmarks',None)
+        if landmarks is None:
+            count = len(pending.banks)
+            budget = getattr(pending.search,'config',None)
+            room = budget.data['sapiensid']['execution']['reference_bytes'] if budget else 64*1024**2
+            maximum = min(64,count,room//(32*4096*8))
+            positions = sorted({round(i*(count-1)/max(1,maximum-1)) for i in range(maximum)}) if count>=8 else []
+            landmarks = [base64.b64encode(pending.gallery.banks[i][2][0]['_vector'].astype('<f4').tobytes()).decode()
+                         for i in positions]
+            self.write('landmarks',landmarks)
+        self.landmarks = np.array([np.frombuffer(base64.b64decode(v),dtype='<f4') for v in landmarks])
+
 
     def read(self,k,default):
         row = self.db.execute('SELECT value FROM metadata WHERE key=?',(self.prefix+k,)).fetchone()
@@ -58,8 +72,19 @@ class ReverseIndex:
             hi = max(0,min(32,math.floor((projection+radius+1)*16)))
             yield {f'b{i}_{n:02d}' for n in range(lo,hi+1)}
 
+    @staticmethod
+    def shells(i,distance,radius):
+        low = max(0,min(32,math.floor((distance-radius-.00001)*16)))
+        high = max(0,min(32,math.floor((distance+radius+.00001)*16)))
+        return {f'c{i}_{n:02d}' for n in range(low,high+1)}
+
     def bins(self,center,radius):
-        return set().union(*self.buckets(center,radius))
+        tokens = set().union(*self.buckets(center,radius))
+        if len(self.landmarks):
+            distances = np.linalg.norm(self.landmarks-center,axis=1)
+            i = int(distances.argmin())
+            tokens.update(self.shells(i,float(distances[i]),radius))
+        return tokens
 
     def nearby(self,center,radius):
         candidates = None
@@ -68,15 +93,20 @@ class ReverseIndex:
             candidates = hits if candidates is None else candidates & hits
             if not candidates:
                 break
+        if candidates and len(self.landmarks):
+            tokens = set()
+            for i,distance in enumerate(np.linalg.norm(self.landmarks-center,axis=1)):
+                tokens.update(self.shells(i,float(distance),radius))
+            candidates.intersection_update(self.members(tokens))
         return candidates or set()
 
     def members(self,tokens):
-        result = set()
-        for token in tokens:
-            start = self.prefix+token+':'
-            result.update(row[0] for row in self.db.execute(
-                'SELECT value FROM metadata WHERE key>=? AND key<?',(start,start[:-1]+';')))
-        return result
+        if not tokens:
+            return set()
+        prefixes = encoded([self.prefix+t for t in sorted(tokens)])
+        rows = self.db.execute("SELECT m.value FROM json_each(?) q CROSS JOIN metadata m "
+                               "WHERE m.key>=q.value||':' AND m.key<q.value||';'",(prefixes,))
+        return {row[0] for row in rows}
 
     def store(self,scan,entry,banks,pending):
         owners = set(entry['local']) | set(entry.get('rivals',()))

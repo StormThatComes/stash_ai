@@ -56,7 +56,14 @@ def run(scenes):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--scenes',type=int,default=10000)
-    result=run(parser.parse_args().scenes)
+    parser.add_argument('--profile',choices=('micro','library'),default='micro')
+    parser.add_argument('--face-config',help='Place the library profile SQLite workspace under the configured recognition work root.')
+    args = parser.parse_args()
+    if args.profile=='library':
+        from .benchmark_scene_library import run as library
+        result = library(args.scenes,args.face_config)
+    else:
+        result=run(args.scenes)
     print(json.dumps(result))
     if result['disagreements']:
         raise SystemExit(1)

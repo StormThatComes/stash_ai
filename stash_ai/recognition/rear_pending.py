@@ -104,7 +104,14 @@ class Pending:
             from .rear_reverse import ReverseIndex
             reverse = ReverseIndex(self.db,scope,namespace,stamp,self)
             nominated = reverse.nominate(self,changed)
-        base = " FROM scans s "
+        directory = None
+        targets = None
+        if reverse is not None and self.db.execute('PRAGMA user_version').fetchone()[0]>=16:
+            from .rear_scene_changes import Directory
+            directory = Directory(self.db,scope,namespace,reverse)
+            targets = directory.select(selected,nominated,scope_generation[1])
+        base = " FROM scans s " if targets is None else " FROM json_each(?) w CROSS JOIN scans s ON s.id=w.value "
+        arguments = (scope,namespace) if targets is None else (encoded(sorted(targets)),scope,namespace)
         if self.local_clocks:
             base += ("LEFT JOIN evidence_versions b ON b.kind='raw-body' AND b.key=s.id "
                      "LEFT JOIN evidence_versions f ON f.kind='raw-observations' AND f.key=s.id "
@@ -113,14 +120,16 @@ class Pending:
         else:
             fields = 's.id,s.scene'
         heads = self.db.execute('SELECT '+fields+base+"WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND "
-                                +predicate(),(scope,namespace))
+                                +predicate(),arguments)
         for scan,scene,*clocks in heads:
             count('rear_scene_headers')
             key = 'rear-pending:' + digest([scope,namespace,scene])
             identity = ([scan,stamp,*clocks] if self.local_clocks else
                         [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None,
                          version(self.db,'raw-observations',scan) if self.audited else None])
-            if reverse is not None:
+            if directory is not None:
+                directory.remember(scene,scan,identity)
+            elif reverse is not None:
                 reverse.state['scans'][scan] = identity
                 if (nominated is not None and scan not in selected and scan not in nominated
                         and reverse.previous.get('scans',{}).get(scan)==identity

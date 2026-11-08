@@ -97,13 +97,13 @@ def _scene(db, scan, stamp, gallery, search, config):
     query_faces = {}
     checked = defaultdict(set)
     def plausible(oid,owner,refs):
-        face = query_faces.get(oid)
+        faces = query_faces.get(oid)
         # Incomplete or historical banks stay conservative competitors.
-        if face is None or owner in search.unavailable or not refs or len(checked[oid])>=8:
+        if not faces or owner in search.unavailable or not refs or len(checked[oid])>=8:
             return True
         if owner in checked[oid]:
             return False
-        if guard.allows({'_face_vector':face},(),owner):
+        if any(guard.allows({'_face_vector':face},(),owner) for face in faces):
             return True
         checked[oid].add(owner)
         return False
@@ -236,7 +236,13 @@ def _scene(db, scan, stamp, gallery, search, config):
             runner,rival = max(competitors)
             proof.update(runner=runner,rival=rival,rival_scope='certified_rear_views')
         if row['face_embedding'] is not None and row['face_rejection'] is None:
-            query_faces[row['id']] = measured
+            query_faces[row['id']] = [measured]
+        elif hasattr(search,'endpoints'):
+            track = decision.get('rooted_track') or {}
+            if track.get('owner')==owner and len(track.get('roots',()))==2:
+                ends = [search.endpoints.face(root,owner) for root in track['roots']]
+                if all(ends) and ends[0][1]!=ends[1][1]:
+                    query_faces[row['id']] = [entry[0] for entry in ends]
         proposals[row['id']] = (owner,row['cue'],old,proof)
         batch.append((row['id'], query, {owner,old} | occupied, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):
