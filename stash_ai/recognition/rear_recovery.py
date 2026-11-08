@@ -83,6 +83,9 @@ def _scene(db, scan, stamp, gallery, search, config):
     required = defaultdict(set)
     satellites = defaultdict(dict)
     face_owners = set()
+    anonymous = set()
+    nonanonymous = set()
+    core_rows = defaultdict(list)
     from .body_guards import FaceGuard
     from .clustering import vector as face_vector
     from .rear_gallery import winner
@@ -142,7 +145,13 @@ def _scene(db, scan, stamp, gallery, search, config):
         if old is not None:
             if row['face_owner'] or row['face_rejection'] is None and row['face_embedding'] is not None:
                 face_owners.add(old)
-            if row['role']=='anchor' or decision.get('reason')=='body_scene_core':
+            if decision.get('reason')=='anonymous_body_track':
+                anonymous.add(old)
+            else:
+                nonanonymous.add(old)
+            if row['role']=='anchor' or decision.get('reason') in ('body_scene_core','anonymous_body_track'):
+                if settings.get('tracklet_matching'):
+                    core_rows[old].append({key:row[key] for key in ('id','scan','cue','seconds','quality','geometry')})
                 required[old].add(row['id'])
             else:
                 satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
@@ -174,8 +183,8 @@ def _scene(db, scan, stamp, gallery, search, config):
         if (bank is None or owner in search.unavailable or old in search.unavailable
                 or (scan,row['cue']) in bank['cues']):
             continue
-        if old and (old not in search.bank or search.bank[old]['faces']
-                    or any(s!=scan for s,_ in search.bank[old]['cues'])):
+        if old and (old not in search.bank and decision.get('reason')!='anonymous_body_track' or
+                    old in search.bank and (search.bank[old]['faces'] or any(s!=scan for s,_ in search.bank[old]['cues']))):
             continue
         proof = dict(person=owner, status='accepted', role='auxiliary',
                      reason='external_rear_view', source_scan=source, perspective=kind, score=mean,
@@ -209,9 +218,19 @@ def _scene(db, scan, stamp, gallery, search, config):
             destinations = {proposals[i][0] for i in ids}
             if len(destinations)==1:
                 targets[old] = destinations.pop()
+    split = set()
+    if settings.get('tracklet_matching'):
+        from .body_tracklets import split_members
+        proposed = {oid:proposals[oid][0] for oid in viable}
+        def occupied(row,target):
+            return target in impossible_owners(row,json.loads(row['geometry']),torsos.get(row['cue'],()))
+        for old,core in core_rows.items():
+            if old not in targets and old not in face_owners:
+                split.update(split_members(core,proposed,occupied,settings))
+    mixed_origins = anonymous & nonanonymous
     for oid in sorted(viable):
         owner,_,old,proof = proposals[oid]
-        if old and targets.get(old)!=owner:
+        if old in mixed_origins or (old and targets.get(old)!=owner and oid not in split):
             continue
         decisions[oid] = proof
     for old,owner in targets.items():
