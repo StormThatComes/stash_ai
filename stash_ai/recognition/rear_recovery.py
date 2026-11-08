@@ -97,27 +97,16 @@ def _scene(db, scan, stamp, gallery, search, config):
             waiting[oid] = (proof['previous'], rival, 'competing_owner')
         batch.clear()
 
-    for raw in _rows(db,scan,stamp):
-        row = dict(raw)
+    def request(row,decision):
         old = row['person']
-        decision = json.loads(row['proof'])
-        decision.update(person=old,status=row['status'],role=row['role'])
-        decision.pop('rear_retry',None)
-        if old is not None:
-            if row['face_owner'] or row['face_rejection'] is None and row['face_embedding'] is not None:
-                face_owners.add(old)
-            if row['role']=='anchor' or decision.get('reason')=='body_scene_core':
-                required[old].add(row['id'])
-            else:
-                satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
         if (row['face_owner'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
                 or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root','unresolved_partner')):
-            continue
+            return None
         person = json.loads(row['geometry'])
         kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
         kind = decision.get('query_perspective') or kind
         if kind not in ('back','side'):
-            continue
+            return None
         query = vector(row)
         context = decision.get('shot_context')
         roster = set(decision.get('scene_roster',()))
@@ -126,8 +115,46 @@ def _scene(db, scan, stamp, gallery, search, config):
             roster.add(rooted_owner)
         bonus = config.data['clustering']['same_scene_match_bonus'] if roster else 0.
         search_settings = dict(settings,match_threshold=max(0.,settings['match_threshold']-bonus))
-        ranked = gallery.rank(query,scan,search_settings,quality(row).get('pixel_digest'),perspective=kind)
-        occupied = impossible_owners(row,person,torsos.get(row['cue'],()))
+        return query,scan,search_settings,quality(row).get('pixel_digest'),kind
+
+    def queries():
+        from itertools import islice
+        source = iter(_rows(db,scan,stamp))
+        size = min(16,search.block) if hasattr(gallery,'rank_many') else 1
+        while batch_rows := list(islice(source,size)):
+            items, requests = [], []
+            for raw in batch_rows:
+                row = dict(raw)
+                decision = json.loads(row['proof'])
+                decision.update(person=row['person'],status=row['status'],role=row['role'])
+                decision.pop('rear_retry',None)
+                query = request(row,decision)
+                if query is not None:
+                    requests.append(query)
+                items.append((row,decision,query))
+            ranks = iter(gallery.rank_many(requests) if hasattr(gallery,'rank_many') else
+                         [gallery.rank(*r) for r in requests])
+            for row,decision,query in items:
+                yield row,decision,query,next(ranks) if query is not None else None
+
+    for row,decision,request_args,ranked in queries():
+        old = row['person']
+        if old is not None:
+            if row['face_owner'] or row['face_rejection'] is None and row['face_embedding'] is not None:
+                face_owners.add(old)
+            if row['role']=='anchor' or decision.get('reason')=='body_scene_core':
+                required[old].add(row['id'])
+            else:
+                satellites[old][row['id']] = dict(decision,person=old,status=row['status'],role=row['role'])
+        if request_args is None:
+            continue
+        query,_,search_settings,_,kind = request_args
+        context = decision.get('shot_context')
+        roster = set(decision.get('scene_roster',()))
+        if context and context['owner']==decision.get('open_face_root',{}).get('owner'):
+            roster.add(context['owner'])
+        bonus = settings['match_threshold']-search_settings['match_threshold']
+        occupied = impossible_owners(row,json.loads(row['geometry']),torsos.get(row['cue'],()))
         if occupied:
             ranked = [candidate for candidate in ranked if candidate[2] not in occupied]
         best = winner(ranked,settings,contextual=roster,bonus=bonus)

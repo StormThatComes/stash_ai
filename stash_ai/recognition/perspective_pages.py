@@ -77,17 +77,42 @@ class DiskGallery(Gallery):
         return self.banks.owners[index][0]
 
     def nearby(self,query,radius):
-        query = np.asarray(query,dtype='float64')
-        def possible(blob, extent):
-            return np.linalg.norm(query-np.frombuffer(blob,dtype='<f8')) <= radius+extent+1e-9
-        candidates = set()
+        return self.nearby_many([query],[radius])[0]
+
+    def nearby_many(self,queries,radii):
+        queries = [np.asarray(q,dtype='float64') for q in queries]
+        results = [set() for _ in queries]
+        def inside(blob, extent, indices):
+            pivot = np.frombuffer(blob,dtype='<f8')
+            return [i for i in indices if np.linalg.norm(queries[i]-pivot)<=radii[i]+extent+1e-9]
         for block,center,extent in self.db.execute('SELECT block,center,radius FROM blocks'):
-            if not possible(center,extent):
+            possible = inside(center,extent,range(len(queries)))
+            if not possible:
                 continue
             for bank,pivot,spread in self.db.execute('SELECT bank,center,radius FROM bounds WHERE block=?',(block,)):
-                if possible(pivot,spread):
-                    for (blob,) in self.db.execute('SELECT embedding FROM gallery WHERE bank=?',(bank,)):
-                        if np.linalg.norm(query-np.frombuffer(blob,dtype='<f4')) <= radius:
-                            candidates.add(bank)
-                            break
-        return candidates
+                active = inside(pivot,spread,possible)
+                if not active:
+                    continue
+                for (blob,) in self.db.execute('SELECT embedding FROM gallery WHERE bank=?',(bank,)):
+                    vector = np.frombuffer(blob,dtype='<f4')
+                    for i in tuple(active):
+                        if np.linalg.norm(queries[i]-vector)<=radii[i]:
+                            results[i].add(bank)
+                            active.remove(i)
+                    if not active:
+                        break
+        return results
+
+    def rank_many(self,requests):
+        if not requests:
+            return []
+        queries = [r[0] for r in requests]
+        radii = [np.sqrt(2*(1-r[2]['match_threshold']+r[2]['ambiguity_margin']))+.002 for r in requests]
+        candidates = self.nearby_many(queries,radii)
+        ranked = [[] for _ in queries]
+        for index in sorted(set().union(*candidates)):
+            bank = self.banks[index]
+            for i,indices in enumerate(candidates):
+                if index in indices:
+                    ranked[i].append(self.score_bank(bank,*requests[i]))
+        return [self.ordered(rows) for rows in ranked]

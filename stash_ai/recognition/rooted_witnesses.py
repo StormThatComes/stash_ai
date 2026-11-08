@@ -1,5 +1,5 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
-VIEW_POLICY = 'independent-held-out-perspectives-v3'
+VIEW_POLICY = 'independent-held-out-perspectives-v4'
 
 
 def select(tracks, settings, scores, rank, shot_of):
@@ -71,14 +71,26 @@ def select_ordered(ordered, seeds, settings, scores, rank, shot_of):
     return sorted(best,key=lambda item:(item[2]['scan'],item[2]['cue'],item[2]['id']))
 
 
-def modes(tracks, settings, scores, rank, shot_of, maximum=3):
+def retrieves_independent_witness(kept,settings,scores):
+    for _,_,row in kept:
+        values = [scores.face_similarity(row['_vector'],other['_vector'])
+                  for _,_,other in kept if row['id']!=other['id']]
+        if values and min(values)>=settings['cohesion_threshold'] and sum(values)/len(values)>=settings['match_threshold']:
+            return True
+    return False
+
+
+def modes(tracks, settings, scores, rank, shot_of, maximum=None):
     """Keep additional modes only for previously uncovered, independently rooted looks."""
     remaining = list(tracks)
-    for index in range(maximum):
+    index = 0
+    while remaining and (maximum is None or index < maximum):
         kept = select(remaining,settings,scores,rank,shot_of)
         if not kept or index and len(kept)<max(2,settings['attach_min_support']):
             break
-        yield kept
+        if index<3 or retrieves_independent_witness(kept,settings,scores):
+            yield kept
+        index += 1
         used = {root for a,b,_ in kept for root in (a,b)}
         def uncovered(item):
             if item[0] in used or item[1] in used:

@@ -108,6 +108,10 @@ class _Cluster:
     scene_witnesses: dict = field(default_factory=dict)
     metadata_reservation: object = field(default=None, repr=False)
     metadata_bytes: int = 0
+    database: object = field(default=None, repr=False)
+    maximum: int = 8
+    needs_final_selection: bool = False
+    witnesses: dict = field(default_factory=dict, repr=False)
 
     def accepts_pose(self,geometry):
         return all(pose_matches(geometry,hint) for hint in (self.pose_hints or {self.pose}))
@@ -117,70 +121,104 @@ class _Cluster:
         return all(float(np.dot(existing, query)) >= threshold for existing in self.examples)
 
     def add(self, row, query, maximum=8):
-        from .independent_evidence import unit
-        cue = unit(row)
-        stamp = row['scan'], row['seconds']
-        q = metadata(row['quality']) if 'quality' in row.keys() else {}
-        shot = (row['scan'], 'shot', q['view_shot']) if q.get('view_shot') is not None else stamp
+        from .independent_evidence import stamp, unit
+        from .reference_selection import quality
         from .run_cache import current
-        shared = current()
-        if shared is not None and shared.working is not None:
-            if self.metadata_reservation is None:
-                from .memory_size import Reservation
-                self.metadata_reservation = Reservation(shared.working, label='view-metadata')
-            self.metadata_bytes += (1024 if cue not in self.cue_representatives else 0) + (1024 if stamp not in self.cue_times else 0)
-            self.metadata_reservation.set(self.metadata_bytes)
-        self.cues.add(row)
-        previous = self.cue_representatives.get(cue, self.cue_times.get(stamp))
-        if previous is not None:
-            from .reference_selection import quality
-            identifier, score = previous
-            new_score = quality(row['quality']) if 'quality' in row.keys() else 0.
-            if new_score > score:
-                # The centroid keeps the original independent witnesses. A
-                # better duplicate changes exemplars, never support or weight.
-                if identifier in self.observations:
-                    index = self.observations.index(identifier)
-                    self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
-                    self.shots[index] = shot
-                else:
-                    self.examples.append(query)
-                    self.observations.append(row['id'])
-                    self.qualities.append(new_score)
-                    self.shots.append(shot)
-                if self.first == identifier:
-                    self.first = row['id']
-                for witnesses in self.scene_witnesses.values():
-                    witnesses[:] = [row['id'] if old == identifier else old for old in witnesses]
-                replacement = row['id'], new_score
-                self.cue_representatives[cue] = self.cue_times[stamp] = replacement
-                for key, value in list(self.cue_representatives.items()):
-                    if value[0] == identifier:
-                        self.cue_representatives[key] = replacement
-                for key, value in list(self.cue_times.items()):
-                    if value[0] == identifier:
-                        self.cue_times[key] = replacement
-                self._reduce(maximum)
+
+        time, pixel = stamp(row), unit(row)
+        q = metadata(row['quality']) if 'quality' in row.keys() else {}
+        score = quality(row['quality']) if 'quality' in row.keys() else 0.
+        shot = (row['scan'], 'shot', q['view_shot']) if q.get('view_shot') is not None else time
+        record = (row['id'],score,query,shot,row['scene'] if 'scene' in row.keys() else None,
+                  pose_view(row['geometry']) if 'geometry' in row.keys() else None)
+        self.maximum = maximum
+        key = time,pixel
+        previous = self.witnesses.get(key)
+        if previous and (-previous[1],previous[0]) <= (-score,row['id']):
             return
-        from .reference_selection import quality
-        value = row['id'], quality(row['quality']) if 'quality' in row.keys() else 0.
-        self.cue_representatives[cue] = self.cue_times[stamp] = value
+        if previous is None:
+            shared = current()
+            self.metadata_bytes += 1024 + (0 if self.database is not None else query.nbytes)
+            if shared is not None and shared.working is not None:
+                if self.metadata_reservation is None:
+                    from .memory_size import Reservation
+                    self.metadata_reservation = Reservation(shared.working, label='view-metadata')
+                self.metadata_reservation.set(self.metadata_bytes)
+        isolated = time not in self.cues.edges and pixel not in self.cues.units
+        self.cues.add(row)
+        self.witnesses[key] = (record[:2]+(None,)+record[3:]) if self.database is not None else record
+        if isolated:
+            self.needs_final_selection |= self.centre_count>=maximum
+            self._append_witness(key,record,maximum)
+        else:
+            self.needs_final_selection = True
+            # The new edge cannot improve the chosen proof when only its
+            # timestamp is new and its fingerprint already owns a better row.
+            chosen = self.cue_representatives.get(pixel)
+            if (previous is None and time not in self.cue_times and len(self.cues.edges[time])==1
+                    and chosen and (-chosen[1],chosen[0])<=(-score,row['id'])
+                    and len(self.cues)==self.centre_count):
+                return
+            self._resolve(maximum)
+
+    def _resolve(self, maximum):
+        # Rank competing edges deterministically. A maximum matching can replace
+        # an earlier witness to admit another independent timestamp and crop.
+        from .independent_evidence import Votes
+        key_order = sorted(self.witnesses, key=lambda k:(-self.witnesses[k][1],self.witnesses[k][0]))
+        time_order, pixels = {}, {}
+        for time,pixel in key_order:
+            time_order.setdefault(time,len(time_order))
+            pixels.setdefault(pixel,len(pixels))
+        voting = Votes()
+        for time,pixel in key_order:
+            t,p = time_order[time],pixels[pixel]
+            voting.edges.setdefault(t,set()).add(p)
+            voting.unmatched.add(t)
+        voting.match(key=lambda i:i)
+        self.examples.clear()
+        self.shots.clear()
+        self.qualities.clear()
+        self.observations.clear()
+        self.scene_witnesses.clear()
+        self.pose_hints.clear()
+        self.cue_times.clear()
+        self.cue_representatives.clear()
+        self.total = None
+        self.centre_count = 0
+        selected = [key for key in key_order if voting.owners.get(pixels[key[1]])==time_order[key[0]]]
+        for offset in range(0,len(selected),64):
+            chunk = selected[offset:offset+64]
+            features = {}
+            if self.database is not None:
+                ids = [self.witnesses[key][0] for key in chunk]
+                features = {r['id']:vector(r) for r in self.database.execute(
+                    'SELECT id,dimensions,embedding FROM observations WHERE id IN (SELECT value FROM json_each(?))',
+                    (json.dumps(ids),))}
+            for key in chunk:
+                record = self.witnesses[key]
+                if self.database is not None:
+                    record = record[:2]+(features[record[0]],)+record[3:]
+                self._append_witness(key,record,maximum)
+        self.first = min(self.observations)
+
+    def _append_witness(self, key, record, maximum):
+        time,pixel = key
+        oid,score,query,shot,scene,pose = record
+        self.cue_times[time] = self.cue_representatives[pixel] = (oid,score)
         self.centre_count += 1
-        if self.scene_minimum and 'scene' in row.keys():
-            witnesses=self.scene_witnesses.setdefault(row['scene'],[])
-            if len(witnesses)<self.scene_minimum:
-                witnesses.append(row['id'])
-        if 'geometry' in row.keys():
-            self.pose_hints.add(pose_view(row['geometry']))
-            if 'neutral' in self.pose_hints:
-                self.pose='neutral'
-        import numpy as np
-        from .reference_selection import quality
         self.total = query.astype('float64').copy() if self.total is None else self.total + query
+        if self.scene_minimum and scene is not None:
+            witnesses = self.scene_witnesses.setdefault(scene,[])
+            if len(witnesses)<self.scene_minimum:
+                witnesses.append(oid)
+        if pose is not None:
+            self.pose_hints.add(pose)
+            self.pose = 'neutral' if 'neutral' in self.pose_hints else min(self.pose_hints)
         self.examples.append(query)
+        self.observations.append(oid)
         self.shots.append(shot)
-        self.observations.append(row['id'])
-        self.qualities.append(quality(row['quality']) if 'quality' in row.keys() else 0.)
+        self.qualities.append(score)
         self._reduce(maximum)
 
     def _reduce(self, maximum):
@@ -251,11 +289,11 @@ def prioritized(slots,maximum,cohesion=.8,*,primary=False,reserves=False):
     def independent_hits(slot):
         examples = features[id(slot)]
         return {(stamp,pixel) for value,stamp,pixel in examples
-                if (not primary or not measured or len(stamp)==3)
-                and any(other_stamp != stamp and other_pixel != pixel
-                        and (not primary or not measured or len(other_stamp)==3)
-                        and float(np.dot(value,other)) >= cohesion
-                        for other,other_stamp,other_pixel in examples)}
+                if any(other_pixel != pixel and stamp != other_stamp and
+                       (not primary or not measured or stamp[0] != other_stamp[0]
+                        or len(stamp)==len(other_stamp)==3)
+                       and float(np.dot(value,other)) >= cohesion
+                       for other,other_stamp,other_pixel in examples)}
     hits = {id(slot):independent_hits(slot) for slot in remaining}
     while remaining and len(chosen)<maximum:
         def priority(index):
@@ -314,16 +352,16 @@ def witness_limit(grouping):
     return grouping.get('max_view_witnesses',32) if grouping.get('adaptive_view_witnesses',False) else 8
 
 
-def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8):
+def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8,db=None):
     index=best_cohort(slots,row,sample,threshold)
     slot=slots[index] if index is not None else None
     if slot is None:
         if not complete and len(slots)>=32:
             return 0
-        slot=_Cluster(pose_view(row['geometry']),row['id'],scene_minimum=scene_minimum);slots.append(slot)
-    before=len(slot.examples)
+        slot=_Cluster(pose_view(row['geometry']),row['id'],scene_minimum=scene_minimum,database=db);slots.append(slot)
+    before=slot.metadata_bytes
     slot.add(row,sample,maximum=maximum)
-    return (len(slot.examples)-before)*sample.nbytes
+    return slot.metadata_bytes-before
 
 
 def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8,primary=False):
@@ -332,6 +370,9 @@ def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8,primary
     eligible={}
     for slot in list(cover)+list(slots):
         if len(slot.cues)>=minimum:
+            if slot.needs_final_selection:
+                slot._resolve(slot.maximum)
+                slot.needs_final_selection = False
             eligible.setdefault(slot.medoid()[1],slot)
     eligible=list(eligible.values())
     measured = any(any(len(shot)==3 for shot in slot.shots) for slot in eligible)
@@ -392,9 +433,9 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
                 emit(person)
                 person, slots, cover, scratch = row['person'], [], [], 0
             query = vector(row)
-            scratch+=add_cohort(slots,row,query,cohesion,complete=complete,maximum=witness_limit(grouping))
+            scratch+=add_cohort(slots,row,query,cohesion,complete=complete,maximum=witness_limit(grouping),db=db)
             if complete:
-                scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
+                scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping),db=db)
             if complete and used+scratch>remaining_bytes:
                 raise ResourceLimit('Confirmed view evidence exceeds clustering.max_reference_bytes.')
     emit(person)

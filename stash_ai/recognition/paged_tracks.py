@@ -1,7 +1,7 @@
 """Ordered, replayable witness selection for one owner in configured workspace SQLite."""
 import json
 from .database import encoded
-from .rooted_witnesses import select_ordered
+from .rooted_witnesses import select_ordered, retrieves_independent_witness
 
 
 class Tracks:
@@ -32,7 +32,8 @@ class Tracks:
             def __iter__(ordered):
                 for raw, in self.db.execute('SELECT payload'+query+' ORDER BY '+order,args):
                     yield decode(raw)
-        for index in range(3):
+        index = 0
+        while True:
             count = self.db.execute('SELECT COUNT(DISTINCT '+shot+')'+query,args).fetchone()[0]
             if not count:
                 return
@@ -45,9 +46,9 @@ class Tracks:
             kept = select_ordered(Ordered(), seeds, settings, scores, rank, shot_of)
             if not kept or index and len(kept)<max(2,settings['attach_min_support']):
                 break
-            yield kept
-            if index == 2:
-                break
+            if index<3 or retrieves_independent_witness(kept,settings,scores):
+                yield kept
+            index += 1
             used = {root for a,b,_ in kept for root in (a,b)}
             # Stable keyset pages allow updating the active set without modifying a live cursor.
             last = ''

@@ -26,6 +26,15 @@ def test_disk_banks_match_exact_radius_winner_and_runner_for_each_angle():
                 actual = disk.rank(query,scan,settings,None,kind)
                 assert [r[:4]+(r[5],) for r in actual]==[r[:4]+(r[5],) for r in expected]
                 assert winner(actual,settings)==winner(expected,settings)==None
+        requests=[(query,'other',settings,None,k) for k in ('back','side')]
+        reads=[]
+        db.set_trace_callback(reads.append)
+        actual=disk.rank_many(requests)
+        batch_reads=len(reads)
+        reads.clear()
+        assert actual==[disk.rank(*r) for r in requests]
+        assert batch_reads<len(reads)
+        db.set_trace_callback(None)
         for radius in (0.,.1,1.,2.1):
             assert disk.nearby(query,radius)==ram.nearby(query,radius)
         solo = Gallery([banks[1]])
