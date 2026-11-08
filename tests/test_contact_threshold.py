@@ -14,7 +14,8 @@ def test_two_distinct_face_roots_report_split_and_designated_reference():
     groups = {('s',0,'A'):['a'],('s',1,'A'):['b']}
     labels = dict(a='A',b='A')
     assert visible_scores(groups,decisions,labels)['split_reference']==2
-    assert visible_scores(groups,decisions,labels,['a'])['fragment']==1
+    result = visible_scores(groups,decisions,labels,['a'])
+    assert result['fragment']==result['split_identities']==1
 
 
 def test_abstaining_inside_contact_preserves_only_endpoint_recovery():

@@ -300,7 +300,7 @@ def holdout_verdict(metrics):
             ('correct_contacts','sequences','correct','crossings',True),
             ('partner_swaps','sequences','partner','crossings',False),
             ('false_joins','partners','false_joins','partner_pairs',False),
-            ('split_references','visible','split_reference','total',False)):
+            ('split_references','visible','split_identities','reference_identities',False)):
         values = []
         for trial in (base, final):
             group = trial[category]

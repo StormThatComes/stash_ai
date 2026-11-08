@@ -45,6 +45,18 @@ def stress_cases(candidates, visible, scans, samples, locations):
     # Select separate contact episodes, prioritizing different physical events.
     scenes = {scan['id']: scan['scene'] for scan in scans}
     backs = {(scene, cue) for oid,(scene,cue) in locations.items() if 'back' in samples[oid]['slices']}
+    episodes_by_cue = {}
+    for scene, labels in visible.items():
+        start = previous = None
+        for number,people in sorted(labels.items(),key=lambda item:int(item[0])):
+            cue = int(number)
+            if len(people)==2:
+                if previous is None or cue!=previous+1:
+                    start = cue
+                episodes_by_cue[scene,cue] = start
+                previous = cue
+            else:
+                previous = None
     options = []
     for case in candidates:
         scan,cue,*_ = case
@@ -58,9 +70,7 @@ def stress_cases(candidates, visible, scans, samples, locations):
             kind = 'partner_exit'
         else:
             kind = 'contact'
-        start = cue
-        while start and len(labels.get(str(start-1), ())) == 2:
-            start -= 1
+        start = episodes_by_cue[scene,cue]
         options.append((kind,(scene,start),case))
     chosen, episodes, kinds = [], set(), set()
     for diverse in (True,False):
@@ -109,7 +119,8 @@ def visible_scores(groups, decisions, labels, references=()):
         else:
             result = 'correct' if ids==(designated[truth] or roots[truth]) else 'fragment'
         counts[result] += 1
-    return dict(total=len(groups),**counts)
+    return dict(total=len(groups),reference_identities=sum(bool(ids) for ids in roots.values()),
+                split_identities=sum(len(ids)>1 for ids in roots.values()),**counts)
 
 
 def swap(db,config,scan,cue,first,second):

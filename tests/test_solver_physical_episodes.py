@@ -52,7 +52,7 @@ def test_visible_people_have_one_outcome_even_when_a_detection_is_missing():
     decisions = dict(root=dict(accepted_identity='X',evidence={'reason':'known_identity'}),
                      back=dict(accepted_identity=None),new=dict(accepted_identity='Y'))
     counts = visible_scores(groups,decisions,{'root':'A'})
-    assert counts==dict(total=4,correct=1,partner=0,fragment=1,withheld=1,missing=1,unknown_reference=0,split_reference=0)
+    assert counts==dict(total=4,reference_identities=1,split_identities=0,correct=1,partner=0,fragment=1,withheld=1,missing=1,unknown_reference=0,split_reference=0)
 
 
 def test_private_association_fault_swaps_actual_projections(tmp_path):

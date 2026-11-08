@@ -36,9 +36,8 @@ def contact_interval(db,config,owners,oid,peer):
         if len(rows)!=2 or any(r['embedding'] is None for r in rows):
             continue
         tagged = [(owners.get(r['id'],owners.get(r['face'])),r) for r in rows]
-        if {k for k,r in tagged} == {index,None} or len({k for k,r in tagged})!=2:
-            continue
-        if not all(k is not None for k,r in tagged) or not any(k==index for k,r in tagged):
+        participants = {k for k,r in tagged}
+        if None in participants or index not in participants or len(participants)!=2:
             continue
         tagged.sort(key=lambda x:x[0]!=index)
         qualities = [json.loads(r['quality']).get('quality',{}) for k,r in tagged]
