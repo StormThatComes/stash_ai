@@ -412,6 +412,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 decisions[row['id']].update(person=None,status='withheld',role='auxiliary',
                                             reason='unresolved_partner')
     from .fragment_endpoints import nominations
+    from .fragment_endpoints import split_owner_nominations
+    for member,proof in split_owner_nominations(looks,lookup,root,shot_ids,scores,settings):
+        decisions[member].setdefault('endpoint_pairs',[]).append(proof)
     bridges = nominations(looks,lookup,root,shot_ids,scores,settings)
     if not banks and not crossed and not bridges:
         return

@@ -46,7 +46,11 @@ def _report(db,config,scope,namespace,*,focus=None,compact=False):
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
     from .incomplete_rivals import protect
-    result=protect(db,scope,namespace,plan(db,config,banks(db,config,scope,namespace),focus=focus,compact=compact))
+    bank = banks(db,config,scope,namespace)
+    result = plan(db,config,bank,focus=focus,compact=compact)
+    from .endpoint_merges import verified
+    verified(db,config,scope,namespace,bank,result)
+    result = protect(db,scope,namespace,result)
     from .body_reference_gaps import protect as protect_contracts
     return protect_contracts(db,config,scope,namespace,result)
 

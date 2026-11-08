@@ -62,20 +62,39 @@ def ordered_owners(db, origins):
 
 
 def labels_for_groups(scan,groups,origins,settings,owners):
-    """Oldest label wins merges; its largest physical overlap wins a split."""
-    from collections import Counter
-    from .database import encoded
+    """Retain as many historical IDs as possible, then maximise independent overlap."""
     from .body_identity import independent
-    votes=defaultdict(list)
-    for index,group in enumerate(groups):
-        keys={physical_key(scan,row) for row in group}
-        counts=Counter(person for key in keys for person in origins.get(key,()))
-        accepted=len(independent(group,settings))>=settings['min_support']
-        for person,total in counts.items():votes[person].append((total,accepted,index))
-    assigned={}
-    for owner in owners:
-        candidates=[v for v in votes[owner] if v[2] not in assigned]
-        if candidates:
-            winner=max(candidates,key=lambda v:(v[0],v[1],-v[2]))
-            assigned[winner[2]]=owner
-    return assigned
+    if not origins or not owners or not groups:
+        return {}
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import min_weight_full_bipartite_matching
+    positions = {owner:i for i,owner in enumerate(owners)}
+    group_order = sorted(range(len(groups)),key=lambda i:min(r['id'] for r in groups[i]))
+    edges = []
+    for row_index, group_index in enumerate(group_order):
+        history = defaultdict(list)
+        for row in groups[group_index]:
+            for person in origins.get(physical_key(scan,row),()):
+                if person in positions:
+                    history[person].append(row)
+        for person, rows in history.items():
+            support = len(independent(rows,settings))
+            if support:
+                edges.append((row_index,positions[person],support))
+    if not edges:
+        return {}
+    # Each group has its own unmatched column. Real edges dominate all
+    # available overlap combined; age breaks equal-overlap ties deterministically.
+    cardinality = 1 + sum(v for _,_,v in edges)
+    matrix_rows, columns, values = [],[],[]
+    for row,col,support in edges:
+        matrix_rows.append(row)
+        columns.append(col)
+        values.append(1+cardinality+support+(len(owners)-col)/((len(owners)+1)*(len(groups)+1)))
+    for row in range(len(groups)):
+        matrix_rows.append(row)
+        columns.append(len(owners)+row)
+        values.append(1.)
+    matrix = csr_matrix((values,(matrix_rows,columns)),shape=(len(groups),len(owners)+len(groups)))
+    rows,cols = min_weight_full_bipartite_matching(matrix,maximize=True)
+    return {group_order[r]:owners[c] for r,c in zip(rows,cols) if c<len(owners)}
