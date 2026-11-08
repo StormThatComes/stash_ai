@@ -62,25 +62,35 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
 def partner_metrics(triples, labels, locations, decisions, exclude):
     """Each performer/cue relation votes once, including face and body projections."""
     from collections import defaultdict
-    positive = defaultdict(list)
-    negative = defaultdict(list)
+    from .scene_strategy_validation import physical_owner
+    projections = defaultdict(set)
+    for oid,truth in labels.items():
+        if oid not in exclude:
+            owner = decisions[oid]['accepted_identity']
+            if owner is not None:
+                projections[(truth,*locations[oid])].add(owner)
+    positive, negative = {}, {}
     for face, back, partner in triples:
         for first, second, same in ((face, back, True), (back, partner, False), (face, partner, False)):
             if first in exclude or second in exclude:
                 continue
-            a, b = (decisions[oid]['accepted_identity'] for oid in (first, second))
             addresses = tuple(sorted((labels[oid], *locations[oid]) for oid in (first, second)))
             if addresses[0] == addresses[1]:
                 continue
-            (positive if same else negative)[addresses].append(a is not None and a == b)
+            left,right = (projections[key] for key in addresses)
+            if same:
+                owner = physical_owner(left)
+                positive[addresses] = owner is not None and owner==physical_owner(right)
+            else:
+                negative[addresses] = bool(left & right)
     counts = defaultdict(Counter)
-    for key, values in positive.items():
-        counts[key[0][0]].update(target_pairs=1, recovered=int(all(values)))
-    for key, values in negative.items():
+    for key, recovered in positive.items():
+        counts[key[0][0]].update(target_pairs=1, recovered=int(recovered))
+    for key, joined in negative.items():
         for performer in {address[0] for address in key}:
-            counts[performer].update(partner_pairs=1, false_joins=int(any(values)))
-    return dict(target_pairs=len(positive), recovered=sum(map(all, positive.values())),
-                partner_pairs=len(negative), false_joins=sum(map(any, negative.values())),
+            counts[performer].update(partner_pairs=1, false_joins=int(joined))
+    return dict(target_pairs=len(positive), recovered=sum(positive.values()),
+                partner_pairs=len(negative), false_joins=sum(negative.values()),
                 per_performer=dict(sorted(counts.items())))
 
 

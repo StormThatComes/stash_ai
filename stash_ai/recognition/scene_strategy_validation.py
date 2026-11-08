@@ -70,6 +70,8 @@ def strategy_summary(config,metrics,labels,locations,decisions):
     return dict(tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
                 physical_false_joins=metrics['physical']['false_merge_pairs'],scene_match_bonus=settings['scene_match_bonus'],
                 scene_bonus_mode=settings['scene_bonus_mode'],physical_coverage=metrics['physical']['coverage'],
+                slices={name:{k:values[k] for k in ('observations','coverage','extra_fragments','false_merge_pairs')}
+                        for name,values in metrics['physical']['slices'].items()},
                 fragments_per_performer={p:len(identities[p]) for p in sorted(set(labels.values()))},
                 own_id_turns=seq['own_id_turns'],turns=seq['turns'],endpoint_returns=seq['endpoint_returns'],
                 partner_swaps=seq['contact_interior']['partner'],contacts=seq['crossings'])
