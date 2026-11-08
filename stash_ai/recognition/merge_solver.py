@@ -293,14 +293,21 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
             goal_diagnostics=goal_diagnostics(status),
             **input_patch(name))
+    outside_comparison = None
     def consume(name, observations, retained, predicted):
-        nonlocal best, best_rank, baseline, baseline_outsiders
+        nonlocal best, best_rank, baseline, baseline_outsiders, outside_comparison
         status = assess(goals, observations, retained, predicted)
         summaries[name] = status
         if baseline is None:
             baseline = dict(predicted)
-        outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
-                         {k:v for k,v in predicted.items() if k not in target_ids})
+        from .partition_delta import PartitionImpact, Predictions
+        if isinstance(predicted, Predictions):
+            if outside_comparison is None:
+                outside_comparison = PartitionImpact(baseline, baseline, target_ids)
+            outside = outside_comparison.measure(predicted.changes)
+        else:
+            outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
+                             {k:v for k,v in predicted.items() if k not in target_ids})
         if 'new_outsider_observations' in outside_limits:
             attached=outsiders(status,predicted,target_ids)
             if baseline_outsiders is None:baseline_outsiders=attached

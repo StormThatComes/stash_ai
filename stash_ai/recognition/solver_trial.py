@@ -101,7 +101,7 @@ def evaluate(request, *, progress=None):
     result['worker_pid'] = os.getpid()
     result['started_monotonic_seconds'] = started
     result['finished_monotonic_seconds'] = time.perf_counter()
-    if request.baseline_predictions is not None:
+    if request.baseline_predictions is not None and 'predictions' in result:
         predictions = result.pop('predictions')
         result['prediction_delta'] = {oid: person for oid, person in predictions.items()
                                       if request.baseline_predictions.get(oid) != person}

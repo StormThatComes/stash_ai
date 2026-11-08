@@ -434,6 +434,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
     from .paged_references import scope as reference_pages
     from .stage_checkpoints import scope as stage_checkpoints
     from .scratch_space import scope as scratch_scope
+    collect_results = getattr(database, 'collect_publication_results', True)
     with scratch_scope(config), stage_checkpoints(database,config), atomic(database), derived_cache.scope(database,config), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), reference_pages(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
         from .consolidation_queue import expand
@@ -448,7 +449,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
                         from .hybrid_merge import rebuild as hybrid_rebuild
                         result=hybrid_rebuild(database,selected,config,
                             lambda: _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded),
-                            lambda: _results(database.connection,selected,config))
+                            lambda: _results(database.connection,selected,config) if collect_results else {})
                         break
                     except InvalidatedSourceViews as error:
                         if attempt or not error.medoids-excluded:raise
@@ -493,7 +494,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             from .profiling import count
             database.face_rebuild_mode='warm'
             count('certified_warm_rebuilds')
-            return _results(db,selected,config)
+            return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
         references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                            label_scenes=[item['scene'] for item in selected])
         context = reference_context(references)
@@ -513,7 +514,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 with snapshot(db):certify(db,scope,namespace,state)
                 database.face_rebuild_mode='warm'
                 usage.begin('cached')
-                return _results(db,selected,config)
+                return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
     from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
     previous=previous_queries(db,selected,config,scope,namespace)
     prior_strict=set(previous_strict(db,selected,config,scope,namespace))
@@ -575,7 +576,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 database.face_rebuild_mode='partial'
                 mapping, history = restore(database, replay, ready.restored_payload)
                 _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
-                return _results(db,selected,config)
+                return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
             cursor, next_clock = late.restore(replay)
             if late.restored_payload is None:
                 cursor, next_clock = checkpoints.restore(replay)
@@ -746,7 +747,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             ready.save(replay, len(selected), clock.value, final=True)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
-    return _results(db, selected, config)
+    return _results(db, selected, config) if getattr(database, 'collect_publication_results', True) else {}
 
 
 @measured('results')

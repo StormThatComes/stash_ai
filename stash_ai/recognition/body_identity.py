@@ -391,7 +391,7 @@ def rebuild(database,selected,config,result):
     from .body_cache import cached,stamp as cache_stamp
     if cached(db,selected,config):
         database.body_rebuild_mode='warm' if enabled(config) else 'disabled'
-        return results(db,selected,result)
+        return results(db,selected,result) if getattr(database, 'collect_publication_results', True) else result
     database.body_rebuild_mode='cold' if enabled(config) else 'disabled'
     from .body_plan_spool import Plans
     with Plans(config.data['sapiensid']['execution']['plan_bytes'],config.data['execution']['replay_snapshot_bytes']) as plans:
@@ -459,18 +459,25 @@ def rebuild(database,selected,config,result):
         from .derived_cache import current
         store=current()
         if enabled(config) and store and 'body-scene' in store.hits:database.body_rebuild_mode='partial'
-        return results(db,selected,result)
+        return results(db,selected,result) if getattr(database, 'collect_publication_results', True) else result
 
 
 def results(db,selected,result):
     for groups in result.values():
         for group in groups:
             if group['person'] is not None:group['person']=canonical(db,group['person'])
-    for item in selected:
-        rows=db.execute('SELECT m.person,m.status,COUNT(*) AS observations FROM body_members m '
-            'JOIN body_observations b ON b.id=m.observation WHERE b.scan=? GROUP BY m.person,m.status',(item['scan'],))
-        result.setdefault(item['scan'],[]).extend(dict(person=r['person'],status='accepted' if r['status']=='accepted' else 'withheld',
-            observations=r['observations'],evidence='person') for r in rows)
+    from .rebuild import _batches
+    for batch in _batches(selected):
+        scans = [item['scan'] for item in batch]
+        for scan in scans:
+            result.setdefault(scan, [])
+        rows = db.execute('SELECT b.scan,m.person,m.status,COUNT(*) AS observations FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation WHERE b.scan IN (SELECT value FROM json_each(?)) '
+            'GROUP BY b.scan,m.person,m.status ORDER BY b.scan,m.person,m.status', (encoded(scans),))
+        for row in rows:
+            result[row['scan']].append(dict(person=row['person'],
+                status='accepted' if row['status']=='accepted' else 'withheld',
+                observations=row['observations'], evidence='person'))
     return result
 
 
