@@ -68,7 +68,37 @@ def variant(config, name, database):
     return replace(config,data=data,database=database)
 
 
-def run(config, labels, directory, *, profile_cuda=False, body_batches=None):
+def pose_records(db, selected):
+    records = {}
+    for item in selected:
+        rows = db.execute('SELECT b.cue,b.geometry,o.geometry FROM body_observations b LEFT JOIN observations o '
+                          'ON o.id=b.face WHERE b.scan=? ORDER BY b.cue,b.id', (item['scan'],))
+        for cue, geometry, face in rows:
+            person = json.loads(geometry)
+            key = (item['scene'],cue,tuple(person['bounds']))
+            records.setdefault(key, []).append((person['keypoints'], face))
+    return records
+
+
+def compare_pose(reference, candidate):
+    changed_boxes = association = visibility = 0
+    max_error = 0.0
+    for key in reference.keys() | candidate.keys():
+        a,b = reference.get(key,()), candidate.get(key,())
+        if len(a)!=len(b):
+            changed_boxes += abs(len(a)-len(b))
+        for (p,f),(q,g) in zip(sorted(a,key=lambda v:repr(v)),sorted(b,key=lambda v:repr(v))):
+            association += f!=g
+            for left,right in zip(p,q):
+                if (min(left)>=0) != (min(right)>=0):
+                    visibility += 1
+                elif min(left)>=0:
+                    max_error = max(max_error,math.dist(left,right))
+    return dict(changed_box_counts=changed_boxes,changed_face_associations=association,
+                changed_visible_keypoints=visibility,max_visible_displacement_pixels=max_error)
+
+
+def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False):
     from stash_ai.recognition.backend import LazyBackend
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.models import namespace
@@ -84,7 +114,20 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None):
     results = {}
     with closing(services.client(url=url,api_key=os.getenv('STASH_API_KEY',''),
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
-        if body_batches:
+        reference = None
+        if compare_vitpose:
+            from stash_ai.recognition.config import plain
+            import torch
+            if (config.data['sapiensid']['pose']['backend'] != 'vitpose_plus_large'
+                    or config.data['models']['device'] == 'cpu' or not torch.cuda.is_available()):
+                raise ValueError('ViTPose decoder comparison requires the ViTPose++ backend and CUDA.')
+            variants = []
+            for enabled in (False,True):
+                data = plain(config.data)
+                data['execution']['vitpose_device_decode'] = enabled
+                name = 'vitpose-cuda' if enabled else 'vitpose-reference'
+                variants.append((name,replace(config,data=data,database=directory/(name+'.sqlite3'))))
+        elif body_batches:
             from stash_ai.recognition.config import plain
             variants = []
             for size in body_batches:
@@ -108,7 +151,7 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None):
                 resources.callback(collector.close)
                 selected, cues, gpu_us = [], 0, 0.
                 cuda = None
-                if body_batches and cfg.data['models']['device'] != 'cpu':
+                if (body_batches or compare_vitpose) and cfg.data['models']['device'] != 'cpu':
                     import torch
                     if torch.cuda.is_available():
                         cuda = torch.cuda
@@ -147,6 +190,12 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None):
                                      peak_torch_cuda_allocated_bytes=peak,
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,
                                      cuda_activity_seconds_per_1000_cues=gpu_us/(1000*cues) if profile_cuda else None)
+                if compare_vitpose:
+                    records = pose_records(state.connection,selected)
+                    if reference is None:
+                        reference = records
+                    else:
+                        results[name]['reference_comparison'] = compare_pose(reference,records)
     return results
 
 
@@ -156,9 +205,16 @@ if __name__=='__main__':
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--labels',type=Path,required=True)
     parser.add_argument('--cuda-profile',action='store_true')
-    parser.add_argument('--body-batches', type=int, nargs='+', choices=range(1, 17),
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--compare-vitpose-decode',action='store_true',
+                       help='Compare reference/CUDA ViTPose coordinates, visibility and face associations.')
+    modes.add_argument('--body-batches', type=int, nargs='+', choices=range(1, 17),
                         help='Compare SapiensID batch sizes using the configured pose backend.')
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix='crowded-vtt-') as directory:
-        print(json.dumps(run(load(args.config),json.loads(args.labels.read_text()),Path(directory),
-                             profile_cuda=args.cuda_profile, body_batches=args.body_batches),indent=2))
+    config = load(args.config)
+    configured = config.data['execution'].get('rebuild_scratch_directory')
+    parent = (args.config.resolve().parent/Path(configured).expanduser()) if configured else config.database.parent/'recognition_work'
+    parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='crowded-vtt-',dir=parent) as directory:
+        print(json.dumps(run(config,json.loads(args.labels.read_text()),Path(directory),
+                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode),indent=2))

@@ -299,3 +299,11 @@ def test_compact_device_math_matches_reference_peaks_and_falls_back_for_flat_map
     for got,want in zip(actual,expected):
         np.testing.assert_allclose(got,want,rtol=0,atol=1e-4)
     assert compact(torch.ones_like(maps),boxes,processor,lambda:'reference') == 'reference'
+
+
+def test_benchmark_detects_changed_visibility_and_face_association():
+    from benchmarks.benchmark_crowded_vtt import compare_pose
+    a = {('1',2,(0,0,10,10)): [([[1.,2.],[3.,4.]], 'face')]}
+    b = {('1',2,(0,0,10,10)): [([[2.,2.],[-1.,-1.]], None)]}
+    assert compare_pose(a,b) == dict(changed_box_counts=0, changed_face_associations=1,
+                                     changed_visible_keypoints=1, max_visible_displacement_pixels=1.)
