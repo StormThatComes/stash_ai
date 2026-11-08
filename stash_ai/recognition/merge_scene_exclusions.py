@@ -89,7 +89,8 @@ def _apply(goals, status, observations, predicted, kind):
     wanted = {item['scene'] for item in items} if kind == 'scene' else set()
     scenes = defaultdict(list)
     if wanted:
-        for oid, scene in observations.items():
+        rows = observations.for_owners(wanted) if hasattr(observations, 'for_owners') else observations.items()
+        for oid, scene in rows:
             if scene in wanted and predicted.get(oid) is not None:
                 scenes[scene].append(oid)
     results, violations = [], []

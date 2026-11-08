@@ -67,6 +67,9 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                 elif private is None:
                     from .trial_inputs import prepare
                     prepare(target, seed)
+            from .solver_slot_index import Slots, track
+            if isinstance(observations, Slots):
+                track(target)
             state = SimpleNamespace(connection=target, installation=installation, collect_publication_results=False)
             with stage('Rebuild selected identities'):
                 rebuild(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
@@ -82,8 +85,16 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                                        if r[0] in observations)
                     predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
                     prediction_fields = dict(predictions=predictions)
-                bodies=body_report(target,settings,[s['id'] for s in scans])
-                hybrid=coverage(target,settings,[s['id'] for s in scans])
+                scan_ids = [s['id'] for s in scans]
+                body_counts, hybrid = observations.input_counts(settings) if isinstance(observations, Slots) else (None,None)
+                bodies = None
+                if isinstance(observations, Slots):
+                    from .solver_body_counts import incremental
+                    bodies = incremental(observations.db,target,body_counts,scan_ids,len(observations))
+                if bodies is None:
+                    bodies = body_report(target,settings,scan_ids,input_counts=body_counts)
+                if hybrid is None:
+                    hybrid = coverage(target,settings,scan_ids)
             with stage('Collect solver feedback'):
                 evidence = inspect_trial(target, settings) if inspect_trial else None
     except Exception as exc:

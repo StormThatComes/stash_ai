@@ -29,5 +29,6 @@ def outsiders(status, predicted, goal_ids):
     for group in status['groups']:
         for person in group['resulting_identities']:
             destinations.setdefault(person,[]).append(group['index'])
-    return {(index,oid) for oid,person in predicted.items() if oid not in goal_ids and person is not None
+    rows = predicted.for_owners(destinations) if hasattr(predicted, 'for_owners') else predicted.items()
+    return {(index,oid) for oid,person in rows if oid not in goal_ids and person is not None
             for index in destinations.get(person,())}

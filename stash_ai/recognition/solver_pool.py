@@ -124,7 +124,10 @@ class Trials(AbstractContextManager):
                 from .solver_slot_index import build
                 images = current()
                 slots = None
-                if images is not None and context.get('baseline_predictions') is not None:
+                from .solver_slot_index import Slots
+                if isinstance(context['observations'], Slots):
+                    slots = images.directory / 'observations.sqlite'
+                elif images is not None and context.get('baseline_predictions') is not None:
                     slots = build(images, context['observations'], context['baseline_predictions'])
                 if slots is not None:
                     context = {key: value for key, value in context.items()

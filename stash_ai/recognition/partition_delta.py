@@ -6,6 +6,8 @@ from collections.abc import Mapping
 class Predictions(Mapping):
     def __init__(self, baseline, changes):
         self.baseline, self.changes = baseline, changes
+        self.changed_owners = None
+        self.outsider_delta = None
         if any(key not in baseline for key in changes):
             raise ValueError('Invalid baseline prediction delta.')
 
@@ -17,6 +19,28 @@ class Predictions(Mapping):
 
     def __iter__(self):
         return iter(self.baseline)
+
+    def outsider_counts(self, owners):
+        if self.outsider_delta is None:
+            self.outsider_delta = self.baseline.outsider_changes(self.changes)
+        counts = self.baseline.outsider_counts(owners)
+        for owner in owners:
+            counts.update(self.outsider_delta.get(owner, {}))
+        return counts
+
+    def for_owners(self, owners):
+        if hasattr(self.baseline, 'for_owners'):
+            rows = self.baseline.for_owners(owners)
+        else:
+            rows = ((key,person) for key,person in self.baseline.items() if person in owners)
+        yield from ((key,person) for key,person in rows if key not in self.changes)
+        if self.changed_owners is None:
+            from collections import defaultdict
+            self.changed_owners = defaultdict(list)
+            for key,person in self.changes.items():
+                self.changed_owners[person].append(key)
+        for person in owners:
+            yield from ((key,person) for key in self.changed_owners.get(person,()))
 
     def items(self):
         return ((key, self.changes.get(key, value)) for key, value in self.baseline.items())
@@ -35,15 +59,18 @@ class PartitionImpact:
         self.before, self.baseline, self.excluded = before, baseline, excluded
         self.cells, self.left, self.right, self.population = (Counter() for _ in range(4))
         self.common = self.gained = self.lost = self.assigned = 0
-        for key, new in baseline.items():
+        from .solver_slot_index import Slots
+        indexed = isinstance(before, Slots) and isinstance(baseline, Slots) and before.db is baseline.db
+        rows = baseline.db.execute(f'SELECT id,{before.column},{baseline.column} FROM slots') if indexed else (
+            (key,before.get(key),new) for key,new in baseline.items())
+        for key, old, new in rows:
             if key in excluded:
                 continue
             if new is not None:
                 self.assigned += 1
                 self.population[new] += 1
-            if key not in before:
+            if not indexed and key not in before:
                 continue
-            old = before[key]
             self.common += 1
             self.gained += old is None and new is not None
             self.lost += old is not None and new is None
