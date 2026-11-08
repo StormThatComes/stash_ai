@@ -1,5 +1,5 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
-VIEW_POLICY = 'independent-held-out-perspectives-v2'
+VIEW_POLICY = 'independent-held-out-perspectives-v3'
 
 
 def select(tracks, settings, scores, rank, shot_of):
@@ -49,7 +49,23 @@ def select_ordered(ordered, seeds, settings, scores, rank, shot_of):
                 hashes.append(hashed)
             if len(selected) == maximum:
                 break
-        priority = (len(selected), tuple(sorted((rank(item) for item in selected), reverse=True)))
+        # Prefer a bank that also retrieves independent views beyond its own shots.
+        # Cap the probe independently of a performer's total scene count.
+        recovered = set()
+        if len(selected)>=max(2,settings['attach_min_support']):
+            for a,b,row in ordered:
+                shot = shot_of(row)
+                if shot in shots or shot in recovered or a in roots or b in roots:
+                    continue
+                vote = body_vote(row)
+                if unit(vote) in pixels or stamp(vote) in cues:
+                    continue
+                values = [scores.face_similarity(row['_vector'],other['_vector']) for _,_,other in selected]
+                if min(values)>=settings['cohesion_threshold'] and sum(values)/len(values)>=settings['match_threshold']:
+                    recovered.add(shot)
+                    if len(recovered)>=maximum:
+                        break
+        priority = (len(selected)>=max(2,settings['attach_min_support']),len(recovered),len(selected), tuple(sorted((rank(item) for item in selected), reverse=True)))
         if priority > best_rank:
             best, best_rank = selected, priority
     return sorted(best,key=lambda item:(item[2]['scan'],item[2]['cue'],item[2]['id']))

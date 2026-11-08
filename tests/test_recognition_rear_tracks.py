@@ -114,7 +114,8 @@ def test_large_component_recovers_strong_pair_without_stealing_tied_partner():
 
 
 @pytest.mark.parametrize('weak_has_face',[False,True])
-def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_has_face):
+@pytest.mark.parametrize('query_new_shot',[False,True])
+def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_has_face,query_new_shot):
     from stash_ai.recognition.body_perspectives import recover
     from stash_ai.recognition.body_identity import defaults, Scores
     from types import SimpleNamespace
@@ -130,7 +131,7 @@ def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_ha
                    geometry=encoded(dict(bounds=[0,0,80,100])),_face_vector=None,
                    _vector=np.array([0.,1.] if weak else [1.,0.]),
                    quality=encoded(dict(quality=dict(orientation='front' if face or weak else 'back',
-                       frame_signature=(bytes([15 if cue<5 else 180,15,15])*16).hex(),pixel_digest=str(cue)))))
+                       frame_signature=(bytes([15 if cue<5 else 60 if cue>=11 and query_new_shot else 180,15,15])*16).hex(),pixel_digest=str(cue)))))
         rows.append(row)
         if face: seeds['A'].append(row)
         decisions[str(cue)] = dict(person='A' if face else 'B',status='accepted',
@@ -138,7 +139,7 @@ def test_weak_satellite_can_retry_but_measured_face_vetoes_core_transfer(weak_ha
                                    reason='measured_face_association' if face or weak and weak_has_face
                                           else 'body_core_attachment' if weak else 'body_scene_core')
     recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *args:True))
-    if weak_has_face:
+    if weak_has_face or not query_new_shot:
         assert decisions['11']['person']=='B'
     else:
         assert decisions['11']['person']=='A'
