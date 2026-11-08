@@ -115,8 +115,8 @@ class PreparedCollector:
         vectors=self.model.embed_inputs(ready)
         if len(vectors)!=len(ready):raise ValueError('SapiensID batch returned an invalid feature count.')
         # Validate every vector before marking a cue complete.
-        from .models import normalized_embedding
-        vectors=[normalized_embedding(v,4096) for v in vectors]
+        from .models import body_embedding
+        vectors=[body_embedding(v) for v in vectors]
         for (cue,record,_),vector in zip(jobs,vectors):
             record[2] = vector
             cue['remaining'] -= 1

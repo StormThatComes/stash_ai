@@ -7,6 +7,8 @@ class Lease:
         self.image = image
         self.owner = owner if owner is not None else [image, 0]
         self.owner[1] += 1
+        if owner is None:
+            image._recognition_pixel_digest = None
 
     def retain(self):
         if self.owner is None:
@@ -18,6 +20,7 @@ class Lease:
         if owner is not None:
             owner[1] -= 1
             if not owner[1]:
+                del owner[0]._recognition_pixel_digest
                 owner[0].close()
 
 

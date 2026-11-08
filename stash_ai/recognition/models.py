@@ -385,3 +385,26 @@ def load_backend(config, paths):
         from .onnx_recognizers import OnnxEmbeddingFaces
         return OnnxEmbeddingFaces(config, paths)
     return OpenCVFaces(config, paths)
+
+
+class _UnitBody(bytes):
+    """Immutable float32 payload whose next normalization is bit-identical."""
+
+
+def certified_body(value):
+    import numpy as np
+    return (isinstance(value, np.ndarray) and isinstance(value.base, _UnitBody)
+            and value.dtype == np.dtype('<f4') and value.shape == (4096,)
+            and value.flags.c_contiguous and value.nbytes == len(value.base))
+
+
+def body_embedding(value):
+    import numpy as np
+    if certified_body(value):
+        return value
+    result = normalized_embedding(value, 4096)
+    # Inside this interval, dividing any float32 coordinate by the norm
+    # moves it less than half an ulp. Preserve the legacy path at boundaries.
+    if abs(float(np.linalg.norm(result.astype(np.float64))) - 1) < 2**-27:
+        return np.frombuffer(_UnitBody(result.astype('<f4', copy=False).tobytes()), dtype='<f4')
+    return result
