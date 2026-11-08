@@ -86,3 +86,23 @@ def test_trial_template_restores_private_state_and_shared_views(tmp_path):
                 private.execute("UPDATE metadata SET value='changed' WHERE key='marker'")
                 assert private.execute('SELECT count(*) FROM observations').fetchone() == (0,)
                 assert (current().directory/'trial.sqlite').is_file()
+
+
+def test_checksum_publication_retries_after_busy_writer(tmp_path, monkeypatch):
+    from stash_ai.recognition import solver_shared
+    Arrays.prepare(tmp_path)
+    real_replace = solver_shared.os.replace
+    with scope(tmp_path, 65536) as shared, sqlite3.connect(tmp_path/'ledger.sqlite') as other:
+        shared.db.execute('PRAGMA busy_timeout=1')
+        def publish_then_lock(source, dest):
+            real_replace(source, dest)
+            other.execute('BEGIN IMMEDIATE')
+        monkeypatch.setattr(solver_shared.os, 'replace', publish_then_lock)
+        value = np.arange(8)
+        signature = key('publish', (value,))
+        shared.put(signature, value)
+        assert not shared.disabled and signature in shared.pending
+        other.rollback()
+        assert np.array_equal(shared.get(signature), value)
+        assert not shared.pending
+        assert shared.db.execute('SELECT bytes FROM usage').fetchone()[0] == value.nbytes + 512
