@@ -228,7 +228,17 @@ def _scene(db, scan, stamp, gallery, search, config):
             return target in impossible_owners(row,json.loads(row['geometry']),torsos.get(row['cue'],()))
         for old,core in core_rows.items():
             if old not in targets and old not in face_owners:
-                split.update(split_members(core,proposed,occupied,settings))
+                allowed = split_members(core,proposed,occupied,settings)
+                split.update(allowed)
+                if len({proposed[oid] for oid in allowed})==2 and old not in (anonymous & nonanonymous):
+                    for row in core:
+                        if row['id'] in allowed:
+                            continue
+                        prior = db.execute('SELECT person,role,status,proof FROM body_members WHERE observation=?',
+                                           (row['id'],)).fetchone()
+                        decisions[row['id']] = dict(person=None,status='withheld',role='auxiliary',
+                            reason='external_rear_satellite',track_blocker=dict(reason='unresolved_partner',cue=row['cue']),
+                            previous=dict(json.loads(prior['proof']),person=prior['person'],role=prior['role'],status=prior['status']))
     mixed_origins = anonymous & nonanonymous
     for oid in sorted(viable):
         owner,_,old,proof = proposals[oid]

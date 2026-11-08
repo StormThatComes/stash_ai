@@ -29,7 +29,12 @@ def paths(rows, settings, scores):
     links, incoming = {},set()
     for cue,left in sorted(cues.items()):
         right = cues.get(cue+1,())
-        if not complete(left) or not complete(right):
+        if not right or max(len(left),len(right))>4 or any(r['id'] not in geometry for r in (*left,*right)):
+            continue
+        partial = not (complete(left) and complete(right))
+        # A missing body on both sides has no physical location to rule out.
+        if partial and not any(len(side)>=2 and all(len(geometry[r['id']][2])>=3 for r in side)
+                               for side in (left,right)):
             continue
         qa,_,_,sa = geometry[left[0]['id']]
         qb,_,_,sb = geometry[right[0]['id']]
@@ -46,6 +51,14 @@ def paths(rows, settings, scores):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
         for (a,b),value in edges.items():
             rival = max((s for (i,j),s in edges.items() if (i==a)!=(j==b)),default=-1.)
+            if partial:
+                left_q,_,left_torso,_ = geometry[a]
+                right_q,_,right_torso,_ = geometry[b]
+                if (left_q.get('query_only') or right_q.get('query_only') or
+                        len(left_torso.keys() & right_torso.keys())<3 or rival!=-1. or
+                        max(left_q.get('expected_people',0),right_q.get('expected_people',0),
+                            left_q.get('detected_people',0),right_q.get('detected_people',0))>max(len(left),len(right))):
+                    continue
             if value>=threshold and value-rival>=margin:
                 links[a] = b,value
                 incoming.add(b)
@@ -126,6 +139,22 @@ def split_members(core, proposed, occupied, minimum):
     """Release a contiguous supported side only across a physical contradiction."""
     from .body_identity import independent
     destinations = {proposed[r['id']] for r in core if r['id'] in proposed}
+    if len(destinations)==2:
+        # Independently supported, disjoint prefix/suffix proposals. A measured
+        # contradiction with each opposite owner guards the physical boundary.
+        sides = sorted(([r for r in core if proposed.get(r['id'])==p] for p in destinations),
+                       key=lambda rows:min(r['cue'] for r in rows))
+        left,right = sides
+        if (len(independent(left,minimum))<max(2,minimum['attach_min_support']) or
+                len(independent(right,minimum))<max(2,minimum['attach_min_support'])):
+            return set()
+        end = max(r['cue'] for r in left)
+        start = min(r['cue'] for r in right)
+        if (end>=start or any(r['id'] not in proposed and not end<r['cue']<start for r in core)
+                or not any(occupied(r,proposed[right[0]['id']]) for r in left)
+                or not any(occupied(r,proposed[left[0]['id']]) for r in right)):
+            return set()
+        return {r['id'] for side in sides for r in side}
     if len(destinations)!=1:
         return set()
     target = destinations.pop()
