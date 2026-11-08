@@ -11,32 +11,40 @@ def frame_signature(image):
         return rgb.tobytes().hex()
 
 
-def orientation(person):
+def orientation_measurement(person):
     points = person['keypoints']
     visibility = person.get('keypoint_visibility')
     def visible(i):
         return min(points[i]) >= 0 and (visibility is None or visibility[i] >= .5)
-    if not all(visible(i) for i in (5, 6, 11, 12)):
-        return 'unknown'
-    ls, rs, lh, rh = (np.asarray(points[i]) for i in (5, 6, 11, 12))
+    visible_torso = [i for i in (5,6,11,12) if visible(i)]
+    evidence = dict(label='unknown', visible_torso=visible_torso, confidence=0.)
+    if len(visible_torso)!=4:
+        return evidence
+    ls, rs, lh, rh = (np.asarray(points[i]) for i in (5,6,11,12))
     height = float(np.linalg.norm((ls+rs-lh-rh)/2))
     if height < 6:
-        return 'unknown'
-    # A rolled camera needs a torso-relative horizontal axis. Preserve the
-    # anatomical labels produced by the detector, before encoder flips.
+        return evidence
     up = (ls+rs-lh-rh)/(2*height)
     across = np.array([-up[1], up[0]])
     shoulders, hips = float((ls-rs)@across/height), float((lh-rh)@across/height)
+    evidence.update(shoulder_span=shoulders,hip_span=hips)
     if shoulders*hips < 0:
-        return 'unknown'
+        return evidence
     if max(abs(shoulders),abs(hips)) < .27:
-        return 'side'
-    if min(abs(shoulders),abs(hips)) < .13:
-        return 'unknown'
-    if shoulders > 0:
-        return 'front'
-    # A reversed torso with visible frontal eyes is ambiguous (twist/mirror).
-    return 'unknown' if all(visible(i) for i in (1,2)) else 'back'
+        label = 'side'
+    elif min(abs(shoulders),abs(hips)) < .13:
+        return evidence
+    elif shoulders > 0:
+        label = 'front'
+    else:
+        label = 'unknown' if all(visible(i) for i in (1,2)) else 'back'
+    confidence = min((visibility[i] if visibility is not None else 1.) for i in visible_torso)
+    evidence.update(label=label,confidence=float(confidence) if label!='unknown' else 0.)
+    return evidence
+
+
+def orientation(person):
+    return orientation_measurement(person)['label']
 
 
 def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
@@ -59,7 +67,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if box is None:
             continue
         if person.get('keypoints') is not None:
-            q['orientation'] = orientation(person)
+            measurement = orientation_measurement(person)
+            q['orientation'] = measurement['label']
+            decisions[row['id']]['orientation_measurement'] = measurement
         signature = np.frombuffer(bytes.fromhex(q['frame_signature']), dtype=np.uint8).astype(float)
         geometry[row['id']] = (q, box, signature)
         by_cue[row['cue']].append(row)
@@ -171,21 +181,22 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     lookup = {r['id']:r for r in rows}
     from .crowd_context import torso
     for start,(measurement,_,_) in geometry.items():
-        if measurement.get('orientation') != 'back':
+        kind = measurement.get('orientation')
+        if kind not in ('back','side'):
             continue
         middle = []
         end = next_row.get(start)
-        while end and len(middle)<4 and geometry[end][0].get('orientation') in ('side','unknown'):
+        while end and len(middle)<4 and geometry[end][0].get('orientation') in (('side','unknown') if kind=='back' else ('unknown',)):
             middle.append(end)
             end = next_row.get(end)
-        if not middle or len(middle)>3 or not end or geometry[end][0].get('orientation') != 'back':
+        if not middle or len(middle)>3 or not end or geometry[end][0].get('orientation') != kind:
             continue
         if any(lookup[i]['cue'] in partial or lookup[i].get('face_person') for i in middle):
             continue
         if len(middle)>1 and any(torso(json.loads(lookup[i]['geometry'])) is None for i in middle):
             continue
         for i in middle:
-            decisions[i].update(query_perspective='back',orientation_confidence='temporal')
+            decisions[i].update(query_perspective=kind,orientation_confidence='temporal')
     if not seeds:
         for row in rows:
             decisions[row['id']].setdefault('track_blocker',dict(reason='no_face_root',cue=row['cue']))
@@ -298,6 +309,23 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                     assessed.get('sharpness', 0.), pixels(row['quality']) or 0, row['id'])
         from .rooted_witnesses import modes
         for number, kept in enumerate(modes(tracks,settings,scores,witness_rank,lambda row:shot_ids[row['cue']])):
+            validated = []
+            for start,end,witness in kept:
+                # Challenge each witness with face-confirmed foreign tracks from
+                # a different shot; reassess exclusions on every evidence rebuild.
+                peers = [r for _,_,r in kept if r is not witness]
+                rivals = [(scores.face_similarity(witness['_vector'],r['_vector']), other,r['id'])
+                          for other,bank in seeds.items() if other!=key[0] for r in bank
+                          if r['id'] in geometry and shot_ids[r['cue']]!=shot_ids[witness['cue']]]
+                if settings.get('assess_witnesses',True) and peers and rivals:
+                    own = min(scores.face_similarity(witness['_vector'],r['_vector']) for r in peers)
+                    rival,other,rid = max(rivals)
+                    if rival >= settings['match_threshold'] and own-rival < settings['ambiguity_margin']:
+                        decisions[witness['id']]['view_exclusion'] = dict(reason='held_out_rival',
+                            owner=key[0],rival=other,observation=rid,own_score=own,rival_score=rival)
+                        continue
+                validated.append((start,end,witness))
+            kept = validated
             for start,end,witness in kept:
                 decisions[witness['id']]['rooted_track'] = dict(owner=key[0], perspective=key[1],
                                                                 roots=[start,end])
@@ -361,7 +389,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             # its own appearance. Exact source pixels never add a second vote.
             pixel = geometry[row['id']][0].get('pixel_digest')
             external = [(w, track) for w, track in zip(bank, proof)
-                        if track[:2] != source_paths.get(row['id'])
+                        if shot_ids[w['cue']] != shot_ids[row['cue']] and track[:2] != source_paths.get(row['id'])
                         and not (pixel and pixel == geometry[w['id']][0].get('pixel_digest'))]
             if not external:
                 continue
@@ -418,7 +446,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     for oid,owner,angle,proof,score in candidates:
         if oid in retry or decisions[oid]['person'] in protected or claims[owner,lookup[oid]['cue']] != 1:
             continue
-        rooted = {k:v for k,v in decisions[oid].items() if k in ('rooted_view','rooted_track')}
+        rooted = {k:v for k,v in decisions[oid].items() if k in ('rooted_view','rooted_track','view_exclusion','orientation_measurement')}
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',
                               reason='face_rooted_body_view', perspective=angle,
                               source_tracks=proof, score=score)

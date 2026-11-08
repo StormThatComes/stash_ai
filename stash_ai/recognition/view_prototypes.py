@@ -276,6 +276,10 @@ def prioritized(slots,maximum,cohesion=.8,*,primary=False,reserves=False):
         chosen.append(selected)
         # Mark also the exemplars of other candidates retrievable by this view.
         for slot in remaining:
+            # An opposing profile cannot use this primary through the ordinary
+            # pose gate. Its separately supported exemplars still add coverage.
+            if primary and selected.pose != slot.pose:
+                continue
             for value,stamp,pixel in features[id(slot)]:
                 if any(stamp!=s and pixel!=p and float(np.dot(value,v)) >= cohesion
                        for v,s,p in features[id(selected)]):

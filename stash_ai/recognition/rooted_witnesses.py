@@ -1,6 +1,10 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
+VIEW_POLICY = 'independent-held-out-perspectives-v2'
+
+
 def select(tracks, settings, scores, rank, shot_of):
-    from .body_identity import independent
+    from .independent_evidence import body_vote, stamp, unit
+    from .body_identity import quality
     ordered = sorted(tracks, key=rank, reverse=True)
     if not ordered:
         return []
@@ -12,13 +16,23 @@ def select(tracks, settings, scores, rank, shot_of):
     if len(seeds) > 8:
         seeds = [seeds[round(i*(len(seeds)-1)/7)] for i in range(8)]
     maximum = max(8, settings['attach_min_support'])
+    fingerprints = {}
+    for _,_,row in ordered:
+        vote = body_vote(row)
+        hashed = quality(row).get('appearance_hash')
+        fingerprints[row['id']] = unit(vote),stamp(vote),int(hashed,16) if hashed else None
     best, best_rank = [], ()
     for seed in seeds:
         selected, roots, shots = [], set(), set()
+        pixels, cues, hashes = set(), set(), []
         for item in (seed, *ordered):
             start, end, row = item
             shot = shot_of(row)
             if shot in shots or start in roots or end in roots:
+                continue
+            pixel, cue, hashed = fingerprints[row['id']]
+            if pixel in pixels or cue in cues or (hashed is not None and any(
+                    (hashed ^ peer).bit_count() < settings['min_appearance_distance'] for peer in hashes)):
                 continue
             if any(scores.face_similarity(row['_vector'], other['_vector']) < settings['cohesion_threshold']
                    for _, _, other in selected):
@@ -26,10 +40,12 @@ def select(tracks, settings, scores, rank, shot_of):
             selected.append(item)
             roots.update((start,end))
             shots.add(shot)
+            pixels.add(pixel)
+            cues.add(cue)
+            if hashed is not None:
+                hashes.append(hashed)
             if len(selected) == maximum:
                 break
-        ids = {r['id'] for r in independent([item[2] for item in selected],settings)}
-        selected = [item for item in selected if item[2]['id'] in ids]
         priority = (len(selected), tuple(sorted((rank(item) for item in selected), reverse=True)))
         if priority > best_rank:
             best, best_rank = selected, priority
