@@ -5,7 +5,7 @@ from .database import encoded
 
 
 def recover(database,selected,config):
-    from .body_identity import Scores,anchor,vector,copresent,policy
+    from .body_identity import Scores,anchor,vector,policy
     from .body_observations import contract
     from .body_guards import FaceGuard,resolve_claims
     from .clustering import vector as face_vector
@@ -44,28 +44,19 @@ def recover(database,selected,config):
                 queries.append(row)
         scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         from .body_seed_modes import FrozenSeeds
-        modes = FrozenSeeds(banks,scores,settings) if queries and settings.get('tracklet_matching') else None
+        modes = FrozenSeeds(banks,scores,settings) if queries else None
         for row in queries:
             prior = decisions[row['id']]
             blocker = prior.get('track_blocker', {}).get('reason')
             if blocker in ('different_face_root','unresolved_partner','competing_transition'):
                 continue
             rooted_owner = prior.get('open_face_root', {}).get('owner')
-            if modes is not None:
-                ranking = modes.rank(row,guard)
-                allowed = [item for item in ranking if item[4] and item[2] in confirmed]
-                if not allowed:
-                    continue
-                mean,minimum,person,*_ = allowed[0]
-                runner = max((item[5] for item in ranking if item[2]!=person),default=-1.)
-            else:
-                ranked=[]
-                for person,bank in banks.items():
-                    if copresent([row],bank) or not guard.allows(row,bank) or not guard.allows(row,bank,person):continue
-                    mean,minimum=scores.compare([row],bank);ranked.append((mean,minimum,person))
-                ranked.sort(key=lambda r:(-r[0],r[2]))
-                if not ranked:continue
-                mean,minimum,person=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
+            ranking = modes.rank(row,guard)
+            allowed = [item for item in ranking if item[4] and item[2] in confirmed]
+            if not allowed:
+                continue
+            mean,minimum,person,*_ = allowed[0]
+            runner = max((item[5] for item in ranking if item[2]!=person),default=-1.)
             if (rooted_owner in (None,person) and person in confirmed and mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
                     and mean-runner>=settings['ambiguity_margin']):
                 decisions[row['id']].update(person=person,status='accepted',role='auxiliary',
