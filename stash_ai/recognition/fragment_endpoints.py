@@ -6,19 +6,20 @@ def nominations(looks, lookup, roots, shots, scores, settings):
     if not settings.get('tracklet_matching') or not looks:
         return {}
     from .independent_evidence import unit
-    by_owner = defaultdict(list)
+    by_owner = defaultdict(lambda: defaultdict(list))
     for (owner,kind),entries in looks.items():
         for start,end,member in entries:
-            by_owner[owner].append((kind,start,end,member))
+            by_owner[owner][kind,start,end,shots[member['cue']]].append(member['id'])
     eligible = {}
     face_threshold = settings.get('face_threshold',1.)
     face_margin = settings.get('face_margin',.1)
-    for owner,fragments in by_owner.items():
+    for owner,tracks in by_owner.items():
         rivals = [lookup[k]['_face_vector'] for k,p in roots.items()
                   if p!=owner and lookup[k].get('_face_vector') is not None]
-        for i,(kind,a,b,row) in enumerate(fragments):
-            for other,c,d,peer in fragments[i+1:]:
-                if kind==other or shots[row['cue']]==shots[peer['cue']]:
+        fragments = sorted(tracks.items())
+        for i,((kind,a,b,shot),members) in enumerate(fragments):
+            for (other,c,d,other_shot),peers in fragments[i+1:]:
+                if kind==other or shot==other_shot:
                     continue
                 ids = a,b,c,d
                 if len(set(ids))!=4:
@@ -36,10 +37,12 @@ def nominations(looks, lookup, roots, shots, scores, settings):
                 rival = max((scores.face_similarity(x,y) for x in vectors for y in rivals),default=-1.)
                 if minimum-rival<face_margin:
                     continue
-                proof = [(a,b,row['id']),(c,d,peer['id'])]
-                for oid in (row['id'],peer['id']):
+                for oid in members:
                     if oid not in eligible or minimum>eligible[oid][2]:
-                        eligible[oid] = owner,proof,minimum
+                        eligible[oid] = owner,[(a,b,oid),(c,d,peers[0])],minimum
+                for oid in peers:
+                    if oid not in eligible or minimum>eligible[oid][2]:
+                        eligible[oid] = owner,[(a,b,members[0]),(c,d,oid)],minimum
     return eligible
 
 

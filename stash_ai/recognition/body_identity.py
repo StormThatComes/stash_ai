@@ -342,7 +342,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 borderline.append(row)
         else:remaining.append(row)
     from .contact_anchors import joint_body_claims
-    joint_body_claims(rows,decisions,cue_choices,settings)
+    joint_body_claims(rows,decisions,cue_choices,settings,reflection_threshold=max(
+        config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold']))
     borderline = [r for r in borderline if decisions[r['id']]['status']=='withheld']
     groups=[];weak=[]
     for row in remaining:
