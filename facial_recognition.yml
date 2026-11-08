@@ -470,6 +470,8 @@ execution:
     rfdetr_precision: fp32
     # RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body
     # evidence. Validate detection quality before enabling.
+    vitpose_device_decode: false
+    # Enable compact CUDA DARK decoding for ViTPose; ambiguous heatmaps use the reference processor.
     vitpose_precision: fp32
     # ViTPose++ forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decoding uses float32. Changing
     # this invalidates body evidence; validate keypoint quality.

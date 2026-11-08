@@ -25,6 +25,7 @@ def assets(config):
 def load(config, device):
     from .inference_precision import validate
     precision=config.data['execution'].get('vitpose_precision','fp32')
+    device_decode = config.data['execution'].get('vitpose_device_decode',False)
     validate(device,precision)
     # Transformers imports these conditionally, then uses them unconditionally
     # during affine crops/heatmap decoding. Check before downloading any assets.
@@ -54,13 +55,14 @@ def load(config, device):
     model = model.float().to(device).eval()
     settings = config.data['sapiensid']['pose']
     return ViTPoseLarge(model, processor, device=device,
-                        batch_size=settings.get('vitpose_batch_size', settings['batch_size']),precision=precision)
+                        batch_size=settings.get('vitpose_batch_size', settings['batch_size']),precision=precision,device_decode=device_decode)
 
 
 class ViTPoseLarge:
     """Preserve box order and image coordinates; bound work by people per batch."""
 
-    def __init__(self, model, processor, *, device, batch_size,precision='fp32'):
+    def __init__(self, model, processor, *, device, batch_size,precision='fp32',device_decode=False):
+        self.device_decode = device_decode and str(device).split(':')[0] == 'cuda'
         from .inference_precision import validate
         validate(device,precision)
         self.precision=precision
@@ -121,6 +123,10 @@ class ViTPoseLarge:
             from .inference_precision import autocast
             with autocast(self.device,self.precision):outputs=self.model(**inputs,dataset_index=dataset_index)
             if self.precision!='fp32':outputs=SimpleNamespace(heatmaps=outputs.heatmaps.float())
+            if self.device_decode:
+                from .vitpose_decode import compact
+                return [(batch,compact(outputs.heatmaps,boxes,self.processor,
+                                       lambda:self._decode(outputs,boxes,len(batch))),boxes)]
             if decoder is None:return [(batch,outputs,boxes)]
             return [(batch,self.transfers.read(outputs.heatmaps),boxes)]
         def decode(readback,boxes,count):
@@ -136,7 +142,8 @@ class ViTPoseLarge:
                         preparing=self._preparer.submit(prepare,following)
                     records=self.batches.run(batch,lambda chunk:infer(chunk,prepared if len(chunk)==len(batch) else None),self.device)
                     for chunk,outputs,boxes in records:
-                        if decoder is None:apply(chunk,self._decode(outputs,boxes,len(chunk)))
+                        if self.device_decode:apply(chunk,outputs)
+                        elif decoder is None:apply(chunk,self._decode(outputs,boxes,len(chunk)))
                         else:
                             if pending is not None:
                                 previous,future=pending;apply(previous,future.result())

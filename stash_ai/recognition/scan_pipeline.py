@@ -394,8 +394,12 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
     retained=0
     detected=None
     detect_many=getattr(backend,'detect_faces_many',None)
-    if len(batch)>1 and config.data['execution']['detector_batch_size']>1 and callable(detect_many):
-        detected=[];maximum=config.data['execution']['detector_batch_size']
+    maximum = config.data['execution']['detector_batch_size']
+    detector = getattr(backend, 'ort_detector', None)
+    if detector is not None and getattr(detector, 'dynamic_batch', None) is False:
+        maximum = max(maximum,min(4,len(batch)))
+    if len(batch)>1 and maximum>1 and callable(detect_many):
+        detected=[]
         for start in range(0,len(batch),maximum):
             images=[image for _,_,image in batch[start:start+maximum]]
             result=detect_many(images)

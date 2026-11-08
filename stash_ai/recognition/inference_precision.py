@@ -8,6 +8,8 @@ def contract(config):
                         ('vitpose_precision',pose.get('backend')=='vitpose_plus_large')):
         value=settings.get(name,'fp32')
         if active and value!='fp32':result[name]=value
+    if pose.get('backend')=='vitpose_plus_large' and settings.get('vitpose_device_decode'):
+        result['vitpose_device_decode'] = 'compact-dark-v1'
     return {'inference_precision':result} if result else {}
 
 
