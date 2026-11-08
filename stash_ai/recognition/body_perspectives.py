@@ -85,10 +85,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         signature = np.frombuffer(bytes.fromhex(q['frame_signature']), dtype=np.uint8).astype(float)
         geometry[row['id']] = (q, box, signature)
         if person.get('keypoints'):
-            pts = person['keypoints']
-            vis = person.get('keypoint_visibility')
-            indices = [i for i in (5,6,11,12) if min(pts[i])>=0 and (vis is None or vis[i]>=.5)]
-            torsos[row['id']] = {i:np.asarray(pts[i]) for i in indices}
+            from .track_geometry import torso_points
+            torsos[row['id']] = torso_points(person)
         by_cue[row['cue']].append(row)
     if not geometry:
         return
@@ -141,28 +139,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if colour>30:
                 return fail(1,'cut_colour',colour,30)
             return fail(1,'uncertain_shot',difference,8 if skipped else 20)
-        wa, ha = ba[2]-ba[0], ba[3]-ba[1]
-        wb, hb = bb[2]-bb[0], bb[3]-bb[1]
-        if min(wa,ha,wb,hb)<=0:
-            return fail(2,'empty_box',min(wa,ha,wb,hb),0)
-        scale = max(wa/wb,wb/wa,ha/hb,hb/ha)
-        displacement = math.hypot((ba[0]+ba[2]-bb[0]-bb[2])/2,
-                                  (ba[1]+ba[3]-bb[1]-bb[3])/2)
-        relative = displacement/min(math.hypot(wa,ha), math.hypot(wb,hb))
-        if scale>1.5 or relative>.30:
-            ta,tb = torsos.get(a['id'],{}),torsos.get(b['id'],{})
-            common = sorted(ta.keys() & tb.keys())
-            if len(common)>=3:
-                origin,destination = (np.stack([torso[i] for i in common]) for torso in (ta,tb))
-                spans = [np.linalg.norm(points.max(axis=0)-points.min(axis=0)) for points in (origin,destination)]
-                stable = (min(spans)>=6 and max(spans)<=1.35*min(spans) and
-                          np.linalg.norm(destination-origin,axis=1).max() <= min(spans)*min(.35,.15+.025*gap))
-            else:
-                stable = False
-            if not stable:
-                if scale>1.5:
-                    return fail(3,'box_scale',scale,1.5)
-                return fail(4,'displacement',relative,.30)
+        from .track_geometry import rejection
+        blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}), gap)
+        if blocked:
+            return fail(*blocked)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
         if diagnose:
             appearance_edges[a['id'],b['id']] = similarity

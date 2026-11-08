@@ -24,13 +24,15 @@ def route_family(item):
     return 'admission' if route == 'admission' else 'hybrid'
 
 
-def route_order(candidates):
+def route_order(candidates, *, prefer_body=False):
     """Prefer measured face routes, retaining bounded space for every fallback."""
     buckets = defaultdict(list)
     for item in candidates:
         buckets[route_family(item)].append(item)
+    order = ('body','hybrid','face','admission','uncertain_face') if prefer_body else (
+        'face','face','hybrid','uncertain_face','body','admission')
     while any(buckets.values()):
-        for family in ('face', 'face', 'hybrid', 'uncertain_face', 'body', 'admission'):
+        for family in order:
             if buckets[family]:
                 yield buckets[family].pop(0)
 
@@ -78,6 +80,11 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
         for oid in addresses:by_observation[oid] = index
         for destination in destinations:owners[destination].add(index)
 
+    # A measured temporal break on the target body is more actionable than
+    # relaxing face thresholds elsewhere in the same merge set.
+    body_first = {by_observation[r['observation']] for r in feedback.get('provenance',{}).get('blocker_trace',())
+                  if r.get('observation') in by_observation and r.get('reason') in
+                  ('track_body_similarity','track_no_face_root','track_no_independent_view')}
     def pair_set(a, b):
         indices = owners.get(a, set()) & owners.get(b, set())
         return next(iter(indices)) if len(indices) == 1 and a != b else None
@@ -132,7 +139,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
         group['candidates'].sort(key=lambda p: (p['route']=='admission', -p['gain'],
             magnitude([dict(parameter=k,current=parameter(config.data,k),proposed=v) for k,v in p['patch'].items()]),
             len(p['patch']), digest(p['patch'])))
-        group['candidates'] = list(route_order(group['candidates']))[:16]
+        group['candidates'] = list(route_order(group['candidates'],prefer_body=index in body_first))[:16]
 
     for index, patch in quality.items():
         add(index, 'admission', patch, observations=quality_ids[index], blockers=patch,
@@ -296,7 +303,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
                     if len(evidence)<8:
                         evidence.append(dict(scene=row.get('scene'),cue=row.get('observation_cue'),**interval,
                                              separated=cutoff-rival>=margin))
-                if rival is not None and cutoff-rival < margin:
+                if own_floor < 0 or rival is not None and cutoff-rival < margin:
                     groups[index]['observed_blockers']['track_partner_scores_overlap'] += 1
                 else:
                     add(index,'local_body_track',{key:cutoff}, observations=[oid,peer],

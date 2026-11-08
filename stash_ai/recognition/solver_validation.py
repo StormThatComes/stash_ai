@@ -234,11 +234,18 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             for name, sequence in [('face_first',order),('rear_first',list(reversed(order)))]:
                 if progress:
                     progress('Holdout incremental '+name)
-                staged = evaluate(winner,labels,**dict(options,batch_sizes=(1,),ordered_scenes=sequence))
-                decisions = staged['trials']['baseline/batch-1']['decisions']
-                incremental[name] = dict(order=sequence, **_partition_delta(predicted,decisions,labels),
-                    coverage_changes=sum((predicted[k]['accepted_identity'] is None)!=(decisions[k]['accepted_identity'] is None)
-                                         for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
+                staged = evaluate(settings,labels,variants={'winner':winner},
+                                  **dict(options,batch_sizes=(1,),ordered_scenes=sequence))
+                by_variant = {}
+                for variant in ('baseline','winner'):
+                    joint = full['trials'][variant+'/joint']['decisions']
+                    replay = staged['trials'][variant+'/batch-1']['decisions']
+                    by_variant[variant] = dict(**_partition_delta(joint,replay,labels),
+                        coverage_changes=sum((joint[k]['accepted_identity'] is None) !=
+                                             (replay[k]['accepted_identity'] is None) for k in labels))
+                decisions = staged['trials']['winner/batch-1']['decisions']
+                incremental[name] = dict(order=sequence, baseline=by_variant['baseline'], **by_variant['winner'],
+                    metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
         if not windows:
             faceless = {r[0] for r in source.execute(
                 "SELECT b.id FROM body_observations b LEFT JOIN observations o ON o.id=b.face "
@@ -288,15 +295,15 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(verdict=holdout_verdict(metrics), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
+    return dict(verdict=holdout_verdict(metrics, contamination, incremental), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
 
-def holdout_verdict(metrics):
+def holdout_verdict(metrics, contamination=None, incremental=None):
     base, final = (metrics[name+'/joint'] for name in ('baseline','winner'))
     results = {}
     for label,category,field,total,higher in (
-            ('own_turns','sequences','own_id_turns','anchored_turns',True),
+            ('own_turns','sequences','own_id_turns','turns',True),
             ('correct_contacts','sequences','correct','crossings',True),
             ('partner_swaps','sequences','partner','crossings',False),
             ('false_joins','partners','false_joins','partner_pairs',False),
@@ -305,11 +312,36 @@ def holdout_verdict(metrics):
         for trial in (base, final):
             group = trial[category]
             counts = group.get('contact_interior',{}) if field in ('correct','partner') else group
-            values.append((counts[field],group[total]))
+            values.append((counts[field],group.get(total,group.get('anchored_turns',0))))
         (a,n),(b,m) = values
+        if label=='own_turns':
+            n=m=max(n,m)
         state = 'no_coverage' if not n or not m else 'unchanged' if a*m==b*n else (
             'improved' if (b*n>a*m)==higher else 'regressed')
         results[label] = dict(baseline=a,winner=b,baseline_total=n,winner_total=m,status=state)
+    def risk(label,before,after,covered):
+        status = ('no_coverage' if not covered else 'regressed' if after>before else
+                  'improved' if after<before else 'unchanged')
+        results[label] = dict(baseline=before,winner=after,status=status)
+    sequences = [trial['sequences'] for trial in (base,final)]
+    first,last = (set(map(tuple,row.get('rooted_turns',()))) for row in sequences)
+    risk('lost_turn_references',0,len(first-last),bool(first))
+    episodes = (contamination or {}).get('episodes',[])
+    for field in ('later_cues','other_scenes'):
+        for i,item in enumerate(episodes):
+            a,b = (item[name][field] for name in ('baseline','winner'))
+            if field=='other_scenes':
+                a,b = set(a),set(b)
+                risk(f'contact_{i}_new_foreign_scenes',0,len(b-a),True)
+            else:
+                risk(f'contact_{i}_{field}',a,b,True)
+    if not episodes:
+        risk('contact_stress',0,0,False)
+    for order,record in (incremental or {}).items():
+        for field in ('lost_pairs','joined_pairs','coverage_changes'):
+            risk(order+'_'+field,record['baseline'][field],record[field],True)
+    if not incremental:
+        risk('import_order',0,0,False)
     states = {r['status'] for r in results.values()}
     status = next(s for s in ('regressed','improved','unchanged','no_coverage') if s in states)
     return dict(status=status,measures=results)
