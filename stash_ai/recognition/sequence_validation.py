@@ -60,6 +60,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     def tagged(rows, name):
         return any(name in slices for _,slices in rows)
 
+    middle_outcomes = dict(correct=0, withheld=0, partner=0, foreign=0, unknown_reference=0)
     crossings = correct_pairs = 0
     endpoint_returns = foreign_ids = abstentions = 0
     for scene,people in by_scene.items():
@@ -106,6 +107,13 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                     middle = [owner for cue in window[1:-1] for owner,_ in people[person][cue]]
                     wrong |= own is not None and any(owner is not None and owner != own for owner in middle)
                     withheld |= None in middle
+                if None in expected or len(set(expected)) != 2:
+                    outcome = 'unknown_reference'
+                else:
+                    swapped = any(owner == expected[1-i] for i,p in enumerate((a,b))
+                                  for cue in window[1:-1] for owner,_ in people[p][cue])
+                    outcome = 'partner' if swapped else 'foreign' if wrong else 'withheld' if withheld else 'correct'
+                middle_outcomes[outcome] += 1
                 foreign_ids += int(wrong)
                 abstentions += int(withheld)
                 recovered = recovered and not wrong
@@ -119,7 +127,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     return dict(turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),
-                crossings=crossings,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,
+                crossings=crossings,contact_interior=middle_outcomes,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,
                 foreign_id_crossings=foreign_ids,abstained_crossings=abstentions,
                 unscored_episodes=missing_boundaries,
                 anchored_turns=sum(c['anchored_turns'] for c in counts.values()),

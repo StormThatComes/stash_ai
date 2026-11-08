@@ -597,3 +597,11 @@ When a visible labelled pair has two distinct retained bodies and a usable
 face association, the holdout also swaps their face associations in one private
 replay. It rebuilds the hybrid projections and reports changed memberships in
 later cues and other selected scenes. The source database is opened read-only.
+
+Contact interior outcomes distinguish correct, withheld, partner, other foreign and
+unscorable references. Endpoint recovery remains a separate measure. A labelled strict face
+may set `"reference": true` to score a split owner relative to a designated reference.
+The independent verdict records coverage and baseline/finalist counts in JSON and exported YAML.
+Up to three distinct contact episodes are perturbed separately in both private replays.
+Threshold proposals use a bounded two-person path when both goal owners are labelled
+in consecutive cues of the same measured shot. The proposal is validated by the usual full replay.

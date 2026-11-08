@@ -107,6 +107,13 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
     if yaml_output and recommendation:
         serialized = configuration_document(config, recommendation, result['simulation'].get('input_selection', {}),
                                             mode=yaml_mode)
+        verdict = result.get('holdout_validation',{}).get('verdict')
+        if verdict:
+            lines = [f"# Independent holdout: {verdict['status']}"]
+            for name, measure in verdict['measures'].items():
+                lines.append(f"# {name}: {measure['baseline']}/{measure['baseline_total']} -> "
+                             f"{measure['winner']}/{measure['winner_total']} ({measure['status']})")
+            serialized = '\n'.join(lines) + '\n' + serialized
         destination = yaml_output.expanduser().resolve()
         if yaml_owner is not None:
             yaml_owner.write(serialized)

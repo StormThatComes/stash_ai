@@ -135,6 +135,8 @@ def read_manifest(manifest_path):
         if (not isinstance(row,dict) or not isinstance(row.get('truth'),str) or not row['truth'].strip()
                 or not isinstance(row.get('slices'),list) or any(s not in ('back','entangled') for s in row['slices'])):
             raise ValueError('Each validation observation needs truth and a list of back/entangled slices.')
+        if type(row.get('reference', False)) is not bool:
+            raise ValueError('Validation reference must be a boolean.')
         labels[oid] = row['truth']
     database = document.get('database')
     if database is not None and (not isinstance(database,str) or not database):
@@ -184,7 +186,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         from .contact_holdout import physical_inputs, visible_scores, spread
         timing = {}
         locations = _locations(source,scans,labels,timing=timing)
-        groups,swap_case = physical_inputs(source,settings,scans,visible,labels,locations)
+        groups,cases = physical_inputs(source,settings,scans,visible,labels,locations)
         from .body_identity import enabled as body_enabled
         replay_labels = dict(labels)
         if body_enabled(settings):
@@ -193,18 +195,31 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                     replay_labels.setdefault(oid,truth)
         else:
             groups = {k:[oid for oid in ids if oid in labels] for k,ids in groups.items()}
-            swap_case = None
+            cases = []
         full = evaluate(settings,replay_labels,variants={'winner':winner},variant_started=announce,**options)
         predicted = full['trials']['winner/joint']['decisions']
+        references = [oid for oid,row in samples.items() if row.get('reference')]
         metrics = {name:dict(_metrics(labels,samples,locations,trial['decisions'],partner_sets=triples,timing=timing),
-                             visible=visible_scores(groups,trial['decisions'],labels)) for name,trial in full['trials'].items()}
+                             visible=visible_scores(groups,trial['decisions'],labels,references)) for name,trial in full['trials'].items()}
         contamination = dict(status='no_labelled_contact_pair')
-        if swap_case:
-            trial = evaluate(winner,replay_labels,swapped_bodies=swap_case,**options)['trials']['baseline/joint']['decisions']
-            scene = next(s['scene'] for s in scans if s['id']==swap_case[0])
+        if cases:
+            from .contact_holdout import stress_cases
             all_locations = _locations(source,scans,replay_labels)
-            contamination = dict(status='tested',scene=scene,cue=swap_case[1],bodies=list(swap_case[2:]),
-                visible=visible_scores(groups,trial,labels),**spread(predicted,trial,all_locations,scene,swap_case[1],replay_labels))
+            episodes = []
+            for kind,case in stress_cases(cases,visible,scans,samples,locations):
+                scene = next(s['scene'] for s in scans if s['id']==case[0])
+                stressed = evaluate(settings,replay_labels,variants={'winner':winner},swapped_bodies=case,**options)
+                item = dict(kind=kind,scene=scene,cue=case[1],bodies=list(case[2:]))
+                for name in ('baseline','winner'):
+                    key = name+'/joint'
+                    decisions = stressed['trials'][key]['decisions']
+                    before = full['trials'][key]['decisions']
+                    item[name] = dict(visible=visible_scores(groups,decisions,labels,references),
+                        **spread(before,decisions,all_locations,scene,case[1],replay_labels))
+                episodes.append(item)
+            first = episodes[0]
+            contamination = dict(status='tested',episodes=episodes,scene=first['scene'],cue=first['cue'],
+                                 bodies=first['bodies'],**first['winner'])
         incremental = {}
         if len(scans)>1:
             # Front-first is based on usable measured face inputs, including
@@ -273,5 +288,28 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
+    return dict(verdict=holdout_verdict(metrics), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
+
+
+def holdout_verdict(metrics):
+    base, final = (metrics[name+'/joint'] for name in ('baseline','winner'))
+    results = {}
+    for label,category,field,total,higher in (
+            ('own_turns','sequences','own_id_turns','anchored_turns',True),
+            ('correct_contacts','sequences','correct','crossings',True),
+            ('partner_swaps','sequences','partner','crossings',False),
+            ('false_joins','partners','false_joins','partner_pairs',False),
+            ('split_references','visible','split_reference','total',False)):
+        values = []
+        for trial in (base, final):
+            group = trial[category]
+            counts = group.get('contact_interior',{}) if field in ('correct','partner') else group
+            values.append((counts[field],group[total]))
+        (a,n),(b,m) = values
+        state = 'no_coverage' if not n or not m else 'unchanged' if a*m==b*n else (
+            'improved' if (b*n>a*m)==higher else 'regressed')
+        results[label] = dict(baseline=a,winner=b,baseline_total=n,winner_total=m,status=state)
+    states = {r['status'] for r in results.values()}
+    status = next(s for s in ('regressed','improved','unchanged','no_coverage') if s in states)
+    return dict(status=status,measures=results)

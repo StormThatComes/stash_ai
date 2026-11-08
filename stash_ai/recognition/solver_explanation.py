@@ -113,6 +113,10 @@ def holdout_summary(report):
     fault = report.get('association_stress',{})
     if fault.get('status')=='tested':
         parts.append(f"association swap: {fault['later_cues']} later cues changed, {len(fault['other_scenes'])} other scenes")
+    if 'verdict' in report:
+        parts.append('independent holdout '+report['verdict']['status'])
+    if 'contact_interior' in after.get('sequences',{}):
+        parts.append('contact interior '+str(after['sequences']['contact_interior']))
     stress = report['omissions']
     omissions = ', '.join(f"{w['scene']}:{w['first_cue']}-{w['last_cue']} lost={w['lost_pairs']}"
                           f" joined={w['joined_pairs']} {w.get('mode','rejected')}" for w in stress) or 'no series identified'
