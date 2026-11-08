@@ -69,3 +69,22 @@ def test_observed_body_scenes_share_queue_and_keep_ordered_hints(tmp_path, monke
                     assert pool.peak_bytes <= pool.limit
                 return decisions, observer.visits, observer.local_body, observer.local_budget.report()
         assert measure(1) == measure(16)
+
+
+def test_spawned_body_scene_returns_the_same_ids_and_decisions(tmp_path, monkeypatch):
+    from stash_ai.recognition.body_scene_jobs import planned
+    from stash_ai.recognition.database import FaceDatabase
+    from tests.test_recognition_body_global import configured as body_config, scene
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus', lambda: 4)
+    config = body_config(tmp_path)
+    with FaceDatabase(config.database) as state:
+        selected = [scene(state.connection, config, str(i))[0] for i in range(1, 5)]
+        def measure(workers):
+            config.data['execution'].update(rebuild_workers=workers, rebuild_cohort_backend='processes')
+            with compute_scope(config) as pool:
+                results = [(record['scene'], [r['id'] for r in rows], decisions)
+                           for record, rows, decisions in planned(state.connection, selected, config, ids_only=True)]
+                if workers > 1:
+                    assert pool.process_blocks == len(selected)
+                return results
+        assert measure(1) == measure(4)
