@@ -15,6 +15,10 @@ _reuse = None
 
 def initialize(event, updates=None, context=None, images=None, slots=None):
     global _cancel, _updates, _context, _reuse
+    import os
+    if root := os.environ.get('RECOGNITION_WORK_ROOT'):
+        from .work_locations import set_sqlite_work
+        set_sqlite_work(root)
     if _reuse is not None:_reuse.close()
     from .solver_worker_reuse import Reuse
     from multiprocessing.util import Finalize

@@ -1,7 +1,8 @@
 """Filesystem locations owned by one recognition invocation and its children."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import os
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 from threading import RLock
@@ -38,6 +39,18 @@ def validate_outputs(config, paths):
             raise ValueError(f'Solver output {path} is outside configured storage directories: {sorted(map(str, roots))}')
 
 
+def set_sqlite_work(path):
+    """Set the process VFS directory before any inference/worker threads start."""
+    with closing(sqlite3.connect(':memory:')) as db:
+        previous = db.execute('PRAGMA temp_store_directory').fetchone()
+        quoted = str(path).replace("'", "''") if path else ''
+        db.execute(f"PRAGMA temp_store_directory='{quoted}'")
+        value = db.execute('PRAGMA temp_store_directory').fetchone()
+        if path and (not value or value[0] != str(path)):
+            raise RuntimeError(f'SQLite cannot use configured temporary storage at {path}.')
+        return previous[0] if previous else None
+
+
 @contextmanager
 def invocation(config):
     """Set native temp/cache paths before SQLite and model runtimes start.
@@ -63,8 +76,12 @@ def invocation(config):
             os.environ.update(paths)
             tempfile.tempdir = str(work)
             sys.dont_write_bytecode = True
-            with temporary(cache):
-                yield
+            prior_sqlite = set_sqlite_work(work)
+            try:
+                with temporary(cache):
+                    yield
+            finally:
+                set_sqlite_work(prior_sqlite)
         finally:
             tempfile.tempdir, sys.dont_write_bytecode = previous_temp, previous_bytecode
             for name, value in previous.items():
