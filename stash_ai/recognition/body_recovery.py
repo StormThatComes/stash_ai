@@ -35,7 +35,7 @@ def recover(database,selected,config):
         banks={};confirmed=set();queries=[]
         for row in rows:
             proof=decisions[row['id']]
-            if row['person'] is not None and anchor(row,settings) and (
+            if row['person'] is not None and not proof.get('view_exclusion') and anchor(row,settings) and (
                     row['role']=='anchor' or proof.get('reason')=='body_scene_core'):
                 banks.setdefault(row['person'],[]).append(row)
                 if row['status']=='accepted':confirmed.add(row['person'])

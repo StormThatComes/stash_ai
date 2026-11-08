@@ -305,7 +305,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 rivals = [(scores.face_similarity(witness['_vector'],r['_vector']), other,r['id'])
                           for other,bank in seeds.items() if other!=key[0] for r in bank
                           if r['id'] in geometry and shot_ids[r['cue']]!=shot_ids[witness['cue']]]
-                if peers and rivals:
+                if settings.get('assess_witnesses',True) and peers and rivals:
                     own = min(scores.face_similarity(witness['_vector'],r['_vector']) for r in peers)
                     rival,other,rid = max(rivals)
                     if rival >= settings['match_threshold'] and own-rival < settings['ambiguity_margin']:

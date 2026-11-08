@@ -270,8 +270,10 @@ def scene_plan(db,scan,config):
     return _plan(db,config,*_load_scene(db,scan,config))
 
 
-def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *, capture_hints=None):
+def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *, capture_hints=None, view_exclusions=None):
     settings=config.data['sapiensid']['identities']
+    if view_exclusions is not None:
+        settings = dict(settings,assess_witnesses=False)
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
     seeds={};decisions={}
@@ -391,6 +393,23 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *
         if q.get('query_only'):
             decisions[row['id']]['query_only_reason'] = q.get('query_only_reason','uncertain_body_geometry')
             decisions[row['id']]['retry_when'] = 'confirmed_core_changes'
+    if view_exclusions is None:
+        excluded = {oid:d['view_exclusion'] for oid,d in decisions.items() if d.get('view_exclusion')}
+        if excluded:
+            # Rebuild once from raw measurements. Removing an anchor can also
+            # withdraw a core and the auxiliary memberships it supported.
+            retry_rows = []
+            for row in rows:
+                if row['id'] in excluded:
+                    meta = json.loads(row['quality'])
+                    meta['quality'].update(query_only=True,query_only_reason='held_out_rival')
+                    row = dict(row,quality=encoded(meta))
+                retry_rows.append(row)
+            return _plan(db,config,record,retry_rows,roots,origins_by_key,owners,frozen_faces,
+                         capture_hints=capture_hints,view_exclusions=excluded)
+    else:
+        for oid,proof in view_exclusions.items():
+            decisions[oid]['view_exclusion'] = proof
     from .local_body_hints import observe
     if capture_hints is None:
         observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
