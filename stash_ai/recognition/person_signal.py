@@ -86,6 +86,8 @@ def validate(settings):
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
     if type(identity.get('tracklet_matching',False)) is not bool:
         raise ValueError('sapiensid.identities.tracklet_matching must be boolean.')
+    if identity.get('scene_bonus_mode','fixed') not in ('fixed','evidence'):
+        raise ValueError('sapiensid.identities.scene_bonus_mode must be fixed or evidence.')
     bonus = identity.get('scene_match_bonus')
     if bonus is not None:
         _number(bonus,'sapiensid.identities.scene_match_bonus',0,.1)

@@ -140,6 +140,7 @@ HELP = {
     'matching.body.identities': 'Scene-local body identities and attachments.',
     'matching.body.identities.enabled': 'Create body identities within scenes. Requires body.collection.enabled.',
     'matching.body.identities.match_threshold': 'Minimum mean body similarity for a scene-local match. Range: 0..1.',
+    'matching.body.identities.scene_bonus_mode': 'Use fixed or evidence-weighted scene support. Set scene_match_bonus to 0 for the no-context control.',
     'matching.body.identities.scene_match_bonus': 'Bonus for a confirmed body owner in the same scene. Null inherits matching.face.same_scene.match_bonus. Range: 0..0.1.',
     'matching.body.identities.tracklet_matching': 'Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained VTT evidence.',
     'matching.body.identities.track_similarity_threshold': 'Minimum similarity across consecutive body observations. Null inherits cohesion_threshold. Range: 0..1.',

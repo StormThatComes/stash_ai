@@ -337,7 +337,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             decision['shot_context'] = dict(owner=hint['owner'],root=origin['id'],
                                             bonus=settings['scene_context_bonus'])
     if settings.get('scene_context_bonus',0.)>0:
-        record_scene_roster(by_cue,root,shot_ids,partial,decisions,settings.get('roster_support',3))
+        record_scene_roster(by_cue,root,shot_ids,partial,decisions,settings.get('roster_support',3),
+                            weighted=settings.get('scene_bonus_mode')=='evidence')
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -449,7 +450,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 continue
             comparisons = [scores.face_similarity(row['_vector'], w['_vector']) for w, _ in external]
             mean, low = sum(comparisons)/len(comparisons), min(comparisons)
-            if mean < settings['match_threshold'] or low < settings['cohesion_threshold']:
+            bonus = owner_bonus(decision,owner,settings.get('scene_context_bonus',0.))
+            if mean < settings['match_threshold']-bonus or low < settings['cohesion_threshold']:
                 continue
             # Every foreign owner including provisional scene groups competes.
             competing = [(scores.compare([row],others)[0], p) for p,others in owner_rows.items()
@@ -520,7 +522,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     for oid,owner,angle,proof,score in candidates:
         if oid in retry or (decisions[oid]['person'] in protected and oid not in split) or claims[owner,lookup[oid]['cue']] != 1:
             continue
-        rooted = {k:v for k,v in decisions[oid].items() if k in ('rooted_view','rooted_track','view_exclusion','orientation_measurement')}
+        previous = decisions[oid]
+        rooted = {k:v for k,v in previous.items() if k in ('rooted_view','rooted_track','view_exclusion','orientation_measurement')}
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',
                               reason='face_rooted_body_view', perspective=angle,
                               source_tracks=proof, score=score)
@@ -528,10 +531,14 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
         if angle != 'crossing':
             decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
+        if angle!='crossing' and score<settings['match_threshold']:
+            decisions[oid]['roster_context'] = dict(owner=owner,
+                bonus=owner_bonus(previous,owner,settings.get('scene_context_bonus',0.)),
+                witnesses=previous.get('roster_witnesses',{}).get(owner,[]))
         decisions[oid].update(rooted)
 
 
-def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum):
+def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False):
     from .independent_evidence import body_vote, representatives
     sources = defaultdict(list)
     queries = defaultdict(list)
@@ -541,7 +548,7 @@ def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum):
             if owner is not None:
                 sources[owner].append(body_vote(row))
             elif not row.get('face_person') and cue not in partial:
-                queries[shots[cue]].append(row['id'])
+                queries[shots[cue]].append((cue,row['id']))
     for owner,rows in sorted(sources.items()):
         supported = representatives(rows)[:minimum]
         if len(supported)<minimum:
@@ -550,11 +557,35 @@ def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum):
         default_ids = [r['id'] for r in supported]
         for shot,ids in queries.items():
             witnesses = default_ids
-            if shot in origins:
-                independent = representatives(r for r in rows if shots[r['cue']]!=shot)[:minimum]
+            independent = None
+            if weighted or shot in origins:
+                independent = representatives(r for r in rows if shots[r['cue']]!=shot)
                 if len(independent)<minimum:
                     continue
-                witnesses = [r['id'] for r in independent]
-            for oid in ids:
+                witnesses = [r['id'] for r in independent[:minimum]]
+            if weighted:
+                from bisect import bisect_left
+                references = sorted(independent,key=lambda r:r['cue'])
+                cues = [r['cue'] for r in references]
+                diverse = len({shots[c] for c in cues})>1
+            for cue,oid in ids:
+                proof_ids = witnesses
+                if weighted:
+                    pos = bisect_left(cues,cue)
+                    nearby = references[max(0,pos-1):pos+1]
+                    distance = min(abs(cue-r['cue']) for r in nearby)
+                    # Two-sided evidence in different shots reaches the cap.
+                    factor = (.5 + .25*diverse + .25*(0<pos<len(cues))) / (1+distance/30)
+                    decisions[oid].setdefault('roster_weights',{})[owner] = factor
+                    proof_ids = list(dict.fromkeys([*witnesses,*(r['id'] for r in nearby)]))
                 decisions[oid].setdefault('scene_roster',[]).append(owner)
-                decisions[oid].setdefault('roster_witnesses',{})[owner] = witnesses
+                decisions[oid].setdefault('roster_witnesses',{})[owner] = proof_ids
+
+
+def owner_bonus(decision,owner,maximum):
+    context = decision.get('shot_context',{})
+    if owner and context.get('owner')==owner and decision.get('open_face_root',{}).get('owner')==owner:
+        return maximum
+    if owner not in decision.get('scene_roster',()):
+        return 0.
+    return maximum*decision.get('roster_weights',{}).get(owner,1.)

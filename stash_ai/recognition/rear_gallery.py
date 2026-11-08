@@ -135,10 +135,11 @@ def revision(gallery):
     return stamp.hexdigest()
 
 
-def winner(ranked, settings, *, contextual=(), bonus=0.):
+def winner(ranked, settings, *, contextual=(), bonus=0., owner_bonuses=None):
     for candidate in ranked:
         mean, minimum, owner = candidate[:3]
-        threshold = settings['match_threshold'] - (bonus if owner in contextual else 0.)
+        adjustment = owner_bonuses.get(owner,0.) if owner_bonuses is not None else (bonus if owner in contextual else 0.)
+        threshold = settings['match_threshold']-adjustment
         if mean < threshold or minimum < settings['cohesion_threshold']:
             continue
         rival = max((max(r[0],r[5]) for r in ranked if r[2]!=owner), default=-1.)
