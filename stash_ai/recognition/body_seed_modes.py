@@ -12,9 +12,16 @@ class FrozenSeeds:
             for row in rows:
                 if len(modes)==1 and scores.certifies(row,modes[0],threshold):
                     modes[0].append(row);continue
-                compatible=[m for m in modes if scores.compare([row],m)[1]>=threshold]
-                if len(compatible)==1:compatible[0].append(row)
-                else:modes.append([row])
+                compatible = []
+                for index, mode in enumerate(modes):
+                    mean, minimum = scores.compare([row],mode)
+                    if minimum >= threshold:
+                        compatible.append((minimum,mean,len(mode),-index))
+                if compatible:
+                    _,_,_,negative_index = max(compatible)
+                    modes[-negative_index].append(row)
+                else:
+                    modes.append([row])
             self.modes[person]=modes
             from .body_identity import independent
             for mode in modes:
