@@ -77,6 +77,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     if track_threshold is None:
         track_threshold = settings['cohesion_threshold']
     outgoing_failures, incoming_failures = {}, {}
+    appearance_edges = {}
     def transition(a, b, *, diagnose=False):
         def fail(order, reason, measured, limit):
             if diagnose:
@@ -125,6 +126,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if relative>.30:
             return fail(4,'displacement',relative,.30)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
+        if diagnose:
+            appearance_edges[a['id'],b['id']] = similarity
         return similarity if similarity >= track_threshold else fail(
             5,'body_similarity',similarity,track_threshold)
 
@@ -140,6 +143,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         for row in left:
             stops[row['id']] = dict(reason=default_stop, cue=target)
 
+        appearance_edges.clear()
         forward, backward = defaultdict(list), defaultdict(list)
         for a in left:
             for b in right:
@@ -147,6 +151,19 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 if score is not None:
                     forward[a['id']].append((score,b['id']))
                     backward[b['id']].append((score,a['id']))
+        # Only alternatives passing the same time, cut and geometry gates
+        # bound a threshold proposal; keep one competitor per failed endpoint.
+        for members,failures,forward_order in ((left,outgoing_failures,True),(right,incoming_failures,False)):
+            for member in members:
+                failure = failures.get(member['id'])
+                if not failure or failure[1]['reason']!='body_similarity':
+                    continue
+                detail = failure[1]
+                rivals = [(value, b if forward_order else a) for (a,b),value in appearance_edges.items()
+                          if (a if forward_order else b)==member['id'] and
+                             (b if forward_order else a)!=detail['peer']]
+                if rivals:
+                    detail['partner_score'],detail['partner_observation'] = max(rivals)
         for a in left:
             edges = sorted(forward[a['id']], reverse=True)
             if not edges:

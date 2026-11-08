@@ -4,13 +4,20 @@ from itertools import combinations
 
 
 def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timing=None):
+    from .reference_roles import STRICT_REASONS
+    face_roots = defaultdict(set)
     by_scene = defaultdict(lambda: defaultdict(dict))
     for oid,truth in labels.items():
         if oid in excluded:
             continue
         scene,cue = locations[oid]
         rows = by_scene[scene][truth].setdefault(cue,[])
-        rows.append((decisions[oid]['accepted_identity'], samples[oid]['slices']))
+        decision = decisions[oid]
+        owner = decision['accepted_identity']
+        if (owner and decision.get('evidence_kind') != 'person' and
+                (decision.get('evidence') or {}).get('reason') in STRICT_REASONS):
+            face_roots[scene,truth].add((cue,owner))
+        rows.append((owner, samples[oid]['slices']))
     counts = defaultdict(lambda: defaultdict(int))
 
     missing_boundaries = 0
@@ -61,6 +68,14 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 ids = [identity(track[c]) for c in window]
                 counts[person]['turns'] += 1
                 counts[person]['one_id_turns'] += int(None not in ids and len(set(ids))==1)
+                roots = {owner for cue,owner in face_roots[scene,person]
+                         if cue<=window[0] or cue>=window[-1]}
+                if len(roots)==1:
+                    counts[person]['anchored_turns'] += 1
+                    expected = next(iter(roots))
+                    foreign = any(owner==expected for partner,other in people.items() if partner!=person
+                                  for cue in window for owner,_ in other.get(cue,()))
+                    counts[person]['own_id_turns'] += int(all(p==expected for p in ids) and not foreign)
                 assigned = [p for p in ids if p is not None]
                 counts[person]['id_switches'] += sum(a!=b for a,b in zip(assigned,assigned[1:]))
         # Form pairs only in annotated entangled cues (usually two people).
@@ -101,6 +116,9 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 crossings=crossings,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,
                 foreign_id_crossings=foreign_ids,abstained_crossings=abstentions,
                 unscored_episodes=missing_boundaries,
+                anchored_turns=sum(c['anchored_turns'] for c in counts.values()),
+                own_id_turns=sum(c['own_id_turns'] for c in counts.values()),
+                macro_own_id_turn_recovery=macro('own_id_turns','anchored_turns'),
                 macro_turn_recovery=macro('one_id_turns','turns'),
                 macro_crossing_recovery=macro('recovered_crossings','crossings'),
                 per_performer={p:dict(c) for p,c in sorted(counts.items())})
