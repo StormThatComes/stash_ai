@@ -140,7 +140,8 @@ evidence. RTMO's pinned COCO17 ONNX model downloads into the configured model
 directory if missing-model downloads are enabled. All variants scan the
 complete selected scenes, check their cue pixels and timings against the
 first run, rebuild identities using private databases, then score only the
-labelled cues. No Stash memberships are published. Compare missing/duplicate
+labelled cues. A reference ID comes from the matched torso’s accepted strict face
+anchor. A missing face reference is counted explicitly. No Stash memberships are published. Compare missing/duplicate
 poses, partner false joins, both correct, anchored query recovery, retry count,
 and CUDA activity seconds per 1000 cues. A missing reference is reported
 separately. Run the experiment again on the same file to compare future changes.

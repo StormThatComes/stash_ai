@@ -12,28 +12,37 @@ import tempfile
 import time
 
 
-def score(db, selected, labels):
+def score(db, selected, labels, *, reference_config=None):
     from stash_ai.recognition.crowd_labels import torso_owner
     scanned = {s['scene']:s['scan'] for s in selected}
     observations = []
     identity_queries = []
     anchors = defaultdict(set)
     counts = Counter()
+    face_owner = 'NULL'
+    if reference_config is not None:
+        from stash_ai.recognition.reference_roles import strict_sql
+        from stash_ai.recognition.pose_policy import anchor_sql
+        face_owner = ("CASE WHEN o.rejected IS NULL AND o.embedding IS NOT NULL AND " + strict_sql('o','fm')
+                      + ' AND '+anchor_sql('o',reference_config.data['clustering'])+' THEN fm.person END')
     wrist_errors = []
     for scene,cues in labels.items():
         for cue,persons in cues.items():
             if not persons or len({p['truth'] for p in persons}) != len(persons):
                 raise ValueError('Each labelled cue needs one torso point per distinct visible performer.')
             detections = defaultdict(list)
-            for geometry, person, status in db.execute(
-                    "SELECT b.geometry,m.person,m.status FROM body_observations b LEFT JOIN body_members m "
-                    "ON m.observation=b.id WHERE b.scan=? AND b.cue=?", (scanned[scene],int(cue))):
+            references = defaultdict(list)
+            for geometry, person, status, face in db.execute(
+                    'SELECT b.geometry,m.person,m.status,'+face_owner+' FROM body_observations b '
+                    'LEFT JOIN body_members m ON m.observation=b.id LEFT JOIN observations o ON o.id=b.face '
+                    'LEFT JOIN members fm ON fm.observation=o.id WHERE b.scan=? AND b.cue=?',(scanned[scene],int(cue))):
                 pose = json.loads(geometry)
                 owner = torso_owner(pose,persons)
                 if owner is None:
                     counts['unmatched_torsos'] += 1
                     continue
                 detections[owner].append(person if status=='accepted' else None)
+                references[owner].append(face)
                 label = next(p for p in persons if p['truth']==owner)
                 for side,point in label.get('wrists',{}).items():
                     joint = pose['keypoints'][9 if side=='left' else 10]
@@ -55,8 +64,15 @@ def score(db, selected, labels):
                 visible[truth] = matches[0] if len(matches)==1 else None
                 if not label.get('reference'):
                     identity_queries.append((truth,visible[truth]))
-                if label.get('reference') and visible[truth] is not None:
-                    anchors[truth].add(visible[truth])
+                if label.get('reference'):
+                    owner = visible[truth]
+                    if reference_config is not None:
+                        owners = references[truth]
+                        owner = owners[0] if len(owners)==1 else None
+                    if owner is None:
+                        counts['missing_reference_ids'] += 1
+                    else:
+                        anchors[truth].add(owner)
             if len(visible)==2 and not any(p.get('reference') for p in persons):
                 observations.append(visible)
     for truth,owner in identity_queries:
@@ -278,7 +294,7 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                 peak = cuda.max_memory_allocated() if cuda else None
                 bodies = state.connection.execute('SELECT COUNT(*) FROM body_observations WHERE embedding IS NOT NULL').fetchone()[0]
                 rebuild_selected(state,selected,cfg)
-                results[name] = dict(**score(state.connection,selected,labels), cues=cues,
+                results[name] = dict(**score(state.connection,selected,labels,reference_config=cfg if compare_contact else None), cues=cues,
                                      cues_per_second=cues/elapsed, bodies_per_second=bodies/elapsed,
                                      peak_torch_cuda_allocated_bytes=peak,
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,

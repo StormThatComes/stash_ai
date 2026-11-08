@@ -79,3 +79,29 @@ def test_one_invocation_scans_all_variants_without_publishing(tmp_path,monkeypat
     assert len(result)==3 and all(v['verified_vtt_cues']==v['cues']>0 for v in result.values())
     assert all(v['scored_cues']==1 for v in result.values())
     assert not client.writes and not cfg.database.exists()
+
+
+def test_contact_reference_uses_face_id_even_if_reference_body_was_misassigned(tmp_path):
+    from tests.test_recognition_body_global import configured,scene
+    from tests.test_recognition_crowded_tracks import pose
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from benchmarks.benchmark_crowded_vtt import score
+    cfg = configured(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        item,ids = scene(db,cfg,vectors=[[1,0],[1,0]])
+        for owner in ('face-owner','wrong-body'):
+            db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',(owner,'scope','ns',1,None,owner))
+        face_quality = encoded(dict(pixels=100,sharpness=100,pose_deviation=0.,visible_face_fraction=1.))
+        db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                   ('anchor',item['scan'],0,0.,'','[]','[]',face_quality,None,2,np.array([1.,0.],dtype='<f4').tobytes(),None))
+        db.execute('INSERT INTO members VALUES (?,?)',('anchor','face-owner'))
+        db.execute('UPDATE body_observations SET face=? WHERE id=?',('anchor',ids[0]))
+        for oid in ids:
+            db.execute('UPDATE body_observations SET geometry=? WHERE id=?',(encoded(pose(40)),oid))
+            db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(oid,'wrong-body','auxiliary','accepted','p','{}'))
+        label = dict(truth='A',point=[40,45])
+        labels = {'1':{'0':[dict(label,reference=True)],'1':[label]}}
+        assert score(db,[item],labels)['own_id_queries']==1
+        result = score(db,[item],labels,reference_config=cfg)
+        assert result['anchored_queries']==1 and result['own_id_queries']==0
