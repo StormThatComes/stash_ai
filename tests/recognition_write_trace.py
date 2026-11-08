@@ -23,8 +23,12 @@ def linux(trace):
             continue
         if name not in {'open','openat','creat','mkdir','mkdirat','unlink','unlinkat','rename','renameat','renameat2','link','linkat','symlink','symlinkat','truncate'}:
             continue
-        for token in re.findall(r'"(?:\\.|[^"\\])*"',event):
-            path = Path(ast.literal_eval(token))
+        # strace -y annotates directory FDs, including those used by
+        # shutil.rmtree to remove children relative to an open directory.
+        for field in re.finditer(r'(?:(?:-?\d+|AT_FDCWD)<([^>]+)>,\s*)?("(?:\\.|[^"\\])*")',event):
+            path = Path(ast.literal_eval(field[2]))
+            if not path.is_absolute() and field[1]:
+                path = Path(field[1]) / path
             if not str(path).startswith(('/dev/shm/','/dev/null','/dev/tty')):
                 yield path
 
@@ -43,6 +47,12 @@ def windows(trace, root):
                 if match:pids.add(int(match[1]))
                 continue
             if not re.match(r'^[A-Za-z]:\\',path):
+                continue
+            # Procmon attributes NTFS bookkeeping to the user request that
+            # caused it. These are the volume's internal metadata streams.
+            target = Path(path)
+            if target.parent == Path(target.anchor) and target.name.casefold() in {
+                    '$mft', '$mftmirr', '$bitmap', '$logfile', '$converttononresident'}:
                 continue
             if (operation in ('WriteFile','SetRenameInformationFile','SetDispositionInformationFile','SetEndOfFileInformationFile')
                     or operation=='CreateFile' and re.search(r'OpenResult: (Created|Overwritten|Superseded)',detail)):
