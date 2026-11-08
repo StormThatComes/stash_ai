@@ -320,6 +320,9 @@ def main(argv=None, *, services=None):
                   device=getattr(args, 'device', None))
     if args.command == 'run' or args.command == 'report-merge' and args.solve:
         from .work_locations import invocation, validate_outputs
+        if args.faces_db is not None:
+            configured = load(args.face_config, device=getattr(args, 'device', None))
+            validate_outputs(configured, (args.faces_db,))
         if args.command == 'report-merge':
             validate_outputs(config, (args.output, args.yaml_output, args.checkpoint))
         with invocation(config):

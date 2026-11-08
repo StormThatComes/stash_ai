@@ -29,12 +29,13 @@ def test_delta_records_deletion_new_owner_and_seed_difference(tmp_path):
         index.execute('CREATE TABLE input_counts(body_enabled INTEGER)')
         index.execute('INSERT INTO input_counts VALUES (0)')
         index.executemany('INSERT INTO slots VALUES (?,?,?,?,?)',
-                          [(1,'a','1','old','base'), (2,'b','1','left','left'), (3,'c','2',None,None)])
+                          [(1,'a','1','old','base'), (2,'b','1','left','left'), (3,'c','2',None,None),
+                           (4,'d','2',None,None), (5,'e','2',None,None)])
         index.commit()
         db.execute('CREATE TABLE members(observation TEXT PRIMARY KEY,person TEXT)')
         db.execute('CREATE TABLE body_members(observation TEXT PRIMARY KEY,person TEXT,status TEXT)')
         db.executemany('INSERT INTO members VALUES (?,?)',[('a','old'),('b','left')])
-        slots = Slots(index,'baseline',3)
+        slots = Slots(index,'baseline',5)
         slots.attach(db)
         track(db)
         db.execute("DELETE FROM members WHERE observation='b'")

@@ -178,7 +178,10 @@ class InstallationLock:
         self.stream = None
 
     def __enter__(self):
-        self.stream = safe_path(self.root, LOCK).open("a+b")
+        path = safe_path(self.root, LOCK)
+        # Installed trees already have a stable lock inode. Shared application
+        # readers need only read access; the updater owns initial installation.
+        self.stream = path.open("rb" if not self.exclusive and path.exists() else "a+b")
         try:
             if os.name == "nt":
                 self._windows_lock()

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 class Predictions(Mapping):
     def __init__(self, baseline, changes):
         self.baseline, self.changes = baseline, changes
+        self.changed_owners = None
         if any(key not in baseline for key in changes):
             raise ValueError('Invalid baseline prediction delta.')
 
@@ -24,7 +25,13 @@ class Predictions(Mapping):
         else:
             rows = ((key,person) for key,person in self.baseline.items() if person in owners)
         yield from ((key,person) for key,person in rows if key not in self.changes)
-        yield from ((key,person) for key,person in self.changes.items() if person in owners)
+        if self.changed_owners is None:
+            from collections import defaultdict
+            self.changed_owners = defaultdict(list)
+            for key,person in self.changes.items():
+                self.changed_owners[person].append(key)
+        for person in owners:
+            yield from ((key,person) for key in self.changed_owners.get(person,()))
 
     def items(self):
         return ((key, self.changes.get(key, value)) for key, value in self.baseline.items())

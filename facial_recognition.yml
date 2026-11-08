@@ -520,8 +520,8 @@ execution:
     # journal headroom. Excludes persistent caches, checkpoints and SQLite internal sort files. Range:
     # 1048576..1099511627776.
     scratch_directory: recognition_work
-    # Scratch parent directory, relative to this YAML; null uses recognition_work next to the database. Run-owned files
-    # are removed on exit.
+    # Scratch parent directory, relative to this YAML; null uses recognition_work next to the database.
+    # Run-owned files are removed on exit.
     parallel_scenes: true
     # Match independent local face scenes concurrently using the CPU worker/queue budget, then apply in scene
     # order; requires anchor_view_matching. Values: true, false.

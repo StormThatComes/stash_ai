@@ -1,10 +1,9 @@
 """Read-only observation and baseline maps shared by spawned solver processes."""
 from collections.abc import Mapping
-from contextlib import closing
+from contextlib import closing, contextmanager
 import os
 import sqlite3
 
-from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -43,6 +42,7 @@ def coordinator(images, source, config, scans):
                            'ON CONFLICT(id) DO UPDATE SET scene=excluded.scene,retained=excluded.retained,baseline=excluded.baseline',
                            ((oid,scene,owner,owner) for oid,scene,owner in source.execute(sql,args)))
         db.execute('CREATE INDEX slot_baseline_owner ON slots(baseline,id)')
+        db.execute('CREATE INDEX slot_scene ON slots(scene,id)')
         db.execute('CREATE INDEX baseline_initial_changes ON slots(id) WHERE retained IS NOT baseline')
         from .body_observations import coverage as body_coverage
         from .person_signal import coverage as hybrid_coverage
@@ -170,7 +170,9 @@ class Slots(Mapping):
             indexed = any(row[1] == 'retained' for row in target.execute('PRAGMA solver_slots.table_info(slots)'))
             population = 'solver_slots.slots s'
             same_projection = indexed and self.db.execute('SELECT body_enabled FROM input_counts').fetchone()[0] == enabled(settings)
-            if tracked and same_projection:
+            sparse = tracked and same_projection and target.execute(
+                'SELECT COUNT(*) FROM trial_changed').fetchone()[0] <= len(self)//2
+            if sparse:
                 population = ('(SELECT id FROM trial_changed UNION SELECT id FROM solver_slots.slots '
                               'WHERE retained IS NOT baseline) d JOIN solver_slots.slots s ON s.id=d.id')
             rows = target.execute(f'SELECT s.id,{owner} FROM {population} {joins} '

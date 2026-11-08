@@ -23,6 +23,7 @@ def test_native_work_paths_and_legacy_default(tmp_path):
         with tempfile.NamedTemporaryFile() as file:
             assert Path(file.name).is_relative_to(work)
         with sqlite3.connect(work/'sort.sqlite') as db:
+            assert db.execute('PRAGMA temp_store_directory').fetchone() == (str(work),)
             db.execute('PRAGMA temp_store=FILE')
             db.execute('PRAGMA cache_size=4')
             db.execute('CREATE TABLE data(value BLOB)')

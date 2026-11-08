@@ -23,3 +23,19 @@ def reserve(directory, amount, limit):
             raise ResourceLimit(f'Shared recognition scratch budget at {root} cannot admit {others + amount} bytes.',
                                 budget='execution.rebuild.scratch_bytes', limit=limit, requested=others+amount)
         db.execute('INSERT OR REPLACE INTO leases VALUES (?,?)', (owner, amount))
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def file_leases(*, write=False):
+    root = os.environ.get('RECOGNITION_WORK_ROOT')
+    if not root:
+        yield None
+        return
+    with closing(sqlite3.connect(Path(root)/'scratch-leases.sqlite',timeout=30)) as db, db:
+        if write:
+            db.execute('BEGIN IMMEDIATE')
+        db.execute('CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, device INTEGER, cap INTEGER)')
+        yield db

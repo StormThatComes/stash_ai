@@ -89,6 +89,18 @@ jobs:
         run: |
           uv pip install --system -r requirements-cpu.txt -r requirements-dev.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 
+      - name: Trace configured recognition writes on Linux
+        if: matrix.shard == 1
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: |
+          command -v strace || (sudo apt-get update -qq && sudo apt-get install -y strace)
+          root="$RUNNER_TEMP/recognition-allowed"
+          strace -f -qq -y -s 500 -e trace=%file -o "$RUNNER_TEMP/recognition.trace" python -B -m tests.recognition_storage_probe "$root"
+          python -B -m tests.recognition_write_trace "$root" "$RUNNER_TEMP/recognition.trace" linux
+
       - name: Diagnostic overhead benchmark
         if: matrix.shard == 1
         run: |
@@ -167,6 +179,33 @@ jobs:
       - name: Install FFmpeg on Windows for tiny-video fixtures
         if: matrix.suite == 'video'
         run: choco install ffmpeg -y --no-progress
+      - name: Trace configured recognition writes on Windows
+        if: runner.os == 'Windows' && matrix.suite == 'core' && matrix.shard == 1
+        shell: pwsh
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP procmon.zip
+          $bin = Join-Path $env:RUNNER_TEMP procmon
+          Invoke-WebRequest https://download.sysinternals.com/files/ProcessMonitor.zip -OutFile $zip
+          Expand-Archive $zip $bin
+          $exe = Join-Path $bin Procmon64.exe
+          $signature = Get-AuthenticodeSignature $exe
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { throw 'Invalid Process Monitor signature' }
+          $pml = Join-Path $env:RUNNER_TEMP recognition.pml
+          $csv = Join-Path $env:RUNNER_TEMP recognition.csv
+          $root = Join-Path $env:RUNNER_TEMP recognition-allowed
+          Start-Process $exe -ArgumentList "/AcceptEula /Quiet /Minimized /BackingFile `"$pml`""
+          Start-Process $exe -ArgumentList '/WaitForIdle' -Wait
+          try {
+            python -B -m tests.recognition_storage_probe "$root"
+            if ($LASTEXITCODE) { throw 'Recognition probe failed' }
+          } finally { Start-Process $exe -ArgumentList '/Terminate' -Wait }
+          Start-Process $exe -ArgumentList "/OpenLog `"$pml`" /SaveAs `"$csv`"" -Wait
+          python -B -m tests.recognition_write_trace "$root" "$csv" windows
+
       - name: Run Windows lifecycle tests
         if: runner.os == 'Windows'
         env:

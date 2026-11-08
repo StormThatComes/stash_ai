@@ -51,30 +51,38 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
         return
     from .database import SCHEMA
     from .scratch_space import scope as scratch_scope, directory as owned_directory
-    with scratch_scope(config), owned_directory(prefix='recognition-replay-') as directory:
+    from .disk_budget import reserve_file
+    from pathlib import Path
+    with scratch_scope(config) as work_budget, owned_directory(prefix='recognition-replay-') as directory:
         with closing(sqlite3.connect(directory+'/seed.sqlite3')) as seed:
             seed.execute('PRAGMA cache_size=-2048')
             page_size = seed.execute('PRAGMA page_size').fetchone()[0]
-            seed.execute(f"PRAGMA max_page_count={config.data['execution']['replay_snapshot_bytes']//page_size}")
-            seed.executescript(SCHEMA)
-            seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
-            try:
-                from .snapshot_import import bulk
-                with bulk(seed):
-                    hidden = [dict(scene=scene) for scene in excluded_scenes]
-                    copy_history(db, seed, hidden, scope, ns, commit=False)
-            except sqlite3.OperationalError as error:
-                if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
-                    raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error
-                raise
-            statistics = dict(embedding_bytes=sum(seed.execute(
-                f'SELECT COALESCE(SUM(length(embedding)),0) FROM {table}').fetchone()[0]
-                for table in ('observations','person_evidence','body_observations')))
-            seed.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('replay-input-statistics', encoded(statistics)))
-            seed.commit()
-            size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
-            if size > config.data['execution']['replay_snapshot_bytes']:
-                raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.')
+            seed_path = Path(directory)/'seed.sqlite3'
+            cap = min(work_budget.limit, config.data['execution']['replay_snapshot_bytes'])
+            with reserve_file(seed_path, cap) as grant:
+                if grant < 65536:
+                    raise ResourceLimit(f'Insufficient space for the replay snapshot at {seed_path}: {grant} bytes.')
+                seed.execute(f"PRAGMA max_page_count={grant//page_size}")
+                seed.executescript(SCHEMA)
+                seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
+                try:
+                    from .snapshot_import import bulk
+                    with bulk(seed):
+                        hidden = [dict(scene=scene) for scene in excluded_scenes]
+                        copy_history(db, seed, hidden, scope, ns, commit=False)
+                except sqlite3.OperationalError as error:
+                    if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
+                        raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error
+                    raise
+                statistics = dict(embedding_bytes=sum(seed.execute(
+                    f'SELECT COALESCE(SUM(length(embedding)),0) FROM {table}').fetchone()[0]
+                    for table in ('observations','person_evidence','body_observations')))
+                seed.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('replay-input-statistics', encoded(statistics)))
+                seed.commit()
+                size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
+                if size > config.data['execution']['replay_snapshot_bytes']:
+                    raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.')
+            work_budget.set(str(seed_path), size)
             seed.execute('PRAGMA query_only=ON')
             token = _prepared_sources.set((*_prepared_sources.get(), (seed, (scope, ns, installation))))
             try:
@@ -83,6 +91,7 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
                     yield seed
             finally:
                 _prepared_sources.reset(token)
+                work_budget.set(str(seed_path), 0)
 
 
 def replay(config, variants, **kwargs):
