@@ -47,13 +47,20 @@ def _global_rivals(search, batch, *, plausible=None):
     return rivals
 
 
-def _rows(db, scan, stamp):
-    return db.execute("""SELECT b.id,b.cue,b.seconds,b.scan,b.face,b.quality,b.geometry,b.embedding,
+def _rows(db, scan, stamp, blocks=None):
+    sql = """SELECT b.id,b.cue,b.seconds,b.scan,b.face,b.quality,b.geometry,b.embedding,
         m.person,m.status,m.role,m.proof,f.rejected AS face_rejection,f.embedding AS face_embedding,
         f.quality AS face_quality,f.dimensions AS face_dimensions,fm.person AS face_owner FROM body_observations b
         LEFT JOIN observations f ON f.id=b.face LEFT JOIN members fm ON fm.observation=f.id JOIN body_members m
         ON m.observation=b.id WHERE b.scan=? AND m.policy=? AND b.rejected IS NULL
-        ORDER BY b.cue,b.id""",(scan,stamp))
+        """
+    params = (scan,stamp)
+    if blocks is not None:
+        from .rear_fragments import WIDTH
+        cues = [c for block in blocks for c in range(block*WIDTH,(block+1)*WIDTH)]
+        sql += ' AND b.cue IN (SELECT value FROM json_each(?))'
+        params += (encoded(cues),)
+    return db.execute(sql+' ORDER BY b.cue,b.id',params)
 
 
 def _occupied_torsos(db, scan, stamp, config):
@@ -76,7 +83,7 @@ def impossible_owners(row,person,torsos):
     return {owner for oid,owner,other in torsos if oid!=row['id'] and pair([person,other]) is not None}
 
 
-def _scene(db, scan, stamp, gallery, search, config):
+def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=None):
     from .body_perspectives import orientation
     settings = config.data['sapiensid']['identities']
     proposals = {}
@@ -141,8 +148,8 @@ def _scene(db, scan, stamp, gallery, search, config):
 
     def queries():
         from itertools import islice
-        source = iter(_rows(db,scan,stamp))
-        size = min(16,search.block) if hasattr(gallery,'rank_many') else 1
+        source = iter(_rows(db,scan,stamp,blocks))
+        size = min(16,search.block) if pending or hasattr(gallery,'rank_many') else 1
         while batch_rows := list(islice(source,size)):
             items, requests = [], []
             for raw in batch_rows:
@@ -154,8 +161,12 @@ def _scene(db, scan, stamp, gallery, search, config):
                 if query is not None:
                     requests.append(query)
                 items.append((row,decision,query))
-            ranks = iter(gallery.rank_many(requests) if hasattr(gallery,'rank_many') else
-                         [gallery.rank(*r) for r in requests])
+            if pending is None:
+                ranks = iter(gallery.rank_many(requests) if hasattr(gallery,'rank_many') else
+                             [gallery.rank(*r) for r in requests])
+            else:
+                from .rear_fragments import rank
+                ranks = iter(rank(pending,requests))
             for row,decision,query in items:
                 yield row,decision,query,next(ranks) if query is not None else None
 
@@ -361,7 +372,9 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
         minimum = max(0.,settings['match_threshold'] - scene_bonus(config.data))
         pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))
         for scan,scene in pending.candidates(scope,namespace,set(scans),stamp,active=active):
-            decisions = _scene(db,scan,stamp,gallery,search,config)
+            from .rear_fragments import select
+            blocks = select(db,scan,stamp,pending)
+            decisions = _scene(db,scan,stamp,gallery,search,config,blocks=blocks,pending=pending) if blocks!=[] else {}
             if apply(db,scan,decisions):
                 enqueue(db,scope,namespace,dict(scan=scan,scene=scene),config,True,'rear_view_attachment')
     return True
