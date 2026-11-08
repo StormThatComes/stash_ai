@@ -250,13 +250,16 @@ def test_pending_scan_only_wakes_when_a_reachable_gallery_or_recorded_rival_chan
             def bank(owner,value):
                 return owner,'source', [dict(id=owner,roots=['start','end'],quality='{}',_vector=value)]
             return Gallery([bank('near',axis),bank('far',far)])
-        def run(far):
+        def run(far, selected=()):
             pending=Pending(db,gallery(far),search,config.data['sapiensid']['identities'])
-            return [s for s,_ in pending.candidates('scope','ns',set(),stamp)]
+            return [s for s,_ in pending.candidates('scope','ns',set(selected),stamp)]
         assert run(-axis)==[item['scan']]
         assert run(-axis)==[]
         assert run(np.roll(axis,1))==[]
         assert run(axis)==[item['scan']]
+        assert run(axis, [item['scan']]) == []
+        db.execute("UPDATE body_members SET proof=? WHERE observation=?", ('{"reason":"different_face_root"}', ids[0]))
+        assert run(axis, [item['scan']]) == [item['scan']]
 
 
 def test_cross_scene_gallery_uses_only_external_witnesses():

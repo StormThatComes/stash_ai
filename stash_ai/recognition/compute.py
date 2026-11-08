@@ -1,6 +1,6 @@
 """Coordinator-owned, bounded CPU work; workers never inherit replay state."""
 from collections import Counter, deque
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future, wait
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ class Work:
     generation: object
     payload: object
     size: int
+    ready: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class Compute:
         self.child_pids = set()
         self.shared_inputs = {}
         self.pending = deque()
+        self.drain_numeric = None
         self.closed = False
         self.bytes = self.peak_bytes = 0
         self.submitted = self.applied = 0
@@ -247,18 +249,26 @@ class Compute:
         self._owned()
         if backend not in ('threads', 'processes'):
             raise ValueError('Unsupported recognition CPU backend.')
+        if self.pending and self.drain_numeric is not None:
+            self.drain_numeric()
         if self.pending:
             raise RuntimeError('Recognition CPU result stream is still active.')
         previous = -1
         try:
             for job in jobs:
                 self._owned()
-                if (type(job.size) is not int or not 0 < job.size <= self.limit
+                if (type(job.size) is not int or not (0 < job.size and (job.ready or job.size <= self.limit))
                         or type(job.ordinal) is not int or job.ordinal <= previous):
                     raise ValueError('Invalid recognition CPU work size/order.')
                 previous = job.ordinal
+                ready = Result(job.ordinal, job.generation, job.payload, 0., 0.) if job.ready else None
+                if job.ready and job.size > self.limit:
+                    while self.pending:
+                        yield self._take()
+                    yield ready
+                    continue
                 if self.workers == 1:
-                    yield self._invoke(function, job)
+                    yield ready if job.ready else self._invoke(function, job)
                     continue
                 workers = self.workers
                 inflight = workers if workers < self.worker_capacity else 2*workers
@@ -266,7 +276,10 @@ class Compute:
                                         or self.bytes + job.size > self.limit):
                     yield self._take()
                 self._account_queue(self.bytes+job.size)
-                if backend == 'processes':
+                if job.ready:
+                    future = Future()
+                    future.set_result(ready)
+                elif backend == 'processes':
                     self._start_processes()
                     future = self.process_executor.submit(_invoke_process, function, job)
                 else:

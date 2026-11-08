@@ -16,13 +16,8 @@ def diagnostic_scope(function):
     return wrapped
 
 
-def map_bounded(function, items, *, cost, payload=lambda item: item, kind, cached=lambda item:None):
-    """Yield (input, output) in order; consumers may schedule their own work.
-
-    A whole batch retires before yielding, avoiding nested active CPU streams.
-    Half the queue is reserved for a prepared lookahead item. Oversized jobs
-    retain the exact scalar path; neither item count nor bytes grow unbounded.
-    """
+def map_bounded(function, items, *, cost, payload=lambda item: item, kind, cached=lambda item:None, stream=False):
+    """Bound ordered result windows. Nested pool users can drain a suspended window."""
     pool = current()
     if pool is None or pool.workers == 1:
         for item in items:
@@ -33,34 +28,50 @@ def map_bounded(function, items, *, cost, payload=lambda item: item, kind, cache
     batch, used = [], 0
 
     def flush():
-        jobs = (Work(i, kind, payload(item), amount)
-                for i, (item, amount) in enumerate(batch))
-        values = []
-        with closing(pool.ordered(function, jobs), name='close '+kind+' numerical jobs') as stream:
-            for result in stream:
-                values.append(result.value)
-        pool.record(kind, computed=len(values), consumed=len(values))
-        return [(item, value) for (item, _), value in zip(batch, values)]
+        from collections import deque
+        if all(found is not None for _, _, found in batch):
+            for item, _, found in batch:
+                yield item, found
+            return
+        jobs = (Work(i, kind, found if found is not None else payload(item), amount, ready=found is not None)
+                for i, (item, amount, found) in enumerate(batch))
+        queued = deque()
+        with closing(pool.ordered(function, jobs), name='close '+kind+' numerical jobs') as results:
+            def drain():
+                pool.drain_numeric = None
+                queued.extend(results)
+            if not stream:
+                drain()
+            try:
+                for item, _, found in batch:
+                    result = queued.popleft() if queued else next(results)
+                    if found is None:
+                        pool.record(kind, computed=1, consumed=1)
+                    pool.drain_numeric = drain
+                    try:
+                        yield item, result.value
+                    finally:
+                        pool.drain_numeric = None
+            finally:
+                # Early termination of a bounded window must leave the pool
+                # usable by the next phase. Workers still observe cancellation.
+                drain()
 
     for item in items:
-        found=cached(item)
+        found = cached(item)
+        amount = max(1, cost(item))
         if found is not None:
-            if batch:
-                yield from flush()
-                batch,used=[],0
             from .profiling import count
             count(kind+'_cached_jobs')
-            yield item,found
-            continue
-        amount = cost(item)
-        if batch and (used+amount > maximum or len(batch) >= pool.workers*2):
+        if batch and (used + amount > maximum or len(batch) >= pool.workers*2):
             yield from flush()
             batch, used = [], 0
         if amount > maximum:
-            pool.fallback(kind+'_admission')
-            yield item, function(payload(item))
+            if found is None:
+                pool.fallback(kind+'_admission')
+            yield item, found if found is not None else function(payload(item))
         else:
-            batch.append((item, amount))
+            batch.append((item, amount, found))
             used += amount
     if batch:
         yield from flush()
@@ -90,7 +101,7 @@ def matrix_tiles(tiles, *, kind):
                 if found is None:size += 3*(left.nbytes+right.nbytes) + 2*len(left)*len(right)*8
             yield metadata, keys, payload, size
     for item, values in map_bounded(_matrices, prepare(), cost=lambda item: item[3],
-                                    payload=lambda item: [p for p in item[2] if p[2] is None], kind=kind,
+                                    payload=lambda item: [p for p in item[2] if p[2] is None], kind=kind, stream=True,
                                     cached=lambda item: [] if all(p[2] is not None for p in item[2]) else None):
         metadata, keys, payload, _ = item
         values=iter(values)
