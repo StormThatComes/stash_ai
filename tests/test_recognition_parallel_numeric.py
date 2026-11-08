@@ -62,3 +62,16 @@ def test_trial_cancellation_reaches_inner_workers(monkeypatch):
     finally:
         outer.cancel()
         timer.join()
+
+
+def test_streamed_cache_hits_allow_nested_pool_work(monkeypatch):
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus', lambda: 4)
+    with compute_scope(configured(rebuild_workers=4, rebuild_queue_bytes=1048576)) as pool:
+        values = []
+        for item, value in map_bounded(lambda i: i*2, range(24), cost=lambda _: 4096,
+                cached=lambda i: i*2 if i%3 == 0 else None, stream=True, kind='tiles'):
+            if item % 5 == 0:
+                list(pool.ordered(abs, [Work(0, 'nested', -1, 4096)]))
+            values.append(value)
+        assert values == [i*2 for i in range(24)]
+        assert pool.bytes == 0 and not pool.pending

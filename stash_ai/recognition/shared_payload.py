@@ -11,7 +11,7 @@ class Rows:
 
 
 def pack(rows):
-    size=sum(len(row[-1]) for row in rows)
+    size=sum(len(row[-1]) for row in rows if row[-1] is not None)
     if not size:
         return rows, None
     segment=SharedMemory(create=True,size=size)
@@ -20,6 +20,9 @@ def pack(rows):
         records=[]
         for row in rows:
             data=row[-1]
+            if data is None:
+                records.append(tuple(row[:-1]) + (offset, -1))
+                continue
             segment.buf[offset:offset+len(data)]=data
             records.append(tuple(row[:-1])+(offset,len(data)))
             offset+=len(data)
@@ -37,7 +40,7 @@ def unpack(rows):
     segment=SharedMemory(name=rows.name)
     try:
         # SQLite owns each inserted BLOB; do not retain borrowed buffer views.
-        yield (row[:-2]+(bytes(segment.buf[row[-2]:row[-2]+row[-1]]),) for row in rows.metadata)
+        yield (row[:-2]+(None if row[-1] < 0 else bytes(segment.buf[row[-2]:row[-2]+row[-1]]),) for row in rows.metadata)
     finally:
         segment.close()
 
@@ -63,6 +66,9 @@ def borrowed(rows):
     try:
         values = []
         for row in rows.metadata:
+            if row[-1] < 0:
+                values.append(row[:-2] + (None,))
+                continue
             view = segment.buf[row[-2]:row[-2]+row[-1]].toreadonly()
             buffers.append(view)
             values.append(row[:-2]+(view,))

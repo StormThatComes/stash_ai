@@ -149,7 +149,7 @@ def nominations(lookup, store, face_floor, body_floor, config=None):
         yield from pending
     from .profiling import count
     for (key,payload,hit),result in map_bounded(compute,admitted(),
-            payload=lambda item:item[1],cost=lambda item:65536+512*len(item[1][0][3])*len(item[1][1][3]),
+            payload=lambda item:item[1],stream=True, cost=lambda item:65536+512*len(item[1][0][3])*len(item[1][1][3]),
             cached=lambda item:item[2],kind="incremental_hybrid_tiles"):
         if hit is None:
             count('hybrid_centroid_pairs_recomputed',len(payload[0][3])*len(payload[1][3]))

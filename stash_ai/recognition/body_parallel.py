@@ -74,7 +74,7 @@ def comparisons(evidence, requests):
                 if cacheable:
                     pending[key] = positions
                 yield key, positions, (a, b), estimate, cacheable, identity
-        for item, value in map_bounded(_compare, prepare(), cost=lambda item: item[3],
+        for item, value in map_bounded(_compare, prepare(), stream=True, cost=lambda item: item[3],
                                       payload=lambda item: item[2], kind='body_witness_proofs'):
             key, positions, _, _, cacheable, identity = item
             from .body_numeric import publish

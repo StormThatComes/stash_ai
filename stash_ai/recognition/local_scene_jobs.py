@@ -36,7 +36,10 @@ def solve(payload):
         try:
             db.executescript(schema())
             db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',payload['scan'])
-            db.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',payload['rows'])
+            from .shared_payload import unpack
+            with unpack(payload['rows']) as rows:
+                db.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                               (row[:-1] + (row[-1], None) for row in rows))
             db.execute('CREATE TEMP TABLE local_core_order(observation TEXT PRIMARY KEY,position INTEGER)')
             db.executemany('INSERT INTO local_core_order VALUES (?,?)',payload['order'])
             db.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
@@ -64,17 +67,29 @@ def matches(database,selected,cursor,config,keys,pool,build):
             item=selected[ordinal];scan=item['scan']
             key,entry=scene_artifacts.lookup(database,scan,config,keys.get(scan))
             prepared[ordinal]=(key,entry is not None)
-            rows,raw=db.execute('SELECT COUNT(*),COALESCE(SUM(length(embedding)+length(geometry)+length(quality)+length(id)+length(scan)),0) '
+            if entry is not None:
+                from .memory_size import size as owned_size
+                yield Work(ordinal, scan, entry, max(1, owned_size(entry)), ready=True)
+                continue
+            rows,raw=db.execute('SELECT COUNT(*),COALESCE(SUM(COALESCE(length(embedding),0)+length(geometry)+length(quality)+length(id)+length(scan)),0) '
                                 'FROM observations WHERE scan=?',(scan,)).fetchone()
             size=8*1024**2+12*(raw+rows*2048)
             payload=None
             if size<=pool.limit:
-                payload=dict(cached=entry) if entry is not None else dict(
+                payload=dict(
                     scan=tuple(db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()),
-                    rows=[tuple(r) for r in db.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY cue,id',(scan,))],
+                    rows=[tuple(r) for r in db.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,dimensions,embedding FROM observations WHERE scan=? ORDER BY cue,id',(scan,))],
                     order=[tuple(r) for r in db.execute('SELECT observation,position FROM local_core_order JOIN observations o ON o.id=observation WHERE o.scan=?',(scan,))],
                     prior=[tuple(r) for r in db.execute('SELECT q.id FROM prior_attachment_queries q JOIN observations o ON o.id=q.id WHERE o.scan=?',(scan,))] if prior else [],
                     installation=database.installation,settings=plain(config.data),bytes=size)
+                if config.data['execution']['rebuild_cohort_backend'] == 'processes' and pool.workers > 1:
+                    from .shared_payload import pack
+                    try:
+                        payload['rows'], segment = pack(payload['rows'])
+                    except OSError:
+                        segment = None  # Pickle remains an exact fallback on small shared-memory volumes.
+                    if segment is not None:
+                        pool.shared_inputs[ordinal] = segment
             else:pool.fallback('local_scene_admission');size=1024
             yield Work(ordinal,scan,payload,size)
     with closing(pool.ordered(solve,jobs(),backend=config.data['execution']['rebuild_cohort_backend'])) as results:

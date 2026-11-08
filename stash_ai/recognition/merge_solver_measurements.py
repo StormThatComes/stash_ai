@@ -82,7 +82,7 @@ def measured_pairs(pairs, *, max_bytes=4194304):
     def payload(item):
         a, b, _, cached, _, _ = item
         return tuple(a.samples), tuple(b.samples), max_bytes, cached
-    for item, result in map_bounded(_measure, prepared(), cost=lambda item: item[4],
+    for item, result in map_bounded(_measure, prepared(), stream=True, cost=lambda item: item[4],
                                     payload=payload, kind='face_measurements',cached=lambda item:item[3]):
         left, right, key, cached, _, signature = item
         if cached is None and shared is not None:

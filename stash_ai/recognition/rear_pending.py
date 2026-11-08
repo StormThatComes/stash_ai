@@ -50,6 +50,11 @@ class Pending:
     def __init__(self, db, gallery, search, settings):
         self.db, self.gallery, self.search = db, gallery, search
         self.audited = supported(db)
+        from .local_dependencies import available
+        self.local_clocks = self.audited and available(db) and db.execute('PRAGMA user_version').fetchone()[0] >= 13
+        if self.local_clocks:
+            from .dependency_schema import validate_triggers
+            validate_triggers(db, required=True)
         self.banks = _bank_versions(gallery)
         self.radius = np.sqrt(2*(1-settings['match_threshold']+settings['ambiguity_margin']))+.003
         self.owners = {}
@@ -86,6 +91,7 @@ class Pending:
         previous = json.loads(old[0]) if old else None
         budget = self.search.config.data['sapiensid']['execution']['reference_bytes'] if self.search.mean_versions else 0
         changed = changed_modes(self.search,previous,budget)
+        scope_generation = [version(self.db), version(self.db, 'heads')] if self.local_clocks else None
         for scan,scene in self.db.execute("SELECT s.id,s.scene FROM scans s WHERE scope=? AND namespace=? "
                                           "AND status='complete' AND "+predicate(),(scope,namespace)):
             key = 'rear-pending:' + digest([scope,namespace,scene])
@@ -93,7 +99,11 @@ class Pending:
             entry = json.loads(saved[0]) if saved else {}
             identity = [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None,
                         version(self.db,'raw-observations',scan) if self.audited else None]
-            refresh = scan in selected or not self.audited or entry.get('identity')!=identity or 'balls' not in entry
+            if self.local_clocks:
+                from .local_dependencies import scene_key
+                identity.append(version(self.db, 'scene', scene_key(self.db, scan)))
+            refresh = (not self.audited or (scan in selected and not self.local_clocks)
+                       or entry.get('identity') != identity or 'balls' not in entry)
             if refresh:
                 balls,owners = _envelopes(self.db,scan,stamp)
                 entry = dict(identity=identity,balls=balls,local=owners)
@@ -107,7 +117,8 @@ class Pending:
                 for address in self.gallery.tree.query_ball_point(query,self.radius+radius):
                     banks.add(self.gallery.addresses[address])
             revision = self.generation(entry,banks)
-            if not refresh and not near_change and entry.get('checked')==revision:
+            certified = scan not in selected or (self.local_clocks and entry.get('checked_scope') == scope_generation)
+            if certified and not refresh and not near_change and entry.get('checked')==revision:
                 continue
             if scan in selected or scan in active or banks:
                 yield scan,scene
@@ -116,6 +127,7 @@ class Pending:
                     FROM body_observations b JOIN main.body_members m ON m.observation=b.id
                     WHERE b.scan=? AND rival IS NOT NULL ORDER BY rival""",(scan,))]
                 revision = self.generation(entry,banks)
+                entry['checked_scope'] = scope_generation
             entry['checked'] = revision
             value = encoded(entry)
             if not saved or saved[0]!=value:
