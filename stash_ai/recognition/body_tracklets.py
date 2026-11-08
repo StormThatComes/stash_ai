@@ -61,23 +61,44 @@ def paths(rows, settings, scores):
         yield chain,strengths
 
 
+def compatible_segments(chain, strengths, decisions):
+    """Only the interval between contradictory measured owners is ambiguous."""
+    start = 0
+    previous = None
+    for i,row in enumerate(chain):
+        if row['id'] not in decisions:
+            continue
+        owner = decisions[row['id']].get('person')
+        if owner is None:
+            if i>start:
+                yield chain[start:i],strengths[start:i-1]
+            start,previous = i+1,None
+        elif previous is not None and previous[1]!=owner:
+            j = previous[0]
+            yield chain[start:j+1],strengths[start:j]
+            for member in chain[j+1:i]:
+                decisions[member['id']] = dict(person=None,status='withheld',role='auxiliary',
+                    reason='different_face_root',track_blocker=dict(reason='different_face_root',cue=row['cue']))
+            start,previous = i,(i,owner)
+        else:
+            previous = i,owner
+    if start<len(chain):
+        yield chain[start:],strengths[start:len(chain)-1]
+
+
 def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     """Name paths only from strict roots. Anonymous paths stay scene-local."""
     from .body_identity import copresent, independent
     from .body_origins import physical_key
     roots = {r['id']:owner for owner,bank in seeds.items() for r in bank}
     anonymous = {}
-    for chain,strengths in paths(rows,settings,scores):
+    segments = (part for chain,strengths in paths(rows,settings,scores)
+                for part in compatible_segments(chain,strengths,decisions))
+    for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}
-        if len(known)>1 or any(r['id'] in decisions and
-                               decisions[r['id']].get('person') not in known for r in chain):
-            # A change of face owner is a physical boundary, not a bridge.
-            for row in chain:
-                if row['id'] not in decisions:
-                    decisions[row['id']] = dict(person=None,status='withheld',role='auxiliary',
-                        reason='different_face_root',track_blocker=dict(reason='different_face_root',cue=row['cue']))
-            continue
         if not known:
+            if any(r['id'] in decisions for r in chain):
+                continue
             if len(independent(chain,settings))>=2:
                 key = uuid.uuid5(uuid.NAMESPACE_URL,'anonymous-track:'+physical_key(record,chain[0]))
                 for row in chain:

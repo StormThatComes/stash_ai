@@ -55,3 +55,13 @@ def test_real_scene_plan_replays_the_same_inputs_with_and_without_tracklets(tmp_
         assert without[ids[-1]]['person']!='A'
         assert with_tracks[ids[-1]]['person']=='A'
         assert with_tracks[ids[-1]]['reason']=='local_body_track'
+
+
+def test_face_change_withholds_only_the_unresolved_interval():
+    from stash_ai.recognition.body_tracklets import compatible_segments
+    chain = [dict(id=str(i),cue=i) for i in range(6)]
+    decisions = {'1':{'person':'A'},'4':{'person':'B'}}
+    parts = list(compatible_segments(chain,[.9]*5,decisions))
+    assert [[r['id'] for r in rows] for rows,_ in parts]==[['0','1'],['4','5']]
+    assert [decisions[k]['reason'] for k in ('2','3')]==['different_face_root']*2
+    assert all(len(rows)==len(edges)+1 for rows,edges in parts)
