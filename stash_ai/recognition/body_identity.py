@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v24-evidence-roster',contract(config),matching_policy(config),
+    return digest(['body-local-v25-independent-fragments',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -324,6 +324,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen)
         queries = [r for r in queries if r['id'] not in decisions]
     remaining=[]
+    borderline=[]
     for row in queries:
         ranked=frozen.rank(row,guard)
         if ranked and max(r[5] for r in ranked)>=settings['match_threshold']-settings['ambiguity_margin']:
@@ -335,6 +336,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
                 score=mean,minimum=minimum,runner=runner,rival=rival,
                 witness_ids=[w['id'] for w in bank[:8]])
+            if not good and anchor(row,settings):
+                borderline.append(row)
         else:remaining.append(row)
     groups=[];weak=[]
     for row in remaining:
@@ -424,6 +427,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         d = decisions[oid]
         if d['status']!='accepted' and d.get('reason')!='different_face_root':
             d.update(person=track,role='auxiliary',status='provisional',reason='anonymous_body_track')
+    from .scene_fragments import preserve_fragments, attach_with_scene_support
+    preserve_fragments(record,borderline,decisions,settings,scores,guard)
+    attach_with_scene_support(rows,groups,seeds,decisions,config,scores,guard)
     from .body_perspectives import recover
     track_settings = dict(settings,scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))

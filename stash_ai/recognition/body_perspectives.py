@@ -338,7 +338,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                                             bonus=settings['scene_context_bonus'])
     if settings.get('scene_context_bonus',0.)>0:
         record_scene_roster(by_cue,root,shot_ids,partial,decisions,settings.get('roster_support',3),
-                            weighted=settings.get('scene_bonus_mode')=='evidence')
+                            weighted=settings.get('scene_bonus_mode')=='evidence',settings=settings)
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -538,34 +538,35 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         decisions[oid].update(rooted)
 
 
-def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False):
-    from .independent_evidence import body_vote, representatives
+def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False, settings=None):
+    from .body_identity import independent, defaults
+    settings = settings or defaults()
     sources = defaultdict(list)
     queries = defaultdict(list)
     for cue,rows in sorted(by_cue.items()):
         for row in rows:
             owner = roots.get(row['id'])
             if owner is not None:
-                sources[owner].append(body_vote(row))
+                sources[owner].append(row)
             elif not row.get('face_person') and cue not in partial:
                 queries[shots[cue]].append((cue,row['id']))
     for owner,rows in sorted(sources.items()):
-        supported = representatives(rows)[:minimum]
+        supported = independent(rows,settings)[:minimum]
         if len(supported)<minimum:
             continue
         origins = {shots[r['cue']] for r in supported}
         default_ids = [r['id'] for r in supported]
         for shot,ids in queries.items():
             witnesses = default_ids
-            independent = None
+            other_shots = None
             if weighted or shot in origins:
-                independent = representatives(r for r in rows if shots[r['cue']]!=shot)
-                if len(independent)<minimum:
+                other_shots = independent((r for r in rows if shots[r['cue']]!=shot),settings)
+                if len(other_shots)<minimum:
                     continue
-                witnesses = [r['id'] for r in independent[:minimum]]
+                witnesses = [r['id'] for r in other_shots[:minimum]]
             if weighted:
                 from bisect import bisect_left
-                references = sorted(independent,key=lambda r:r['cue'])
+                references = sorted(other_shots,key=lambda r:r['cue'])
                 cues = [r['cue'] for r in references]
                 diverse = len({shots[c] for c in cues})>1
             for cue,oid in ids:
