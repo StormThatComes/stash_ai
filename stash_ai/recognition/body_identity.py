@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v25-independent-fragments',contract(config),matching_policy(config),
+    return digest(['body-local-v26-contact-ownership',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -325,6 +325,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         queries = [r for r in queries if r['id'] not in decisions]
     remaining=[]
     borderline=[]
+    cue_choices={}
     for row in queries:
         ranked=frozen.rank(row,guard)
         if ranked and max(r[5] for r in ranked)>=settings['match_threshold']-settings['ambiguity_margin']:
@@ -336,9 +337,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
                 score=mean,minimum=minimum,runner=runner,rival=rival,
                 witness_ids=[w['id'] for w in bank[:8]])
+            cue_choices[row['id']] = ranked
             if not good and anchor(row,settings):
                 borderline.append(row)
         else:remaining.append(row)
+    from .contact_anchors import joint_body_claims
+    joint_body_claims(rows,decisions,cue_choices,settings)
+    borderline = [r for r in borderline if decisions[r['id']]['status']=='withheld']
     groups=[];weak=[]
     for row in remaining:
         if not anchor(row,settings):weak.append(row);continue

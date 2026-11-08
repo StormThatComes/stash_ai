@@ -504,7 +504,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                                    pair([json.loads(row['geometry']),json.loads(other['geometry'])]) is not None
                                    for other in seeds.get(target,())))
                 allowed = split_members(core,proposed,occupied,settings)
-                split.update(oid for oid in allowed if claims[proposed[oid],lookup[oid]['cue']]==1)
+                if allowed and all(claims[proposed[oid],lookup[oid]['cue']]==1 for oid in allowed):
+                    split.update(allowed)
+                    if len({proposed[oid] for oid in allowed})==2:
+                        for r in core:
+                            if r['id'] not in allowed:
+                                decisions[r['id']] = dict(person=None,status='withheld',role='auxiliary',
+                                    reason='split_contact_interior',track_blocker=dict(reason='unresolved_partner',cue=r['cue']))
             protected.add(old)
             continue
         target = next(iter(targets))
