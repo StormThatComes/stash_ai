@@ -204,7 +204,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             scene = next(s['scene'] for s in scans if s['id']==swap_case[0])
             all_locations = _locations(source,scans,replay_labels)
             contamination = dict(status='tested',scene=scene,cue=swap_case[1],bodies=list(swap_case[2:]),
-                visible=visible_scores(groups,trial,labels),**spread(predicted,trial,all_locations,scene,swap_case[1]))
+                visible=visible_scores(groups,trial,labels),**spread(predicted,trial,all_locations,scene,swap_case[1],replay_labels))
         incremental = {}
         if len(scans)>1:
             # Front-first is based on usable measured face inputs, including
