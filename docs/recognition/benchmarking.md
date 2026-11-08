@@ -145,3 +145,33 @@ anchor. A missing face reference is counted explicitly. No Stash memberships are
 poses, partner false joins, both correct, anchored query recovery, retry count,
 and CUDA activity seconds per 1000 cues. A missing reference is reported
 separately. Run the experiment again on the same file to compare future changes.
+
+The contact comparison also runs RTMO with torso-aware suppression on the
+same ONNX outputs. The original RTMO variant uses box NMS. Both check that
+each previously associated face still belongs to the same physical torso.
+The report includes future-context retry attempts per 1000 scanned cues and
+the number of cues that yielded recovered bodies, including bracketed empty
+cues. These retries use the neighbouring retained VTT pixels and timestamps.
+
+### Optional paired KPR retrieval
+
+Install the [upstream KPR project](https://github.com/VlSomers/keypoint_promptable_reidentification/tree/e3e6ee2ffb74fd86a39518ce9a25ff91fbd973fa)
+and its dependencies in the benchmark environment. Use its trained Occluded
+PoseTrack checkpoint and matching YAML. Pass both local paths explicitly.
+
+```shell
+python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels contact-labels.json --compare-contact --kpr-config /models/kpr/kpr_occ_posetrack_test.yaml --kpr-weights /models/kpr/kpr_occ_pt_IN_82.34_92.33_42323828.pth.tar
+```
+
+Mark clean reference cues for at least two performers. The paired retrieval
+experiment uses the RF-DETR/ViTPose boxes, identical verified VTT pixels and
+the same labelled references for both encoders. KPR takes crop-relative
+positive joints and visible negative joints of other detected people.
+SapiensID uses its retained body embedding. Each query ranks the enrolled
+performers by mean distance to their references, excluding its own cue and
+identical crops. The output counts correct, partner, foreign and tied or
+unscorable retrievals plus missing inputs. Wrist annotations give a separate
+breakdown for poses with a predicted wrist closer to the partner's labelled
+wrist. This closed-set ranking measures the encoder signal separately from
+the end-to-end identity assignments. The optional model only runs in the
+benchmark and its working files use the configured benchmark directory.

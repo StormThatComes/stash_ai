@@ -12,8 +12,8 @@ def test_contact_variants_share_detector_and_keep_source_config(tmp_path):
     cfg = configured(tmp_path)
     variants = dict(contact_variants(cfg,tmp_path))
     assert [v.data['sapiensid']['pose']['backend'] for v in variants.values()]==[
-        'vitpose_plus_large','pmpose','vitpose_plus_large']
-    assert len({v.database for v in variants.values()})==3
+        'vitpose_plus_large','pmpose','vitpose_plus_large','vitpose_plus_large']
+    assert len({v.database for v in variants.values()})==4
     assert all(v.data['sapiensid']['pose']['detector']=='rfdetr_xl' for v in variants.values())
     assert variants['rfdetr-masked-pmpose'].data['sapiensid']['pose']['refinement']['masked_identity_crop']
 
@@ -75,8 +75,8 @@ def test_one_invocation_scans_all_variants_without_publishing(tmp_path,monkeypat
     monkeypatch.setattr('stash_ai.recognition.person_collection.PersonCollector',collector)
     labels = {'1':{'0':[dict(truth='A',point=[80,100],reference=True)]}}
     result = run(cfg,labels,tmp_path,compare_contact=True)
-    assert models==[('vitpose_plus_large',False),('pmpose',False),('vitpose_plus_large',True)]
-    assert len(result)==3 and all(v['verified_vtt_cues']==v['cues']>0 for v in result.values())
+    assert models==[('vitpose_plus_large',False),('pmpose',False),('vitpose_plus_large',True),('vitpose_plus_large',True)]
+    assert len(result)==4 and all(v['verified_vtt_cues']==v['cues']>0 for v in result.values())
     assert all(v['scored_cues']==1 for v in result.values())
     assert not client.writes and not cfg.database.exists()
 
@@ -105,3 +105,77 @@ def test_contact_reference_uses_face_id_even_if_reference_body_was_misassigned(t
         assert score(db,[item],labels)['own_id_queries']==1
         result = score(db,[item],labels,reference_config=cfg)
         assert result['anchored_queries']==1 and result['own_id_queries']==0
+
+
+def test_overlapping_rtmo_boxes_keep_distinct_torsos_and_protect_linked_faces():
+    from benchmarks.rtmo_contact import torso_nms,preserves_faces
+    from tests.test_recognition_crowded_tracks import pose
+    a,b = pose(40),pose(100)
+    box = [0,0,140,100]
+    for p in (a,b):
+        p['bounds'] = box
+    def candidate(p,score):
+        points = np.column_stack([p['keypoints'], np.ones(17)])
+        return box,score,points
+    assert torso_nms([candidate(a,.99),candidate(a,.98),candidate(b,.96)],1,
+                     dict(nms_threshold=.5,max_people_per_frame=2))==[0,2]
+    assert preserves_faces([a,b],[b,a],[0,1],[1,0])
+    assert not preserves_faces([a,b],[b,a],[0,1],[0,1])
+
+
+def test_separated_torsos_still_require_independent_head_evidence():
+    from stash_ai.recognition.person_association import confirmed_in_contact
+    from tests.test_recognition_partial_face_association import FACE,person
+    candidate = person((0,0,100,140))
+    peer = person((5,0,110,140))
+    candidate['pose_refinement'] = {'separated':True}
+    candidate['keypoints'][1:3] = [[-1,-1],[-1,-1]]
+    assert not confirmed_in_contact(FACE,candidate,[candidate,peer])
+
+
+def test_kpr_prompts_are_crop_relative_and_ignore_invisible_partner_points():
+    from benchmarks.kpr_contact import prompts
+    from tests.test_recognition_crowded_tracks import pose
+    a,b = pose(40),pose(47)
+    with Image.new('RGB',(140,100),(255,0,0)) as image:
+        sample = prompts(image,[a,b],0)
+    assert sample['keypoints_xyc'][5].tolist()==[8,20,1]
+    assert sample['negative_kps'].shape==(1,17,3)
+    assert sample['negative_kps'][0,0].tolist()==[0,0,0]
+    assert sample['image'][0,0].tolist()==[0,0,255]
+
+
+def test_completed_empty_cue_requires_two_independent_matching_neighbours(tmp_path):
+    from tests.test_recognition_body_global import configured,scene
+    from tests.test_recognition_crowded_tracks import pose
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from stash_ai.recognition.future_crowd import plans
+    from stash_ai.recognition.body_observations import contract
+    cfg = configured(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        item,ids = scene(db,cfg,'1',[[1,0]]*4,times=[0,0,2,2])
+        for oid,x in zip(ids,[40,100,41,102]):
+            db.execute('UPDATE body_observations SET geometry=?,quality=? WHERE id=?',
+                       (encoded(pose(x)),encoded(dict(quality=dict(view_shot=0))),oid))
+        def planned():
+            return [c for c,rows,*_ in plans(db,item['scan'],contract(cfg)) if not rows]
+        assert planned()==[]
+        db.execute('INSERT INTO body_cues VALUES (?,?,?)',(item['scan'],contract(cfg),1))
+        assert planned()==[1]
+        db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.view_shot',2) WHERE cue=2")
+        assert planned()==[]
+
+
+def test_paired_reid_scores_both_models_with_the_same_foreign_reference():
+    from collections import Counter
+    from benchmarks.kpr_contact import compare
+    def record(label,ref,cue,features):
+        return dict(truth=label,reference=ref,cue=('s',cue),pixels=cue,others={'B'},mixed_wrist=not ref,
+                    body=np.asarray(features),kpr=np.asarray(features))
+    rows = [record('A',True,0,[1,0]),record('B',True,1,[0,1]),record('A',False,2,[1,0])]
+    # Deliberately choose the partner with the second encoder.
+    probe = SimpleNamespace(distances=lambda q,refs:[.8,.1])
+    result = compare(rows,Counter(),probe)['paired_top1']
+    assert result['sapiensid']=={'own':1,'mixed_wrist_own':1}
+    assert result['kpr']=={'partner':1,'mixed_wrist_partner':1}

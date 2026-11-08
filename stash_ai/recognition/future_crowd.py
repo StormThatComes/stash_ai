@@ -21,6 +21,18 @@ def plans(db, scan, expected):
     for cue,rows in groups.items():
         if len(rows)==2 and all(r['rejected'] is None for r in rows):
             clean[cue] = pair([json.loads(r['geometry']) for r in rows])
+    for cue, in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=? ORDER BY cue',(scan,expected)):
+        if cue in groups or not follows(clean.get(cue-1),clean.get(cue+1)):
+            continue
+        before,after = groups[cue-1],groups[cue+1]
+        shot = before[0]['shot']
+        if (shot is None or any(row['shot']!=shot for row in (*before,*after)) or
+                not 0<after[0]['seconds']-before[0]['seconds']<=24):
+            continue
+        faces = list(map(tuple,db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? '
+                                         'ORDER BY id',(scan,cue))))
+        stamp = digest([[(r['id'],r['geometry'],r['seconds'],r['shot']) for r in (*before,*after)],faces])
+        yield cue,[],shot,clean[cue-1],stamp
     for cue,rows in groups.items():
         conflict = any(r['rejected']=='person_mask_conflict' for r in rows)
         if len(rows)!=1 and not (len(rows)==2 and conflict):
@@ -69,28 +81,50 @@ def recover(collector, db, scan, source):
         indices = sorted(wanted)
         frames = source.frames_indices(indices) if hasattr(source,'frames_indices') else source.frames(indices[0])
         with closing(frames):
-            for cue,_,image in frames:
+            for cue,timing,image in frames:
                 with image:
                     if cue in wanted:
                         rows,shot,support,stamp = wanted[cue]
-                        _retry(collector.model,db,config,scan,cue,image,rows,shot,support)
+                        _retry(collector.model,db,config,scan,cue,image,rows,shot,support,seconds=timing.start)
                         attempted[str(cue)] = stamp
     with db:
         db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(key,encoded(dict(
             contract=expected, generation=generation(),attempted=attempted))))
 
 
-def _retry(model,db,config,scan,cue,image,rows,shot,support):
+def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
     from .body_collection import collect
     from .body_perspectives import frame_signature
     from .crowded_retry import retry_people
     from .models import checked_detection
     from .person_pipeline import PreparedCollector
     from .sapiensid_backend import associate
-    old = [json.loads(r['geometry']) for r in rows]
-    bounds = [p['bounds'] for p in old]
+    neighbours = []
+    if rows:
+        bounds = [json.loads(r['geometry'])['bounds'] for r in rows]
+        seconds = rows[0]['seconds']
+    else:
+        import numpy as np
+        from .perspective_shots import change
+        expected = contract(config)
+        signature = np.frombuffer(bytes.fromhex(frame_signature(image)),dtype='uint8').astype(float).reshape(-1,3)
+        bounds = []
+        for side in (cue-1,cue+1):
+            people = []
+            for stored,geometry,quality in db.execute('SELECT seconds,geometry,quality FROM body_observations '
+                    'WHERE scan=? AND contract=? AND cue=? ORDER BY id',(scan,expected,side)):
+                q = json.loads(quality).get('quality',{})
+                if (not q.get('frame_signature') or q.get('view_shot')!=shot or
+                        not 0 < (seconds-stored)*(cue-side) <= 12):
+                    return
+                other = np.frombuffer(bytes.fromhex(q['frame_signature']),dtype='uint8').astype(float).reshape(-1,3)
+                if change(other,signature,True)!='continuous':
+                    return
+                person = json.loads(geometry)
+                people.append(person)
+                bounds.append(person['bounds'])
+            neighbours.append(pair(people))
     box = [min(b[0] for b in bounds),min(b[1] for b in bounds),max(b[2] for b in bounds),max(b[3] for b in bounds)]
-    seconds = rows[0]['seconds']
     faces = list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',
                             (scan,cue)))
     detections = [checked_detection(json.loads(r['geometry'])) for r in faces]
@@ -99,7 +133,8 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support):
     recovered = retry_people(model,image,detections,[dict(bounds=box)])
     if len(recovered)!=2 or not all(p.get('crowded_box_retry') for p in recovered):
         return
-    if not follows(support,pair([dict(p,crowded_box_retry=False) for p in recovered])):
+    recovered_pair = pair([dict(p,crowded_box_retry=False) for p in recovered])
+    if not all(follows(previous,recovered_pair) for previous in (support,*neighbours)):
         return
     for person in recovered:
         person['future_torso_retry'] = True
