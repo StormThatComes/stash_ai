@@ -131,6 +131,11 @@ class Lookahead:
                  ('release pending replay vectors',lambda: self.pending_budget.set(0))])
 
 
+def prefetch_busy():
+    active = _active.get()
+    return active is not None and active.pending is not None and not active.pending.done()
+
+
 def prepared_vector(row):
     active=_active.get()
     found=active.prepared.get(row['id']) if active is not None else None

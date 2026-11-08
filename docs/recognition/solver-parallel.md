@@ -70,8 +70,8 @@ The repository provides two complete v2 configurations for a host allocating
 The solver YAML does **not** set the number of trials or the total CPU/RAM
 budget. Pass all three flags from the example above. At 16 CPUs and four trials,
 the planner assigns four CPU slots to each trial: a coordinator and three inner
-slots. Parallel scene matching uses all three. The serial scene route reserves one
-slot for its prefetch reader when enabled. Baseline runs alone with the
+slots. Parallel scene matching uses all three. The serial scene route lends one
+slot to an outstanding prefetch and reclaims it when the future completes. Baseline runs alone with the
 larger CPU allocation but the same per-trial memory limit.
 
 The conservative maximum admission is **14.75 GiB per trial**: 10 GiB working,

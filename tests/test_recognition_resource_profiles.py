@@ -51,4 +51,10 @@ def test_shipped_solver_profile_admits_four_trials_without_shrinking_working_mem
         pool = Compute(replay)
         assert pool.workers == 3 and pool.native_threads == 1
         replay.data['execution']['rebuild_parallel_scenes'] = False
-        assert Compute(replay).workers == 2
+        from concurrent.futures import Future
+        from stash_ai.recognition.replay_memory import Lookahead
+        with Lookahead(':memory:', replay) as reader:
+            reader.pending = Future()
+            assert pool.workers == 2
+            reader.pending.set_result({})
+            assert pool.workers == 3
