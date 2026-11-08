@@ -9,7 +9,8 @@ from tests.test_recognition_body_global import configured, scene
 
 @pytest.mark.parametrize('incremental,rejected_face,missing_root', [
     (False, False, False), (False, False, True), (True, False, True), (True, True, False)])
-def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, incremental, rejected_face, missing_root):
+@pytest.mark.parametrize('perspective',['back','side'])
+def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, incremental, rejected_face, missing_root,perspective):
     config = configured(tmp_path)
     with FaceDatabase(config.database) as state:
         db = state.connection
@@ -21,7 +22,7 @@ def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, i
         for i,oid in enumerate(ids+queries):
             rooted = i in (0,2,3,5)
             color = (15 if i<3 else 180, 15,15)
-            q = dict(pixel_digest=oid, keypoints=10, sharpness=100, orientation='front' if rooted else 'back',
+            q = dict(pixel_digest=oid, keypoints=10, sharpness=100, orientation='front' if rooted else perspective,
                      frame_signature=(bytes(color)*16).hex())
             db.execute('UPDATE body_observations SET quality=?,geometry=? WHERE id=?',
                        (encoded(dict(quality=q)),encoded(dict(bounds=[0,0,80,100])),oid))

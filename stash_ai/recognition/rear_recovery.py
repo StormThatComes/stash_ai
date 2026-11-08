@@ -94,14 +94,15 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         person = json.loads(row['geometry'])
         kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
-        if kind != 'back' and decision.get('query_perspective') != 'back':
+        kind = decision.get('query_perspective') or kind
+        if kind not in ('back','side'):
             continue
         query = vector(row)
         context = decision.get('shot_context')
         effective = settings
         if context and context['owner']==decision.get('open_face_root',{}).get('owner'):
             effective = dict(settings,match_threshold=max(0.,settings['match_threshold']-context['bonus']))
-        ranked = gallery.rank(query,scan,effective,quality(row).get('pixel_digest'))
+        ranked = gallery.rank(query,scan,effective,quality(row).get('pixel_digest'),perspective=kind)
         best = winner(ranked, effective)
         if best is None:
             if ranked:
@@ -122,7 +123,7 @@ def _scene(db, scan, stamp, gallery, search, config):
                     or any(s!=scan for s,_ in search.bank[old]['cues'])):
             continue
         proof = dict(person=owner, status='accepted', role='auxiliary',
-                     reason='external_rear_view', source_scan=source, perspective='back', score=mean,
+                     reason='external_rear_view', source_scan=source, perspective=kind, score=mean,
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses],
                      source_scans=sorted({w['scan'] for w in witnesses}))
@@ -175,9 +176,17 @@ def recover(db, selected, config):
     # Present the frozen local memberships to all reference readers. Derived
     # claims remain durable until we have a verified replacement for their scan.
     from .rear_snapshot import frozen, apply
-    with frozen(db,scope,namespace) as active:
+    from contextlib import ExitStack, closing
+    from .scratch_space import scope as scratch_scope, connect
+    with ExitStack() as resources, frozen(db,scope,namespace) as active:
         scans = {s['scan']:s['scene'] for s in selected}
-        gallery = load(db,config,scope,namespace) if config.data['sapiensid']['global_matching']['enabled'] else None
+        gallery = None
+        if config.data['sapiensid']['global_matching']['enabled']:
+            pages = None
+            if config.data['execution']['rebuild_storage']=='disk':
+                resources.enter_context(scratch_scope(config))
+                pages = resources.enter_context(closing(connect()))
+            gallery = load(db,config,scope,namespace,pages=pages)
         if gallery and gallery.tree is not None and _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
             return
         # Incompatible or withdrawn evidence revokes previously derived claims.
