@@ -50,7 +50,8 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
         yield db
         return
     from .database import SCHEMA
-    with tempfile.TemporaryDirectory(prefix='recognition-replay-') as directory:
+    from .scratch_space import scope as scratch_scope, directory as owned_directory
+    with scratch_scope(config), owned_directory(prefix='recognition-replay-') as directory:
         with closing(sqlite3.connect(directory+'/seed.sqlite3')) as seed:
             seed.execute('PRAGMA cache_size=-2048')
             page_size = seed.execute('PRAGMA page_size').fetchone()[0]

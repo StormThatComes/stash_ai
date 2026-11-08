@@ -366,6 +366,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             bool(targeted.budget), dict(query_feedback.visits), dict(query_feedback.priorities), runtime,
             baseline_predictions=context.get('baseline_predictions'),
             baseline_body_identities=context.get('baseline_body_identities'))
+    # Only this fixed-proposal tail is independent of intervening results.
+    request.independent = False
     def accept(settings, evaluated):
         adopt(settings, evaluated['feedback'])
         for key, amount in evaluated['sampling_visits_delta'].items():
@@ -570,6 +572,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 yield None
             from .pose_anchor_rules import PARAMETER
             parent = best
+            request.independent = True
             for profile, rules in rule_profiles:
                 changes = changes_for(parent) | {PARAMETER: rules}
                 name = f'trial-{trials}'

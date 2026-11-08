@@ -125,7 +125,8 @@ def load_pose(config):
     # Require the runtime validated for explicit YOLO26 NMS-head selection.
     if Version(__version__) < Version('8.4.189'):
         raise RuntimeError('YOLO26 pose requires ultralytics>=8.4.189; install requirements-cpu.txt or requirements-gpu.txt.')
-    with tempfile.TemporaryDirectory(prefix='stash-sapiensid-pose-') as temp:
+    from .work_locations import work_root
+    with tempfile.TemporaryDirectory(dir=work_root(config), prefix='stash-sapiensid-pose-') as temp:
         path = Path(temp) / 'pose.pt'
         path.write_bytes(data)
         model = YOLO(str(path), task='pose')

@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+import os
 import shutil
 import time
 import threading
@@ -32,12 +33,18 @@ class Budget:
         parent=self.database.parent
         roots=[p for p in parent.glob(self.database.name+'*') if not p.is_symlink()]
         roots.extend(self.roots)
+        if work := os.environ.get('RECOGNITION_WORK_ROOT'):
+            roots.append(Path(work))
         volumes={};seen=set()
         for root in roots:
             files=root.rglob('*') if root.is_dir() else (root,)
             for item in files:
                 if item.is_symlink() or not item.is_file():continue
-                stat=item.stat();key=(stat.st_dev,stat.st_ino)
+                try:
+                    stat=item.stat()
+                except FileNotFoundError:
+                    continue  # Another trial released its owned file.
+                key=(stat.st_dev,stat.st_ino)
                 if key in seen:continue
                 seen.add(key)
                 row=volumes.setdefault(stat.st_dev,dict(path=str(item.parent),used=0))

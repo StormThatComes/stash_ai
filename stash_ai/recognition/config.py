@@ -60,7 +60,7 @@ def defaults():
                       'derived_cache_bytes': 4294967296, 'pixel_index_bytes': 4294967296, 'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
                       'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_mode': 'snapshot', 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592, 'replay_snapshot_bytes': 68719476736},
-        'storage': {'crop_policy': 'all', 'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576,
+        'storage': {'output_directory': None, 'crop_policy': 'all', 'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576,
                     'retention': {'auto_prune': False, 'keep_previous_scans': 1,
                                   'keep_previous_person_contracts': 1, 'prune_obsolete_crops': True}},
         'names': {'file': None},
@@ -139,6 +139,9 @@ def _number(value, name, low, high, *, integer=False):
 def validate(data):
     from .person_signal import validate as validate_person
     validate_person(data['sapiensid'])
+    output_directory = data['storage']['output_directory']
+    if output_directory is not None and (not isinstance(output_directory, str) or not output_directory.strip()):
+        raise ValueError('storage.output_directory must be a path or null.')
     if data['storage']['crop_policy'] not in ('all','selected'):
         raise ValueError('storage.crop_policy must be all or selected.')
     retention = data['storage']['retention']

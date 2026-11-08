@@ -56,12 +56,15 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
         nonlocal active_stage
         active_stage = label
     try:
-        with observe_stages(stage_update), closing(_ram(settings)) as target:
+        from .solver_worker_reuse import current_private
+        private = current_private() if seed is not None else None
+        target_context = private.borrow(settings, seed, observations) if private else closing(_ram(settings))
+        with observe_stages(stage_update), target_context as target:
             with stage('Prepare replay'):
                 if seed is None:
                     target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
                     copy_inputs(source, target, [], scope, namespace)
-                else:
+                elif private is None:
                     from .trial_inputs import prepare
                     prepare(target, seed)
             state = SimpleNamespace(connection=target, installation=installation, collect_publication_results=False)
