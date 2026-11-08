@@ -53,6 +53,7 @@ def registry(config):
         result = {k: v for k, v in result.items() if not k.startswith('sapiensid.')}
     from .body_parameters import active
     special={
+        'sapiensid.identities.scene_match_bonus':Domain(high=.1,relax=1),
         'sapiensid.identities.min_support': Domain(int, 2, MAX_SUPPORT),
         'sapiensid.identities.attach_min_support': Domain(int, 1, MAX_SUPPORT),
         'sapiensid.identities.min_appearance_distance':Domain(int,0,64),

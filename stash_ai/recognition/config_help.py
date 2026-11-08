@@ -140,6 +140,7 @@ HELP = {
     'matching.body.identities': 'Scene-local body identities and attachments.',
     'matching.body.identities.enabled': 'Create body identities within scenes. Requires body.collection.enabled.',
     'matching.body.identities.match_threshold': 'Minimum mean body similarity for a scene-local match. Range: 0..1.',
+    'matching.body.identities.scene_match_bonus': 'Bonus for a confirmed body owner in the same scene. Null inherits matching.face.same_scene.match_bonus. Range: 0..0.1.',
     'matching.body.identities.track_similarity_threshold': 'Minimum similarity across consecutive body observations. Null inherits cohesion_threshold. Range: 0..1.',
     'matching.body.identities.cohesion_threshold': 'Minimum similarity to every body reference in a scene-local match. Range: 0..1.',
     'matching.body.identities.ambiguity_margin': 'Minimum scene-local body score lead over a competing identity/group. Range: 0..1.',

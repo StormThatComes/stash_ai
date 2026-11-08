@@ -304,6 +304,9 @@ matching:
       # Minimum similarity to every body reference in a scene-local match. Range: 0..1.
       track_similarity_threshold: null
       # Minimum similarity across consecutive body observations. Null inherits cohesion_threshold. Range: 0..1.
+      scene_match_bonus: null
+      # Bonus for a confirmed body owner in the same scene. Null inherits matching.face.same_scene.match_bonus.
+      # Range: 0..0.1.
       ambiguity_margin: 0.1
       # Minimum scene-local body score lead over a competing identity/group. Range: 0..1.
       min_support: 3

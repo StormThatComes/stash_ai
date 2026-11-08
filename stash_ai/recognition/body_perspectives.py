@@ -47,6 +47,8 @@ def orientation_measurement(person):
         label = 'front'
     else:
         label = 'unknown' if all(visible(i) for i in (1,2)) else 'back'
+        if label=='unknown':
+            evidence.update(possible='back', conflict='predicted_eyes')
     confidence = min((visibility[i] if visibility is not None else 1.) for i in visible_torso)
     evidence.update(label=label,confidence=float(confidence) if label!='unknown' else 0.)
     return evidence
@@ -246,9 +248,15 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 or lookup[oid]['cue'] in partial or lookup[oid].get('face_person')):
             continue
         neighbours = [n for n in (previous_links.get(oid),next_row.get(oid)) if n is not None]
+        eye_conflict = decision['orientation_measurement'].get('conflict')=='predicted_eyes'
+        if eye_conflict:
+            if lookup[oid].get('_face_vector') is not None:
+                continue
+            neighbours = [n for n in neighbours if abs(lookup[n]['cue']-lookup[oid]['cue'])==1
+                          and lookup[n]['cue'] not in partial and shot_ids[lookup[n]['cue']]==shot_ids[lookup[oid]['cue']]]
         directions = {geometry[n][0].get('orientation') for n in neighbours}
         if 'back' in directions and not directions.intersection(('front','side')):
-            decision.update(query_perspective='back',orientation_confidence='partial_torso_and_neighbour')
+            decision.update(query_perspective='back',orientation_confidence=('rear_torso_and_neighbour' if eye_conflict else 'partial_torso_and_neighbour'))
     if not seeds:
         for row in rows:
             decisions[row['id']].setdefault('track_blocker',dict(reason='no_face_root',cue=row['cue']))
@@ -344,21 +352,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             decision['shot_context'] = dict(owner=hint['owner'],root=origin['id'],
                                             bonus=settings['scene_context_bonus'])
     if settings.get('scene_context_bonus',0.)>0:
-        from .independent_evidence import body_vote, Votes
-        prior = defaultdict(Votes)
-        first_shots = defaultdict(set)
-        for cue,members in sorted(by_cue.items()):
-            established = sorted(p for p,votes in prior.items()
-                                 if len(votes)>=settings.get('roster_support',3) and
-                                 any(shot!=shot_ids[cue] for shot in first_shots[p]))
-            for row in members:
-                if established and not row.get('face_person') and cue not in partial:
-                    decisions[row['id']]['scene_roster'] = established
-            for row in members:
-                owner = root.get(row['id'])
-                if owner is not None:
-                    prior[owner].add(body_vote(row))
-                    first_shots[owner].add(shot_ids[cue])
+        record_scene_roster(by_cue,root,shot_ids,partial,decisions,settings.get('roster_support',3))
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -528,3 +522,32 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if angle != 'crossing':
             decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
         decisions[oid].update(rooted)
+
+
+def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum):
+    from .independent_evidence import body_vote, representatives
+    sources = defaultdict(list)
+    queries = defaultdict(list)
+    for cue,rows in sorted(by_cue.items()):
+        for row in rows:
+            owner = roots.get(row['id'])
+            if owner is not None:
+                sources[owner].append(body_vote(row))
+            elif not row.get('face_person') and cue not in partial:
+                queries[shots[cue]].append(row['id'])
+    for owner,rows in sorted(sources.items()):
+        supported = representatives(rows)[:minimum]
+        if len(supported)<minimum:
+            continue
+        origins = {shots[r['cue']] for r in supported}
+        default_ids = [r['id'] for r in supported]
+        for shot,ids in queries.items():
+            witnesses = default_ids
+            if shot in origins:
+                independent = representatives(r for r in rows if shots[r['cue']]!=shot)[:minimum]
+                if len(independent)<minimum:
+                    continue
+                witnesses = [r['id'] for r in independent]
+            for oid in ids:
+                decisions[oid].setdefault('scene_roster',[]).append(owner)
+                decisions[oid].setdefault('roster_witnesses',{})[owner] = witnesses

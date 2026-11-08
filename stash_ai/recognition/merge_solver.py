@@ -65,6 +65,8 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
         current = config.data[section][key]
         options[section+'.'+key] = sorted({1, 2, max(1,current-1)})
     options['clustering.same_scene_match_bonus'] = [.03,.05,.1,.2]
+    if config.data['sapiensid']['identities']['enabled']:
+        options['sapiensid.identities.scene_match_bonus'] = [0.,.015,.03,.05,.1]
     from .pose_policy import restricted
     if restricted(config.data['clustering']):
         options['clustering.anchor_view_matching'] = [True]

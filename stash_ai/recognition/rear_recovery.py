@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 import json
 import numpy as np
 
-from .body_identity import policy, quality, vector
+from .body_identity import policy, quality, vector, scene_bonus
 from .database import encoded
 from .scan_heads import predicate
 
@@ -113,7 +113,7 @@ def _scene(db, scan, stamp, gallery, search, config):
         rooted_owner = decision.get('open_face_root',{}).get('owner')
         if context and context['owner']==rooted_owner:
             roster.add(rooted_owner)
-        bonus = config.data['clustering']['same_scene_match_bonus'] if roster else 0.
+        bonus = scene_bonus(config.data) if roster else 0.
         search_settings = dict(settings,match_threshold=max(0.,settings['match_threshold']-bonus))
         return query,scan,search_settings,quality(row).get('pixel_digest'),kind
 
@@ -186,7 +186,8 @@ def _scene(db, scan, stamp, gallery, search, config):
             if context and context['owner']==owner:
                 proof['shot_context'] = context
             else:
-                proof['roster_context'] = dict(owner=owner,bonus=bonus)
+                proof['roster_context'] = dict(owner=owner,bonus=bonus,
+                    witnesses=decision.get('roster_witnesses',{}).get(owner,[]))
         competitors = [(max(item[0],item[5]),item[2]) for item in ranked if item[2]!=owner]
         if competitors:
             runner,rival = max(competitors)
@@ -275,7 +276,7 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     with Search(db,config,references) as search:
         search.unavailable = unavailable
         settings = config.data['sapiensid']['identities']
-        minimum = max(0.,settings['match_threshold'] - config.data['clustering']['same_scene_match_bonus'])
+        minimum = max(0.,settings['match_threshold'] - scene_bonus(config.data))
         pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))
         for scan,scene in pending.candidates(scope,namespace,set(scans),stamp,active=active):
             decisions = _scene(db,scan,stamp,gallery,search,config)
