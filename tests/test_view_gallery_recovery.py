@@ -18,6 +18,7 @@ def test_matching_votes_drive_representatives_and_centroid_in_any_order():
         [selected] = supported_cohorts([slot],[],2,4,complete=True)
         assert len(selected.cues)==selected.centre_count==2
         assert set(selected.observations)=={'1','2'}
+        assert selected.cues.owners==selected.pixel_times
         np.testing.assert_allclose(selected.total,[1.8,.6])
 
 

@@ -99,6 +99,7 @@ class _Cluster:
     cues: Votes = field(default_factory=Votes)
     centre_count: int = 0
     cue_times: dict = field(default_factory=dict)
+    pixel_times: dict = field(default_factory=dict)
     cue_representatives: dict = field(default_factory=dict)
     qualities: list = field(default_factory=list)
     shots: list = field(default_factory=list)
@@ -157,7 +158,7 @@ class _Cluster:
             chosen = self.cue_representatives.get(pixel)
             if (previous is None and time not in self.cue_times and len(self.cues.edges[time])==1
                     and chosen and (-chosen[1],chosen[0])<=(-score,row['id'])
-                    and len(self.cues)==self.centre_count):
+                    and len(self.cues.edges[self.pixel_times[pixel]])==1):
                 return
             self._resolve(maximum)
 
@@ -182,6 +183,7 @@ class _Cluster:
         self.observations.clear()
         self.scene_witnesses.clear()
         self.pose_hints.clear()
+        self.pixel_times.clear()
         self.cue_times.clear()
         self.cue_representatives.clear()
         self.total = None
@@ -200,11 +202,13 @@ class _Cluster:
                 if self.database is not None:
                     record = record[:2]+(features[record[0]],)+record[3:]
                 self._append_witness(key,record,maximum)
+        self.cues.set_matching({pixel:time for time,pixel in selected})
         self.first = min(self.observations)
 
     def _append_witness(self, key, record, maximum):
         time,pixel = key
         oid,score,query,shot,scene,pose = record
+        self.pixel_times[pixel] = time
         self.cue_times[time] = self.cue_representatives[pixel] = (oid,score)
         self.centre_count += 1
         self.total = query.astype('float64').copy() if self.total is None else self.total + query

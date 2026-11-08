@@ -78,6 +78,12 @@ class Votes:
     def __contains__(self, value):
         return value in self.units
 
+    def set_matching(self, owners):
+        """Reuse the maximum matching used to select the actual proof rows."""
+        self.owners = owners
+        self.unmatched = self.edges.keys()-set(owners.values())
+        self._count = len(owners)
+
     def update(self, other):
         self.units.update(other.units)
         for stamp, pixels in other.edges.items():
