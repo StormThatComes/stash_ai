@@ -114,7 +114,8 @@ def contact_variants(config,directory):
     if not (s['enabled'] and s['collection']['enabled'] and s['identities']['enabled']):
         raise ValueError('Contact comparison requires body collection and local identities enabled.')
     for name,backend in [('rfdetr-vitpose','vitpose_plus_large'),('rfdetr-masked-pmpose','pmpose'),
-                         ('rfdetr-vitpose-rtmo','vitpose_plus_large'),('rfdetr-vitpose-rtmo-torso','vitpose_plus_large')]:
+                         ('rfdetr-vitpose-rtmo','vitpose_plus_large'),('rfdetr-vitpose-rtmo-torso','vitpose_plus_large'),
+                         ('rfdetr-vitpose-rtmo-missing','vitpose_plus_large')]:
         data = plain(config.data)
         pose = data['sapiensid']['pose']
         pose.update(detector='rfdetr_xl',backend=backend)
@@ -261,7 +262,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                 if name.startswith('rfdetr-vitpose-rtmo'):
                     from benchmarks.rtmo_contact import ContactModel
                     def factory(settings,assets):
-                        return ContactModel(settings,assets,stats,torso_nms=name.endswith('-torso'))
+                        return ContactModel(settings,assets,stats,torso_nms=name.endswith(('-torso','-missing')),
+                                            missing_only=name.endswith('-missing'))
                 collector = PersonCollector(cfg,paths,factory=factory)
                 resources.callback(collector.close)
                 selected, cues, gpu_us = [], 0, 0.
@@ -325,6 +327,11 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                     results[name]['contact_retry'] = dict(stats)
                     results[name]['verified_vtt_cues'] = len(catalogue)
                     results[name]['scored_cues'] = sum(map(len,labels.values()))
+                    base = results['rfdetr-vitpose']
+                    results[name]['delta_from_vitpose'] = {
+                        key:results[name][key]-base[key] if base[key] is not None else None
+                        for key in ('both_correct','partner_false_joins','missing_poses','duplicate_poses',
+                                    'scan_seconds_per_1000_cues','cuda_activity_seconds_per_1000_cues')}
                 if name=='rfdetr-vitpose' and kpr_config:
                     from contextlib import contextmanager
                     from benchmarks import kpr_contact

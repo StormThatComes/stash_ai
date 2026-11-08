@@ -74,20 +74,56 @@ class Extractor:
         return np.divide((weights*parts).sum(axis=-1),total,out=np.full_like(total,np.inf,dtype=float),where=total>0)
 
 
-def closest(distances, refs):
+def owner_distances(distances, refs):
     by_owner = defaultdict(list)
-    for distance,ref in zip(distances,refs):
+    for distance,ref in zip(distances,refs,strict=True):
         if np.isfinite(distance):
             by_owner[ref['truth']].append(float(distance))
-    ranked = sorted((sum(v)/len(v),owner) for owner,v in by_owner.items())
+    return sorted((sum(v)/len(v),owner) for owner,v in by_owner.items())
+
+
+def top(ranked):
     if not ranked or len(ranked)>1 and abs(ranked[0][0]-ranked[1][0])<1e-7:
-        return None
-    return ranked[0][1]
+        return None,None
+    return ranked[0][1],ranked[0][0]
+
+
+def open_set(scores,target_far=.01):
+    """Calibrate each model on absent probes from other scenes at the same target FAR."""
+    scenes = sorted({row['scene'] for row in scores})
+    totals = Counter(known=0, recovered=0, known_wrong=0, known_withheld=0,
+                     absent=0, false_accepts=0, uncalibrated_queries=0)
+    folds = {}
+    for scene in scenes:
+        calibration = [r['absent'] for r in scores if r['scene']!=scene]
+        finite = sorted(d for d in calibration if d is not None)
+        evaluation = [r for r in scores if r['scene']==scene]
+        if not finite:
+            totals['uncalibrated_queries'] += len(evaluation)
+            folds[scene] = dict(status='no_calibration',queries=len(evaluation))
+            continue
+        allowance = int(target_far*len(calibration))
+        # Strictly below the first excluded negative, including ties.
+        cutoff = np.nextafter(finite[allowance],-np.inf) if allowance<len(finite) else finite[-1]
+        folds[scene] = dict(threshold=float(cutoff),calibration_count=len(calibration),queries=len(evaluation))
+        for r in evaluation:
+            totals['known'] += 1
+            totals['absent'] += 1
+            if r['distance'] is None or r['distance']>cutoff:
+                totals['known_withheld'] += 1
+            elif r['owner']==r['truth']:
+                totals['recovered'] += 1
+            else:
+                totals['known_wrong'] += 1
+            totals['false_accepts'] += int(r['absent'] is not None and r['absent']<=cutoff)
+    return dict(target_false_accept_rate=target_far,folds=folds,**totals,
+                measured_false_accept_rate=totals['false_accepts']/totals['absent'] if totals['absent'] else None)
 
 
 def compare(rows, counts, extractor):
     refs = [r for r in rows if r['reference']]
     totals = {model:Counter() for model in ('sapiensid','kpr')}
+    scores = defaultdict(list)
     for query in rows:
         if query['reference']:
             continue
@@ -98,13 +134,17 @@ def compare(rows, counts, extractor):
         sapiens = [1.-float(np.dot(query['body'],r['body'])) for r in eligible]
         kpr = extractor.distances(query['kpr'],[r['kpr'] for r in eligible])
         for model,values in [('sapiensid',sapiens),('kpr',kpr)]:
-            owner = closest(values,eligible)
+            ranked = owner_distances(values,eligible)
+            owner,distance = top(ranked)
+            _,absent = top([r for r in ranked if r[1]!=query['truth']])
+            scores[model].append(dict(scene=query['cue'][0],truth=query['truth'],owner=owner,
+                                      distance=distance,absent=absent))
             result = ('abstained' if owner is None else 'own' if owner==query['truth']
                       else 'partner' if owner in query['others'] else 'foreign')
             totals[model][result] += 1
             if query['mixed_wrist']:
                 totals[model]['mixed_wrist_'+result] += 1
-    return dict(counts=counts,paired_top1=totals)
+    return dict(counts=counts,paired_top1=totals,open_set={model:open_set(scores[model]) for model in totals})
 
 
 def run(db,selected,labels,source_for,extractor):
