@@ -107,3 +107,40 @@ Compare encoder batches on the same labelled VTT selection and GPU using
 `python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels pairs.json --body-batches 1 2 4`.
 Each batch starts with a separate temporary database and retains the configured pose backend.
 Compare cue throughput, embedded bodies per second, peak PyTorch CUDA allocation and the labelled assignment results.
+
+### Compare recognition through a crowded VTT contact
+
+In a JSON file, label each visible person's torso in the original VTT cue
+pixels. Use the same truth label for that person across cues and scenes.
+Choose clean, face-visible reference cues for both performers. A wrist label
+is optional and uses the person's anatomical left or right.
+
+```json
+{
+  "123": {
+    "120": [{"truth":"A","point":[90,75],"reference":true},{"truth":"B","point":[160,85],"reference":true}],
+    "121": [{"truth":"A","point":[110,78],"wrists":{"right":[152,86]}},{"truth":"B","point":[142,83]}],
+    "122": [{"truth":"A","point":[87,82]},{"truth":"B","point":[176,85]}]
+  }
+}
+```
+
+Run the comparison from the repository root with Stash credentials and an
+enabled SapiensID collection/identity configuration. The example measures GPU
+activity on CUDA. On CPU omit `--cuda-profile`.
+
+```shell
+python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels contact-labels.json --compare-contact --cuda-profile
+```
+
+The three variants use RF-DETR-XL with ViTPose++, RF-DETR-XL with masked
+PMPose, and the first variant with an additional full-frame RTMO-S pass on
+unresolved face/pose counts, overlapping boxes or temporal two-person
+evidence. RTMO's pinned COCO17 ONNX model downloads into the configured model
+directory if missing-model downloads are enabled. All variants scan the
+complete selected scenes, check their cue pixels and timings against the
+first run, rebuild identities using private databases, then score only the
+labelled cues. No Stash memberships are published. Compare missing/duplicate
+poses, partner false joins, both correct, anchored query recovery, retry count,
+and CUDA activity seconds per 1000 cues. A missing reference is reported
+separately. Run the experiment again on the same file to compare future changes.

@@ -1,9 +1,10 @@
-"""Compare PMPose and its two SAM overlap modes on labelled VTT cues from read-only Stash."""
+"""Compare production pose and identity routes on identical labelled VTT cues."""
 import argparse
 from collections import Counter, defaultdict
 from contextlib import ExitStack, closing, nullcontext
 from dataclasses import replace
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -12,11 +13,13 @@ import time
 
 
 def score(db, selected, labels):
-    from stash_ai.recognition.crowd_context import torso
+    from stash_ai.recognition.crowd_labels import torso_owner
     scanned = {s['scene']:s['scan'] for s in selected}
     observations = []
+    identity_queries = []
     anchors = defaultdict(set)
     counts = Counter()
+    wrist_errors = []
     for scene,cues in labels.items():
         for cue,persons in cues.items():
             if not persons or len({p['truth'] for p in persons}) != len(persons):
@@ -26,15 +29,23 @@ def score(db, selected, labels):
                     "SELECT b.geometry,m.person,m.status FROM body_observations b LEFT JOIN body_members m "
                     "ON m.observation=b.id WHERE b.scan=? AND b.cue=?", (scanned[scene],int(cue))):
                 pose = json.loads(geometry)
-                centre = torso(pose)
-                if centre is None:
+                owner = torso_owner(pose,persons)
+                if owner is None:
+                    counts['unmatched_torsos'] += 1
                     continue
-                left,top,right,bottom = pose['bounds']
-                size = max(1.,math.hypot(right-left,bottom-top))
-                ranked = sorted((math.dist(centre,p['point'])/size,p['truth']) for p in persons)
-                if ranked[0][0]>.25 or len(ranked)>1 and ranked[1][0]-ranked[0][0]<.05:
-                    continue
-                detections[ranked[0][1]].append(person if status=='accepted' else None)
+                detections[owner].append(person if status=='accepted' else None)
+                label = next(p for p in persons if p['truth']==owner)
+                for side,point in label.get('wrists',{}).items():
+                    joint = pose['keypoints'][9 if side=='left' else 10]
+                    counts['wrist_predictions'] += 1
+                    if min(joint)<0:
+                        counts['missing_wrists'] += 1
+                        continue
+                    error = math.dist(joint,point)
+                    wrist_errors.append(error)
+                    foreign = [math.dist(joint,p['wrists'][side]) for p in persons
+                               if p['truth']!=owner and side in p.get('wrists',{})]
+                    counts['wrists_closer_to_partner'] += bool(foreign and min(foreign)<error)
             visible = {}
             for label in persons:
                 truth = label['truth']
@@ -42,10 +53,21 @@ def score(db, selected, labels):
                 counts['duplicate_poses'] += max(0,len(matches)-1)
                 counts['missing_poses'] += not matches
                 visible[truth] = matches[0] if len(matches)==1 else None
+                if not label.get('reference'):
+                    identity_queries.append((truth,visible[truth]))
                 if label.get('reference') and visible[truth] is not None:
                     anchors[truth].add(visible[truth])
             if len(visible)==2 and not any(p.get('reference') for p in persons):
                 observations.append(visible)
+    for truth,owner in identity_queries:
+        if len(anchors[truth])!=1:
+            counts['unanchored_queries'] += 1
+            continue
+        counts['anchored_queries'] += 1
+        foreign = any(owner in refs for label,refs in anchors.items() if label!=truth)
+        counts['own_id_queries'] += owner in anchors[truth] and not foreign
+        counts['foreign_id_queries'] += foreign
+        counts['unassigned_queries'] += owner is None
     for visible in observations:
         a,b = visible
         own,partner = visible[a],visible[b]
@@ -54,7 +76,9 @@ def score(db, selected, labels):
                                                or partner is not None and partner in anchors[a])
         counts['both_correct'] += bool(own is not None and partner is not None and own!=partner
                                        and anchors[a]=={own} and anchors[b]=={partner})
-    return dict(counts)
+    return dict(dict.fromkeys(('labelled_pairs','both_correct','partner_false_joins',
+                 'missing_poses','duplicate_poses','unmatched_torsos'),0),**counts,
+                 wrist_mean_error_px=sum(wrist_errors)/len(wrist_errors) if wrist_errors else None)
 
 
 def variant(config, name, database):
@@ -66,6 +90,46 @@ def variant(config, name, database):
     pose['refinement'].update(enabled=name!='unmasked',mode='overlap',masked_identity_crop=name=='masked_identity')
     data['execution'].update(max_cues=0,media_cache_bytes=0)
     return replace(config,data=data,database=database)
+
+
+def contact_variants(config,directory):
+    from stash_ai.recognition.config import plain
+    s = config.data['sapiensid']
+    if not (s['enabled'] and s['collection']['enabled'] and s['identities']['enabled']):
+        raise ValueError('Contact comparison requires body collection and local identities enabled.')
+    for name,backend in [('rfdetr-vitpose','vitpose_plus_large'),('rfdetr-masked-pmpose','pmpose'),
+                         ('rfdetr-vitpose-rtmo','vitpose_plus_large')]:
+        data = plain(config.data)
+        pose = data['sapiensid']['pose']
+        pose.update(detector='rfdetr_xl',backend=backend)
+        pose['refinement'].update(enabled=backend=='pmpose',mode='overlap',masked_identity_crop=backend=='pmpose')
+        data['execution'].update(max_cues=0,media_cache_bytes=0)
+        yield name,replace(config,data=data,database=directory/(name+'.sqlite3'))
+
+
+class CheckedSource:
+    """Fail the comparison if any variant sees a different VTT pixel or timing."""
+    def __init__(self,source,scene,catalogue,first):
+        self.source,self.scene,self.catalogue,self.first = source,scene,catalogue,first
+
+    def __getattr__(self,name):
+        return getattr(self.source,name)
+
+    def frames(self,start=0):
+        with closing(self.source.frames(start)) as frames:
+            for index,cue,image in frames:
+                try:
+                    with image.convert('RGB') as rgb:
+                        stamp = (rgb.size,cue.start,cue.end,hashlib.sha256(rgb.tobytes()).digest())
+                    address = self.scene,index
+                    if self.first:
+                        self.catalogue.setdefault(address,stamp)
+                    if self.catalogue.get(address)!=stamp:
+                        raise ValueError(f'VTT pixels or timing changed at scene {self.scene}, cue {index}.')
+                except BaseException:
+                    image.close()
+                    raise
+                yield index,cue,image
 
 
 def pose_records(db, selected):
@@ -98,7 +162,7 @@ def compare_pose(reference, candidate):
                 changed_visible_keypoints=visibility,max_visible_displacement_pixels=max_error)
 
 
-def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False):
+def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False, compare_contact=False):
     from stash_ai.recognition.backend import LazyBackend
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.models import namespace
@@ -112,10 +176,27 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
     services = Services()
     url = os.getenv('STASH_URL','http://localhost:9999')
     results = {}
+    catalogue = {}
+    if compare_contact:
+        from stash_ai.recognition.crowd_labels import validate
+        validate(labels,labels)
+        if not labels or not all(labels.values()):
+            raise ValueError('Contact comparison requires labelled VTT cues.')
+        for cues in labels.values():
+            for persons in cues.values():
+                for person in persons:
+                    wrists = person.get('wrists',{})
+                    if not isinstance(wrists,dict) or any(
+                        side not in ('left','right') or not isinstance(point,list) or len(point)!=2 or
+                        any(type(x) not in (float,int) or not math.isfinite(x) or x<0 for x in point)
+                        for side,point in wrists.items()):
+                        raise ValueError('Optional wrists must map left/right to [x,y] VTT coordinates.')
     with closing(services.client(url=url,api_key=os.getenv('STASH_API_KEY',''),
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
         reference = None
-        if compare_vitpose:
+        if compare_contact:
+            variants = contact_variants(config,directory)
+        elif compare_vitpose:
             from stash_ai.recognition.config import plain
             import torch
             if (config.data['sapiensid']['pose']['backend'] != 'vitpose_plus_large'
@@ -140,6 +221,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                         for name in ('unmasked','sam_overlap','masked_identity')]
         for name, cfg in variants:
             with ExitStack() as resources:
+                from stash_ai.recognition.work_locations import invocation
+                resources.enter_context(invocation(cfg))
                 state = resources.enter_context(FaceDatabase(cfg.database))
                 paths = LazyAssets(cfg,services.assets,RunReport(False,print))
                 paths.prepare_identity()
@@ -147,11 +230,17 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                 resources.callback(backend.unload)
                 visible = LazyVisibility(cfg,paths,services.visibility)
                 resources.callback(visible.close)
-                collector = PersonCollector(cfg,paths)
+                stats = Counter(retry_cues=0,replacement_cues=0)
+                factory = None
+                if name=='rfdetr-vitpose-rtmo':
+                    from benchmarks.rtmo_contact import ContactModel
+                    def factory(settings,assets):
+                        return ContactModel(settings,assets,stats)
+                collector = PersonCollector(cfg,paths,factory=factory)
                 resources.callback(collector.close)
                 selected, cues, gpu_us = [], 0, 0.
                 cuda = None
-                if (body_batches or compare_vitpose) and cfg.data['models']['device'] != 'cpu':
+                if (body_batches or compare_vitpose or compare_contact) and cfg.data['models']['device'] != 'cpu':
                     import torch
                     if torch.cuda.is_available():
                         cuda = torch.cuda
@@ -163,6 +252,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                     with closing(services.source(client,item,cfg)) as source:
                         if any(not 0<=int(i)<len(source.cues) for i in labels[scene]):
                             raise ValueError('Label outside VTT cue range in scene '+scene)
+                        if compare_contact:
+                            source = CheckedSource(source,scene,catalogue,name=='rfdetr-vitpose')
                         monitor = nullcontext()
                         if profile_cuda:
                             import torch
@@ -178,6 +269,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                             gpu_us += sum(e.time_range.elapsed_us() for e in profiler.events()
                                           if e.device_type==torch.autograd.DeviceType.CUDA)
                         selected.append(dict(scene=scene,scan=scan))
+                        if compare_contact and sum(s==scene for s,_ in catalogue)!=len(source.cues):
+                            raise ValueError(f'Incomplete or changed VTT input for scene {scene}.')
                         cues += len(source.cues)
                 if cuda:
                     cuda.synchronize()
@@ -190,6 +283,10 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                                      peak_torch_cuda_allocated_bytes=peak,
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,
                                      cuda_activity_seconds_per_1000_cues=gpu_us/(1000*cues) if profile_cuda else None)
+                if compare_contact:
+                    results[name]['contact_retry'] = dict(stats)
+                    results[name]['verified_vtt_cues'] = len(catalogue)
+                    results[name]['scored_cues'] = sum(map(len,labels.values()))
                 if compare_vitpose:
                     records = pose_records(state.connection,selected)
                     if reference is None:
@@ -206,6 +303,8 @@ if __name__=='__main__':
     parser.add_argument('--labels',type=Path,required=True)
     parser.add_argument('--cuda-profile',action='store_true')
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--compare-contact',action='store_true',
+                       help='Compare RF-DETR+ViTPose++, masked PMPose and selective full-frame RTMO on the same VTT.')
     modes.add_argument('--compare-vitpose-decode',action='store_true',
                        help='Compare reference/CUDA ViTPose coordinates, visibility and face associations.')
     modes.add_argument('--body-batches', type=int, nargs='+', choices=range(1, 17),
@@ -217,4 +316,4 @@ if __name__=='__main__':
     parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='crowded-vtt-',dir=parent) as directory:
         print(json.dumps(run(config,json.loads(args.labels.read_text()),Path(directory),
-                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode),indent=2))
+                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode,compare_contact=args.compare_contact),indent=2))
