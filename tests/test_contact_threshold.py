@@ -47,3 +47,12 @@ def test_lost_turns_and_fault_propagation_cannot_improve_verdict():
     stress = dict(episodes=[dict(baseline=dict(later_cues=0,other_scenes=[]),
                                  winner=dict(later_cues=1,other_scenes=['2']))])
     assert holdout_verdict({'baseline/joint':baseline,'winner/joint':baseline},stress)['status']=='regressed'
+
+
+def test_solver_uses_the_joint_path_when_one_local_edge_is_close():
+    from stash_ai.recognition.contact_threshold import labelled_path_wins
+    close = {(0,0):.86,(1,1):.90,(0,1):.85,(1,0):.35}
+    clear = {(0,0):.90,(1,1):.95,(0,1):.45,(1,0):.40}
+    assert labelled_path_wins([close,clear],.85,.1)
+    tied = dict.fromkeys(close,.9)
+    assert not labelled_path_wins([tied,tied],.85,.1)
