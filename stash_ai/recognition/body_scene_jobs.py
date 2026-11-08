@@ -7,11 +7,19 @@ from stash_ai.runtime.cleanup import closing
 
 def _worker(payload):
     from .body_identity import _plan, _prepare_vectors
-    config, frozen, wanted = payload
+    config, frozen, wanted, compact = payload
+    from .shared_payload import Rows, unpack
+    if isinstance(frozen[1], Rows):
+        with unpack(frozen[1]) as packed:
+            rows = [dict(metadata, embedding=vector) for metadata, vector in packed]
+        frozen = (frozen[0], rows, *frozen[2:])
     _prepare_vectors(frozen[1])
     hints = []
     plan = _plan(None, config, *frozen,
                  capture_hints=lambda groups, seeds, modes: hints.append((groups, seeds, modes)) if wanted else None)
+    if compact and not hints:
+        record, rows, decisions = plan
+        plan = record, [{'id': row['id']} for row in rows], decisions
     return plan, hints
 
 
@@ -32,7 +40,7 @@ def _witnesses(db, owners, limit):
     return frozen,used
 
 
-def planned(db, items, config):
+def planned(db, items, config, *, ids_only=False):
     from .body_identity import scene_plan, _load_scene, _plan, _prepare_vectors
     from .hybrid_query_observer import _observer
     store=current() if _observer.get() is None else None
@@ -43,11 +51,29 @@ def planned(db, items, config):
         if checkpoints:checkpoints.put('body-scene',key,decisions)
     observer = _observer.get()
     pool=compute()
+    from types import SimpleNamespace
+    from .config import plain
+    backend = config.data['execution']['rebuild_cohort_backend'] if observer is None and ids_only else 'threads'
+    worker_config = SimpleNamespace(data=plain(config.data)) if backend == 'processes' else config
     batch=[]
+    def jobs():
+        for ordinal, (key, inputs, size, wanted) in enumerate(batch):
+            if backend == 'processes':
+                from .shared_payload import pack
+                record, rows, *rest = inputs
+                packed = [(dict((k,v) for k,v in row.items() if k != 'embedding'), row['embedding']) for row in rows]
+                try:
+                    packed, segment = pack(packed)
+                except OSError:
+                    segment = None
+                if segment is not None:
+                    pool.shared_inputs[ordinal] = segment
+                    inputs = (record, packed, *rest)
+            yield Work(ordinal, key, (worker_config, inputs, wanted, ids_only), size)
+
     def drain():
         if batch:
-            jobs=(Work(i,key,(config,inputs,wanted),size) for i,(key,inputs,size,wanted) in enumerate(batch))
-            with closing(pool.ordered(_worker,jobs),name='finish body scene plans') as results:
+            with closing(pool.ordered(_worker, jobs(), backend=backend),name='finish body scene plans') as results:
                 for result in results:
                     (record, rows, decisions), hints = result.value
                     if observer is not None and hasattr(observer, 'local_budget'):
