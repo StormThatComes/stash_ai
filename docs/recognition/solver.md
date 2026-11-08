@@ -585,3 +585,15 @@ The `detection` report counts expected people, missing and duplicate poses,
 and ambiguous poses independently of the membership replay. Existing
 `observations` still label the samples used to evaluate identity decisions.
 Explicit omission windows take precedence over automatic scenario selection.
+
+The holdout groups each labelled visible performer and cue into one outcome. The
+report counts correct identities, foreign identities, new fragments, withheld
+people and missed detections. An assigned person without a unique strict face
+reference has a separate unknown-reference outcome. Two-sided turns require
+strict faces at both boundaries of the continuous episode. Single-sided and
+remote face references have separate counts.
+
+When a visible labelled pair has two distinct retained bodies and a usable
+face association, the holdout also swaps their face associations in one private
+replay. It rebuilds the hybrid projections and reports changed memberships in
+later cues and other selected scenes. The source database is opened read-only.

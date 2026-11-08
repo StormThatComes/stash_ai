@@ -105,6 +105,14 @@ def holdout_summary(report):
         parts.append(f"physical projection conflicts {after['physical']['projection_conflicts']}")
     if report.get('detection',{}).get('expected_people'):
         parts.append(f"missing poses {report['detection']['missing_poses']}/{report['detection']['expected_people']}")
+    if after.get('visible',{}).get('total'):
+        physical = after['visible']
+        parts.append(f"visible people {physical['correct']}/{physical['total']} correct, {physical['partner']} partner, "
+                     f"{physical['fragment']} fragments, {physical['withheld']} withheld, {physical['missing']} missing, "
+                     f"{physical['unknown_reference']} without unique reference")
+    fault = report.get('association_stress',{})
+    if fault.get('status')=='tested':
+        parts.append(f"association swap: {fault['later_cues']} later cues changed, {len(fault['other_scenes'])} other scenes")
     stress = report['omissions']
     omissions = ', '.join(f"{w['scene']}:{w['first_cue']}-{w['last_cue']} lost={w['lost_pairs']}"
                           f" joined={w['joined_pairs']} {w.get('mode','rejected')}" for w in stress) or 'no series identified'

@@ -286,7 +286,8 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
                 key = 'sapiensid.identities.track_similarity_threshold'
                 cutoff = lower(key,row['measured'])
                 rival = row.get('partner_score')
-                if rival is not None and rival >= cutoff:
+                margin = max(.025,parameter(config.data,'sapiensid.identities.ambiguity_margin'))
+                if rival is not None and (row['measured']-rival < margin):
                     groups[index]['observed_blockers']['track_partner_scores_overlap'] += 1
                 else:
                     add(index,'local_body_track',{key:cutoff}, observations=[oid,peer],

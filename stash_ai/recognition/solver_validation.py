@@ -181,12 +181,30 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         def announce(name):
             if progress:
                 progress(f'Holdout {name} · {len(scans)} scenes · {len(labels)} labels')
-        full = evaluate(settings,labels,variants={'winner':winner},variant_started=announce,**options)
+        from .contact_holdout import physical_inputs, visible_scores, spread
         timing = {}
         locations = _locations(source,scans,labels,timing=timing)
+        groups,swap_case = physical_inputs(source,settings,scans,visible,labels,locations)
+        from .body_identity import enabled as body_enabled
+        replay_labels = dict(labels)
+        if body_enabled(settings):
+            for (_,_,truth),addresses in groups.items():
+                for oid in addresses:
+                    replay_labels.setdefault(oid,truth)
+        else:
+            groups = {k:[oid for oid in ids if oid in labels] for k,ids in groups.items()}
+            swap_case = None
+        full = evaluate(settings,replay_labels,variants={'winner':winner},variant_started=announce,**options)
         predicted = full['trials']['winner/joint']['decisions']
-        metrics = {name: _metrics(labels,samples,locations,trial['decisions'], partner_sets=triples,timing=timing)
-                   for name, trial in full['trials'].items()}
+        metrics = {name:dict(_metrics(labels,samples,locations,trial['decisions'],partner_sets=triples,timing=timing),
+                             visible=visible_scores(groups,trial['decisions'],labels)) for name,trial in full['trials'].items()}
+        contamination = dict(status='no_labelled_contact_pair')
+        if swap_case:
+            trial = evaluate(winner,replay_labels,swapped_bodies=swap_case,**options)['trials']['baseline/joint']['decisions']
+            scene = next(s['scene'] for s in scans if s['id']==swap_case[0])
+            all_locations = _locations(source,scans,replay_labels)
+            contamination = dict(status='tested',scene=scene,cue=swap_case[1],bodies=list(swap_case[2:]),
+                visible=visible_scores(groups,trial,labels),**spread(predicted,trial,all_locations,scene,swap_case[1]))
         incremental = {}
         if len(scans)>1:
             # Front-first is based on usable measured face inputs, including
@@ -255,5 +273,5 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, omissions=stress, incremental=incremental,
+    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))

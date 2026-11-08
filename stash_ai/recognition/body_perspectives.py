@@ -196,9 +196,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 if not failure or failure[1]['reason']!='body_similarity':
                     continue
                 detail = failure[1]
-                rivals = [(value, b if forward_order else a) for (a,b),value in appearance_edges.items()
-                          if (a if forward_order else b)==member['id'] and
-                             (b if forward_order else a)!=detail['peer']]
+                source,target_id = ((member['id'],detail['peer']) if forward_order else
+                                    (detail['peer'],member['id']))
+                rivals = [(value,b if a==source else a) for (a,b),value in appearance_edges.items()
+                          if (a==source and b!=target_id) or (b==target_id and a!=source)]
                 if rivals:
                     detail['partner_score'],detail['partner_observation'] = max(rivals)
         for a in left:
