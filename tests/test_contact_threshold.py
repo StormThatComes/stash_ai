@@ -29,3 +29,30 @@ def test_abstaining_inside_contact_preserves_only_endpoint_recovery():
     result = sequence_metrics(labels,samples,locations,decisions)
     assert result['endpoint_returns']==result['contact_interior']['withheld']==1
     assert result['contact_interior']['correct']==0
+
+
+def test_lost_turns_and_fault_propagation_cannot_improve_verdict():
+    from stash_ai.recognition.solver_validation import holdout_verdict
+
+    def trial(success, anchors):
+        return dict(sequences=dict(turns=10, own_id_turns=success, anchored_turns=anchors,
+                    rooted_turns=[('s','A',i,i+2) for i in range(anchors)], crossings=0,
+                    contact_interior=dict(correct=0,partner=0)),
+                    partners=dict(false_joins=0,partner_pairs=0),
+                    visible=dict(split_identities=0,reference_identities=1))
+    baseline = trial(8,10)
+    verdict = holdout_verdict({'baseline/joint':baseline,'winner/joint':trial(7,7)})
+    assert verdict['status']=='regressed'
+    assert verdict['measures']['lost_turn_references']['winner']==3
+    stress = dict(episodes=[dict(baseline=dict(later_cues=0,other_scenes=[]),
+                                 winner=dict(later_cues=1,other_scenes=['2']))])
+    assert holdout_verdict({'baseline/joint':baseline,'winner/joint':baseline},stress)['status']=='regressed'
+
+
+def test_solver_uses_the_joint_path_when_one_local_edge_is_close():
+    from stash_ai.recognition.contact_threshold import labelled_path_wins
+    close = {(0,0):.86,(1,1):.90,(0,1):.85,(1,0):.35}
+    clear = {(0,0):.90,(1,1):.95,(0,1):.45,(1,0):.40}
+    assert labelled_path_wins([close,clear],.85,.1)
+    tied = dict.fromkeys(close,.9)
+    assert not labelled_path_wins([tied,tied],.85,.1)

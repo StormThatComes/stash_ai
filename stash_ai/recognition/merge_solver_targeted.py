@@ -24,13 +24,15 @@ def route_family(item):
     return 'admission' if route == 'admission' else 'hybrid'
 
 
-def route_order(candidates):
+def route_order(candidates, *, prefer_body=False):
     """Prefer measured face routes, retaining bounded space for every fallback."""
     buckets = defaultdict(list)
     for item in candidates:
         buckets[route_family(item)].append(item)
+    order = ('body','hybrid','face','admission','uncertain_face') if prefer_body else (
+        'face','face','hybrid','uncertain_face','body','admission')
     while any(buckets.values()):
-        for family in ('face', 'face', 'hybrid', 'uncertain_face', 'body', 'admission'):
+        for family in order:
             if buckets[family]:
                 yield buckets[family].pop(0)
 
@@ -78,6 +80,17 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
         for oid in addresses:by_observation[oid] = index
         for destination in destinations:owners[destination].add(index)
 
+    # A measured temporal break on the target body is more actionable than
+    # relaxing face thresholds elsewhere in the same merge set.
+    body_first = {by_observation[r['observation']] for r in feedback.get('provenance',{}).get('blocker_trace',())
+                  if r.get('observation') in by_observation and r.get('reason') in
+                  ('track_body_similarity','track_no_face_root','track_no_independent_view')}
+    for group in goals['groups']:
+        target = groups[group['index']]['target']
+        missing = [r for m in group['members'] for r in m['observations']
+                   if target is None or membership.get(r['id'])!=target]
+        if missing and all(r.get('evidence_kind')=='person' for r in missing):
+            body_first.add(group['index'])
     def pair_set(a, b):
         indices = owners.get(a, set()) & owners.get(b, set())
         return next(iter(indices)) if len(indices) == 1 and a != b else None
@@ -132,7 +145,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
         group['candidates'].sort(key=lambda p: (p['route']=='admission', -p['gain'],
             magnitude([dict(parameter=k,current=parameter(config.data,k),proposed=v) for k,v in p['patch'].items()]),
             len(p['patch']), digest(p['patch'])))
-        group['candidates'] = list(route_order(group['candidates']))[:16]
+        group['candidates'] = list(route_order(group['candidates'],prefer_body=index in body_first))[:16]
 
     for index, patch in quality.items():
         add(index, 'admission', patch, observations=quality_ids[index], blockers=patch,
@@ -285,7 +298,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             if index is not None and by_observation.get(peer)==index and row['measured']>=0:
                 key = 'sapiensid.identities.track_similarity_threshold'
                 from .contact_threshold import contact_interval
-                interval = contact_interval(db,config,by_observation,oid,peer) if db is not None else None
+                interval = contact_interval(db,config,by_observation,oid,peer,measured=row['measured']) if db is not None else None
                 own_floor = min(row['measured'],interval['own_floor']) if interval else row['measured']
                 cutoff = lower(key,own_floor)
                 rival = row.get('partner_score')
@@ -294,9 +307,9 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
                     rival = max(interval['rival_floor'],rival if rival is not None else -1.)
                     evidence = groups[index].setdefault('contact_paths',[])
                     if len(evidence)<8:
-                        evidence.append(dict(scene=row.get('scene'),cue=row.get('observation_cue'),**interval,
-                                             separated=cutoff-rival>=margin))
-                if rival is not None and cutoff-rival < margin:
+                        evidence.append(dict(scene=row.get('scene'),cue=row.get('observation_cue'),**interval))
+                separated = interval['separated'] if interval else rival is None or cutoff-rival>=margin
+                if not separated:
                     groups[index]['observed_blockers']['track_partner_scores_overlap'] += 1
                 else:
                     add(index,'local_body_track',{key:cutoff}, observations=[oid,peer],

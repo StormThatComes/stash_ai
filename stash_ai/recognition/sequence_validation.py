@@ -20,6 +20,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
         rows.append((owner, samples[oid]['slices']))
     counts = defaultdict(lambda: defaultdict(int))
 
+    turn_roots = []
     missing_boundaries = 0
 
     def continuous(scene, a, b):
@@ -77,6 +78,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 elif not boundaries and roots_by_cue:
                     counts[person]['remote_root_turns'] += 1
                 if len(boundaries)==2:
+                    turn_roots.append((scene,person,window[0],window[-1]))
                     counts[person]['anchored_turns'] += 1
                     counts[person]['face_root_conflicts'] += len(roots)>1
                     expected = next(iter(roots)) if len(roots)==1 else None
@@ -124,7 +126,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     def macro(success,total):
         rates = [c.get(success,0)/c[total] for c in counts.values() if c.get(total)]
         return sum(rates)/len(rates) if rates else None
-    return dict(turns=sum(c['turns'] for c in counts.values()),
+    return dict(rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),
                 crossings=crossings,contact_interior=middle_outcomes,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,
