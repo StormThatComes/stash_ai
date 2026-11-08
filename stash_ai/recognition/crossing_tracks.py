@@ -1,73 +1,95 @@
-"""Bounded two-person assignment through one continuous, face-bracketed contact."""
+"""Resolve a bounded two-person contact using strict endpoints and physical edges."""
 from itertools import permutations
 
 
-def crossings(by_cue, roots, decisions, transition, margin, *, occluded=()):
-    claims = {}
-    for start, first in by_cue.items():
-        owners = tuple(roots.get(row['id']) for row in first)
-        if len(owners) != 2 or None in owners or len(set(owners)) != 2:
-            continue
-        layers = [{0:tuple(first)}]
-        hidden = None
-        for cue in range(start + 1, start + 8):
-            people = by_cue.get(cue, ())
-            if cue in occluded and len(people)==1 and hidden is None:
-                hidden = people[0]
+def _path(layers, edges, *, rival_at=None, best=None, margin=0.):
+    # At each layer keep the best prefix ending in each of the two permutations.
+    paths = {i:(0.,(i,)) for i in layers[0]}
+    for index, table in enumerate(edges,1):
+        current = {}
+        for (left,right),(score,eligible,physical) in table.items():
+            if left not in paths or (best is None and not eligible):
                 continue
-            if len(people) != 2:
-                break
-            states = {}
-            for index, order in enumerate(permutations(people)):
-                known = [roots.get(row['id']) or (decisions[row['id']].get('person') if row.get('face_person') else None)
-                         for row in order]
-                if all(person in (None,owner) for person,owner in zip(known,owners)):
-                    states[index] = order
-            if not states:
-                break
-            layers.append(states)
-            if all(row['id'] in roots for row in people):
-                if (len(layers) > 2 or hidden is not None) and (people[0].get('seconds', 0)-first[0].get('seconds', 0) <= 60):
-                    if _window(layers, owners, decisions, transition, margin, claims) and hidden is not None:
-                        decisions[hidden['id']].update(person=None, status='withheld', role='auxiliary',
-                            reason='unresolved_partner', track_blocker=dict(reason='unresolved_partner',cue=cue))
-                break
-    return claims
+            if rival_at==index and best[index]==right:
+                continue
+            if best is not None and physical!=table[best[index-1],best[index]][2]:
+                score += margin
+            value, prefix = paths[left]
+            candidate = value+score, (*prefix,right)
+            if right not in current or candidate>current[right]:
+                current[right] = candidate
+        paths = current
+    return max(paths.values(),default=None)
 
 
-def _window(layers, owners, decisions, transition, margin, claims):
-    # At most six interior pairs. Score each possible path with cached edges,
-    # then charge the margin only on transitions where an alternative differs.
-    paths = [(0., (0,))]
-    physical_edges = []
-    for earlier, later in zip(layers,layers[1:]):
-        edges = {}
-        physical = {}
-        for left, previous in earlier.items():
-            for right, current in later.items():
-                scores = [transition(a,b) for a,b in zip(previous,current)]
-                if None not in scores:
-                    edges[left,right] = sum(scores)/2
-                    physical[left,right] = frozenset((a['id'],b['id']) for a,b in zip(previous,current))
-        physical_edges.append(physical)
-        paths = [(score+edges[states[-1],state], (*states,state))
-                 for score,states in paths for state in later if (states[-1],state) in edges]
-        if not paths:
+def _window(pairs, owners, roots, decisions, transition, raw, margin, claims):
+    layers = []
+    for pair in pairs:
+        states = {}
+        for i,order in enumerate(permutations(pair)):
+            known = [roots.get(r['id']) or (decisions[r['id']].get('person') if r.get('face_person') else None) for r in order]
+            if all(p in (None,owner) for p,owner in zip(known,owners)):
+                states[i] = order
+        if not states:
             return False
-    score, best = max(paths)
-    before, after = layers[0][0], layers[-1][best[-1]]
+        layers.append(states)
+    edges = []
+    for left,right in zip(layers,layers[1:]):
+        table = {}
+        cache = {}
+        for i,previous in left.items():
+            for j,current in right.items():
+                physical = []
+                values = []
+                for a,b in zip(previous,current):
+                    key = a['id'],b['id']
+                    if key not in cache:
+                        score = transition(a,b)
+                        cache[key] = score if score is not None or raw is None else raw(a,b), score is not None
+                    physical.append(key)
+                    values.append(cache[key])
+                if all(score is not None for score,_ in values):
+                    table[i,j] = sum(s for s,_ in values)/2, all(ok for _,ok in values), frozenset(physical)
+        edges.append(table)
+    winner = _path(layers,edges)
+    if winner is None:
+        return False
+    score,best = winner
+    before,after = layers[0][best[0]],layers[-1][best[-1]]
     for i in range(1,len(layers)-1):
-        def separated(alternative):
-            other_score, other = alternative
-            if other[i]==best[i]:
-                return True
-            different = sum(edge[a,c]!=edge[b,d] for edge,a,b,c,d in
-                            zip(physical_edges,best,other,best[1:],other[1:]))
-            return score-other_score >= margin*different and score>other_score
-        if not all(separated(path) for path in paths):
+        rival = _path(layers,edges,rival_at=i,best=best,margin=margin)
+        if rival and (rival[0]>score+1e-12 or margin==0 and rival[0]>=score):
             continue
         for owner,row,first,last in zip(owners,layers[i][best[i]],before,after):
             if row.get('face_person') or decisions[row['id']].get('track_blocker',{}).get('reason')=='different_face_root':
                 continue
-            claims[row['id']] = owner,first,last,score/(len(layers)-1)
+            claims.setdefault(row['id'],{})[owner] = owner,first,last,score/len(edges)
     return True
+
+
+def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=None):
+    claims = {}
+    for start,first in sorted(by_cue.items()):
+        if len(first)!=2 or not any(r['id'] in roots for r in first):
+            continue
+        pairs = [first]
+        hidden = []
+        for cue in range(start+1,start+13):
+            people = by_cue.get(cue,())
+            if len(people)==1 and cue in occluded and len(hidden)<2:
+                hidden.append(people[0])
+                continue
+            if len(people)!=2 or people[0].get('seconds',0)-first[0].get('seconds',0)>60:
+                break
+            pairs.append(people)
+            if all(r['id'] in roots for r in people):
+                owners = tuple(roots[r['id']] for r in people)
+                if len(set(owners))==2 and (len(pairs)>2 or hidden):
+                    if _window(pairs,owners,roots,decisions,transition,raw,margin,claims):
+                        for row in hidden:
+                            decision = decisions[row['id']]
+                            if decision.get('track_blocker',{}).get('reason')!='different_face_root':
+                                decision.update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
+                                                track_blocker=dict(reason='unresolved_partner',cue=row.get('cue',cue)))
+                break
+    return {oid:next(iter(options.values())) for oid,options in claims.items() if len(options)==1}
