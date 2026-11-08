@@ -38,3 +38,34 @@ def test_parallel_witness_budget_fails_without_mutation(tmp_path, monkeypatch, l
         assert config.database.read_bytes() == before
     finally:
         state.__exit__(None, None, None)
+
+
+def test_observed_body_scenes_share_queue_and_keep_ordered_hints(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.recognition.body_scene_jobs import planned
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.hybrid_query_observer import observe_queries
+    from stash_ai.recognition.local_body_hints import Budget
+    from tests.test_recognition_body_global import configured as body_config, scene
+    monkeypatch.setattr('stash_ai.recognition.compute.available_cpus', lambda: 16)
+    config = body_config(tmp_path)
+    config.data['execution']['rebuild_queue_bytes'] = 2 << 20
+    with FaceDatabase(config.database) as state:
+        selected = []
+        addresses = []
+        for index in range(3):
+            scan, ids = scene(state.connection, config, str(index+1))
+            selected.append(scan)
+            addresses.append(dict(id=ids[0], scene=scan['scene']))
+        goals = {'groups': [dict(index=0, members=[dict(observations=addresses)])]}
+        def measure(workers):
+            config.data['execution']['rebuild_workers'] = workers
+            observer = SimpleNamespace(sets={r['id']:0 for r in addresses}, visits={},
+                local_body=[], local_budget=Budget(goals), truncation_reasons=set(), local_body_comparisons=0)
+            with compute_scope(config) as pool, observe_queries(observer):
+                decisions = [plan[2] for plan in planned(state.connection, selected, config)]
+                if workers > 1:
+                    assert pool.submitted == len(selected)
+                    assert pool.peak_bytes <= pool.limit
+                return decisions, observer.visits, observer.local_body, observer.local_budget.report()
+        assert measure(1) == measure(16)
