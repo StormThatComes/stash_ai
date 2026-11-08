@@ -417,6 +417,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         return
     owner_rows = defaultdict(list)
     rival_evidence = {}
+    entrant_banks = {}
     for r in rows:
         p = decisions[r['id']]['person']
         if p is not None:
@@ -468,6 +469,16 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                          and guard.allows(row,others)]
             competing.extend((scores.compare([row],other)[0], p) for (p,_,_),(other,_) in banks.items() if p!=owner)
             runner, rival = max(competing, default=(-1.,None))
+            if bonus:
+                from .roster_presence import entrant_score
+                from .body_identity import independent
+                own = decision.get('person'),shot_ids[row['cue']]
+                if own not in entrant_banks:
+                    entrant_banks[own] = independent((r for r in owner_rows.get(own[0],())
+                        if r['cue'] in shot_ids and shot_ids[r['cue']]!=own[1]),settings)
+                entrant = entrant_score(scores,row,entrant_banks[own],settings,settings['scene_context_bonus'])
+                if entrant>runner:
+                    runner,rival = entrant,'new_participant'
             if rival is not None:
                 rival_evidence[row['id'],owner,mean] = dict(rival=rival,runner=runner)
             if mean-runner < margin:
@@ -566,7 +577,7 @@ def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, we
             if owner is not None:
                 sources[owner].append(row)
             elif not row.get('face_person') and cue not in partial:
-                queries[shots[cue]].append((cue,row['id']))
+                queries[shots[cue]].append(row)
     for owner,rows in sorted(sources.items()):
         supported = independent(rows,settings)[:minimum]
         if len(supported)<minimum:
@@ -582,20 +593,15 @@ def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, we
                     continue
                 witnesses = [r['id'] for r in other_shots[:minimum]]
             if weighted:
-                from bisect import bisect_left
-                references = sorted(other_shots,key=lambda r:r['cue'])
-                cues = [r['cue'] for r in references]
-                diverse = len({shots[c] for c in cues})>1
-            for cue,oid in ids:
+                from .roster_presence import Presence
+                presence = Presence(other_shots,shots)
+            for row in ids:
+                oid = row['id']
                 proof_ids = witnesses
                 if weighted:
-                    pos = bisect_left(cues,cue)
-                    nearby = references[max(0,pos-1):pos+1]
-                    distance = min(abs(cue-r['cue']) for r in nearby)
-                    # Two-sided evidence in different shots reaches the cap.
-                    factor = (.5 + .25*diverse + .25*(0<pos<len(cues))) / (1+distance/30)
+                    factor,nearby = presence.weight(row)
                     decisions[oid].setdefault('roster_weights',{})[owner] = factor
-                    proof_ids = list(dict.fromkeys([*witnesses,*(r['id'] for r in nearby)]))
+                    proof_ids = list(dict.fromkeys([*witnesses,*nearby]))
                 decisions[oid].setdefault('scene_roster',[]).append(owner)
                 decisions[oid].setdefault('roster_witnesses',{})[owner] = proof_ids
 

@@ -84,3 +84,23 @@ def test_borderline_fragment_is_independent_of_iteration_order(tmp_path):
         return [decisions[r['id']].get('person') for r in rows]
     assert partition(rows)==partition(rows[::-1])
     assert partition(rows)[0] and len(set(partition(rows)[:3]))==1
+
+
+def test_weak_face_preserves_the_anonymous_neighbours_without_naming_them():
+    from tests.test_contact_body_claims import body
+    rows = [body(str(i),i,40) for i in range(3)]
+    decisions = {'1':dict(person='A',role='auxiliary',reason='measured_face_association')}
+    result = plan(dict(scope='s',scene='1',namespace='n',input_sha='v'),rows,{},decisions,
+                  defaults(),SimpleNamespace(face_similarity=np.dot),None,None)
+    assert set(result)=={'0','2'}
+    assert result['0']==result['2']==decisions['1']['anonymous_fragment']
+    assert decisions['1']['person']=='A'
+
+
+def test_presence_is_independent_of_thumbnail_sampling_rate():
+    from stash_ai.recognition.roster_presence import Presence
+    def weight(step):
+        shots={i*step:i for i in range(5)}
+        roots=[dict(id=str(i),seconds=i*10,cue=i*step) for i in (0,2,4)]
+        return Presence(roots,shots).weight(dict(cue=step,seconds=10))
+    assert weight(1)==weight(5)
