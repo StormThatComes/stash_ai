@@ -6,8 +6,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      serial_windows_video:
-        description: Run both Windows video shards serially for a timing comparison
+      parallel_windows_lifecycle:
+        description: Compare Windows lifecycle tests with two workers per job
         type: boolean
         default: false
 
@@ -171,7 +171,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install complete application CPU profile
-        run: uv pip install --system -r requirements-dev.txt -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+        run: uv pip install --system pytest -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+      - name: Install pytest workers for the manual comparison
+        if: runner.os == 'Windows' && inputs.parallel_windows_lifecycle
+        run: uv pip install --system -c constraints/cpu-py314.txt pytest-xdist==3.8.0 execnet==2.1.2
       - name: Load pinned CPU models
         if: matrix.smoke && matrix.suite != 'video'
         env:
@@ -179,7 +182,7 @@ jobs:
           STASH_API_KEY: ''
         run: python -m pytest -q tests/test_recognition_model_smoke.py --tb=short
       - name: Verify simultaneous solver trials with the complete CPU profile
-        if: matrix.suite != 'video' && matrix.shard == 1
+        if: runner.os == 'Windows' && matrix.suite == 'core' && matrix.shard == 1
         run: python -m pytest -q tests/test_recognition_solver_concurrency.py --tb=short
       - name: Install FFmpeg on Windows for tiny-video fixtures
         if: matrix.suite == 'video'
@@ -214,15 +217,15 @@ jobs:
       - name: Run Windows lifecycle tests
         if: runner.os == 'Windows'
         env:
-          PYTEST_ADDOPTS: ${{ matrix.suite == 'video' && !inputs.serial_windows_video && '-n 2 --dist=loadfile' || '' }}
           # Each partition has its own runner; subprocesses inherit bounded
           # native thread defaults while explicit application budgets still apply.
           OMP_NUM_THREADS: '1'
           MKL_NUM_THREADS: '1'
           OPENBLAS_NUM_THREADS: '1'
         run: >-
-          python -m tests.ci_windows ${{ matrix.suite }} ${{ matrix.shard }}
+          python -m tests.ci_windows ${{ matrix.suite }} ${{ matrix.shard }} --profile ${{ matrix.profile }}
           --tb=short --maxfail=1 --durations=20 --junitxml="${{ runner.temp }}/lifecycle.xml"
+          ${{ inputs.parallel_windows_lifecycle && '-n 2 --dist=loadfile' || '' }}
       - name: Save Windows lifecycle durations
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4

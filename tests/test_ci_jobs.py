@@ -94,17 +94,39 @@ def test_post_merge_and_manual_runs_always_run_the_full_matrix(event):
     result = event_plan(event, {})
     assert all(result[key] for key in ('pytest', 'updater', 'dependencies', 'recognition'))
     assert len(result['matrix']['include']) == 5
+    assert all(row['profile'] == 'full' for row in result['matrix']['include'])
 
 
 def test_windows_partitions_keep_scope_and_only_one_model_smoke_per_platform():
     matrix = select_jobs([('M', 'stash_ai/recognition/scanning.py')])['matrix']['include']
     windows = [row for row in matrix if row['os'] == 'windows-latest']
-    assert {(row['suite'], row['shard']) for row in windows} == {
-        ('core', 1), ('core', 2), ('video', 1), ('video', 2)}
+    assert {(row['suite'], row['shard'], row['profile']) for row in windows} == {
+        ('core', 1, 'pr'), ('video', 1, 'pr')}
     assert [row['shard'] for row in windows if row['suite'] == 'core' and row['smoke']] == [1]
     solver = select_jobs([('M', 'stash_ai/recognition/merge_solver.py')])['matrix']['include']
-    assert {(row['suite'], row['shard']) for row in solver} == {('core', 1), ('core', 2)}
+    assert {(row['suite'], row['shard']) for row in solver} == {('core', 1)}
     assert not any(row['smoke'] for row in solver)
+
+
+def test_only_modified_updater_files_use_both_minimal_os_jobs():
+    result = select_jobs([('M', 'README.md'), ('M', 'tests/test_updater.py'), ('M', 'update_stash_ai.py')])
+    assert result['updater'] and not any(result[key] for key in ('pytest', 'dependencies', 'recognition'))
+    assert select_jobs([('D', 'update_stash_ai.py')])['pytest']
+    mixed = select_jobs([('M', 'update_stash_ai.py'), ('M', 'stash_ai/recognition/scanning.py')])
+    assert mixed['updater'] and mixed['pytest'] and mixed['recognition']
+
+
+def test_changed_windows_module_or_imported_fixture_expands_only_affected_suites():
+    def windows(paths):
+        plan = select_jobs([('M', path) for path in paths])
+        return {(r['suite'], r['shard'], r['profile']) for r in plan['matrix']['include']
+                if r['os'] == 'windows-latest'}
+
+    source = 'stash_ai/recognition/scanning.py'
+    assert windows([source, 'tests/test_recognition_video_recovery.py']) == {
+        ('core', 1, 'pr'), ('video', 1, 'full'), ('video', 2, 'full')}
+    assert windows([source, 'tests/test_recognition_clustering.py']) == {
+        (suite, shard, 'full') for suite in ('core', 'video') for shard in (1, 2)}
 
 
 def test_unavailable_pr_diff_falls_back_to_full_validation():

@@ -28,12 +28,19 @@ SOLVER_MODULES = ('merge_solver', 'merge_goal', 'merge_observation_exclusions',
 
 
 def full_plan(reason):
-    return plan({'pytest', 'updater', 'dependencies', 'models', 'core', 'video'}, {reason})
+    return plan({'pytest', 'updater', 'dependencies', 'models', 'core', 'video'}, {reason}, {'core', 'video'})
 
 
-def plan(selected, reasons):
-    matrix = [dict(row, smoke='models' in selected and row['shard'] == 1) for row in RECOGNITION_MATRIX
-              if row['suite'] in selected]
+def plan(selected, reasons, full_windows):
+    matrix = []
+    for row in RECOGNITION_MATRIX:
+        suite = row['suite']
+        if suite not in selected:
+            continue
+        profile = 'pr' if row['os'] == 'windows-latest' and suite not in full_windows else 'full'
+        if profile == 'pr' and row['shard'] != 1:
+            continue
+        matrix.append(dict(row, profile=profile, smoke='models' in selected and row['shard'] == 1))
     return dict(pytest='pytest' in selected, updater='updater' in selected,
                 dependencies='dependencies' in selected, recognition=bool(matrix),
                 matrix={'include': matrix}, reasons=sorted(reasons))
@@ -71,13 +78,18 @@ def test_dependencies(paths, root):
 
 
 def select_jobs(changes, root=ROOT):
+    changes = list(changes)
     if not changes:
         return full_plan('Empty PR diff; run all checks')
+    substantive = [(status, path) for status, path in changes if not documentation(path)]
+    updater_paths = {'update_stash_ai.py', 'tests/test_updater.py'}
+    if substantive and all(status == 'M' and path in updater_paths for status, path in substantive):
+        return plan({'updater'}, {'Standalone updater changes; run its suite on both OSes'}, set())
     windows = {suite: test_dependencies((root / '.github/ci' / f"windows-{suite}.txt").read_text().splitlines(), root)
                for suite in {row['suite'] for row in RECOGNITION_MATRIX if row['os'] == 'windows-latest'}}
     model_tests = test_dependencies(['tests/test_recognition_model_smoke.py'], root)
     solver_tests = test_dependencies(['tests/test_recognition_solver_concurrency.py'], root)
-    selected, reasons = set(), set()
+    selected, reasons, full_windows = set(), set(), set()
     for status, path in changes:
         if documentation(path):
             reasons.add('Documentation')
@@ -86,12 +98,14 @@ def select_jobs(changes, root=ROOT):
                 or path in {'pytest.ini', 'pyproject.toml', 'setup.cfg', 'tests/conftest.py', 'tests/__init__.py'}):
             return full_plan('CI, dependencies or shared test infrastructure changed')
         selected.add('pytest')
-        selected.update(suite for suite, files in windows.items() if path in files)
+        affected = {suite for suite, files in windows.items() if path in files}
+        selected.update(affected)
+        full_windows.update(affected)
         if path in model_tests:
             selected.update(('models', 'core'))
         if path in solver_tests:
             selected.add('core')
-        if path in {'update_stash_ai.py', 'tests/test_updater.py'}:
+        if path in updater_paths:
             selected.add('updater')
             reasons.add('Updater')
         elif path.startswith('tests/test_') and path.endswith('.py'):
@@ -113,10 +127,11 @@ def select_jobs(changes, root=ROOT):
             reasons.add('Benchmark entry points and full Linux regressions')
         elif path.startswith('stash_ai/') or path in {'stash_ai.py', 'facial_recognition.yml'}:
             selected.update(('models', 'core', 'video', 'updater'))
+            full_windows.update(('core', 'video'))
             reasons.add('Shared application code or configuration')
         else:
             return full_plan('Unclassified path; run all checks')
-    return plan(selected, reasons)
+    return plan(selected, reasons, full_windows)
 
 
 def pr_changes(event, root=ROOT):
@@ -179,7 +194,7 @@ def main():
         for key in ('pytest', 'updater', 'dependencies'):
             summary.write(f'- {key} — {"run" if result[key] else "skip"}\n')
         for row in result['matrix']['include']:
-            summary.write(f'- recognition CPU — {row["os"]}, {row["suite"]}, shard {row["shard"]}\n')
+            summary.write(f'- recognition CPU — {row["os"]}, {row["suite"]}, shard {row["shard"]} ({row["profile"]})\n')
         summary.write('\n' + '\n'.join(result['reasons']) + '\n')
 
 
