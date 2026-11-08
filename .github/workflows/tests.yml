@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      serial_windows_video:
+        description: Run both Windows video shards serially for a timing comparison
+        type: boolean
+        default: false
 
 # Group automatic runs by branch or PR ref and give each manual run its own group.
 concurrency:
@@ -166,7 +171,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install complete application CPU profile
-        run: uv pip install --system pytest -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+        run: uv pip install --system -r requirements-dev.txt -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
       - name: Load pinned CPU models
         if: matrix.smoke && matrix.suite != 'video'
         env:
@@ -209,6 +214,7 @@ jobs:
       - name: Run Windows lifecycle tests
         if: runner.os == 'Windows'
         env:
+          PYTEST_ADDOPTS: ${{ matrix.suite == 'video' && !inputs.serial_windows_video && '-n 2 --dist=loadfile' || '' }}
           # Each partition has its own runner; subprocesses inherit bounded
           # native thread defaults while explicit application budgets still apply.
           OMP_NUM_THREADS: '1'

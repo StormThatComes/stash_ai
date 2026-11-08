@@ -23,7 +23,11 @@ are selected. Each job-selection summary records the reasons for the choice.
 
 Each push to `main` schedules the full matrix and cancels any unfinished run from
 an earlier push to `main`. A new PR revision cancels the previous run for that PR.
-Manual runs use the full matrix and run independently.
+Manual runs use the full matrix and run independently. Each Windows video
+shard runs whole test files on two pytest workers. To measure the sequential
+baseline on the same revision, select `serial_windows_video` when launching
+the Tests workflow manually. Compare the lifecycle step times and the test
+cases in the existing JUnit artifacts for both shards.
 
 Use `CI result` as the required check when configuring branch protection. It
 verifies that all selected jobs succeeded and accepts jobs intentionally omitted
