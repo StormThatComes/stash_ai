@@ -33,9 +33,9 @@ def test_six_strategies_share_retained_observations(tmp_path):
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
         result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
                                manifest,compare_strategies=True)
-    assert len(result['scene_strategies'])==6
+    assert len(result['scene_strategies'])==9
     assert all(r['fragments_per_performer']=={'A':1} for r in result['scene_strategies'].values())
-    assert all(set(w['damage'])=={'baseline','winner'} for w in result['omissions'])
+    assert all(set(w['damage'])=={'baseline','winner',*result['stress_strategies']} for w in result['omissions'])
 
 
 def test_explicit_physical_vote_can_repair_unlinked_baseline(tmp_path):
@@ -54,3 +54,21 @@ def test_explicit_physical_vote_can_repair_unlinked_baseline(tmp_path):
         freeze(db,config,goals,pairs)
         assert len(evidence['core_units'])==1
         assert [r['id'] for r in unit['observations']]==['face',ids[0]]
+
+
+def test_unlabelled_face_preserves_a_turn_and_ordinary_false_joins_regress():
+    from stash_ai.recognition.solver_validation import _metrics, holdout_verdict
+    from stash_ai.recognition.reference_roles import STRICT_REASONS
+    labels = {'a0':'A','a1':'A','a2':'A','face1':'A','b0':'B','b1':'B','b2':'B'}
+    locations = {k:('1',int(k[-1])) for k in labels}
+    samples = {k:dict(slices=['back'] if k in ('a1','face1') else []) for k in labels}
+    def measure(join):
+        decisions = {k:dict(accepted_identity=None if k=='face1' else 'A' if join else owner,
+                            evidence_kind='person' if k=='a1' else 'face',
+                            evidence=dict(reason=sorted(STRICT_REASONS)[0])) for k,owner in labels.items()}
+        return dict(_metrics(labels,samples,locations,decisions),visible={})
+    good,bad = measure(False),measure(True)
+    assert good['sequences']['own_id_turns']==1
+    verdict = holdout_verdict({'baseline/joint':good,'winner/joint':bad})
+    assert verdict['status']=='regressed'
+    assert verdict['measures']['physical_false_merge_pairs']['winner']==9

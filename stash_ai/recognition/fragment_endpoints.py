@@ -2,8 +2,13 @@
 from collections import defaultdict
 
 
+def enabled(settings):
+    value = settings.get('endpoint_matching')
+    return settings.get('tracklet_matching', False) if value is None else value
+
+
 def nominations(looks, lookup, roots, shots, scores, settings):
-    if not settings.get('tracklet_matching') or not looks:
+    if not enabled(settings) or not looks:
         return {}
     from .independent_evidence import unit
     by_owner = defaultdict(lambda: defaultdict(list))

@@ -13,11 +13,21 @@ def variants(config):
     for tracks in (False,True):
         for mode in ('off','fixed','evidence'):
             data = plain(config.data)
-            data['sapiensid']['identities'].update(tracklet_matching=tracks,
+            data['sapiensid']['identities'].update(tracklet_matching=tracks, endpoint_matching=tracks,
                 scene_bonus_mode='evidence' if mode=='evidence' else 'fixed',
                 scene_match_bonus=0. if mode=='off' else positive)
             result[f"tracks-{int(tracks)}-{mode}"] = replace(config,data=data)
+    for mode in ('off', 'fixed', 'evidence'):
+        tracks = result[f'tracks-1-{mode}']
+        data = plain(tracks.data)
+        data['sapiensid']['identities']['endpoint_matching'] = False
+        result[f'paths-only-{mode}'] = replace(config, data=data)
     return result
+
+
+def physical_owner(values):
+    owners = set(values) - {None}
+    return next(iter(owners)) if len(owners) == 1 else None
 
 
 def physical_predictions(labels,locations,ids,decisions):
@@ -27,7 +37,7 @@ def physical_predictions(labels,locations,ids,decisions):
         value = decisions[oid]['accepted_identity']
         if value is not None:
             owners.add(value)
-    return {key:next(iter(owners)) if len(owners)==1 else None for key,owners in seen.items()}
+    return {key:physical_owner(owners) for key,owners in seen.items()}
 
 
 def omission_damage(labels,locations,ids,before,after):
@@ -57,7 +67,8 @@ def strategy_summary(config,metrics,labels,locations,decisions):
         if owner is not None:
             identities[truth].add(owner)
     seq = metrics['sequences']
-    return dict(tracklet_matching=settings['tracklet_matching'],scene_match_bonus=settings['scene_match_bonus'],
+    return dict(tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
+                physical_false_joins=metrics['physical']['false_merge_pairs'],scene_match_bonus=settings['scene_match_bonus'],
                 scene_bonus_mode=settings['scene_bonus_mode'],physical_coverage=metrics['physical']['coverage'],
                 fragments_per_performer={p:len(identities[p]) for p in sorted(set(labels.values()))},
                 own_id_turns=seq['own_id_turns'],turns=seq['turns'],endpoint_returns=seq['endpoint_returns'],

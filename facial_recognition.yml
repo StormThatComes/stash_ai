@@ -301,6 +301,8 @@ matching:
       tracklet_matching: false
       # Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained
       # VTT evidence.
+      endpoint_matching: null
+      # Compare independent face endpoints across views. Null follows tracklet_matching.
       match_threshold: 0.85
       # Minimum mean body similarity for a scene-local match. Range: 0..1.
       cohesion_threshold: 0.8

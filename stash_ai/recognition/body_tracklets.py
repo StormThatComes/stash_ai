@@ -127,11 +127,13 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
                 continue
             floor = min(strengths[min(i,j):max(i,j)])
             ranked = frozen.rank(row,guard)
-            rival = max((v[5] for v in ranked if v[2]!=owner),default=-1.)
+            rival, rival_owner = max(((v[5],v[2]) for v in ranked if v[2]!=owner),default=(-1.,None))
             if floor-rival < max(.025,settings['ambiguity_margin']):
                 continue
             decisions[row['id']] = dict(person=owner,status='accepted',role='auxiliary',
-                reason='local_body_track',root=root['id'],track_floor=floor,runner=rival)
+                reason='local_body_track',root=root['id'],track_floor=floor,runner=rival,rival=rival_owner,
+                threshold=settings.get('track_similarity_threshold') if settings.get('track_similarity_threshold') is not None else settings['cohesion_threshold'],
+                required_margin=max(.025,settings['ambiguity_margin']))
     return anonymous
 
 

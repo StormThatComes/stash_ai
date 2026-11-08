@@ -56,8 +56,8 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
             missing_boundaries += 1
 
     def identity(rows):
-        owners = {owner for owner,_ in rows}
-        return owners.pop() if len(owners)==1 else None
+        from .scene_strategy_validation import physical_owner
+        return physical_owner(owner for owner,_ in rows)
 
     def tagged(rows, name):
         return any(name in slices for _,slices in rows)
@@ -112,7 +112,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 for person, own in zip((a,b), expected):
                     middle = [owner for cue in window[1:-1] for owner,_ in people[person][cue]]
                     wrong |= own is not None and any(owner is not None and owner != own for owner in middle)
-                    withheld |= None in middle
+                    withheld |= any(identity(people[person][cue]) is None for cue in window[1:-1])
                 if None in expected or len(set(expected)) != 2:
                     outcome = 'unknown_reference'
                 else:
