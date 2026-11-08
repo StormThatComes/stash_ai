@@ -23,7 +23,7 @@ def load(db, config, scope, namespace, *, pages=None):
                      json_extract(m.proof,'$.rooted_track.perspective')) IN ('back','side')),
         certified AS MATERIALIZED (
         SELECT p.id,json_extract(p.claim,'$.owner') AS owner,json_extract(p.claim,'$.roots') AS roots,
-            json_extract(p.claim,'$.perspective') AS perspective
+            json_extract(p.claim,'$.perspective') AS perspective,json_extract(p.claim,'$.shot') AS shot
         FROM proofs p JOIN json_each(p.claim,'$.roots') root
         JOIN body_observations rb ON rb.id=root.value AND rb.scan=p.scan
         JOIN observations o ON o.id=rb.face JOIN members m ON m.observation=o.id
@@ -32,7 +32,7 @@ def load(db, config, scope, namespace, *, pages=None):
         AND m.person=json_extract(p.claim,'$.owner') AND o.rejected IS NULL
         AND """ + strict_sql() + ' AND ' + anchor_sql('o',config.data['clustering']) + """
         GROUP BY p.id HAVING count(DISTINCT rb.id)=2)
-        SELECT b.id,b.scan,b.cue,b.seconds,b.quality,c.owner,c.roots,c.perspective
+        SELECT b.id,b.scan,b.cue,b.seconds,b.quality,c.owner,c.roots,c.perspective,c.shot
         FROM certified c JOIN body_observations b ON b.id=c.id ORDER BY c.owner,c.perspective,b.scan,b.cue,b.id"""
     settings = config.data['sapiensid']['identities']
     limit = config.data['sapiensid']['execution']['reference_bytes'] // 8
@@ -60,7 +60,10 @@ def load(db, config, scope, namespace, *, pages=None):
 
     def local_shot(row):
         shot = json.loads(row['quality']).get('quality',{}).get('view_shot')
-        return tuple(row['roots']) if shot is None else shot
+        if shot is not None:
+            return ('captured',shot)
+        measured = row.get('shot')
+        return tuple(json.loads(measured)) if measured else ('unknown',row['scan'])
 
     def banks():
         cursor = db.execute(sql,(scope,namespace,contract(config),policy(config)))
@@ -157,27 +160,37 @@ class Gallery:
     def nearby(self,query,radius):
         return {self.addresses[i] for i in self.tree.query_ball_point(query,radius)}
 
-    def rank(self, query, scan, settings, pixel, perspective='back'):
+    @staticmethod
+    def search_radius(settings):
         # A mean above the floor requires at least one witness above the floor.
         floor = settings['match_threshold'] - settings['ambiguity_margin']
-        candidates = sorted(self.nearby(query,np.sqrt(2*(1-floor)) + .002))
-        result = []
-        for index in candidates:
-            owner,source,rows = self.banks[index]
-            rows = [row for row in rows if row.get('scan',source)!=scan]
-            if not rows:
-                continue
-            source = rows[0].get('scan',source)
-            scored = [(float(np.dot(query,row['_vector'])),row) for row in rows]
-            rival_score = sum(score for score,_ in scored)/len(scored)
-            independent = [(score,row) for score,row in scored
-                           if not pixel or json.loads(row['quality']).get('quality',{}).get('pixel_digest') != pixel]
-            if rows[0].get('perspective','back')==perspective and len(independent)>=max(2,settings['attach_min_support']):
-                scores, witnesses = zip(*independent)
-                source = witnesses[0].get('scan',source)
-                proof = tuple({k:w[k] for k in ('id','scan','roots') if k in w} for w in witnesses)
-                result.append((sum(scores)/len(scores), min(scores), owner, source, proof, rival_score))
-            else:
-                # Losing independent support cannot remove a plausible rival.
-                result.append((-1., -1., owner, source, (), rival_score))
-        return sorted(result,key=lambda r:(-r[0],-r[1],r[2],r[3]))
+        return np.sqrt(2*(1-floor)) + .002
+
+    def rank(self, query, scan, settings, pixel, perspective='back'):
+        candidates = sorted(self.nearby(query,self.search_radius(settings)))
+        ranked = [self.score_bank(self.banks[i],query,scan,settings,pixel,perspective) for i in candidates]
+        return self.ordered(ranked)
+
+    @staticmethod
+    def ordered(ranked):
+        return sorted((r for r in ranked if r is not None),key=lambda r:(-r[0],-r[1],r[2],r[3]))
+
+    @staticmethod
+    def score_bank(bank,query,scan,settings,pixel,perspective):
+        owner,source,rows = bank
+        rows = [row for row in rows if row.get('scan',source)!=scan]
+        if not rows:
+            return None
+        source = rows[0].get('scan',source)
+        scored = [(float(np.dot(query,row['_vector'])),row) for row in rows]
+        rival_score = sum(score for score,_ in scored)/len(scored)
+        independent = [(score,row) for score,row in scored
+                       if not pixel or json.loads(row['quality']).get('quality',{}).get('pixel_digest') != pixel]
+        if rows[0].get('perspective','back')==perspective and len(independent)>=max(2,settings['attach_min_support']):
+            scores, witnesses = zip(*independent)
+            source = witnesses[0].get('scan',source)
+            proof = tuple({k:w[k] for k in ('id','scan','roots') if k in w} for w in witnesses)
+            return (sum(scores)/len(scores), min(scores), owner, source, proof, rival_score)
+        else:
+            # Losing independent support cannot remove a plausible rival.
+            return (-1., -1., owner, source, (), rival_score)

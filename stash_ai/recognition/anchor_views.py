@@ -50,7 +50,7 @@ def _confirmed(db, policy, grouping, usage):
     from .config import plain
     store=current()
     if store is None:
-        result,_=_build_strict(db.execute(source+ordering,(policy,)),grouping,usage)
+        result,_=_build_strict(db.execute(source+ordering,(policy,)),grouping,usage,db)
     else:
         result=[]
         query=source+' AND o.scan=?'+ordering
@@ -59,7 +59,7 @@ def _confirmed(db, policy, grouping, usage):
             key=fingerprint(db,[(query,inputs)],[policy,scan,plain(grouping)])
             entry=store.get('anchor-views',key)
             if entry is None or usage.bytes+entry[0]>usage.limit:
-                views,peak=_build_strict(db.execute(query,inputs),grouping,usage)
+                views,peak=_build_strict(db.execute(query,inputs),grouping,usage,db)
                 store.put('anchor-views',key,[peak,[[v.group.identifier,v.pose,v.medoid,v.support_ids,
                     v.support_count] for v in views]])
                 result.extend(views)
@@ -77,7 +77,7 @@ def _confirmed(db, policy, grouping, usage):
     return result
 
 
-def _build_strict(rows,grouping,usage):
+def _build_strict(rows,grouping,usage,db=None):
     initial=usage.bytes
     peak=initial
     result, key, slots, cover, scratch = [], None, [], [], 0
@@ -100,8 +100,8 @@ def _build_strict(rows,grouping,usage):
                 emit()
                 key, slots, cover, scratch = rowkey, [], [], 0
             query = vector(row)
-            scratch+=add_cohort(slots,row,query,cohesion,complete=True,maximum=witness_limit(grouping))
-            scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
+            scratch+=add_cohort(slots,row,query,cohesion,complete=True,maximum=witness_limit(grouping),db=db)
+            scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping),db=db)
             peak=max(peak,usage.bytes+scratch)
             if usage.bytes+scratch>usage.limit:
                 raise ResourceLimit('Local anchor view evidence exceeds clustering.max_reference_bytes.')

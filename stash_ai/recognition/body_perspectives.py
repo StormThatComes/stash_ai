@@ -396,14 +396,17 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             kept = validated
             for start,end,witness in kept:
                 decisions[witness['id']]['rooted_track'] = dict(owner=key[0], perspective=key[1],
-                                                                roots=[start,end])
+                                                                roots=[start,end], shot=shot_ids[witness['cue']],
+                                                                boundary=boundary[witness['cue']])
             if len(kept) >= max(2,settings['attach_min_support']):
                 witnesses = [r for _,_,r in kept]
                 proof = [(start,end,r['id']) for start,end,r in kept]
                 banks[(*key,number)] = witnesses, proof
                 for start,end,witness in proof:
                     decisions[witness]['rooted_view'] = dict(owner=key[0], perspective=key[1],
-                                                             roots=[start,end], tracks=proof)
+                                                             roots=[start,end], tracks=proof,
+                                                             shot=shot_ids[lookup[witness]['cue']],
+                                                             boundary=boundary[lookup[witness]['cue']])
 
     for row in rows:
         decision = decisions[row['id']]

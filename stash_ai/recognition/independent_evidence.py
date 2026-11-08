@@ -78,6 +78,12 @@ class Votes:
     def __contains__(self, value):
         return value in self.units
 
+    def set_matching(self, owners):
+        """Reuse the maximum matching used to select the actual proof rows."""
+        self.owners = owners
+        self.unmatched = self.edges.keys()-set(owners.values())
+        self._count = len(owners)
+
     def update(self, other):
         self.units.update(other.units)
         for stamp, pixels in other.edges.items():
@@ -87,16 +93,19 @@ class Votes:
         self._count = None
 
     def __len__(self):
+        return self.match()
+
+    def match(self, key=repr):
         if self._count is not None:
             return self._count
         owners = self.owners
         # Iterative augmenting paths avoid Python recursion on long clips.
-        for start in sorted(self.unmatched, key=repr):
+        for start in sorted(self.unmatched, key=key):
             pending, parents, visited = [start], {}, {start}
             endpoint = None
             while pending and endpoint is None:
                 stamp = pending.pop()
-                for pixel in sorted(self.edges[stamp], key=repr):
+                for pixel in sorted(self.edges[stamp], key=key):
                     owner = owners.get(pixel)
                     if owner is None:
                         endpoint = stamp, pixel

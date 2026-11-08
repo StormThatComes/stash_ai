@@ -91,9 +91,9 @@ def _catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_sce
                 emit()
                 owner, slots, cover, scratch = row['person'], [], [], 0
             sample=vector(row)
-            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete,scene_minimum=scene_minimum,maximum=witness_limit(grouping))
+            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete,scene_minimum=scene_minimum,maximum=witness_limit(grouping),db=db)
             if complete:
-                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum,maximum=witness_limit(grouping))
+                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum,maximum=witness_limit(grouping),db=db)
             if complete and usage.bytes+scratch>usage.limit:
                 raise ResourceLimit('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()
