@@ -49,5 +49,6 @@ def test_shipped_solver_profile_admits_four_trials_without_shrinking_working_mem
     assert replay.data['execution']['rebuild_prefetch_scenes'] is True
     with scope(runtime):
         pool = Compute(replay)
-        # Per trial: coordinator + prefetch reader + two numeric workers.
-        assert pool.workers == 2 and pool.native_threads == 1
+        assert pool.workers == 3 and pool.native_threads == 1
+        replay.data['execution']['rebuild_parallel_scenes'] = False
+        assert Compute(replay).workers == 2

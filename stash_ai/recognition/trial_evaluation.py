@@ -69,10 +69,16 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                 rebuild(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
             rebuild_metrics = getattr(state, "last_rebuild_profile", None)
             with stage('Collect trial predictions'):
-                predictions = dict.fromkeys(observations)
-                predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
-                                   if r[0] in observations)
-                predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
+                from .solver_slot_index import Slots
+                if isinstance(observations, Slots):
+                    prediction_fields = dict(prediction_encoding='baseline-delta-v1',
+                                             prediction_delta=observations.prediction_delta(target, settings))
+                else:
+                    predictions = dict.fromkeys(observations)
+                    predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
+                                       if r[0] in observations)
+                    predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
+                    prediction_fields = dict(predictions=predictions)
                 bodies=body_report(target,settings,[s['id'] for s in scans])
                 hybrid=coverage(target,settings,[s['id'] for s in scans])
             with stage('Collect solver feedback'):
@@ -95,5 +101,5 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
             limit.add_note(exc.__notes__[-1])
             raise limit from exc
         raise
-    return dict(predictions=predictions, independent_person=bodies, hybrid=hybrid,
+    return dict(**prediction_fields, independent_person=bodies, hybrid=hybrid,
                 decision_evidence=evidence, rebuild_profile=rebuild_metrics)

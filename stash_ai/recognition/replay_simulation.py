@@ -227,6 +227,10 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                     evaluated = evaluate(name, settings, seed=seed, source=db, scope=scope,
                                         namespace=ns, installation=installation, scans=scans, observations=observations,
                                         rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
+                            if variant_stream is not None and baseline is not None and 'predictions' in evaluated:
+                                full = evaluated.pop('predictions')
+                                evaluated['prediction_delta'] = {k:v for k,v in full.items() if baseline[k] != v}
+                                evaluated['prediction_encoding'] = 'baseline-delta-v1'
                             if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
                                 from .partition_delta import Predictions
                                 if baseline is None:
