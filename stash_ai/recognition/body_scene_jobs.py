@@ -23,119 +23,177 @@ def _worker(payload):
     return plan, hints
 
 
-def _witnesses(db, owners, limit):
+from dataclasses import dataclass
+from functools import cached_property
+
+
+@dataclass(frozen=True)
+class Witness:
+    dimensions: int
+    embedding: bytes
+
+    @cached_property
+    def validated(self):
+        from .clustering import vector
+        return vector({'dimensions': self.dimensions, 'embedding': self.embedding})
+
+
+def _bank_source():
     from .scan_heads import predicate
-    where=(' FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-           "WHERE m.person=? AND o.rejected IS NULL AND s.status='complete' AND "+predicate())
+    return (' FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+            "WHERE m.person=? AND o.rejected IS NULL AND s.status='complete' AND "+predicate())
+
+
+def _witnesses(db, owners, limit, cache, generation, charges):
+    where = _bank_source()
     frozen={}
     used=0
     for person in sorted(owners):
-        charge=db.execute('SELECT COALESCE(SUM(3*COALESCE(length(o.embedding),0)+512),0)'+where,
-                          (person,)).fetchone()[0]+512
+        from .run_cache import MISSING
+        key = ('body-veto-bank', generation, person)
+        hit = cache.get(key) if cache is not None else MISSING
+        if hit is not MISSING:
+            rows, charge = hit
+            used += charge
+            if used > limit:return None,0
+            frozen[person] = rows
+            continue
+        charge = charges(person)
         used+=charge
         if used>limit:return None,0
         # Keep raw values. Validate in traversal order on demand, just like the
         # serial guard; a veto may stop before a later corrupt witness.
-        frozen[person]=tuple(dict(r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
+        frozen[person]=tuple(Witness(*r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
+        if cache is not None:
+            cache.put(key, (frozen[person], charge), charge)
     return frozen,used
 
 
 def planned(db, items, config, *, ids_only=False):
     from .body_identity import scene_plan, _load_scene, _plan, _prepare_vectors
     from .hybrid_query_observer import _observer
-    store=current() if _observer.get() is None else None
-    from .stage_checkpoints import current as stage_current
-    checkpoints=stage_current() if _observer.get() is None else None
-    def save(key,decisions):
-        if store:store.put('body-scene',key,decisions)
-        if checkpoints:checkpoints.put('body-scene',key,decisions)
-    observer = _observer.get()
-    pool=compute()
+    from functools import partial
     from types import SimpleNamespace
     from .config import plain
+    from .database import encoded
+    from .body_observations import contract
+    from .run_cache import current as numerical_cache, MISSING
+    from .stage_checkpoints import current as stage_current
+
+    observer = _observer.get()
+    pool = compute()
+    store, checkpoints, cache = current(), stage_current(), numerical_cache()
+    target_scans = None
+    if observer is not None and hasattr(observer, 'local_budget'):
+        addresses = encoded(sorted(observer.sets))
+        target_scans = {s for s, in db.execute(
+            'SELECT scan FROM body_observations WHERE id IN (SELECT value FROM json_each(?)) UNION '
+            'SELECT scan FROM body_observations WHERE face IN (SELECT value FROM json_each(?))', (addresses,addresses))}
+        observer.local_budget.start(observer.visits)
     backend = config.data['execution']['rebuild_cohort_backend'] if observer is None and ids_only else 'threads'
     worker_config = SimpleNamespace(data=plain(config.data)) if backend == 'processes' else config
-    batch=[]
-    def jobs():
-        for ordinal, (key, inputs, size, wanted) in enumerate(batch):
-            if backend == 'processes':
-                from .shared_payload import pack
-                record, rows, *rest = inputs
-                packed = [(dict((k,v) for k,v in row.items() if k != 'embedding'), row['embedding']) for row in rows]
-                try:
-                    packed, segment = pack(packed)
-                except OSError:
-                    segment = None
-                if segment is not None:
-                    pool.shared_inputs[ordinal] = segment
-                    inputs = (record, packed, *rest)
-            yield Work(ordinal, key, (worker_config, inputs, wanted, ids_only), size)
+    expected = contract(config)
+    settings = config.data['sapiensid']['identities']
+    # Every scene in this planning pass reads the same frozen memberships.
+    witness_generation = object()
+    from functools import lru_cache
+    from .identity_merges import canonical
 
-    def drain():
-        if batch:
-            with closing(pool.ordered(_worker, jobs(), backend=backend),name='finish body scene plans') as results:
-                for result in results:
-                    (record, rows, decisions), hints = result.value
-                    if observer is not None and hasattr(observer, 'local_budget'):
-                        observer.local_budget.start(observer.visits)
-                        from .local_body_hints import observe
-                        from .body_guards import FaceGuard
-                        for groups, seeds, modes in hints:
-                            observe(rows, groups, seeds, None, FaceGuard(db, config), config, frozen=modes)
-                    save(result.generation,decisions)
-                    yield record,rows,decisions
-            batch.clear()
+    @lru_cache(maxsize=1024)
+    def charge(person):
+        return db.execute('SELECT COALESCE(SUM(3*COALESCE(length(o.embedding),0)+512),0)'
+                          + _bank_source(), (person,)).fetchone()[0]+512
 
-    for item in items:
-        scan=item['scan']
-        key=body_key(db,scan,config) if store or checkpoints else None
-        cached=store.get('body-scene',key) if store else None
-        if cached is None and checkpoints:cached=checkpoints.get('body-scene',key)
-        if cached is not None:
-            yield from drain()
-            yield db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone(),[{'id':i} for i in cached],cached
-            continue
-        size=0
-        if pool and pool.workers > 1 and (observer is None or hasattr(observer, 'local_budget')):
-            # Budget for packed input, local scoring banks, output and guard cache.
-            raw=db.execute('SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(quality)+length(geometry)+8192),0) '
-                           'FROM body_observations WHERE scan=?',(scan,)).fetchone()[0]
-            size=131072+raw*12
-        if size and size <= pool.limit:
-            if batch and sum(job[2] for job in batch) + size > pool.limit:
-                yield from drain()
-            frozen=_load_scene(db,scan,config,prepare_vectors=False)
-            rows=frozen[1]
-            # Fully face-linked scenes have no body queries to compare. Avoid
-            # transferring their rows and retaining idle numerical work slots.
-            if all(r['face_person'] is not None for r in rows):
-                yield from drain()
-                _prepare_vectors(rows)
-                plan = _plan(db, config, *frozen)
-                save(key, plan[2])
-                yield plan
-                continue
-            faces,charge={},0
-            if any(r['face_person'] is None and r['face_embedding'] is not None and r['face_rejected'] is None for r in rows):
-                from .body_identity import anchor
-                settings=config.data['sapiensid']['identities']
-                owners={frozen[2][r['face_person']] for r in rows if r['face_person'] is not None
-                        and r['face_anchor'] and anchor(r,settings)}
-                room=min(pool.limit-size-sum(job[2] for job in batch),config.data['sapiensid']['execution']['reference_bytes']//16)
-                faces,charge=_witnesses(db,owners,room)
-            if faces is not None:
-                wanted = observer is not None and any(
-                    r['id'] in observer.sets or r['face'] in observer.sets for r in rows)
-                batch.append((key, (*frozen, faces), size+charge, wanted))
-                if len(batch)>=pool.workers:
-                    yield from drain()
-                continue
-            yield from drain()
+    def guard_room(scan, cap):
+        owners = {canonical(db, row[0]) for row in db.execute(
+            'SELECT DISTINCT m.person FROM body_observations b JOIN members m ON m.observation=b.face '
+            'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL', (scan,expected))}
+        return min(cap, sum(charge(owner) for owner in owners))
+
+    def job(ordinal, key, size, frozen, faces, wanted):
+        if backend == 'processes':
+            from .shared_payload import pack
+            record, rows, *rest = frozen
+            data = [(dict((k,v) for k,v in row.items() if k != 'embedding'), row['embedding']) for row in rows]
+            packed, segment = pack(data)
+            if segment is not None:
+                pool.shared_inputs[ordinal] = segment
+                frozen = (record, packed, *rest)
+        return Work(ordinal, key, (worker_config, (*frozen,faces), wanted, ids_only), size)
+
+    def prepare(ordinal, scan, key, size, room, wanted):
+        if size > pool.limit:
+            return Work(ordinal,key,(scene_plan(db,scan,config),[]),size,ready=True)
+        frozen = _load_scene(db,scan,config,prepare_vectors=False)
+        rows = frozen[1]
+        if all(row['face_person'] is not None for row in rows):
             _prepare_vectors(rows)
-            plan=_plan(db,config,*frozen)
-        else:
-            yield from drain()
-            plan=scene_plan(db,scan,config)
-        save(key,plan[2])
-        yield plan
-    yield from drain()
+            return Work(ordinal,key,(_plan(db,config,*frozen),[]),size,ready=True)
+        faces, admitted = {}, 0
+        if room:
+            from .body_identity import anchor
+            owners = {frozen[2][row['face_person']] for row in rows if row['face_person'] is not None
+                      and row['face_anchor'] and anchor(row,settings)}
+            faces, admitted = _witnesses(db, owners, room, cache, witness_generation, charge)
+            if faces is None:
+                _prepare_vectors(rows)
+                return Work(ordinal,key,(_plan(db,config,*frozen),[]),size,ready=True)
+        return job(ordinal,key,size-room+admitted,frozen,faces,wanted)
+
+    def jobs():
+        for ordinal,item in enumerate(items):
+            scan = item['scan']
+            wanted = observer is not None and (target_scans is None or scan in target_scans)
+            key = body_key(db,scan,config) if not wanted and (store or checkpoints or (observer and cache)) else None
+            if key:
+                cached = store.get('body-scene',key) if store else None
+                if cached is None and checkpoints:cached = checkpoints.get('body-scene',key)
+                if cached is None and observer and cache:
+                    raw = cache.get(('body-plan',key))
+                    if raw is not MISSING:
+                        import json
+                        cached = json.loads(raw)
+                if cached is not None:
+                    record = db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()
+                    plan = record,[dict(id=i) for i in cached],cached
+                    from .memory_size import size as memory_size
+                    yield Work(ordinal,None,(plan,[]),max(1,memory_size(cached)*2+4096),ready=True)
+                    continue
+            if pool is None or pool.workers == 1 or (observer and target_scans is None):
+                yield Work(ordinal,key,(scene_plan(db,scan,config),[]),1,ready=True)
+                continue
+            # Include native vector copies, packed IPC input, Python geometry,
+            # score keys, and the decision output. Excluded rows are never loaded.
+            raw, needs_guard = db.execute(
+                'SELECT COALESCE(SUM(8*length(b.embedding)+8*(length(b.quality)+length(b.geometry))'
+                '+4*COALESCE(length(o.embedding),0)+8192),0), '
+                'MAX(m.person IS NULL AND o.embedding IS NOT NULL AND o.rejected IS NULL) '
+                'FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
+                'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? '
+                'AND b.rejected IS NULL AND b.embedding IS NOT NULL',(scan,expected)).fetchone()
+            size = raw + 131072
+            cap = min(max(0,pool.limit-size), config.data['sapiensid']['execution']['reference_bytes']//16)
+            room = guard_room(scan,cap) if needs_guard else 0
+            size = pool.limit+1 if needs_guard and cap == 0 else size+room
+            yield Work(ordinal,key,None,size,ready=size>pool.limit,
+                       prepare=partial(prepare,ordinal,scan,key,size,room,wanted))
+
+    if pool is None:
+        results = ((work.generation, work.payload) for work in jobs())
+    else:
+        results = ((result.generation,result.value) for result in pool.ordered(_worker,jobs(),backend=backend))
+    with closing(results, name='finish body scene plans') as ordered:
+        for key, (plan, hints) in ordered:
+            record, rows, decisions = plan
+            if hints:
+                from .local_body_hints import observe
+                from .body_guards import FaceGuard
+                for groups, seeds, modes in hints:
+                    observe(rows,groups,seeds,None,FaceGuard(db,config),config,frozen=modes)
+            if key:
+                if store:store.put('body-scene',key,decisions)
+                if checkpoints:checkpoints.put('body-scene',key,decisions)
+                if observer and cache:
+                    raw = encoded(decisions)
+                    cache.put(('body-plan',key),raw,len(raw.encode())+512)
+            yield record,rows,decisions

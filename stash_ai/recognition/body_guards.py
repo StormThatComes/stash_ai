@@ -19,8 +19,9 @@ class FaceGuard:
     def witnesses(self, person):
         from .scan_heads import predicate as current_scan
         if self.frozen is not None:
+            from .body_scene_jobs import Witness
             for raw in self.frozen[person]:
-                yield vector(raw)
+                yield raw.validated if isinstance(raw, Witness) else vector(raw)
             return
         key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
         if key in self.banks:
