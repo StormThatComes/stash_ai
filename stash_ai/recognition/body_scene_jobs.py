@@ -7,8 +7,11 @@ from stash_ai.runtime.cleanup import closing
 
 def _worker(payload):
     from .body_identity import _plan
-    config, frozen = payload
-    return _plan(None,config,*frozen)
+    config, frozen, wanted = payload
+    hints = []
+    plan = _plan(None, config, *frozen,
+                 capture_hints=lambda groups, seeds, modes: hints.append((groups, seeds, modes)) if wanted else None)
+    return plan, hints
 
 
 def _witnesses(db, owners, limit):
@@ -37,14 +40,21 @@ def planned(db, items, config):
     def save(key,decisions):
         if store:store.put('body-scene',key,decisions)
         if checkpoints:checkpoints.put('body-scene',key,decisions)
+    observer = _observer.get()
     pool=compute()
     batch=[]
     def drain():
         if batch:
-            jobs=(Work(i,key,(config,inputs),size) for i,(key,inputs,size) in enumerate(batch))
+            jobs=(Work(i,key,(config,inputs,wanted),size) for i,(key,inputs,size,wanted) in enumerate(batch))
             with closing(pool.ordered(_worker,jobs),name='finish body scene plans') as results:
                 for result in results:
-                    record,rows,decisions=result.value
+                    (record, rows, decisions), hints = result.value
+                    if observer is not None and hasattr(observer, 'local_budget'):
+                        observer.local_budget.start(observer.visits)
+                        from .local_body_hints import observe
+                        from .body_guards import FaceGuard
+                        for groups, seeds, modes in hints:
+                            observe(rows, groups, seeds, None, FaceGuard(db, config), config, frozen=modes)
                     save(result.generation,decisions)
                     yield record,rows,decisions
             batch.clear()
@@ -59,12 +69,14 @@ def planned(db, items, config):
             yield db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone(),[{'id':i} for i in cached],cached
             continue
         size=0
-        if _observer.get() is None and pool and pool.workers>1:
+        if pool and pool.workers > 1 and (observer is None or hasattr(observer, 'local_budget')):
             # Budget for packed input, local scoring banks, output and guard cache.
-            raw=db.execute('SELECT COALESCE(SUM(length(embedding)+length(quality)+length(geometry)+8192),0) '
+            raw=db.execute('SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(quality)+length(geometry)+8192),0) '
                            'FROM body_observations WHERE scan=?',(scan,)).fetchone()[0]
             size=131072+raw*12
-        if size and size <= pool.limit//max(2,pool.workers):
+        if size and size <= pool.limit:
+            if batch and sum(job[2] for job in batch) + size > pool.limit:
+                yield from drain()
             frozen=_load_scene(db,scan,config)
             rows=frozen[1]
             faces,charge={},0
@@ -73,10 +85,12 @@ def planned(db, items, config):
                 settings=config.data['sapiensid']['identities']
                 owners={frozen[2][r['face_person']] for r in rows if r['face_person'] is not None
                         and r['face_anchor'] and anchor(r,settings)}
-                room=min(pool.limit//max(2,pool.workers)-size,config.data['sapiensid']['execution']['reference_bytes']//16)
+                room=min(pool.limit-size-sum(job[2] for job in batch),config.data['sapiensid']['execution']['reference_bytes']//16)
                 faces,charge=_witnesses(db,owners,room)
             if faces is not None:
-                batch.append((key,(*frozen,faces),size+charge))
+                wanted = observer is not None and any(
+                    r['id'] in observer.sets or r['face'] in observer.sets for r in rows)
+                batch.append((key, (*frozen, faces), size+charge, wanted))
                 if len(batch)>=pool.workers:
                     yield from drain()
                 continue

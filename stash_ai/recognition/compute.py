@@ -62,7 +62,10 @@ class Compute:
         from .solver_execution import current as solver_execution
         solver = solver_execution()
         if solver is not None:
-            self.workers = max(1, solver.inner_workers - int(settings.get('rebuild_prefetch_scenes', False)))
+            parallel_local = (settings.get('rebuild_parallel_scenes', False) and
+                              config.data['clustering']['anchor_view_matching'] and solver.inner_workers > 1)
+            prefetch = settings.get('rebuild_prefetch_scenes', False) and not parallel_local
+            self.workers = max(1, solver.inner_workers - int(prefetch))
             native = 1
         self.native_threads = native
         from .resource_plan import plan
