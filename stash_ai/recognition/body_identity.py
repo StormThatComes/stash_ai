@@ -317,4 +317,151 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *
     labels=labels_for_groups(record,groups,origins_by_key,settings,owners)
     used=set(labels.values())
     for index,group in enumerate(groups):
-        # Exact source observation origins, no
+        # Exact source observation origins, not previous assignments, preserve
+        # IDs across reruns while allowing changed evidence to split a group.
+        person=labels.get(index)
+        if person is None:
+            person=str(uuid.uuid5(uuid.NAMESPACE_URL,digest(['body-person',physical_key(record,group[0])])))
+            attempt=0;seed=person
+            while person in used:
+                person=str(uuid.uuid5(uuid.UUID(seed),encoded(['split',physical_key(record,group[0]),attempt])))
+                attempt+=1
+        used.add(person)
+        support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
+        for row in group:
+            decisions[row['id']]=dict(person=person,status=status,role='anchor',reason='body_scene_core',independent_support=support)
+    # Weak observations may attach to frozen accepted cores but never train them.
+    banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']
+    for row in weak:
+        if (len(banks)==1 and not copresent([row],banks[0][1]) and guard.allows(row,banks[0][1])
+                and scores.certifies(row,banks[0][1],max(settings['match_threshold'],settings['cohesion_threshold']))):
+            decisions[row['id']]=dict(person=banks[0][0],status='accepted',role='auxiliary',reason='body_core_attachment')
+            continue
+        ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks
+            if not copresent([row],g) and guard.allows(row,g)],key=lambda x:(-x[0][0],x[1]))
+        best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
+        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin']
+        decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
+            reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+        rules=settings.get('anchor_keypoint_rules',{})
+        if not good and (rules.get('all') or rules.get('any')):
+            regional=anchor_gate(row['quality'],settings)['keypoint_rules']
+            if not regional['eligible']:
+                decisions[row['id']]['anchor_keypoint_rules']=regional
+                if decisions[row['id']]['reason']=='body_anchor_quality':
+                    decisions[row['id']]['reason']=regional['reason']
+    from .body_perspectives import recover
+    recover(rows, decisions, seeds, settings, scores, guard, occupied=record.get('occupied_cues', ()))
+    for row in rows:
+        blocker = decisions[row['id']].get('track_blocker')
+        if blocker:
+            blocker['scene'] = record['scene']
+        q = quality(row)
+        if q.get('query_only'):
+            decisions[row['id']]['query_only_reason'] = q.get('query_only_reason','uncertain_body_geometry')
+            decisions[row['id']]['retry_when'] = 'confirmed_core_changes'
+    from .local_body_hints import observe
+    if capture_hints is None:
+        observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
+    else:
+        capture_hints(groups, seeds, frozen)
+    resolve_claims(rows,decisions,config,scores=scores)
+    if settings['anchor_min_person_pixels'] is not None:
+        for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
+    return record,rows,decisions
+
+
+def rebuild(database,selected,config,result):
+    if not selected or not available(database.connection):return result
+    db=database.connection
+    from .body_cache import cached,stamp as cache_stamp
+    if cached(db,selected,config):
+        database.body_rebuild_mode='warm' if enabled(config) else 'disabled'
+        return results(db,selected,result)
+    database.body_rebuild_mode='cold' if enabled(config) else 'disabled'
+    from .body_plan_spool import Plans
+    with Plans(config.data['sapiensid']['execution']['plan_bytes'],config.data['execution']['replay_snapshot_bytes']) as plans:
+        # Plan every selected scene before replacing any derived state.
+
+        if enabled(config):
+            with tracking(selected,'Build scene person identities',unit='scene') as items:
+                from .body_scene_jobs import planned
+                for scan,rows,decisions in planned(db,items,config):
+                    plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
+        from .assignment_delta import enqueue
+        with db:
+            from .body_aliases import retire_disabled
+            retire_disabled(database,selected,config)
+            changed=set()
+            # Keep temporary DDL inside the same rollback boundary for callers
+            # invoking the body stage directly, without the outer rebuild wrapper.
+            if not db.in_transaction:db.execute('BEGIN')
+            db.execute('CREATE TEMP TABLE desired_body_members(id TEXT PRIMARY KEY)')
+            db.executemany('INSERT INTO desired_body_members VALUES (?)',((r['id'],) for _,rows,_ in plans for r in rows))
+            for item in selected:
+                scan=db.execute('SELECT * FROM scans WHERE id=?',(item['scan'],)).fetchone()
+                removed=db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
+                    'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?) '
+                    'AND observation NOT IN (SELECT id FROM desired_body_members)',
+                    (scan['scope'],scan['namespace'],scan['scene'])).rowcount
+                if removed:changed.add(scan['scene'])
+            db.execute('DROP TABLE desired_body_members')
+            stamp=policy(config)
+            installation = database.installation
+            for scan, rows, decisions in plans:
+                people = {}
+                origins = []
+                memberships = []
+                for row in rows:
+                    oid = row['id']
+                    decision = decisions[oid]
+                    person = decision['person']
+                    if person is not None and person not in people:
+                        people[person] = (person, scan['scope'], scan['namespace'], time.time(), None,
+                                          f'stash-ai-recognition:{installation}:{person}')
+                    if person is not None and decision['reason'] == 'body_scene_core':
+                        origins.append((oid, person))
+                    memberships.append((oid, person, decision['role'], decision['status'], stamp, encoded(decision)))
+                db.executemany('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)', people.values())
+                db.executemany('INSERT OR IGNORE INTO body_origins VALUES (?,?)', origins)
+                updated = db.executemany('INSERT INTO body_members VALUES (?,?,?,?,?,?) ON CONFLICT(observation) DO UPDATE SET '
+                        'person=excluded.person,role=excluded.role,status=excluded.status,policy=excluded.policy,proof=excluded.proof '
+                        'WHERE body_members.person IS NOT excluded.person OR body_members.role IS NOT excluded.role '
+                        'OR body_members.status IS NOT excluded.status OR body_members.policy IS NOT excluded.policy '
+                        'OR body_members.proof IS NOT excluded.proof', memberships).rowcount
+                if updated:
+                    changed.add(scan['scene'])
+            for item in selected:
+                scan=db.execute('SELECT scope,namespace,scene FROM scans WHERE id=?',(item['scan'],)).fetchone()
+                enqueue(db,scan['scope'],scan['namespace'],item,config,scan['scene'] in changed,'body_scene_rebuild')
+            if plans:
+                from .body_global import reconcile
+                reconcile(database,selected,config)
+                from .body_recovery import recover
+                recover(database,selected,config)
+                from .rear_recovery import recover as recover_rear
+                recover_rear(db,selected,config)
+            cache_stamp(db,selected,config)
+        from .derived_cache import current
+        store=current()
+        if enabled(config) and store and 'body-scene' in store.hits:database.body_rebuild_mode='partial'
+        return results(db,selected,result)
+
+
+def results(db,selected,result):
+    for groups in result.values():
+        for group in groups:
+            if group['person'] is not None:group['person']=canonical(db,group['person'])
+    for item in selected:
+        rows=db.execute('SELECT m.person,m.status,COUNT(*) AS observations FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation WHERE b.scan=? GROUP BY m.person,m.status',(item['scan'],))
+        result.setdefault(item['scan'],[]).extend(dict(person=r['person'],status='accepted' if r['status']=='accepted' else 'withheld',
+            observations=r['observations'],evidence='person') for r in rows)
+    return result
+
+
+def publication_rows(db,scan):
+    if not available(db):return []
+    return db.execute('SELECT b.id,b.scan,b.cue,b.contract,b.rejected,b.embedding,m.person,m.status,m.role,m.policy,m.proof,'
+        'p.scope,p.namespace,p.token FROM body_observations b JOIN body_members m ON m.observation=b.id '
+        'LEFT JOIN people p ON p.id=m.person WHERE b.scan=? ORDER BY b.id',(scan,))
