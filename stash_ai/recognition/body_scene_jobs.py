@@ -23,10 +23,29 @@ def _worker(payload):
     return plan, hints
 
 
-def _witnesses(db, owners, limit, cache, generation):
+from dataclasses import dataclass
+from functools import cached_property
+
+
+@dataclass(frozen=True)
+class Witness:
+    dimensions: int
+    embedding: bytes
+
+    @cached_property
+    def validated(self):
+        from .clustering import vector
+        return vector({'dimensions': self.dimensions, 'embedding': self.embedding})
+
+
+def _bank_source():
     from .scan_heads import predicate
-    where=(' FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-           "WHERE m.person=? AND o.rejected IS NULL AND s.status='complete' AND "+predicate())
+    return (' FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+            "WHERE m.person=? AND o.rejected IS NULL AND s.status='complete' AND "+predicate())
+
+
+def _witnesses(db, owners, limit, cache, generation, charges):
+    where = _bank_source()
     frozen={}
     used=0
     for person in sorted(owners):
@@ -39,13 +58,12 @@ def _witnesses(db, owners, limit, cache, generation):
             if used > limit:return None,0
             frozen[person] = rows
             continue
-        charge=db.execute('SELECT COALESCE(SUM(3*COALESCE(length(o.embedding),0)+512),0)'+where,
-                          (person,)).fetchone()[0]+512
+        charge = charges(person)
         used+=charge
         if used>limit:return None,0
         # Keep raw values. Validate in traversal order on demand, just like the
         # serial guard; a veto may stop before a later corrupt witness.
-        frozen[person]=tuple(dict(r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
+        frozen[person]=tuple(Witness(*r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
         if cache is not None:
             cache.put(key, (frozen[person], charge), charge)
     return frozen,used
@@ -78,6 +96,19 @@ def planned(db, items, config, *, ids_only=False):
     settings = config.data['sapiensid']['identities']
     # Every scene in this planning pass reads the same frozen memberships.
     witness_generation = object()
+    from functools import lru_cache
+    from .identity_merges import canonical
+
+    @lru_cache(maxsize=1024)
+    def charge(person):
+        return db.execute('SELECT COALESCE(SUM(3*COALESCE(length(o.embedding),0)+512),0)'
+                          + _bank_source(), (person,)).fetchone()[0]+512
+
+    def guard_room(scan, cap):
+        owners = {canonical(db, row[0]) for row in db.execute(
+            'SELECT DISTINCT m.person FROM body_observations b JOIN members m ON m.observation=b.face '
+            'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL', (scan,expected))}
+        return min(cap, sum(charge(owner) for owner in owners))
 
     def job(ordinal, key, size, frozen, faces, wanted):
         if backend == 'processes':
@@ -98,16 +129,16 @@ def planned(db, items, config, *, ids_only=False):
         if all(row['face_person'] is not None for row in rows):
             _prepare_vectors(rows)
             return Work(ordinal,key,(_plan(db,config,*frozen),[]),size,ready=True)
-        faces, charge = {}, 0
+        faces, admitted = {}, 0
         if room:
             from .body_identity import anchor
             owners = {frozen[2][row['face_person']] for row in rows if row['face_person'] is not None
                       and row['face_anchor'] and anchor(row,settings)}
-            faces, charge = _witnesses(db, owners, room, cache, witness_generation)
+            faces, admitted = _witnesses(db, owners, room, cache, witness_generation, charge)
             if faces is None:
                 _prepare_vectors(rows)
                 return Work(ordinal,key,(_plan(db,config,*frozen),[]),size,ready=True)
-        return job(ordinal,key,size-room+charge,frozen,faces,wanted)
+        return job(ordinal,key,size-room+admitted,frozen,faces,wanted)
 
     def jobs():
         for ordinal,item in enumerate(items):
@@ -141,8 +172,9 @@ def planned(db, items, config, *, ids_only=False):
                 'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? '
                 'AND b.rejected IS NULL AND b.embedding IS NOT NULL',(scan,expected)).fetchone()
             size = raw + 131072
-            room = min(max(0,pool.limit-size), config.data['sapiensid']['execution']['reference_bytes']//16) if needs_guard else 0
-            size = pool.limit+1 if needs_guard and room == 0 else size+room
+            cap = min(max(0,pool.limit-size), config.data['sapiensid']['execution']['reference_bytes']//16)
+            room = guard_room(scan,cap) if needs_guard else 0
+            size = pool.limit+1 if needs_guard and cap == 0 else size+room
             yield Work(ordinal,key,None,size,ready=size>pool.limit,
                        prepare=partial(prepare,ordinal,scan,key,size,room,wanted))
 

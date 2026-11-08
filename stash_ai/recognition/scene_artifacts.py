@@ -109,6 +109,8 @@ def body_key(db, scan, config):
     queries=[
         ('SELECT scope,namespace,scene,input_sha,status,total FROM scans WHERE id=?',(scan,)),
         ('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)),
+        ('SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION '
+         'SELECT cue FROM observations WHERE scan=? ORDER BY cue',(scan,expected,scan)),
         ('SELECT b.id,b.cue,b.seconds,b.geometry,b.quality,b.rejected,b.embedding,b.face,'
          'o.dimensions,o.embedding,o.quality,o.rejected,m.person,'+strict_sql()+
          ' FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
@@ -132,7 +134,7 @@ def body_key(db, scan, config):
     local_clocks=local_available(db)
     def signed(kind,key,records,dependency,dependency_key):
         read=lambda:derived_cache.fingerprint(db,records,key)
-        return cached(db,kind,key,'v3-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
+        return cached(db,kind,key,'v4-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
                       dependency_key=dependency_key if local_clocks else '*') if audited else read()
     banks=[]
     for owner in sorted({root for _,root in roots}):
