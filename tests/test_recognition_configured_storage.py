@@ -43,3 +43,19 @@ def test_trace_resolves_relative_file_removal_against_directory_fd(tmp_path):
     trace.write_text(f'100   unlinkat(12<{tmp_path}>, "observations.sqlite", 0) = 0\n'
                      f'101  renameat(8<{tmp_path}>, "a", 9<{tmp_path}/other>, "b") = 0\n')
     assert list(linux(trace)) == [tmp_path/'observations.sqlite', tmp_path/'a', tmp_path/'other'/'b']
+
+
+def test_direct_solver_uses_configured_work_root(tmp_path):
+    from contextlib import closing
+    from benchmarks.benchmark_merge_solver import fixture
+    from stash_ai.recognition.fragmentation_report import _open_readonly
+    from stash_ai.recognition.merge_solver import solve
+    config, goals = fixture(tmp_path/'data','face')
+    captured = []
+    def observe(name, phase, item):
+        if name == 'baseline' and phase == 'start':
+            captured.append(Path(tempfile.gettempdir()))
+    with closing(_open_readonly(config.database)) as source:
+        solve(config,goals,source,maximum=1,progress=observe)
+    assert len(captured)==1 and captured[0].parent == work_root(config)
+    assert not captured[0].exists()

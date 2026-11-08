@@ -126,7 +126,14 @@ def solver_scope(function):
         if metrics.enabled:
             result['performance'] = metrics.snapshot()
         return result
-    return wrapped
+    @wraps(function)
+    def owned(config, goals, *args, **kwargs):
+        from .work_locations import invocation, validate_outputs
+        writer = kwargs.get('winner_writer')
+        validate_outputs(config, (kwargs.get('checkpoint'), writer.path if writer else None))
+        with invocation(config):
+            return wrapped(config, goals, *args, **kwargs)
+    return owned
 
 
 def evaluation_scope(function):

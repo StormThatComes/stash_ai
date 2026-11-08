@@ -71,11 +71,11 @@ class Budget:
             free=shutil.disk_usage(row['path']).free
             row.update(free=free, requested=requested, reserved=held)
             if self.limit and requested>self.limit:
-                raise ResourceLimit('Recognition data, caches and scratch exceed the per-volume disk budget.',
+                raise ResourceLimit(f'Recognition data, caches and scratch exceed the per-volume disk budget at {target}: {requested} bytes required, limit {self.limit}.',
                     budget='execution.rebuild.disk_total_bytes',limit=self.limit,requested=requested)
             required=self.headroom+held+(growth if dev==device else 0)
             if free<required:
-                raise ResourceLimit('Recognition disk free-space reserve would be exhausted.',
+                raise ResourceLimit(f'Recognition disk free-space reserve at {target} would be exhausted: {required} bytes required, {free} free.',
                     budget='execution.rebuild.disk_free_bytes',limit=free,requested=required)
         self.volumes=volumes
         self.checked=time.monotonic()
