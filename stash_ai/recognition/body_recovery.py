@@ -51,14 +51,12 @@ def recover(database,selected,config):
             rooted_owner = prior.get('open_face_root', {}).get('owner')
             ranked=[]
             for person,bank in banks.items():
-                if rooted_owner is not None and person != rooted_owner:
-                    continue
                 if copresent([row],bank) or not guard.allows(row,bank) or not guard.allows(row,bank,person):continue
                 mean,minimum=scores.compare([row],bank);ranked.append((mean,minimum,person))
             ranked.sort(key=lambda r:(-r[0],r[2]))
             if not ranked:continue
             mean,minimum,person=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
-            if (person in confirmed and mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
+            if (rooted_owner in (None,person) and person in confirmed and mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
                     and mean-runner>=settings['ambiguity_margin']):
                 decisions[row['id']].update(person=person,status='accepted',role='auxiliary',
                     reason='body_confirmed_core_attachment',score=mean,minimum=minimum,runner=runner)

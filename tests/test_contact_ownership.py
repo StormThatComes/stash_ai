@@ -36,3 +36,42 @@ def test_confirmed_core_retry_preserves_face_contradiction(tmp_path):
         db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(ids[-1],None,'auxiliary','withheld',policy(cfg),encoded(proof)))
         recover(state,[scan],cfg)
         assert tuple(db.execute('SELECT person,status FROM body_members WHERE observation=?',(ids[-1],)).fetchone())==(None,'withheld')
+
+
+def test_subthreshold_partner_still_competes_with_whole_path():
+    cues = {i:[dict(id=f'{i}{owner}',seconds=i) for owner in 'ab'] for i in range(3)}
+    roots = {row['id']:row['id'][-1] for i in (0,2) for row in cues[i]}
+    decisions = {row['id']:{} for pair in cues.values() for row in pair}
+    def raw(a,b):
+        return .801 if a['id'][-1]==b['id'][-1] else .799
+    assert not crossings(cues,roots,decisions,lambda a,b:raw(a,b) if raw(a,b)>=.8 else None,.1,raw=raw)
+
+
+def test_partial_face_pair_recovers_after_two_hidden_cues():
+    cues = {i:[dict(id=f'{i}{owner}',seconds=i) for owner in ('x' if i in (1,2) else 'ab')] for i in range(5)}
+    roots = {'0a':'A','4a':'A','4b':'B'}
+    decisions = {row['id']:{} for pair in cues.values() for row in pair}
+    result = crossings(cues,roots,decisions,lambda a,b: .99 if a['id'][-1]==b['id'][-1] else .68,
+                       .1,occluded={1,2})
+    assert {k:v[0] for k,v in result.items()}=={'3a':'A','3b':'B'}
+    assert all(decisions[key]['reason']=='unresolved_partner' for key in ('1x','2x'))
+
+
+def test_rooted_retry_keeps_identical_competing_core(tmp_path):
+    from tests.test_recognition_body_identity import configuration,scene
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.body_recovery import recover
+    cfg = configuration(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        scan,ids = scene(db,cfg,vectors=[[1.,0.]]*7)
+        for owner in 'AB':
+            db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',(owner,'scope','ns',1,None,owner))
+        for oid,owner in zip(ids,'AAABBB'):
+            db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(oid,owner,'anchor','accepted',policy(cfg),
+                       encoded(dict(reason='body_scene_core'))))
+        proof = dict(reason='body_anchor_quality',retry_when='confirmed_core_changes',open_face_root=dict(owner='A'))
+        db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(ids[-1],None,'auxiliary','withheld',policy(cfg),encoded(proof)))
+        recover(state,[scan],cfg)
+        assert db.execute('SELECT person FROM body_members WHERE observation=?',(ids[-1],)).fetchone()[0] is None

@@ -57,6 +57,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         return
     by_cue = defaultdict(list)
     geometry = {}
+    torsos = {}
     root = {r['id']: owner for owner, bank in seeds.items() for r in bank}
     for row in rows:
         q = quality(row)
@@ -72,6 +73,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             decisions[row['id']]['orientation_measurement'] = measurement
         signature = np.frombuffer(bytes.fromhex(q['frame_signature']), dtype=np.uint8).astype(float)
         geometry[row['id']] = (q, box, signature)
+        if person.get('keypoints'):
+            pts = person['keypoints']
+            vis = person.get('keypoint_visibility')
+            indices = [i for i in (5,6,11,12) if min(pts[i])>=0 and (vis is None or vis[i]>=.5)]
+            torsos[row['id']] = {i:np.asarray(pts[i]) for i in indices}
         by_cue[row['cue']].append(row)
     if not geometry:
         return
@@ -89,7 +95,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         track_threshold = settings['cohesion_threshold']
     outgoing_failures, incoming_failures = {}, {}
     appearance_edges = {}
-    def transition(a, b, *, diagnose=False):
+    def transition(a, b, *, diagnose=False, raw=False):
         def fail(order, reason, measured, limit):
             if diagnose:
                 # Retain one candidate per endpoint, preferring the one that
@@ -105,7 +111,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
         gap = b['seconds'] - a['seconds']
-        skipped = b['cue'] - a['cue'] == 2
+        skipped = b['cue'] - a['cue'] > 1
         if skipped:
             continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
         else:
@@ -129,17 +135,27 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if min(wa,ha,wb,hb)<=0:
             return fail(2,'empty_box',min(wa,ha,wb,hb),0)
         scale = max(wa/wb,wb/wa,ha/hb,hb/ha)
-        if scale>1.5:
-            return fail(3,'box_scale',scale,1.5)
         displacement = math.hypot((ba[0]+ba[2]-bb[0]-bb[2])/2,
                                   (ba[1]+ba[3]-bb[1]-bb[3])/2)
         relative = displacement/min(math.hypot(wa,ha), math.hypot(wb,hb))
-        if relative>.30:
-            return fail(4,'displacement',relative,.30)
+        if scale>1.5 or relative>.30:
+            ta,tb = torsos.get(a['id'],{}),torsos.get(b['id'],{})
+            common = sorted(ta.keys() & tb.keys())
+            if len(common)>=3:
+                origin,destination = (np.stack([torso[i] for i in common]) for torso in (ta,tb))
+                spans = [np.linalg.norm(points.max(axis=0)-points.min(axis=0)) for points in (origin,destination)]
+                stable = (min(spans)>=6 and max(spans)<=1.35*min(spans) and
+                          np.linalg.norm(destination-origin,axis=1).max() <= min(spans)*min(.35,.15+.025*gap))
+            else:
+                stable = False
+            if not stable:
+                if scale>1.5:
+                    return fail(3,'box_scale',scale,1.5)
+                return fail(4,'displacement',relative,.30)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
         if diagnose:
             appearance_edges[a['id'],b['id']] = similarity
-        return similarity if similarity >= track_threshold else fail(
+        return similarity if raw or similarity >= track_threshold else fail(
             5,'body_similarity',similarity,track_threshold)
 
     # Ambiguous transitions, cuts and sparse cue gaps end a track.
@@ -159,6 +175,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         for a in left:
             for b in right:
                 score = transition(a,b,diagnose=True)
+                score = appearance_edges.get((a['id'],b['id']))
                 if score is not None:
                     forward[a['id']].append((score,b['id']))
                     backward[b['id']].append((score,a['id']))
@@ -177,7 +194,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                     detail['partner_score'],detail['partner_observation'] = max(rivals)
         for a in left:
             edges = sorted(forward[a['id']], reverse=True)
-            if not edges:
+            if not edges or edges[0][0]<track_threshold:
                 if a['id'] in outgoing_failures and right:
                     stops[a['id']] = outgoing_failures[a['id']][1]
                 continue
@@ -368,7 +385,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 and boundary.get(cue+1)=='continuous'
                 and shot_ids.get(cue-1)==shot_ids.get(cue)==shot_ids.get(cue+1)}
     crossed = crossings({cue:members for cue,members in by_cue.items() if cue not in partial or cue in occluded},
-                        root,decisions,transition,margin,occluded=occluded)
+                        root,decisions,transition,margin,occluded=occluded,
+                        raw=lambda a,b:transition(a,b,raw=True))
     for cue in partial:
         for row in by_cue[cue]:
             if geometry[row['id']][0].get('query_only_reason')=='unresolved_partner':
