@@ -64,7 +64,10 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
         shot = q.get('view_shot')
         if decision.get('person'):
             components[decision['person']].append(row['id'])
-        if shot is None or row.get('face_person') or q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1):
+        # This local roster is a faceless recovery route. A measured face uses
+        # the ordinary face veto banks, including all external witness history.
+        if (shot is None or row.get('face_person') or row.get('_face_vector') is not None
+                or q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1)):
             continue
         rank = modes.rank(row,guard)
         choices = []

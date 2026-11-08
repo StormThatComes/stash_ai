@@ -44,3 +44,20 @@ def test_body_only_core_can_recover_borderline_cue_in_another_shot(tmp_path):
         assert decisions[ids[-1]]['reason']=='scene_body_attachment'
         assert decisions[ids[-1]]['person']==decisions[ids[0]]['person']
         assert decisions[ids[-1]]['role']=='auxiliary'
+
+
+def test_scene_roster_does_not_access_unfrozen_external_face_banks(tmp_path):
+    from stash_ai.recognition.body_identity import _load_scene, _plan
+    cfg = configuration(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        item,ids = scene(db,cfg,vectors=[[1.,0.]]*3+[[.83,(1-.83**2)**.5]])
+        for i,oid in enumerate(ids):
+            db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.view_shot',?) WHERE id=?",(i,oid))
+        db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                   ('face',item['scan'],3,3.,'','[]','[]','{}',None,2,np.array([1.,0.],dtype='<f4').tobytes(),None))
+        db.execute('UPDATE body_observations SET face=? WHERE id=?',('face',ids[-1]))
+        data=_load_scene(db,item['scan'],cfg)
+        serial=_plan(db,cfg,*data)[2]
+        worker=_plan(None,cfg,*data,frozen_faces={})[2]
+        assert serial==worker
