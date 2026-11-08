@@ -3,7 +3,7 @@ import math
 
 import numpy as np
 
-from stash_ai.recognition.crowd_context import pair
+from stash_ai.recognition.crowd_context import pair, torso
 from stash_ai.recognition.sapiensid_backend import SapiensIDFaces, associate
 
 
@@ -56,12 +56,55 @@ class RTMO:
         xywh = [[a,b,c-a,d-b] for (a,b,c,d),_,_ in candidates]
         keep = cv2.dnn.NMSBoxes(xywh,[s for _,s,_ in candidates],settings['score_threshold'],
                                 settings['nms_threshold'])
+        if getattr(self,'torso_nms',False):
+            keep = torso_nms(candidates,scale,settings)
         selected = [candidates[i] for i in np.asarray(keep,dtype=int).ravel()[:settings['max_people_per_frame']]]
         if not selected:
             return [],[],np.empty((0,17,2)),np.empty((0,17))
         bounds, scores, selected_poses = zip(*selected)
         poses = np.stack(selected_poses)
         return list(bounds),list(scores),poses[:,:,:2]/scale,poses[:,:,2]
+
+
+def torso_nms(candidates,scale,settings):
+    """Retain overlapping predictions when the model supplies two distinct torsos."""
+    poses = []
+    for bounds,_,pose in candidates:
+        points = pose[:,:2]/scale
+        valid = ((pose[:,2]>settings.get('keypoint_score_threshold',.5)) & (points[:,0]>=bounds[0]) &
+                 (points[:,0]<bounds[2]) & (points[:,1]>=bounds[1]) & (points[:,1]<bounds[3]))
+        poses.append(dict(bounds=bounds,keypoints=np.where(valid[:,None],points,-1).tolist()))
+    keep = []
+    for i in sorted(range(len(candidates)),key=lambda i:-candidates[i][1]):
+        a,b,c,d = poses[i]['bounds']
+        for j in keep:
+            e,f,g,h = poses[j]['bounds']
+            intersection = max(0,min(c,g)-max(a,e))*max(0,min(d,h)-max(b,f))
+            union = (c-a)*(d-b)+(g-e)*(h-f)-intersection
+            if intersection>settings['nms_threshold']*union and not pair([poses[i],poses[j]]):
+                break
+        else:
+            keep.append(i)
+            if len(keep)>=settings['max_people_per_frame']:
+                break
+    return keep
+
+
+def preserves_faces(previous,found,old_matches,new_matches):
+    for old,new in zip(old_matches,new_matches):
+        if old is None:
+            continue
+        center = torso(previous[old])
+        if new is None or center is None:
+            return False
+        # Match physical torsos, so detector ordering can change between passes.
+        box = previous[old]['bounds']
+        scale = math.hypot(box[2]-box[0],box[3]-box[1])
+        distances = [math.dist(center,torso(p)) for p in found]
+        if (distances[new]>.30*scale or any(d-distances[new]<.06*scale
+                                            for i,d in enumerate(distances) if i!=new)):
+            return False
+    return True
 
 
 def needs_retry(image,faces,people):
@@ -76,7 +119,8 @@ def needs_retry(image,faces,people):
 
 
 class ContactModel(SapiensIDFaces):
-    def __init__(self,config,paths,stats):
+    def __init__(self,config,paths,stats,*,torso_nms=False):
+        self.torso_nms = torso_nms
         self.rtmo = None
         self.stats = stats
         super().__init__(config,paths,load_detector=False)
@@ -88,13 +132,15 @@ class ContactModel(SapiensIDFaces):
         self.stats['retry_cues'] += 1
         if self.rtmo is None:
             self.rtmo = RTMO(self.config)
+            self.rtmo.torso_nms = self.torso_nms
             self.stats['rtmo_device'] = self.rtmo.device
         outputs = self.rtmo.predict(image,self.config.data['sapiensid']['pose'])
         found = self._people(*outputs)
         if pair(found) is None:
             return faces
         matches = associate(faces,found)
-        if any(m is not None and n is None for m,n in zip(self.face_matches,matches)):
+        if not preserves_faces(self.frame_people,found,self.face_matches,matches):
+            self.stats['face_ownership_vetoes'] += 1
             return faces
         self.stats['replacement_cues'] += 1
         self.frame_people,self.face_matches = found,matches

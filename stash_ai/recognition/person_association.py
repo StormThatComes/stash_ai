@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='contact-ownership-v5', containment_tolerance=.05,
+    return dict(version='contact-head-ownership-v6', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -70,8 +70,6 @@ def association_rejection(face, person):
 
 
 def confirmed_in_contact(face, person, people):
-    if person.get('pose_refinement', {}).get('separated'):
-        return True
     left, top, right, bottom = person['bounds']
     contact = any(min(right, p['bounds'][2]) > max(left, p['bounds'][0]) and
                   min(bottom, p['bounds'][3]) > max(top, p['bounds'][1])

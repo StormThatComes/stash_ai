@@ -114,7 +114,7 @@ def contact_variants(config,directory):
     if not (s['enabled'] and s['collection']['enabled'] and s['identities']['enabled']):
         raise ValueError('Contact comparison requires body collection and local identities enabled.')
     for name,backend in [('rfdetr-vitpose','vitpose_plus_large'),('rfdetr-masked-pmpose','pmpose'),
-                         ('rfdetr-vitpose-rtmo','vitpose_plus_large')]:
+                         ('rfdetr-vitpose-rtmo','vitpose_plus_large'),('rfdetr-vitpose-rtmo-torso','vitpose_plus_large')]:
         data = plain(config.data)
         pose = data['sapiensid']['pose']
         pose.update(detector='rfdetr_xl',backend=backend)
@@ -132,7 +132,15 @@ class CheckedSource:
         return getattr(self.source,name)
 
     def frames(self,start=0):
-        with closing(self.source.frames(start)) as frames:
+        return self._checked(self.source.frames(start))
+
+    def frames_indices(self,indices):
+        if hasattr(self.source,'frames_indices'):
+            return self._checked(self.source.frames_indices(indices))
+        return self.frames(min(indices))
+
+    def _checked(self,stream):
+        with closing(stream) as frames:
             for index,cue,image in frames:
                 try:
                     with image.convert('RGB') as rgb:
@@ -178,7 +186,7 @@ def compare_pose(reference, candidate):
                 changed_visible_keypoints=visibility,max_visible_displacement_pixels=max_error)
 
 
-def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False, compare_contact=False):
+def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False, compare_contact=False, kpr_config=None, kpr_weights=None, kpr_python=None):
     from stash_ai.recognition.backend import LazyBackend
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.models import namespace
@@ -193,6 +201,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
     url = os.getenv('STASH_URL','http://localhost:9999')
     results = {}
     catalogue = {}
+    if (kpr_config is None)!=(kpr_weights is None) or kpr_config and not compare_contact or kpr_python and not kpr_config:
+        raise ValueError('Use --kpr-config and --kpr-weights together with --compare-contact.')
     if compare_contact:
         from stash_ai.recognition.crowd_labels import validate
         validate(labels,labels)
@@ -248,10 +258,10 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                 resources.callback(visible.close)
                 stats = Counter(retry_cues=0,replacement_cues=0)
                 factory = None
-                if name=='rfdetr-vitpose-rtmo':
+                if name.startswith('rfdetr-vitpose-rtmo'):
                     from benchmarks.rtmo_contact import ContactModel
                     def factory(settings,assets):
-                        return ContactModel(settings,assets,stats)
+                        return ContactModel(settings,assets,stats,torso_nms=name.endswith('-torso'))
                 collector = PersonCollector(cfg,paths,factory=factory)
                 resources.callback(collector.close)
                 selected, cues, gpu_us = [], 0, 0.
@@ -281,6 +291,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                             scan,_ = scan_scene(state,instance_scope(url),item,cfg,namespace(cfg),source,
                                                 backend.borrow,visibility=visible,on_cue=collector.collect_frame)
                             collector.flush()
+                            if compare_contact:
+                                collector.enrich(state.connection,scan,source)
                         if profile_cuda:
                             gpu_us += sum(e.time_range.elapsed_us() for e in profiler.events()
                                           if e.device_type==torch.autograd.DeviceType.CUDA)
@@ -300,9 +312,33 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,
                                      cuda_activity_seconds_per_1000_cues=gpu_us/(1000*cues) if profile_cuda else None)
                 if compare_contact:
+                    retry_counts = dict(attempts=0,recovered=0)
+                    for item in selected:
+                        entry = state.connection.execute('SELECT value FROM metadata WHERE key=?',
+                              ('future-crowd:'+item['scan'],)).fetchone()
+                        if entry:
+                            retry_counts['attempts'] += len(json.loads(entry[0]).get('attempted',{}))
+                        retry_counts['recovered'] += state.connection.execute(
+                            "SELECT COUNT(DISTINCT cue) FROM body_observations WHERE scan=? AND "
+                            "json_extract(geometry,'$.future_torso_retry')=1",(item['scan'],)).fetchone()[0]
+                    results[name]['temporal_retry'] = dict(retry_counts,attempts_per_1000_cues=1000*retry_counts['attempts']/cues)
                     results[name]['contact_retry'] = dict(stats)
                     results[name]['verified_vtt_cues'] = len(catalogue)
                     results[name]['scored_cues'] = sum(map(len,labels.values()))
+                if name=='rfdetr-vitpose' and kpr_config:
+                    from contextlib import contextmanager
+                    from benchmarks import kpr_contact
+                    # Release production models before loading the optional encoder.
+                    collector.close()
+                    backend.unload()
+                    visible.close()
+                    @contextmanager
+                    def source_for(scene):
+                        with closing(services.source(client,client.scene(scene),cfg)) as source:
+                            yield CheckedSource(source,scene,catalogue,False)
+                    extractor = kpr_contact.Extractor(kpr_config,kpr_weights,directory,cfg.data['models']['device'],kpr_python)
+                    results[name]['paired_reid'] = kpr_contact.run(state.connection,selected,labels,source_for,extractor)
+                    del extractor
                 if compare_vitpose:
                     records = pose_records(state.connection,selected)
                     if reference is None:
@@ -318,6 +354,9 @@ if __name__=='__main__':
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--labels',type=Path,required=True)
     parser.add_argument('--cuda-profile',action='store_true')
+    parser.add_argument('--kpr-python',type=Path,help='Python interpreter of the upstream KPR environment.')
+    parser.add_argument('--kpr-config',type=Path,help='Upstream KPR evaluation YAML for paired contact retrieval.')
+    parser.add_argument('--kpr-weights',type=Path,help='Trained KPR checkpoint for the selected YAML.')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--compare-contact',action='store_true',
                        help='Compare RF-DETR+ViTPose++, masked PMPose and selective full-frame RTMO on the same VTT.')
@@ -332,4 +371,4 @@ if __name__=='__main__':
     parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='crowded-vtt-',dir=parent) as directory:
         print(json.dumps(run(config,json.loads(args.labels.read_text()),Path(directory),
-                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode,compare_contact=args.compare_contact),indent=2))
+                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode,compare_contact=args.compare_contact,kpr_config=args.kpr_config,kpr_weights=args.kpr_weights,kpr_python=args.kpr_python),indent=2))
