@@ -71,3 +71,17 @@ def test_private_association_fault_swaps_actual_projections(tmp_path):
         swap(db,cfg,item['scan'],0,*ids)
         assert db.execute('SELECT face FROM body_observations WHERE id=?',(ids[1],)).fetchone()[0]=='a'
         assert np.frombuffer(read(db,'a',contract(cfg))['embedding'],dtype='<f4')[:2].tolist()==[0,1]
+
+
+def test_association_fault_counts_changed_owners_without_inflating_later_cues():
+    from stash_ai.recognition.contact_holdout import spread
+    locations = dict(face_a=('s',0),face_b=('s',0),contact=('s',1),later=('s',2),external=('other',0))
+    labels = dict(face_a='A',face_b='B',contact='A',later='A',external='A')
+    before = {k:dict(accepted_identity=p,evidence_kind='face' if k.startswith('face') else 'person',
+                     evidence=dict(reason='known_identity')) for k,p in labels.items()}
+    after = {k:dict(v) for k,v in before.items()}
+    after['contact']['accepted_identity']='B'
+    report = spread(before,after,locations,'s',1,labels)
+    assert report['changed_observations']==report['changed_cues']==1
+    assert report['later_cues']==0 and report['other_scenes']==[]
+    assert report['partition_changed_cues']>1

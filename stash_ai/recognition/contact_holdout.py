@@ -81,18 +81,40 @@ def swap(db,config,scan,cue,first,second):
     repair_projections(db,config,scan,cue=cue)
 
 
-def spread(before, after, locations, scene, cue):
-    # Compare membership sets, invariant to UUID renaming between private replays.
+def spread(before, after, locations, scene, cue, labels):
     def signatures(rows):
-        owners = defaultdict(set)
-        for oid in locations:
-            owner = rows[oid]['accepted_identity']
-            if owner:
-                owners[owner].add(oid)
-        banks = {p:frozenset(ids) for p,ids in owners.items()}
-        return {oid:banks.get(rows[oid]['accepted_identity']) for oid in locations}
-    original,stressed = signatures(before),signatures(after)
-    changed = {place for oid,place in locations.items() if original[oid]!=stressed[oid]}
+        members, roots = defaultdict(set),defaultdict(set)
+        for oid,place in locations.items():
+            decision = rows[oid]
+            owner = decision['accepted_identity']
+            if owner is not None:
+                members[owner].add(oid)
+                if (place!=(scene,cue) and decision.get('evidence_kind')!='person' and
+                        decision.get('evidence',{}).get('reason') in STRICT_REASONS):
+                    roots[owner].add(labels[oid])
+        return members,roots
+    original, first_roots = signatures(before)
+    stressed, last_roots = signatures(after)
+    changed,ambiguous,partitions = set(),set(),set()
+    observations = 0
+    for oid,place in locations.items():
+        a,b = before[oid]['accepted_identity'],after[oid]['accepted_identity']
+        if original.get(a)!=stressed.get(b):
+            partitions.add(place)
+        if a is None or b is None:
+            moved = a!=b
+        elif first_roots[a] and last_roots[b]:
+            moved = first_roots[a]!=last_roots[b]
+        elif a==b or original[a]==stressed[b]:
+            moved = False
+        else:
+            # A renamed unanchored fragment cannot establish a physical ID switch.
+            ambiguous.add(place)
+            continue
+        if moved:
+            observations += 1
+            changed.add(place)
     later = [c for s,c in changed if s==scene and c>cue]
-    return dict(changed_cues=len(changed),later_cues=len(later),last_later_cue=max(later,default=None),
-                other_scenes=sorted({s for s,_ in changed if s!=scene}))
+    return dict(changed_cues=len(changed),changed_observations=observations,later_cues=len(later),
+                last_later_cue=max(later,default=None),other_scenes=sorted({s for s,_ in changed if s!=scene}),
+                partition_changed_cues=len(partitions),unresolved_alignment_cues=len(ambiguous))
