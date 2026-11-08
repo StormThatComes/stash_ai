@@ -134,6 +134,12 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
 
 
 def execute(args, config, *, services=None):
+    from .work_locations import invocation
+    with invocation(config):
+        return _run(args, config, services)
+
+
+def _run(args, config, services):
     from .profiling import pipeline_scope
     from tqdm import tqdm
     from .run_display import RunDisplay

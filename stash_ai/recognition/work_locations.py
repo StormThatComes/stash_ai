@@ -1,5 +1,6 @@
 """Filesystem locations owned by one recognition invocation and its children."""
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
 import os
 from pathlib import Path
 import sqlite3
@@ -8,6 +9,7 @@ import tempfile
 from threading import RLock
 
 _lock = RLock()
+_active = ContextVar("recognition_work_invocation", default=None)
 
 
 def configured_path(config, value):
@@ -58,6 +60,9 @@ def invocation(config):
     Python caches its temp path. SQLite and spawned runtimes consult the
     environment independently, including TMP/TEMP on Windows.
     """
+    if _active.get() is config:
+        yield
+        return
     from .disk_budget import scope as disk_scope, temporary
     from .scratch_space import scope as scratch_scope
     with _lock, disk_scope(config), scratch_scope(config) as budget:
@@ -77,10 +82,12 @@ def invocation(config):
             tempfile.tempdir = str(work)
             sys.dont_write_bytecode = True
             prior_sqlite = set_sqlite_work(work)
+            token = _active.set(config)
             try:
                 with temporary(cache):
                     yield
             finally:
+                _active.reset(token)
                 set_sqlite_work(prior_sqlite)
         finally:
             tempfile.tempdir, sys.dont_write_bytecode = previous_temp, previous_bytecode

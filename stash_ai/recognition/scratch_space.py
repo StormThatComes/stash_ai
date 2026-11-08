@@ -26,14 +26,14 @@ class Budget:
         total=self.used-self.leases.get(owner,0)+size
         growth=max(0,size-self.leases.get(owner,0))
         if total>self.limit:
-            raise ResourceLimit('Recognition scratch allocations exceed execution.rebuild.scratch_bytes.',
+            raise ResourceLimit(f'Recognition scratch allocations exceed execution.rebuild.scratch_bytes at {self.directory}: {total} bytes required, limit {self.limit}.',
                 budget='execution.rebuild.scratch_bytes',limit=self.limit,requested=total)
         if growth:
             from .disk_budget import check
             check(growth,self.directory)
             self.free = shutil.disk_usage(self.directory).free
             if self.free < growth:
-                raise ResourceLimit('Insufficient free space in recognition scratch directory.')
+                raise ResourceLimit(f'Insufficient space at {self.directory}: {growth} bytes required, {self.free} free.')
         from .scratch_ledger import reserve
         reserve(self.directory, total, self.limit)
         self.used=total;self.peak=max(self.peak,total)

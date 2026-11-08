@@ -72,7 +72,7 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
                         copy_history(db, seed, hidden, scope, ns, commit=False)
                 except sqlite3.OperationalError as error:
                     if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
-                        raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.') from error
+                        raise ResourceLimit(f'Retained snapshot exceeds the admitted {grant} bytes at {seed_path}.') from error
                     raise
                 statistics = dict(embedding_bytes=sum(seed.execute(
                     f'SELECT COALESCE(SUM(length(embedding)),0) FROM {table}').fetchone()[0]
@@ -81,7 +81,7 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
                 seed.commit()
                 size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
                 if size > config.data['execution']['replay_snapshot_bytes']:
-                    raise ResourceLimit('Retained snapshot exceeds execution.replay_snapshot_bytes.')
+                    raise ResourceLimit(f'Retained snapshot exceeds the admitted {grant} bytes at {seed_path}.')
             work_budget.set(str(seed_path), size)
             seed.execute('PRAGMA query_only=ON')
             token = _prepared_sources.set((*_prepared_sources.get(), (seed, (scope, ns, installation))))
