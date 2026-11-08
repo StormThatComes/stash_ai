@@ -107,7 +107,7 @@ class DiskGallery(Gallery):
         if not requests:
             return []
         queries = [r[0] for r in requests]
-        radii = [np.sqrt(2*(1-r[2]['match_threshold']+r[2]['ambiguity_margin']))+.002 for r in requests]
+        radii = [self.search_radius(settings) for _,_,settings,_,_ in requests]
         candidates = self.nearby_many(queries,radii)
         ranked = [[] for _ in queries]
         for index in sorted(set().union(*candidates)):

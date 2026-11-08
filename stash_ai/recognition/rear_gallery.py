@@ -160,10 +160,14 @@ class Gallery:
     def nearby(self,query,radius):
         return {self.addresses[i] for i in self.tree.query_ball_point(query,radius)}
 
-    def rank(self, query, scan, settings, pixel, perspective='back'):
+    @staticmethod
+    def search_radius(settings):
         # A mean above the floor requires at least one witness above the floor.
         floor = settings['match_threshold'] - settings['ambiguity_margin']
-        candidates = sorted(self.nearby(query,np.sqrt(2*(1-floor)) + .002))
+        return np.sqrt(2*(1-floor)) + .002
+
+    def rank(self, query, scan, settings, pixel, perspective='back'):
+        candidates = sorted(self.nearby(query,self.search_radius(settings)))
         ranked = [self.score_bank(self.banks[i],query,scan,settings,pixel,perspective) for i in candidates]
         return self.ordered(ranked)
 
