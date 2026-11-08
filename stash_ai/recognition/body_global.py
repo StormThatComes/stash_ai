@@ -240,7 +240,7 @@ def reconcile(database,selected,config):
             'WHERE i.person=? AND b.contract=? AND '+current_scan(),(source,contract(config))))
         targets={r['person'] for r in rows}
         if not rows or len(targets)!=1 or None in targets or source in targets or any(
-                r['status']!='accepted' or r['reason']=='face_rooted_body_view' for r in rows):
+                r['status']!='accepted' or r['reason'] in ('face_rooted_body_view','fragment_face_endpoints') for r in rows):
             continue
         target=next(iter(targets));scenes={r['scene'] for r in rows}|_scenes(db,[source,target])
         if not scenes<=selection or not db.execute('SELECT 1 FROM members WHERE person=? LIMIT 1',(target,)).fetchone():continue

@@ -106,6 +106,8 @@ class ReverseIndex:
         added = new.keys()-old.keys()
         old_owners,owners = self.previous['owners'],self.state['owners']
         touched = {old[key] for key in old.keys()-new.keys()}
+        if hasattr(pending.search,'endpoints'):
+            touched.update(new[key] for key in added)
         touched.update(p for p in old_owners.keys()|owners.keys() if old_owners.get(p)!=owners.get(p))
         if len(added)>64 or len(touched)>256:
             return None

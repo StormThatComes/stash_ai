@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v26-contact-ownership',contract(config),matching_policy(config),
+    return digest(['body-local-v27-face-bridges',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -249,7 +249,7 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     from .pose_policy import anchor_sql
     rows=[];cost=0
     for raw in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
-            'o.dimensions AS face_dimensions,o.embedding AS face_embedding,o.rejected AS face_rejected,'
+            'o.quality AS face_quality,o.dimensions AS face_dimensions,o.embedding AS face_embedding,o.rejected AS face_rejected,'
             'm.person AS face_person,CASE WHEN o.id IS NOT NULL THEN '+
             strict_sql()+' AND '+anchor_sql('o',config.data['clustering'])+' ELSE 0 END AS face_anchor FROM body_observations b '
             'LEFT JOIN observations o ON o.id=b.face LEFT JOIN members m ON m.observation=o.id '
@@ -263,7 +263,7 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
         _prepare_vectors(rows)
     from .body_origins import origins_for_scene, ordered_owners
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
-    origins=origins_for_scene(db,record)
+    origins=origins_for_scene(db,record,rows)
     record = dict(record)
     record['occupied_cues'] = [r[0] for r in db.execute(
         'SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION SELECT cue FROM observations WHERE scan=?',
@@ -436,7 +436,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     preserve_fragments(record,borderline,decisions,settings,scores,guard)
     attach_with_scene_support(rows,groups,seeds,decisions,config,scores,guard)
     from .body_perspectives import recover
-    track_settings = dict(settings,scene_context_bonus=scene_bonus(config.data),
+    track_settings = dict(settings,face_threshold=config.data['recognition']['match_threshold'],
+                          face_margin=config.data['recognition']['ambiguity_margin'],scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))
     recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()))
     for row in rows:

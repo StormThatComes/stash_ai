@@ -411,7 +411,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if geometry[row['id']][0].get('query_only_reason')=='unresolved_partner':
                 decisions[row['id']].update(person=None,status='withheld',role='auxiliary',
                                             reason='unresolved_partner')
-    if not banks and not crossed:
+    from .fragment_endpoints import nominations
+    bridges = nominations(looks,lookup,root,shot_ids,scores,settings)
+    if not banks and not crossed and not bridges:
         return
     owner_rows = defaultdict(list)
     rival_evidence = {}
@@ -420,6 +422,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if p is not None:
             owner_rows[p].append(r)
     candidates = []
+    for oid,(owner,proof,score) in bridges.items():
+        row = lookup[oid]
+        if (oid not in crossed and not row.get('face_person') and
+                decisions[oid].get('reason') not in ('unresolved_partner','different_face_root') and
+                (decisions[oid]['status']!='accepted' or decisions[oid]['reason']=='body_scene_core') and
+                not copresent([row],owner_rows[owner]) and guard.allows(row,seeds[owner],owner)):
+            candidates.append((oid,owner,'endpoint_faces',proof,score))
     for oid,(owner,first,last,score) in crossed.items():
         row = lookup[oid]
         prior = decisions[oid]
@@ -535,9 +544,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                               source_tracks=proof, score=score)
         if angle == 'crossing':
             decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
-        if angle != 'crossing':
+        if angle == 'endpoint_faces':
+            decisions[oid].update(reason='fragment_face_endpoints',perspective=geometry[oid][0].get('orientation'))
+        if angle not in ('crossing','endpoint_faces'):
             decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
-        if angle!='crossing' and score<settings['match_threshold']:
+        if angle not in ('crossing','endpoint_faces') and score<settings['match_threshold']:
             decisions[oid]['roster_context'] = dict(owner=owner,
                 bonus=owner_bonus(previous,owner,settings.get('scene_context_bonus',0.)),
                 witnesses=previous.get('roster_witnesses',{}).get(owner,[]))

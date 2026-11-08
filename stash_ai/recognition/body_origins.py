@@ -8,13 +8,49 @@ def physical_key(scan, row):
                   [row[k] for k in ('cue', 'seconds', 'geometry')])
 
 
-def origins_for_scene(db, scan):
+def origins_for_scene(db, scan, current=()):
     result = defaultdict(set)
-    for row in db.execute('SELECT b.cue,b.seconds,b.geometry,i.person FROM body_origins i '
+    import json
+    from .track_geometry import torso_points
+    from .body_identity import vector
+    import numpy as np
+    by_time = defaultdict(list)
+    for row in current:
+        by_time[row['cue'],row['seconds']].append(row)
+    candidates = defaultdict(set)
+    for row in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.geometry,i.person FROM body_origins i '
             'JOIN body_observations b ON b.id=i.observation JOIN scans s ON s.id=b.scan '
             'WHERE s.scope=? AND s.namespace=? AND s.scene=? AND s.input_sha=?',
             tuple(scan[k] for k in ('scope','namespace','scene','input_sha'))):
-        result[physical_key(scan,row)].add(row['person'])
+        key = physical_key(scan,row)
+        result[key].add(row['person'])
+        if row['scan']==scan['id']:
+            continue
+        previous = json.loads(row['geometry'])
+        old_points = torso_points(previous)
+        bounds = previous.get('bounds')
+        if not bounds or len(old_points)<3:
+            continue
+        for new in by_time[row['cue'],row['seconds']]:
+            geometry = json.loads(new['geometry'])
+            points = torso_points(geometry)
+            common = points.keys() & old_points.keys()
+            if (len(common)<3 or not geometry.get('bounds') or
+                    max(abs(a-b) for a,b in zip(bounds,geometry['bounds']))>2 or
+                    any(np.linalg.norm(points[i]-old_points[i])>2.5 for i in common)):
+                continue
+            raw = db.execute('SELECT embedding FROM body_observations WHERE id=?',(row['id'],)).fetchone()
+            if raw[0] and float(vector(raw) @ vector(new))>=.95:
+                candidates[new['id']].add(row['person'])
+    for current_rows in by_time.values():
+        used = defaultdict(list)
+        for row in current_rows:
+            owners = result.get(physical_key(scan,row)) or candidates.get(row['id'],())
+            for owner in owners:
+                used[owner].append(row)
+        for owner,rows in used.items():
+            if len(rows)==1 and candidates[rows[0]['id']]=={owner}:
+                result.setdefault(physical_key(scan,rows[0]),{owner})
     return result
 
 

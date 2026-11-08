@@ -85,7 +85,9 @@ class Pending:
         owners = set(entry['local']) | set(entry.get('rivals',()))
         owners.update(self.gallery.owner_at(i) for i in banks)
         return digest([sorted(self.banks[i] for i in banks),
-                       [(owner,self.owner_revision(owner)) for owner in sorted(owners)]])
+                       [(owner,self.owner_revision(owner)) for owner in sorted(owners)],
+                       [(owner,self.search.endpoints.revision(owner,self.banks)) for owner in sorted(entry['local'])]
+                       if hasattr(self.search,'endpoints') else []])
 
     def candidates(self,scope,namespace,selected,stamp,*,active=()):
         from .rear_bounds import changed_modes
@@ -147,12 +149,16 @@ class Pending:
                 if reverse is not None:
                     reverse.store(scan,entry,banks,self)
                 continue
-            if scan in selected or scan in active or banks:
+            endpoint_candidate = hasattr(self.search,'endpoints') and any(
+                owner in self.search.endpoints.banks for owner in entry['local'])
+            if scan in selected or scan in active or banks or endpoint_candidate:
                 yield scan,scene
                 # The actual veto returned by the exact global search may be new.
                 entry['rivals'] = [r[0] for r in self.db.execute("""SELECT DISTINCT json_extract(m.proof,'$.rear_retry.rival') AS rival
                     FROM body_observations b JOIN main.body_members m ON m.observation=b.id
-                    WHERE b.scan=? AND rival IS NOT NULL ORDER BY rival""",(scan,))]
+                    WHERE b.scan=? AND rival IS NOT NULL
+                    UNION SELECT j.value FROM body_observations b JOIN main.body_members m ON m.observation=b.id
+                    JOIN json_each(m.proof,'$.checked_rivals') j WHERE b.scan=? ORDER BY 1""",(scan,scan))]
                 revision = self.generation(entry,banks)
                 entry['checked_scope'] = scope_generation
             if reverse is not None:
