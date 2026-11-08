@@ -563,3 +563,25 @@ For crossings, label both people before, during (`entangled`) and after the cros
 Rates use observed labelled sequences; zero available sequences produce an undefined macro rate.
 A missing ID during contact can recover at the end. A swap to the partner fails that crossing.
 Body-track diagnostics include the scene, cue, peer, measured value and its actual threshold when available.
+
+### Physical cue and contact validation
+
+The holdout report includes one vote per scene, cue and labelled performer in
+`metrics.physical`. A face and body assigned to different IDs produce a
+projection conflict and an unresolved physical vote. Sequence reports keep
+the continuity count and also report `own_id_turns` out of `anchored_turns`.
+The latter requires an independent accepted strict face reference and checks
+whether a partner shares that ID during the annotated turn.
+
+An optional `visible_people` object in the validation manifest can label a
+missing body using source VTT pixel coordinates. Its keys are selected scene
+IDs and zero-based cue numbers. For example:
+
+```json
+{"visible_people":{"123":{"121":[{"truth":"A","point":[70,90]},{"truth":"B","point":[160,100]}]}}}
+```
+
+The `detection` report counts expected people, missing and duplicate poses,
+and ambiguous poses independently of the membership replay. Existing
+`observations` still label the samples used to evaluate identity decisions.
+Explicit omission windows take precedence over automatic scenario selection.

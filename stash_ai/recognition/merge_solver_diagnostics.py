@@ -158,7 +158,7 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality, *, wrong=No
         if row['status'] != 'accepted':
             blocker = row.get('track_blocker')
             if blocker:
-                details = {k:blocker[k] for k in ('scene','cue','observation_cue','rival','peer','measured','limit') if k in blocker}
+                details = {k:blocker[k] for k in ('scene','cue','observation_cue','rival','peer','measured','limit','partner_score','partner_observation') if k in blocker}
                 add('body_track','track_' + blocker['reason'],row['observation'],**details)
             add('assignment', row['reason'], row['observation'],
                 **({'keypoint_rules':row['keypoint_rules']} if 'keypoint_rules' in row else {}))

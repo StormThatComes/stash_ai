@@ -94,11 +94,17 @@ def holdout_summary(report):
     for name,trial in report.get('incremental',{}).items():
         parts.append(f"{name} lost={trial['lost_pairs']} joined={trial['joined_pairs']} coverage changes={trial['coverage_changes']}")
     if 'sequences' in after:
-        for metric,total in [('one_id_turns','turns'),('both_recovered','crossings')]:
+        for metric,total in [('one_id_turns','turns'),('both_recovered','crossings'),('own_id_turns','anchored_turns')]:
+            if metric not in after['sequences']:
+                continue
             parts.append(f"{metric} {before['sequences'][metric]} → {after['sequences'][metric]}/{after['sequences'][total]}")
         for metric in ('foreign_id_crossings','abstained_crossings','unscored_episodes'):
             if metric in after['sequences']:
                 parts.append(f"{metric} {before['sequences'][metric]} → {after['sequences'][metric]}")
+    if 'physical' in after:
+        parts.append(f"physical projection conflicts {after['physical']['projection_conflicts']}")
+    if report.get('detection',{}).get('expected_people'):
+        parts.append(f"missing poses {report['detection']['missing_poses']}/{report['detection']['expected_people']}")
     stress = report['omissions']
     omissions = ', '.join(f"{w['scene']}:{w['first_cue']}-{w['last_cue']} lost={w['lost_pairs']}"
                           f" joined={w['joined_pairs']} {w.get('mode','rejected')}" for w in stress) or 'no series identified'

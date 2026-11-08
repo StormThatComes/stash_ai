@@ -284,8 +284,13 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             # A neighbour outside this goal can be the partner in the same cue.
             if index is not None and by_observation.get(peer)==index and row['measured']>=0:
                 key = 'sapiensid.identities.track_similarity_threshold'
-                add(index,'local_body_track',{key:lower(key,row['measured'])},
-                    observations=[oid,peer], blockers=['track_body_similarity'])
+                cutoff = lower(key,row['measured'])
+                rival = row.get('partner_score')
+                if rival is not None and rival >= cutoff:
+                    groups[index]['observed_blockers']['track_partner_scores_overlap'] += 1
+                else:
+                    add(index,'local_body_track',{key:cutoff}, observations=[oid,peer],
+                        blockers=['track_body_similarity'])
         for index in indices:
             groups[index]['observed_blockers'][row['reason']] += 1
             for member in groups[index]['performers']:

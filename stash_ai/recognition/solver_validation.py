@@ -1,5 +1,5 @@
 """Labelled, scene-disjoint evaluation of one frozen solver finalist."""
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import closing
 from dataclasses import replace
 import json
@@ -16,12 +16,26 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
     records = [dict(observation=oid, scene=locations[oid][0], truth=truth,
                     predicted=decisions[oid]['accepted_identity']) for oid, truth in labels.items() if oid not in exclude]
     all_metrics = evaluate_identities(records)
+    physical = defaultdict(list)
+    for row in records:
+        physical[(*locations[row['observation']],row['truth'])].append(row)
+    projections = []
+    conflicts = 0
+    for (scene,cue,truth), rows in physical.items():
+        owners = {row['predicted'] for row in rows if row['predicted'] is not None}
+        conflicts += len(owners)>1
+        projections.append(dict(observation=encoded([scene,cue,truth]),scene=scene,truth=truth,
+            predicted=next(iter(owners)) if len(owners)==1 else None,
+            slices={s for row in rows for s in samples[row['observation']]['slices']}))
     provisional = [dict(row, predicted=decisions[row['observation']]['identity'])
                    for row in records if row['predicted'] is None
                    and decisions[row['observation']].get('status') == 'provisional']
     metrics = {'all': all_metrics, 'provisional_only': evaluate_identities(provisional),
                'partners': partner_metrics(partner_sets, labels, locations, decisions, exclude)}
     from .sequence_validation import sequence_metrics
+    metrics['physical'] = dict(evaluate_identities(projections),projection_conflicts=conflicts,
+        slices={name:evaluate_identities([row for row in projections if name in row['slices']])
+                for name in ('back','entangled')})
     metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude,timing=timing)
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
@@ -134,12 +148,15 @@ def read_manifest(manifest_path):
                 or len(set(triple)) != 3 or labels[triple[0]] != labels[triple[1]]
                 or labels[triple[1]] == labels[triple[2]]):
             raise ValueError('Each partner set needs two observations of one target and a different partner.')
+    from .crowd_labels import validate
+    visible = document.get('visible_people',{})
+    validate(visible,scenes)
     return (scenes, samples, labels, (path.parent/database).resolve() if database else None,
-            document.get('series', []), triples)
+            document.get('series', []), triples, visible)
 
 
 def validate_winner(config, training, result, manifest_path, *, manifest=None, progress=None):
-    scenes, samples, labels, database, series, triples = manifest or read_manifest(manifest_path)
+    scenes, samples, labels, database, series, triples, visible = manifest or read_manifest(manifest_path)
     conflict = training.execute('SELECT DISTINCT scene FROM scans WHERE scope=? AND namespace=? AND '
                                 'scene IN (SELECT value FROM json_each(?)) LIMIT 1',
                                 (result['scope'],result['namespace'],encoded(scenes))).fetchone()
@@ -190,11 +207,29 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                     coverage_changes=sum((predicted[k]['accepted_identity'] is None)!=(decisions[k]['accepted_identity'] is None)
                                          for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
         if not windows:
+            faceless = {r[0] for r in source.execute(
+                "SELECT b.id FROM body_observations b LEFT JOIN observations o ON o.id=b.face "
+                "WHERE b.id IN (SELECT value FROM json_each(?)) AND (o.embedding IS NULL OR o.rejected IS NOT NULL)",
+                (encoded(sorted(labels)),))} if source.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='body_observations'").fetchone() else set()
+            for scenario in ('entangled','back','faceless'):
+                candidates = []
+                for oid,(scene,cue) in locations.items():
+                    hard = samples[oid]['slices']
+                    belongs = (scenario in hard if scenario!='faceless' else
+                               oid in faceless)
+                    if belongs:
+                        candidates.append((scene,max(0,cue-1),min(counts[scene]-1,cue+1)))
+                window = next((candidate for candidate in sorted(candidates) if candidate not in windows),None)
+                if window:
+                    windows.append(window)
             # Derive omission windows from the actual winner's recorded face roots.
             tracks = sorted({tuple(track) for row in predicted.values()
                              for track in (row.get('evidence') or {}).get('source_tracks', [])})
             addresses = _locations(source,scans,{oid for track in tracks for oid in track})
             for start,end,_ in tracks:
+                if len(windows)>=3:
+                    break
                 if start in addresses and end in addresses:
                     scene, first = addresses[start]
                     last_scene, last = addresses[end]
@@ -203,6 +238,9 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                         windows.append(window)
                 if len(windows)==3:
                     break
+        from .crowd_labels import detection_counts
+        from .body_observations import contract
+        detections = detection_counts(source,scans,visible,contract(settings))
         stress = []
         for index, window in enumerate(windows, 1):
             if progress:
@@ -217,5 +255,5 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, omissions=stress, incremental=incremental,
+    return dict(selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
