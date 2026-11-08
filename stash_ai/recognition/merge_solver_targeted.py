@@ -284,10 +284,19 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             # A neighbour outside this goal can be the partner in the same cue.
             if index is not None and by_observation.get(peer)==index and row['measured']>=0:
                 key = 'sapiensid.identities.track_similarity_threshold'
-                cutoff = lower(key,row['measured'])
+                from .contact_threshold import contact_interval
+                interval = contact_interval(db,config,by_observation,oid,peer) if db is not None else None
+                own_floor = min(row['measured'],interval['own_floor']) if interval else row['measured']
+                cutoff = lower(key,own_floor)
                 rival = row.get('partner_score')
                 margin = max(.025,parameter(config.data,'sapiensid.identities.ambiguity_margin'))
-                if rival is not None and (row['measured']-rival < margin):
+                if interval:
+                    rival = max(interval['rival_floor'],rival if rival is not None else -1.)
+                    evidence = groups[index].setdefault('contact_paths',[])
+                    if len(evidence)<8:
+                        evidence.append(dict(scene=row.get('scene'),cue=row.get('observation_cue'),**interval,
+                                             separated=cutoff-rival>=margin))
+                if rival is not None and cutoff-rival < margin:
                     groups[index]['observed_blockers']['track_partner_scores_overlap'] += 1
                 else:
                     add(index,'local_body_track',{key:cutoff}, observations=[oid,peer],
