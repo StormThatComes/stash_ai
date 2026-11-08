@@ -57,6 +57,7 @@ def test_applied_record_retires_raw_result_only_after_durable_event(tmp_path):
 def test_ordered_scheduler_refills_after_each_retirement():
     from stash_ai.recognition.solver_pool import Trials
     class Pool:
+        factory = None
         execution = SimpleNamespace(scheduling='batch', trials=2)
         history = ()
         def __init__(self):self.pending = OrderedDict(); self.events = []
@@ -67,3 +68,33 @@ def test_ordered_scheduler_refills_after_each_retirement():
     pool = Pool()
     assert list(Trials.entries(pool, [('one',{}),('two',{}),('three',{})])) == [('one',{}),('two',{}),('three',{})]
     assert pool.events[:5] == [('dispatch','one'),('dispatch','two'),('retire','one'),('dispatch','three'),('retire','two')]
+
+
+def test_independent_controls_fill_finished_slot_before_head_retires():
+    from concurrent.futures import Future
+    from stash_ai.recognition.solver_pool import Trials
+    class Pool:
+        execution = SimpleNamespace(scheduling='batch', trials=2)
+        factory = SimpleNamespace(independent=True)
+        history = ()
+        wait_reason = ''
+        def __init__(self):
+            self.pending, self.events, self.ready = OrderedDict(), [], set()
+        def harvest(self):
+            self.ready = {name for name, (_,future) in self.pending.items() if future.done()}
+        def dispatch(self,name,settings):
+            self.events.append(name)
+            future = Future()
+            self.pending[name] = settings, future
+            if name != 'first':
+                future.set_result(None)
+            if name == 'third':
+                self.pending['first'][1].set_result(None)
+        def retire(self,name):
+            self.events.append('retire-'+name)
+            settings, future = self.pending.pop(name)
+            assert future.done()
+            return name, settings
+    pool = Pool()
+    assert [n for n,_ in Trials.entries(pool,[(n,{}) for n in ('first','second','third')])] == ['first','second','third']
+    assert pool.events[:3] == ['first','second','third']

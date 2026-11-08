@@ -254,12 +254,15 @@ class Trials(AbstractContextManager):
                 raise ValueError('Invalid checkpoint schedule event.')
         exhausted = False
         while self.pending or not exhausted:
+            independent = getattr(self.factory, 'independent', False)
             if not exhausted:
                 # Completed later trials no longer occupy CPU. Keep their
                 # results bounded and preserve canonical batch retirement.
-                self.harvest()
-                while (not exhausted and len(self.pending) < self.execution.trials * (2 if getattr(self.factory, "independent", False) else 1)
-                       and sum(n not in self.ready for n in self.pending) < self.execution.trials):
+                capacity = self.execution.trials
+                if independent:
+                    self.harvest()
+                    capacity += min(self.execution.trials, sum(n in self.ready for n in self.pending))
+                while not exhausted and len(self.pending) < capacity:
                     try:
                         proposal = next(source)
                         if proposal is None:
@@ -285,7 +288,7 @@ class Trials(AbstractContextManager):
                         name = available[0]
                         break
                     wait([f for _, f in self.pending.values()], timeout=.2, return_when=FIRST_COMPLETED)
-            elif getattr(self.factory, 'independent', False) and self.pending[name][1] is not None and not self.pending[name][1].done():
+            elif independent and self.pending[name][1] is not None and not self.pending[name][1].done():
                 active = [future for _, future in self.pending.values() if future is not None and not future.done()]
                 if active:
                     wait(active, timeout=.2, return_when=FIRST_COMPLETED)
