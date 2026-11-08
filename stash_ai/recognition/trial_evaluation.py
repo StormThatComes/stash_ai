@@ -64,7 +64,7 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                 else:
                     from .trial_inputs import prepare
                     prepare(target, seed)
-            state = SimpleNamespace(connection=target, installation=installation)
+            state = SimpleNamespace(connection=target, installation=installation, collect_publication_results=False)
             with stage('Rebuild selected identities'):
                 rebuild(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
             rebuild_metrics = getattr(state, "last_rebuild_profile", None)

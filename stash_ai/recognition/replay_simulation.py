@@ -149,6 +149,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
             result['stop_reason'] = 'no_compatible_scans'
             return result
         baseline = None
+        comparisons = None
         wall_started = time.perf_counter()
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
@@ -227,9 +228,10 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                         namespace=ns, installation=installation, scans=scans, observations=observations,
                                         rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
                             if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
-                                if baseline is None or not evaluated['prediction_delta'].keys() <= baseline.keys():
+                                from .partition_delta import Predictions
+                                if baseline is None:
                                     raise ValueError('Invalid baseline prediction delta.')
-                                predictions = dict(baseline, **evaluated['prediction_delta'])
+                                predictions = Predictions(baseline, evaluated['prediction_delta'])
                             else:
                                 predictions = evaluated['predictions']
                             bodies, hybrid = evaluated['independent_person'], evaluated['hybrid']
@@ -253,24 +255,15 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         if name != 'baseline' and compact_trial_reports:
                             from .trial_report_compaction import compact
                             bodies = compact(bodies, result['trials']['baseline']['independent_person'].get('identities', []))
+                        if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
+                            from .partition_delta import PartitionImpact
+                            if comparisons is None:
+                                comparisons = (PartitionImpact(retained, baseline), PartitionImpact(baseline, baseline))
+                            versus_retained, versus_baseline = (c.measure(predictions.changes) for c in comparisons)
+                        else:
+                            versus_retained, versus_baseline = impact(retained, predictions), impact(baseline, predictions)
                         item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
-                            versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
-                        if evaluated.get('recovered_evaluation'):
-                            item['recovered_evaluation'] = True
-                        if runtime and runtime.profile:
-                            item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started),
-                                rebuild=rebuild_metrics, trial=evaluated.get('trial_profile'))
-                            item['performance']['result_wait_seconds'] = max(0.,time.perf_counter()-evaluated.get('finished_monotonic_seconds',time.perf_counter()))
-                        if runtime:
-                            item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds','worker_cache_reused') if k in evaluated}
-                        if consume is not None:
-                            if getattr(progress, 'coordinator_status', False):
-                                progress(name, 'coordinator', dict(text='score goal assignments'))
-                            consume_started = time.perf_counter()
-                            item.update(consume(name, observations, retained, predictions))
-                            if runtime and runtime.profilebodies = compact(bodies, result['trials']['baseline']['independent_person'].get('identities', []))
-                        item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
-                            versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                            versus_retained=versus_retained, versus_baseline=versus_baseline)
                         if evaluated.get('recovered_evaluation'):
                             item['recovered_evaluation'] = True
                         if runtime and runtime.profile:
