@@ -66,3 +66,22 @@ def test_rival_witness_is_query_only_until_independent_conflict_is_removed(tmp_p
         db.execute('DELETE FROM members WHERE person=?',('B',))
         _,_,clean=scene_plan(db,scan['scan'],cfg)
         assert 'view_exclusion' not in clean[ids[1]] and clean[ids[1]]['rooted_view']['owner']=='A'
+
+
+def test_scene_roster_competes_with_new_performer_at_full_strength():
+    from stash_ai.recognition.rear_gallery import winner
+    settings = dict(match_threshold=.85,cohesion_threshold=.8,ambiguity_margin=.05)
+    def bank(score,owner):
+        return (score, score, owner, 'source', (), score)
+    assert winner([bank(.83,'A'),bank(.81,'C')],settings,contextual={'A'},bonus=.03) is None
+    assert winner([bank(.83,'A'),bank(.76,'C')],settings,contextual={'A'},bonus=.03)[2]=='A'
+    assert winner([bank(.94,'C'),bank(.83,'A')],settings,contextual={'A'},bonus=.03)[2]=='C'
+
+
+def test_three_torso_points_supply_only_a_possible_direction():
+    from stash_ai.recognition.body_perspectives import orientation_measurement
+    points = [[-1,-1] for _ in range(17)]
+    points[5:7] = [[30,20],[65,20]]
+    points[11] = [36,80]
+    result = orientation_measurement(dict(keypoints=points))
+    assert result['label']=='unknown' and result['possible']=='back'

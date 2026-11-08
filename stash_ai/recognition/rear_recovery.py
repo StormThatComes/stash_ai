@@ -99,18 +99,21 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         query = vector(row)
         context = decision.get('shot_context')
-        effective = settings
-        if context and context['owner']==decision.get('open_face_root',{}).get('owner'):
-            effective = dict(settings,match_threshold=max(0.,settings['match_threshold']-context['bonus']))
-        ranked = gallery.rank(query,scan,effective,quality(row).get('pixel_digest'),perspective=kind)
-        best = winner(ranked, effective)
+        roster = set(decision.get('scene_roster',()))
+        rooted_owner = decision.get('open_face_root',{}).get('owner')
+        if context and context['owner']==rooted_owner:
+            roster.add(rooted_owner)
+        bonus = config.data['clustering']['same_scene_match_bonus'] if roster else 0.
+        search_settings = dict(settings,match_threshold=max(0.,settings['match_threshold']-bonus))
+        ranked = gallery.rank(query,scan,search_settings,quality(row).get('pixel_digest'),perspective=kind)
+        best = winner(ranked,settings,contextual=roster,bonus=bonus)
         if best is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
             continue
         mean,low,owner,source,witnesses,_ = best
         if (owner==old or decision.get('open_face_root',{}).get('owner',owner)!=owner
-                or mean<effective['match_threshold'] or low<settings['cohesion_threshold']):
+                or low<settings['cohesion_threshold']):
             continue
         if row['face_embedding'] is not None and row['face_rejection'] is None:
             measured = face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
@@ -128,8 +131,11 @@ def _scene(db, scan, stamp, gallery, search, config):
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses],
                      source_scans=sorted({w['scan'] for w in witnesses}))
-        if effective is not settings and mean<settings['match_threshold']:
-            proof['shot_context'] = context
+        if mean<settings['match_threshold']:
+            if context and context['owner']==owner:
+                proof['shot_context'] = context
+            else:
+                proof['roster_context'] = dict(owner=owner,bonus=bonus)
         competitors = [(max(item[0],item[5]),item[2]) for item in ranked if item[2]!=owner]
         if competitors:
             runner,rival = max(competitors)

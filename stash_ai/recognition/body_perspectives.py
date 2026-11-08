@@ -18,6 +18,15 @@ def orientation_measurement(person):
         return min(points[i]) >= 0 and (visibility is None or visibility[i] >= .5)
     visible_torso = [i for i in (5,6,11,12) if visible(i)]
     evidence = dict(label='unknown', visible_torso=visible_torso, confidence=0.)
+    if len(visible_torso)==3 and not all(visible(i) for i in (1,2)):
+        # Signed span of the complete pair along the torso's anatomical axis.
+        top = [np.asarray(points[i]) for i in visible_torso if i<7]
+        bottom = [np.asarray(points[i]) for i in visible_torso if i>10]
+        axis = np.mean(top,axis=0)-np.mean(bottom,axis=0)
+        height = np.linalg.norm(axis)
+        pair = top if len(top)==2 else bottom
+        if height>=6 and (pair[0]-pair[1]) @ np.array([-axis[1],axis[0]]) < -.27*height**2:
+            evidence['possible'] = 'back'
     if len(visible_torso)!=4:
         return evidence
     ls, rs, lh, rh = (np.asarray(points[i]) for i in (5,6,11,12))
@@ -231,6 +240,14 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             continue
         for i in middle:
             decisions[i].update(query_perspective=kind,orientation_confidence='temporal')
+    for oid,decision in decisions.items():
+        if (decision.get('orientation_measurement',{}).get('possible')!='back'
+                or lookup[oid]['cue'] in partial or lookup[oid].get('face_person')):
+            continue
+        neighbours = [n for n in (previous_links.get(oid),next_row.get(oid)) if n is not None]
+        directions = {geometry[n][0].get('orientation') for n in neighbours}
+        if 'back' in directions and not directions.intersection(('front','side')):
+            decision.update(query_perspective='back',orientation_confidence='partial_torso_and_neighbour')
     if not seeds:
         for row in rows:
             decisions[row['id']].setdefault('track_blocker',dict(reason='no_face_root',cue=row['cue']))
@@ -325,6 +342,22 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 abs(origin['cue']-row['cue'])<=3 and settings.get('scene_context_bonus',0.)>0):
             decision['shot_context'] = dict(owner=hint['owner'],root=origin['id'],
                                             bonus=settings['scene_context_bonus'])
+    if settings.get('scene_context_bonus',0.)>0:
+        from .independent_evidence import body_vote, Votes
+        prior = defaultdict(Votes)
+        first_shots = defaultdict(set)
+        for cue,members in sorted(by_cue.items()):
+            established = sorted(p for p,votes in prior.items()
+                                 if len(votes)>=settings.get('roster_support',3) and
+                                 any(shot!=shot_ids[cue] for shot in first_shots[p]))
+            for row in members:
+                if established and not row.get('face_person') and cue not in partial:
+                    decisions[row['id']]['scene_roster'] = established
+            for row in members:
+                owner = root.get(row['id'])
+                if owner is not None:
+                    prior[owner].add(body_vote(row))
+                    first_shots[owner].add(shot_ids[cue])
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -351,8 +384,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 rivals = [(scores.face_similarity(witness['_vector'],r['_vector']), other,r['id'])
                           for other,bank in seeds.items() if other!=key[0] for r in bank
                           if r['id'] in geometry and shot_ids[r['cue']]!=shot_ids[witness['cue']]]
-                if settings.get('assess_witnesses',True) and peers and rivals:
-                    own = min(scores.face_similarity(witness['_vector'],r['_vector']) for r in peers)
+                if rivals:
+                    own = min((scores.face_similarity(witness['_vector'],r['_vector']) for r in peers),default=-1.)
                     rival,other,rid = max(rivals)
                     if rival >= settings['match_threshold'] and own-rival < settings['ambiguity_margin']:
                         decisions[witness['id']]['view_exclusion'] = dict(reason='held_out_rival',
@@ -424,9 +457,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             # its own appearance. Exact source pixels never add a second vote.
             pixel = geometry[row['id']][0].get('pixel_digest')
             external = [(w, track) for w, track in zip(bank, proof)
-                        if shot_ids[w['cue']] != shot_ids[row['cue']] and track[:2] != source_paths.get(row['id'])
+                        if shot_ids[w['cue']] != shot_ids[row['cue']] and not set(track[:2]).intersection(source_paths.get(row['id'], ()))
                         and not (pixel and pixel == geometry[w['id']][0].get('pixel_digest'))]
-            if not external:
+            required = 1 if row['id'] in source_paths else max(2,settings['attach_min_support'])
+            if len(external)<required:
                 continue
             comparisons = [scores.face_similarity(row['_vector'], w['_vector']) for w, _ in external]
             mean, low = sum(comparisons)/len(comparisons), min(comparisons)
