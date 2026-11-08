@@ -68,7 +68,7 @@ def variant(config, name, database):
     return replace(config,data=data,database=database)
 
 
-def run(config, labels, directory, *, profile_cuda=False):
+def run(config, labels, directory, *, profile_cuda=False, body_batches=None):
     from stash_ai.recognition.backend import LazyBackend
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.models import namespace
@@ -84,8 +84,18 @@ def run(config, labels, directory, *, profile_cuda=False):
     results = {}
     with closing(services.client(url=url,api_key=os.getenv('STASH_API_KEY',''),
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
-        for name in ('unmasked','sam_overlap','masked_identity'):
-            cfg = variant(config,name,directory/(name+'.sqlite3'))
+        if body_batches:
+            from stash_ai.recognition.config import plain
+            variants = []
+            for size in body_batches:
+                data = plain(config.data)
+                data['sapiensid']['execution']['batch_size'] = size
+                name = f'body-batch-{size}'
+                variants.append((name, replace(config, data=data, database=directory/(name+'.sqlite3'))))
+        else:
+            variants = [(name, variant(config, name, directory/(name+'.sqlite3')))
+                        for name in ('unmasked','sam_overlap','masked_identity')]
+        for name, cfg in variants:
             with ExitStack() as resources:
                 state = resources.enter_context(FaceDatabase(cfg.database))
                 paths = LazyAssets(cfg,services.assets,RunReport(False,print))
@@ -97,6 +107,13 @@ def run(config, labels, directory, *, profile_cuda=False):
                 collector = PersonCollector(cfg,paths)
                 resources.callback(collector.close)
                 selected, cues, gpu_us = [], 0, 0.
+                cuda = None
+                if body_batches and cfg.data['models']['device'] != 'cpu':
+                    import torch
+                    if torch.cuda.is_available():
+                        cuda = torch.cuda
+                        cuda.synchronize()
+                        cuda.reset_peak_memory_stats()
                 start = time.monotonic()
                 for scene in sorted(labels,key=int):
                     item = client.scene(scene)
@@ -119,9 +136,15 @@ def run(config, labels, directory, *, profile_cuda=False):
                                           if e.device_type==torch.autograd.DeviceType.CUDA)
                         selected.append(dict(scene=scene,scan=scan))
                         cues += len(source.cues)
+                if cuda:
+                    cuda.synchronize()
                 elapsed = time.monotonic()-start
+                peak = cuda.max_memory_allocated() if cuda else None
+                bodies = state.connection.execute('SELECT COUNT(*) FROM body_observations WHERE embedding IS NOT NULL').fetchone()[0]
                 rebuild_selected(state,selected,cfg)
                 results[name] = dict(**score(state.connection,selected,labels), cues=cues,
+                                     cues_per_second=cues/elapsed, bodies_per_second=bodies/elapsed,
+                                     peak_torch_cuda_allocated_bytes=peak,
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,
                                      cuda_activity_seconds_per_1000_cues=gpu_us/(1000*cues) if profile_cuda else None)
     return results
@@ -133,7 +156,9 @@ if __name__=='__main__':
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--labels',type=Path,required=True)
     parser.add_argument('--cuda-profile',action='store_true')
+    parser.add_argument('--body-batches', type=int, nargs='+', choices=range(1, 17),
+                        help='Compare SapiensID batch sizes using the configured pose backend.')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='crowded-vtt-') as directory:
         print(json.dumps(run(load(args.config),json.loads(args.labels.read_text()),Path(directory),
-                             profile_cuda=args.cuda_profile),indent=2))
+                             profile_cuda=args.cuda_profile, body_batches=args.body_batches),indent=2))

@@ -181,18 +181,21 @@ class SapiensIDV1Encoder:
             if (not isinstance(keypoints, torch.Tensor)
                     or keypoints.shape != (count, 22, 2)
                     or keypoints.device != self.device
-                    or keypoints.dtype not in (torch.float16, torch.float32, torch.float64)
-                    or not torch.isfinite(keypoints).all().item()):
+                    or keypoints.dtype not in (torch.float16, torch.float32, torch.float64)):
                 raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
             missing = (keypoints == -1).all(dim=-1)
             valid = ((keypoints >= 0) & (keypoints <= 1)).all(dim=-1)
-            if not torch.all(missing | valid).item():
-                raise ValueError('SapiensID keypoints must be normalized or (-1,-1).')
             if (not isinstance(masks, torch.Tensor)
                     or masks.shape != (count, *INPUT_SIZE)
                     or masks.device != self.device or masks.dtype != torch.bool):
                 raise ValueError('SapiensID aligner must return (N,384,384) boolean masks.')
-            if not masks.flatten(1).any(dim=1).all().item():
+            finite, normalized, foreground = torch.stack((torch.isfinite(keypoints).all(),
+                (missing | valid).all(), masks.flatten(1).any(dim=1).all())).tolist()
+            if not finite:
+                raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
+            if not normalized:
+                raise ValueError('SapiensID keypoints must be normalized or (-1,-1).')
+            if not foreground:
                 raise ValueError('SapiensID person mask must contain foreground pixels.')
             features = self.model(batch, foreground_masks=masks, ldmks=keypoints)
             if (not isinstance(features, torch.Tensor)

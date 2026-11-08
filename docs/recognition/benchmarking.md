@@ -102,3 +102,8 @@ Mark separate clear cues as references for the same performer. For example:
 
 The report counts two correctly retained IDs, missing and duplicate poses, and joins to the partner.
 A tie in torso alignment abstains. Include both performers before and after a crossing.
+
+Compare encoder batches on the same labelled VTT selection and GPU using
+`python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels pairs.json --body-batches 1 2 4`.
+Each batch starts with a separate temporary database and retains the configured pose backend.
+Compare cue throughput, embedded bodies per second, peak PyTorch CUDA allocation and the labelled assignment results.

@@ -147,3 +147,31 @@ def test_http_new_version_does_not_read_cached_blob(tmp_path,monkeypatch):
     client.media.get=lambda *a,**k:response
     monkeypatch.setattr(cache,'get',lambda *a:pytest.fail('read obsolete cache body'))
     assert bounded_media(client,url,None,5,cache=cache)==b'new'
+
+
+def test_gpu_can_embed_before_png_finishes(tmp_path):
+    from threading import Event
+    from stash_ai.recognition.person_pipeline import PreparedCollector
+    settings = config(tmp_path)
+    data = plain(settings.data)
+    data['execution']['scan_cpu_workers'] = 2
+    data['sapiensid']['execution']['batch_size'] = 1
+    embedded = Event()
+    class Model:
+        def embed_inputs(self, items):
+            embedded.set()
+            return [np.ones(4096) for _ in items]
+    written = []
+    collector = PreparedCollector(replace(settings, data=data), Model(), writer=lambda db, rows: written.extend(rows))
+    def prepare(image, value, ready):
+        ready.set_result(value)
+        assert embedded.wait(3)
+        return value, b'png', False
+    collector.prepare = prepare
+    try:
+        with Image.new('RGB', (8, 8)) as image:
+            collector.collect_items(object(), image, [(['person', {}, None, None], 'tensor')])
+            collector.flush()
+        assert written[0][3] == b'png'
+    finally:
+        collector.close()

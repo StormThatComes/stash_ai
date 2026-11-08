@@ -155,14 +155,22 @@ class RFDETRDetector:
                                  f'query={query}, component={component} (zero-based).')
         # Select the person channel before any top-k limit: other classes and
         # the same query's alternative labels cannot consume the people budget.
-        scores = logits[..., registry.PERSON_LABEL].cpu().sigmoid()
-        boxes = boxes.cpu()
-        valid_geometry = (boxes[..., 2:] > 0).all(dim=-1)
-        corners = torch.cat((boxes[..., :2] - boxes[..., 2:] / 2,
-                             boxes[..., :2] + boxes[..., 2:] / 2), dim=-1)
+        # Compact on the inference device. Keep final sorting and NMS on CPU
+        # to preserve stable query order for equal scores.
+        person_logits = logits[..., registry.PERSON_LABEL]
+        # Keep a floating-point margin at the threshold. Final CPU sigmoid,
+        # geometry, stable ties and NMS use the original scalar contract.
+        possible = (person_logits.sigmoid() >= threshold - 8*torch.finfo(torch.float32).eps)
+        frames, queries = possible.nonzero(as_tuple=True)
+        packed = torch.cat((boxes[frames, queries], person_logits[frames, queries, None]), dim=1).cpu()
+        frames = frames.cpu()
         results = []
-        for raw, confidence, valid, (width, height) in zip(corners, scores, valid_geometry, sizes):
-            box = raw * torch.tensor([width, height, width, height])
+        for index, (width, height) in enumerate(sizes):
+            candidates = packed[frames == index]
+            raw, confidence = candidates[:, :4], candidates[:, 4].sigmoid()
+            valid = (raw[:, 2:] > 0).all(dim=1)
+            corners = torch.cat((raw[:, :2] - raw[:, 2:] / 2, raw[:, :2] + raw[:, 2:] / 2), dim=1)
+            box = corners * torch.tensor([width, height, width, height])
             box[:, 0::2].clamp_(0, width)
             box[:, 1::2].clamp_(0, height)
             keep = valid & (confidence > threshold) & (box[:, 2:] > box[:, :2]).all(dim=1)
