@@ -84,6 +84,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
         signature = captured[2] if captured and captured[0]==cue else frame_signature(image)
         for person, (measurement, _) in zip(people, measurements):
             measurement['frame_signature'] = signature
+            measurement['frame_size'] = list(image.size)
             if captured and captured[0]==cue and captured[1] is not None:
                 measurement['view_shot'] = captured[1]
             measurement['detected_people'] = len(people)

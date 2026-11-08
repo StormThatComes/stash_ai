@@ -10,10 +10,26 @@ def measurements(previous, current):
     return difference,structure,colour
 
 
+def camera_shift(previous,current):
+    """A textured 4x4 thumbnail can certify a one-cell pan in a single axis."""
+    a,b = previous.reshape(4,4,3),current.reshape(4,4,3)
+    if min(a.std(axis=(0,1)).mean(),b.std(axis=(0,1)).mean())<12:
+        return None
+    trials = []
+    for dx,dy in ((0,0),(-1,0),(1,0),(0,-1),(0,1)):
+        first = a[max(0,-dy):4-max(dy,0),max(0,-dx):4-max(dx,0)]
+        second = b[max(0,dy):4-max(-dy,0),max(0,dx):4-max(-dx,0)]
+        trials.append((float(np.abs(first-second).mean()),dx,dy))
+    (best,dx,dy),(runner,_,_) = sorted(trials)[:2]
+    if (dx or dy) and best<=6 and runner-best>=12:
+        return dx,dy
+    return None
+
+
 def change(previous, current, adjacent):
     difference,structure,colour = measurements(previous,current)
     if structure > 16 or colour > 30:
-        return 'cut'
+        return 'continuous' if adjacent and camera_shift(previous,current) else 'cut'
     return 'continuous' if adjacent and difference <= 20 else 'uncertain'
 
 

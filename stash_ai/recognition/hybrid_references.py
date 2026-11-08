@@ -39,7 +39,10 @@ def _rows(db,config,scope,namespace,owners,ids=None):
     sql,args=_query(db,config,scope,namespace,owners,ids)
     from .person_anchor import anchor_gate
     rows=db.execute(sql,args)
-    return (row for row in rows if anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
+    from .contact_anchors import crowded_link
+    from .run_cache import metadata
+    # The hybrid catalogue is built before local temporal corroboration.
+    return (row for row in rows if not crowded_link(metadata(row['person_metadata']).get('quality',{})) and anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
         collection=config.data['sapiensid']['collection'])['eligible'])
 
 
