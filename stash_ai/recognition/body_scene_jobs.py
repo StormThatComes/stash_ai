@@ -6,8 +6,9 @@ from stash_ai.runtime.cleanup import closing
 
 
 def _worker(payload):
-    from .body_identity import _plan
+    from .body_identity import _plan, _prepare_vectors
     config, frozen, wanted = payload
+    _prepare_vectors(frozen[1])
     hints = []
     plan = _plan(None, config, *frozen,
                  capture_hints=lambda groups, seeds, modes: hints.append((groups, seeds, modes)) if wanted else None)
@@ -32,7 +33,7 @@ def _witnesses(db, owners, limit):
 
 
 def planned(db, items, config):
-    from .body_identity import scene_plan, _load_scene, _plan
+    from .body_identity import scene_plan, _load_scene, _plan, _prepare_vectors
     from .hybrid_query_observer import _observer
     store=current() if _observer.get() is None else None
     from .stage_checkpoints import current as stage_current
@@ -77,10 +78,19 @@ def planned(db, items, config):
         if size and size <= pool.limit:
             if batch and sum(job[2] for job in batch) + size > pool.limit:
                 yield from drain()
-            frozen=_load_scene(db,scan,config)
+            frozen=_load_scene(db,scan,config,prepare_vectors=False)
             rows=frozen[1]
+            # Fully face-linked scenes have no body queries to compare. Avoid
+            # transferring their rows and retaining idle numerical work slots.
+            if all(r['face_person'] is not None for r in rows):
+                yield from drain()
+                _prepare_vectors(rows)
+                plan = _plan(db, config, *frozen)
+                save(key, plan[2])
+                yield plan
+                continue
             faces,charge={},0
-            if any(r['face_person'] is None and r['_face_vector'] is not None for r in rows):
+            if any(r['face_person'] is None and r['face_embedding'] is not None and r['face_rejected'] is None for r in rows):
                 from .body_identity import anchor
                 settings=config.data['sapiensid']['identities']
                 owners={frozen[2][r['face_person']] for r in rows if r['face_person'] is not None
@@ -95,6 +105,7 @@ def planned(db, items, config):
                     yield from drain()
                 continue
             yield from drain()
+            _prepare_vectors(rows)
             plan=_plan(db,config,*frozen)
         else:
             yield from drain()
