@@ -75,3 +75,24 @@ def test_rooted_retry_keeps_identical_competing_core(tmp_path):
         db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(ids[-1],None,'auxiliary','withheld',policy(cfg),encoded(proof)))
         recover(state,[scan],cfg)
         assert db.execute('SELECT person FROM body_members WHERE observation=?',(ids[-1],)).fetchone()[0] is None
+
+
+def test_complementary_endpoints_challenge_the_unconstrained_ending():
+    cues = {i:[dict(id=p+str(i),seconds=i) for p in 'AB'] for i in range(3)}
+    def run(roots,reverse=False):
+        data = {i:rows[::-1] if reverse else rows for i,rows in cues.items()}
+        decisions = {r['id']:{} for pair in data.values() for r in pair}
+        return {k:v[0] for k,v in crossings(data,roots,decisions,
+                lambda a,b:.95 if a['id'][0]==b['id'][0] else .2,.1).items()}
+    assert run({'A0':'A','B2':'B'})==run({'A0':'A','B2':'B'},True)=={'A1':'A','B1':'B'}
+    assert not run({'A0':'A','A2':'B'})
+
+
+def test_pan_requires_one_unique_textured_offset():
+    import numpy as np
+    from stash_ai.recognition.perspective_shots import camera_shift,change
+    left = np.random.default_rng(42).integers(0,256,(4,4,3)).astype(float)
+    right = np.roll(left,1,axis=1)
+    assert camera_shift(left,right)==(1,0)
+    assert change(left.reshape(-1,3),right.reshape(-1,3),True)=='continuous'
+    assert camera_shift(left*0,right*0) is None

@@ -72,12 +72,12 @@ def contact_interval(db,config,owners,oid,peer,*,measured=None):
             continue
         layers[cue] = (tuple(k for k,r in tagged), shots.pop(), tagged[0][1]['seconds'],
                        [vector(r) for k,r in tagged], [r['id'] for k,r in tagged], [json.loads(r['geometry']) for k,r in tagged],
-                       np.frombuffer(bytes.fromhex(qualities[0]['frame_signature']), np.uint8).astype(float).reshape(-1,3))
+                       np.frombuffer(bytes.fromhex(qualities[0]['frame_signature']), np.uint8).astype(float).reshape(-1,3), qualities)
     if center not in layers:
         return None
     start=end=center
     from .perspective_shots import change
-    from .track_geometry import rejection, torso_points
+    from .track_geometry import rejection, torso_points, translation
     def adjacent(i,j):
         return (i in layers and j in layers and layers[i][:2]==layers[j][:2] and
                 0<layers[j][2]-layers[i][2]<=12 and change(layers[i][6],layers[j][6],True)=='continuous')
@@ -94,7 +94,8 @@ def contact_interval(db,config,owners,oid,peer,*,measured=None):
             left,right = layers[cue][5][i],layers[cue+1][5][j]
             if not left.get('bounds') or not right.get('bounds') or rejection(
                     left['bounds'],right['bounds'],torso_points(left),torso_points(right),
-                    layers[cue+1][2]-layers[cue][2]):
+                    layers[cue+1][2]-layers[cue][2], translation=translation(layers[cue][7][i],layers[cue+1][7][j],
+                    layers[cue][6],layers[cue+1][6])):
                 return None
             return float(np.dot(a[i],b[j]))
         values = {(i,j):score(i,j) for i in (0,1) for j in (0,1)}

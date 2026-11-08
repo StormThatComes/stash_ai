@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v21-contact-ownership',contract(config),matching_policy(config),
+    return digest(['body-local-v22-contact-paths',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -297,9 +297,15 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
     seeds={};decisions={}
+    from .contact_anchors import questionable_links
+    uncertain = questionable_links(rows,settings,scores)
     for row in rows:
         if row['face_person'] is None:continue
         person=roots[row['face_person']]
+        if row['id'] in uncertain:
+            decisions[row['id']] = dict(person=None,status='withheld',role='auxiliary',
+                reason='unconfirmed_contact_face',track_blocker=dict(reason='unresolved_partner',cue=row['cue']))
+            continue
         strong=bool(row['face_anchor']) and anchor(row,settings)
         decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
                                   reason='measured_face_association')

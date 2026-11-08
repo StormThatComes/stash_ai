@@ -104,6 +104,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         track_threshold = settings['cohesion_threshold']
     outgoing_failures, incoming_failures = {}, {}
     appearance_edges = {}
+    camera_offsets = {}
     def transition(a, b, *, diagnose=False, raw=False):
         def fail(order, reason, measured, limit):
             if diagnose:
@@ -139,8 +140,12 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if colour>30:
                 return fail(1,'cut_colour',colour,30)
             return fail(1,'uncertain_shot',difference,8 if skipped else 20)
-        from .track_geometry import rejection
-        blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}), gap)
+        from .track_geometry import rejection, translation
+        pair = a['cue'],b['cue']
+        if pair not in camera_offsets:
+            camera_offsets[pair] = translation(qa,qb,sa,sb) if not skipped else None
+        blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}), gap,
+                            translation=camera_offsets[pair])
         if blocked:
             return fail(*blocked)
         similarity = scores.face_similarity(a['_vector'],b['_vector'])
@@ -392,12 +397,14 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             decision.setdefault('track_blocker', stop or dict(reason='no_independent_view',cue=row['cue']))
     from .crossing_tracks import crossings
     occluded = {cue for cue,members in by_cue.items() if len(members)==1
-                and not members[0].get('face_person') and boundary.get(cue)=='continuous'
+                and boundary.get(cue)=='continuous'
                 and boundary.get(cue+1)=='continuous'
                 and shot_ids.get(cue-1)==shot_ids.get(cue)==shot_ids.get(cue+1)}
     crossed = crossings({cue:members for cue,members in by_cue.items() if cue not in partial or cue in occluded},
                         root,decisions,transition,margin,occluded=occluded,
-                        raw=lambda a,b:transition(a,b,raw=True))
+                        raw=lambda a,b:transition(a,b,raw=True),
+                        visible_single=lambda row: row['cue'] not in partial and len(torsos.get(row['id'],{}))>=3
+                        and not geometry[row['id']][0].get('query_only'))
     for cue in partial:
         for row in by_cue[cue]:
             if geometry[row['id']][0].get('query_only_reason')=='unresolved_partner':
@@ -462,7 +469,16 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         address = item[:2]
         if address not in best or item[-1] > best[address][-1]:
             best[address] = item
-    candidates = list(best.values())
+    by_observation = defaultdict(list)
+    for item in best.values():
+        by_observation[item[0]].append(item)
+    candidates = []
+    for oid,options in sorted(by_observation.items()):
+        options.sort(key=lambda item:(-item[-1],item[1]))
+        if len(options)>1 and options[0][-1]-options[1][-1]<margin:
+            decisions[oid]['track_blocker'] = dict(reason='competing_owner',rival=options[1][1],cue=lookup[oid]['cue'])
+        else:
+            candidates.append(options[0])
     proposed = {oid: owner for oid, owner, *_ in candidates}
     # Check all core votes before moving anything. Weak satellites cannot
     # veto a coherent core, but a measured face or simultaneous claim can.
