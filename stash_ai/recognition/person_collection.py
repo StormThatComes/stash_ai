@@ -1,4 +1,5 @@
 """Resumable supplementary inference; one invocation owns all GPU models."""
+from functools import cached_property
 from io import BytesIO
 import json
 
@@ -11,9 +12,6 @@ from stash_ai.runtime.cleanup import closing, cleanup
 class PersonCollector:
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory
-        from .body_observations import contract as body_contract
-        self.person_contract = contract(config) if config.data['sapiensid']['enabled'] else None
-        self.body_contract = body_contract(config) if self.person_contract else None
         self.model = None
         self.pipeline = None
         self.deferred = None
@@ -22,6 +20,15 @@ class PersonCollector:
         self.pose_bytes = 0
         self.resume_rows=None
         self.resume_bytes=self.resume_cues=0
+
+    @cached_property
+    def person_contract(self):
+        return contract(self.config)
+
+    @cached_property
+    def body_contract(self):
+        from .body_observations import contract as body_contract
+        return body_contract(self.config)
 
     def _close_pose_frames(self):
         frames, self.pose_frames = self.pose_frames, []
@@ -46,7 +53,7 @@ class PersonCollector:
         missing={r[0] for r in db.execute('SELECT DISTINCT o.cue FROM observations o '
             'LEFT JOIN person_evidence p ON p.observation=o.id AND p.contract=? '
             'WHERE o.scan=? AND o.rejected IS NULL AND p.observation IS NULL',(expected,scan))}
-        from .body_observations import enabled,contract as body_contract
+        from .body_observations import enabled
         if enabled(self.config):
             complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,self.body_contract))}
             missing.update(set(range(total))-complete)
@@ -265,7 +272,7 @@ class PersonCollector:
 
     def _collect_frame(self,db,scan,index,image,*,rows=None,fresh=False,seconds=0.,capture=False):
         if not self.config.data['sapiensid']['enabled']:return
-        from .body_observations import enabled,contract as body_contract,repair_projections
+        from .body_observations import enabled,repair_projections
         if enabled(self.config) and not fresh and db.execute(
                 'SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
                 (scan,self.body_contract,index)).fetchone():
@@ -274,7 +281,7 @@ class PersonCollector:
         self._load();expected=self.person_contract
         if rows is None:rows=list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
-        from .body_observations import enabled,contract as body_contract
+        from .body_observations import enabled
         if enabled(self.config):
             from .crowd_context import attach_context
             attach_context(self.model,image,scan,index,seconds,db=db,contract=self.body_contract)

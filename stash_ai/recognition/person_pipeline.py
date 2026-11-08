@@ -1,5 +1,6 @@
 """Owned CPU preparation with cross-cue batches and complete-cue publication."""
 from collections import deque
+from functools import cached_property
 from concurrent.futures import Future
 from io import BytesIO
 from .person_signal import save, contract
@@ -10,12 +11,15 @@ class PreparedCollector:
     def __init__(self, config, model, writer=None):
         self.config,self.model=config,model
         self.writer=writer
-        self.person_contract = contract(config)
         settings=config.data['execution']
         self.stage=CpuStage(settings['scan_cpu_workers'],settings['scan_queue_bytes']//2)
         self.step=max(1,min(config.data['sapiensid']['execution']['batch_size'],
                             self.stage.limit//(2*(3*384*384*4+384*384+config.data['storage']['max_crop_bytes']+4096))))
         self.cues=deque();self.jobs=[];self.db=None
+
+    @cached_property
+    def person_contract(self):
+        return contract(self.config)
 
     def prepare(self,image,value,ready=None):
         bounds,points,*mask=value
