@@ -33,6 +33,7 @@ class Arrays:
         self.db = None
         self.disabled = False
         self.verified = {}
+        self.pending = {}
         try:
             self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
         except sqlite3.Error:
@@ -44,7 +45,7 @@ class Arrays:
         self.disabled = True
 
     def handle_error(self, error):
-        if getattr(error, 'sqlite_errorcode', 0) & 255 in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        if (getattr(error, 'sqlite_errorcode', 0) or 0) & 255 in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
             from .profiling import count
             count('shared_numeric_busy')
         else:
@@ -70,8 +71,23 @@ class Arrays:
             count('shared_numeric_errors')
             return False
 
+    def flush_pending(self):
+        if not self.pending or self.disabled:
+            return
+        try:
+            with self.db:
+                self.db.executemany('UPDATE entries SET checksum=?,shape=?,dtype=? WHERE key=? AND checksum IS NULL',
+                                    self.pending.values())
+        except sqlite3.Error as error:
+            self.handle_error(error)
+        else:
+            self.pending.clear()
+
     def get(self, signature):
         if signature is None or self.disabled:
+            return None
+        self.flush_pending()
+        if signature in self.pending or self.disabled:
             return None
         path = self.directory/(signature+'.npy')
         import numpy as np
@@ -135,14 +151,14 @@ class Arrays:
             fd, filename = tempfile.mkstemp(dir=self.directory, suffix='.tmp')
             with os.fdopen(fd, 'wb') as stream:
                 np.save(stream, value, allow_pickle=False)
+            with open(filename, 'rb') as stream:
+                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
             os.replace(filename, self.directory/(signature+'.npy'))
             published = True
             filename = None
-            with (self.directory/(signature+'.npy')).open('rb') as stream:
-                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
-            with self.db:
-                self.db.execute('UPDATE entries SET checksum=?,shape=?,dtype=? WHERE key=?',
-                    (checksum, json.dumps(list(value.shape)), value.dtype.str, signature))
+            # Readers ignore reserved rows. A transient writer lock can defer
+            # publication of the checksum without losing the byte reservation.
+            self.pending[signature] = (checksum, json.dumps(list(value.shape)), value.dtype.str, signature)
             count('shared_numeric_written_bytes', value.nbytes)
             found = self.get(signature)
             return value if found is None else found
@@ -150,7 +166,7 @@ class Arrays:
             self.failed()
             return value
         finally:
-            if not published or self.disabled:
+            if not published:
                 with suppress(sqlite3.Error):
                     with self.db:
                         self.db.execute('DELETE FROM entries WHERE key=?', (signature,))
@@ -160,7 +176,10 @@ class Arrays:
 
     def close(self):
         if self.db is not None:
-            self.db.close()
+            try:
+                self.flush_pending()
+            finally:
+                self.db.close()
 
 
 def current():
