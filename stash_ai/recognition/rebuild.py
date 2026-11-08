@@ -302,4 +302,476 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
                     if means and minimum >= config.data['clustering']['cohesion_threshold']:
                         best_two(ranked, (sum(means) / len(means), old.identifier))
             if (ranked and ranked[0][0] >= config.data['recognition']['match_threshold']
-                    and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= config.data[
+                    and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= config.data['recognition']['ambiguity_margin'])):
+                candidate = ranked[0][1]
+                performer = historical_performers[candidate]
+                if candidate not in used and (not performer or performer not in performers):
+                    mapping[cluster] = candidate
+                    used.add(candidate)
+                    if performer:
+                        performers.add(performer)
+                    continue
+            seed = replay.execute('SELECT k.sample_key FROM sample_keys k JOIN members m ON m.observation=k.observation '
+                                  'WHERE m.person=? ORDER BY k.sample_key LIMIT 1', (cluster,)).fetchone()[0]
+            attempt = 0
+            while True:
+                candidate = str(uuid.uuid5(uuid.UUID(database.installation), encoded([scope, namespace, 'rebuild', seed, attempt])))
+                if candidate not in used and not database.connection.execute(
+                        'SELECT 1 FROM identity_merges WHERE source=?', (candidate,)).fetchone():
+                    break
+                attempt += 1
+            mapping[cluster] = candidate
+            used.add(candidate)
+    old_groups.clear()
+    return mapping
+
+
+@measured('apply')
+@stage('Commit rebuilt identities')
+def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None,history=None):
+    db, policy = database.connection, matching_policy(config)
+    usage = usage or ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
+    with work('Apply rebuilt identities', 1, unit='transaction', position=0) as committed:
+        with db:
+            from .reference_registry import apply as apply_registry
+            registry_changed=apply_registry(database,history,config) if history is not None else False
+            with tracking(
+                _inserted(db, 'INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
+                          replay.execute('SELECT * FROM origins')),
+                'Save original sample ownership',
+                unit='member',
+                total=lambda: replay.execute(
+                    'SELECT COUNT(*) FROM origins',
+                ).fetchone()[0],
+            ) as tracked:
+                for row in tracked:
+                    pass
+            with tracking(
+                mapping.values(),
+                'Save rebuilt identities',
+                unit='identity',
+            ) as tracked:
+                for person in tracked:
+                    db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
+                        (person, scope, namespace, time.time(), None, f'stash-ai-recognition:{database.installation}:{person}'))
+            from .assignment_delta import prune,candidates as apply_candidates
+            changed=prune(db,replay,selected,scope,namespace,policy)
+            with tracking(
+                _apply_members(db, replay, mapping, changed),
+                'Save rebuilt memberships',
+                unit='member',
+                total=lambda: replay.execute(
+                    'SELECT COUNT(*) FROM members',
+                ).fetchone()[0],
+            ) as tracked:
+                for row in tracked:
+                    pass
+            with tracking(
+                apply_candidates(db,_mapped_candidates(replay,mapping,policy,''),changed),
+                'Save rebuilt candidates',
+                unit='candidate',
+                total=lambda: replay.execute(
+                    'SELECT COUNT(*) FROM candidates WHERE policy=?',
+                    (policy,),
+                ).fetchone()[0],
+            ) as tracked:
+                for row in tracked:
+                    pass
+            from .unresolved_pool import apply as apply_pool
+            pooled=apply_pool(database,replay,config,mapping)
+            from .assignment_delta import enqueue
+            for item in selected:
+                enqueue(db,scope,namespace,item,config,item['scene'] in changed,'selected_identity_rebuild')
+            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
+                label_scenes=[item['scene'] for item in selected])
+            context = reference_context(references)
+            representative_ids = {identifier for group in references for identifier in group.sample_ids}
+            references.clear()
+            # Current decision roles must exist before selecting references;
+            # historical policy rows cannot decide the new bank's authority.
+            db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
+                "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "
+                "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE policy=? "
+                "AND scan IN (SELECT value FROM json_each(?)) AND (json_extract(payload,'$.reference_context') IS NOT ? "
+                "OR COALESCE(json_extract(payload,'$.reference_selected'),-1) != "
+                "(json_extract(payload,'$.observation') IN (SELECT value FROM json_each(?))))",
+                (context,encoded(sorted(representative_ids)),policy,encoded([item['scan'] for item in selected]),context,encoded(sorted(representative_ids))))
+            if pooled:
+                db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
+                    "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "
+                    "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE id IN "
+                    '(SELECT value FROM json_each(?))',(context,encoded(sorted(representative_ids)),encoded(pooled)))
+            state = dict(format=2, fingerprint=fingerprint, context=context,
+                corroboration_pending=getattr(database,'_rebuild_corroboration_pending',False),
+                corroborated_plan=sorted(getattr(database,'_rebuild_corroborated_plan',())),
+                inputs=rebuild_cache.input_context(db,selected,scope,namespace,config),
+                bindings=rebuild_cache.binding_context(db,scope,namespace),
+                limits=rebuild_cache.resource_limits(config),
+                resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
+            # Refresh the post-commit dependency stamp even when the external
+            # evidence itself did not change, so the next run remains a warm read.
+            from .historical_references import context as external_context
+            state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
+                external_references=external_context(db,selected,config,scope,namespace,cache=True)))
+            rebuild_cache.save(db,scope,namespace,state)
+        committed.advance()
+
+
+from .run_cache import scope as run_cache_scope
+
+
+@pipeline_stage('rebuild')
+def rebuild_selected(database, selected, config, *, progress=None):
+    database.face_rebuild_mode='cold'
+    database.body_rebuild_mode='disabled'
+    first=(database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',
+           (selected[0]['scan'],)).fetchone() if selected else None)
+    if first is not None and config.data['sapiensid']['enabled']:
+        from .incomplete_rivals import require_complete
+        require_complete(database.connection,*first)
+    from .rebuild_transaction import atomic
+    from . import derived_cache
+    from .paged_references import scope as reference_pages
+    from .stage_checkpoints import scope as stage_checkpoints
+    from .scratch_space import scope as scratch_scope
+    collect_results = getattr(database, 'collect_publication_results', True)
+    with scratch_scope(config), stage_checkpoints(database,config), atomic(database), derived_cache.scope(database,config), profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), reference_pages(config), compute_scope(config), score_scope(), physical_keys(database, config):
+        from .reference_registry import InvalidatedSourceViews
+        from .consolidation_queue import expand
+        selected=expand(database.connection,selected,config)
+        while True:
+            from .body_aliases import prepare_replay
+            prepare_replay(database,selected,config)
+            excluded=set()
+            with alias_scope(database.connection,*(first or (None,None)),budget=config.data['clustering']['max_reference_bytes'],persist=True,disk_bytes=config.data['execution']['pixel_index_bytes']):
+                for attempt in range(2):
+                    try:
+                        from .hybrid_merge import rebuild as hybrid_rebuild
+                        result=hybrid_rebuild(database,selected,config,
+                            lambda: _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded),
+                            lambda: _results(database.connection,selected,config) if collect_results else {})
+                        break
+                    except InvalidatedSourceViews as error:
+                        if attempt or not error.medoids-excluded:raise
+                        excluded.update(error.medoids)
+            expanded=expand(database.connection,selected,config)
+            if len(expanded)==len(selected):
+                from .body_identity import rebuild as rebuild_bodies
+                database.last_rebuild_selection = [dict(item) for item in selected]
+                return rebuild_bodies(database,selected,config,result)
+            selected=expanded
+
+
+@measured('rebuild')
+def _rebuild_selected(database, selected, config, *, progress=None,excluded_views=()):
+    """Replay selected scans, then reconcile against frozen external references.
+
+    The private SQLite stays in RAM, streaming vectors without
+    JPEGs. Only the final assignment replacement commits to the durable DB.
+    """
+    if not selected:
+        return {}
+    scenes = [int(item['scene']) for item in selected]
+    if len(set(scenes)) != len(scenes):
+        raise ValueError('Identity rebuild requires exactly one selected scan per scene.')
+    selected = sorted(selected, key=lambda item: (int(item['scene']), item['scan']))
+    db = database.connection
+    first = db.execute('SELECT scope,namespace FROM scans WHERE id=?', (selected[0]['scan'],)).fetchone()
+    if first is None:
+        raise ValueError('Identity rebuild requires a selected scan.')
+    scope, namespace = first['scope'], first['namespace']
+    from . import historical_references
+    from .dependencies import read_only as read_only_dependencies
+    with stage('Validate external identity dependencies'), read_only_dependencies():
+        external_context = historical_references.context(db,selected,config,scope,namespace,cache=True)
+    fingerprint = digest({'format': 2, 'scans': selected, 'policy': matching_policy(config),
+                          'external_references': external_context})
+    usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
+    state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
+    if state and rebuild_cache.admissible(state,config):
+        from .dependencies import certified
+        if certified(db,scope,namespace,state):
+            from .profiling import count
+            database.face_rebuild_mode='warm'
+            count('certified_warm_rebuilds')
+            return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
+        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
+                           label_scenes=[item['scene'] for item in selected])
+        context = reference_context(references)
+        references.clear()
+        with read_only_dependencies():
+            matches = (state.get('context')==context
+                and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace,config)
+                and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace))
+        if matches:
+            with work('Validate cached identity rebuild',len(selected),unit='scene',position=0) as checked:
+                with stage('Validate cached identity decisions'):
+                    complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
+                if complete:
+                    checked.advance(len(selected))
+            if complete:
+                from .dependencies import snapshot,certify
+                with snapshot(db):certify(db,scope,namespace,state)
+                database.face_rebuild_mode='warm'
+                usage.begin('cached')
+                return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
+    from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
+    previous=previous_queries(db,selected,config,scope,namespace)
+    prior_strict=set(previous_strict(db,selected,config,scope,namespace))
+    hints=previous_hints(db,config,scope,namespace)
+    database._rebuild_corroboration_pending=False
+    database._rebuild_corroborated_plan={row['id'] for row in hints}
+    database._rebuild_revalidated_medoids=set()
+    with memory_replay(config) as (replay, replay_uri):
+        replay.row_factory = sqlite3.Row
+        replay = connection(replay)
+        from .replay_input_cache import InputCache
+        inputs=InputCache(database,selected,config,scope,namespace)
+        partitioned=len(selected)>1
+        from .solver_images import current as solver_images
+        images = solver_images()
+        raw_image = None
+        if images is not None and any(r[1] == 'retained' and r[2] == str(images.seed) for r in db.execute('PRAGMA database_list')):
+            raw_image = 'raw-' + digest([selected, scope, namespace, config.data['clustering']['max_anchor_pose_deviation'] is not None]) + '.sqlite'
+        if not inputs.restore(replay):
+            restored = raw_image is not None and images.restore(raw_image, replay)
+            if restored:
+                from .replay_vector_inputs import install
+                install(replay)
+            else:
+                _copy_selection(database, replay, selected, scope, namespace,
+                                retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None,bindings=False,
+                            inputs=inputs if partitioned else None)
+                if raw_image is not None:
+                    images.publish(raw_image, replay)
+            from .evidence_pixels import canonicalize
+            canonicalize(replay)
+            replay.commit()
+            # Save a complete image for cold replay or to repair a damaged image.
+            # When appending scenes, reuse their shards without rewriting the full image.
+            if inputs.reused == 0 or inputs.replace_invalid:
+                inputs.save(replay)
+        _copy_bindings(database,replay,selected,scope,namespace)
+        if previous:
+            replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
+            replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
+            replay.commit()
+        from .checkpoint_delta import DeltaCheckpoints
+        checkpoint_type=DeltaCheckpoints if config.data['execution']['rebuild_checkpoint_mode']=='incremental' else Checkpoints
+        checkpoints = checkpoint_type(database, selected, config, scope, namespace)
+        late_context = None
+        if config.data['execution']['rebuild_checkpoint_scenes']:
+            late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
+                sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
+        late = Checkpoints(database, selected, config, scope, namespace,
+                           phase='selected', context=late_context)
+        with read_only_dependencies():
+            ready_context = digest([late_context, rebuild_cache.binding_context(db,scope,namespace)]) if late_context is not None else None
+        ready = Checkpoints(database, selected, config, scope, namespace,
+                            phase='ready', context=ready_context)
+        with stage('Restore rebuild checkpoint'):
+            ready.restore(replay)
+            if ready.restored_payload is not None:
+                from .ready_checkpoint import restore
+                database.face_rebuild_mode='partial'
+                mapping, history = restore(database, replay, ready.restored_payload)
+                _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
+                return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
+            cursor, next_clock = late.restore(replay)
+            if late.restored_payload is None:
+                cursor, next_clock = checkpoints.restore(replay)
+        if cursor or late.restored_payload is not None:
+            database.face_rebuild_mode='partial'
+        if cursor < len(selected):
+            replay.execute('DROP TABLE IF EXISTS temp.local_core_order')
+        clock = ReplayClock(next_clock)
+        from . import scene_artifacts
+        local_keys=scene_artifacts.face_keys(replay,selected,config,source=db)
+        with stage('Prepare local face cohorts'):
+            if not replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='local_core_order'").fetchone():
+                scene_artifacts.prepare(replay,selected,config,local_keys)
+        # Stable replay identity removes installation-dependent UUID tie order.
+        temporary = SimpleNamespace(connection=replay,
+            installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
+            identity_clock=clock)
+        from .late_checkpoint import encode as encode_late, decode as decode_late
+        if late.restored_payload is not None:
+            early, deferred_hints = decode_late(replay, late.restored_payload)
+        else:
+            with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
+                pool=compute_current()
+                parallel=(config.data['execution']['rebuild_parallel_scenes'] and pool.workers>1
+                          and config.data['clustering']['anchor_view_matching'])
+                if parallel:
+                    from .local_scene_jobs import matches
+                    with closing(matches(temporary,selected,cursor,config,local_keys,pool,
+                            lambda item:cluster_scene(temporary,item['scan'],config,_cold_replay=True))) as results:
+                        with tracking(results,'Rebuild selected identities',total=len(selected),initial=cursor,unit='scene') as tracked:
+                            for index,item,reused in tracked:
+                                if reused:database.face_rebuild_mode='partial'
+                                pool.scenes_applied+=1;pool.publish()
+                                checkpoints.save(replay,index+1,clock.value)
+                else:
+                    with Lookahead(replay_uri, config) as lookahead:
+                        # Prime the first remaining scene as well: with explicit
+                        # prefetch enabled no selected scene may silently go serial.
+                        def prepare_local(index):
+                            if index>=len(selected):return None
+                            scan=selected[index]['scan']
+                            prepared=scene_artifacts.lookup(temporary,scan,config,local_keys.get(scan))
+                            if prepared[1] is None:lookahead.submit(scan)
+                            return prepared
+                        prepared=prepare_local(cursor)
+                        with tracking(
+                            selected[cursor:],
+                            'Rebuild selected identities',
+                            total=len(selected), initial=cursor,
+                            unit='scene',
+                            position=0,
+                        ) as tracked:
+                            for index, item in enumerate(tracked, start=cursor):
+                                with stage('Match selected scene', scene=item['scene']):
+                                    current_prepared=prepared
+                                    if current_prepared[1] is None:lookahead.take(item['scan'])
+                                    else:lookahead.release_prepared()
+                                    prepared=prepare_local(index+1)
+                                    local_progress=(lambda **values: progress(scene=item['scene'],**values)) if progress else None
+                                    reused=scene_artifacts.match(temporary,item['scan'],config,local_keys.get(item['scan']),
+                                        lambda: cluster_scene(temporary,item['scan'],config,progress=local_progress,_cold_replay=True),
+                                        prepared=current_prepared)
+                                    if reused:database.face_rebuild_mode='partial'
+                                    compute_current().scenes_applied += 1
+                                    compute_current().publish()
+                                    checkpoints.save(replay, index+1, clock.value)
+                # Freeze strict references after every selected scene has matched and
+                # merged. Contextual attachments cannot become another scene's anchors
+                # or bridge identities during the replay.
+                checkpoints.save(replay, len(selected), clock.value, final=True)
+                from .strict_partition import resolve as resolve_strict_partition
+                with stage('Consolidate strict identity cores'):
+                    resolve_strict_partition(temporary, selected, config, progress=progress)
+                from .cross_scene import apply_cross_scene_support
+                with stage('Confirm cross-scene provisional identities'):
+                    apply_cross_scene_support(temporary, selected, config, progress=progress)
+                with stage('Classify prior appearance hints'):
+                    deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
+                from .shared_references import retry_strict, early_views
+                with stage('Retry strict identity assignments'):
+                    from .recovery_convergence import converge
+                    converge(replay, lambda: retry_strict(temporary, selected, config))
+                with stage('Build early verified appearance views'):
+                    early = early_views(temporary, selected, config,excluded_views=excluded_views)
+                with stage('Resolve same-scene identity context'):
+                    apply_scene_context(temporary, selected, config, progress=progress)
+                from .anchor_views import apply_anchor_views
+                with stage('Recover anchor appearance views'):
+                    apply_anchor_views(temporary, selected, config, progress=progress)
+                from .global_views import apply_global_views
+                with stage('Consolidate global appearance views'):
+                    global_state=apply_global_views(temporary, selected, config, progress=progress)
+                from .cohort_resolution import selected as resolve_selected_cohorts
+                from dataclasses import replace
+                from .identity_merges import canonical
+                early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
+                with stage('Resolve selected identity cohorts'):
+                    resolve_selected_cohorts(temporary,config,early,global_state)
+                with stage('Retry changed strict evidence'):
+                    from .recovery_convergence import converge
+                    converge(replay, lambda: retry_strict(temporary, selected, config))
+                global_state=None  # Release frozen exemplars before the historical bank.
+            replay.commit()
+            if checkpoints.enabled:
+                late.phase_payload = encode_late(early, deferred_hints)
+                late.save(replay, len(selected), clock.value, final=True)
+        with stage('Freeze historical identity references'):
+            history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
+        with stage('Reconcile historical identities'):
+            external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
+                progress=progress,history=history,early=early,excluded_views=excluded_views)
+        from .unresolved_pool import resolve as resolve_pool
+        with stage('Resolve retained unassigned faces'):
+            resolve_pool(database,replay,selected,config,history,external_bindings,early)
+        mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
+                        selected_scenes=[item['scene'] for item in selected])
+        from .shared_references import auxiliary_bank
+        with stage('Build auxiliary reference bank'):
+            shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
+        with stage('Assign auxiliary faces'):
+            apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
+                            reference_views=shared_views,reference_confirmations=confirmations)
+        from .shared_references import finalize_early
+        finalize_early(replay,config,mapping)
+        from .pooled_views import finalize as finalize_pool
+        finalize_pool(replay,config,mapping)
+        from .selected_corroboration import resolve as restore_corroboration
+        with stage('Revalidate corroborated identity views'):
+            database._rebuild_corroboration_pending=restore_corroboration(
+                database,temporary,selected,config,history,previous,hints=hints)
+        from .pose_recovery import recover as recover_uncertain_pose, recover_appearances, recover_joint, freeze, recover_final
+        with stage('Recover supported strict appearances'):
+            recover_appearances(database,temporary,config,history)
+        with stage('Recover uncertain face pose'):
+            recover_uncertain_pose(database,temporary,config,history)
+        with stage('Recover joint appearance and pose queries'):
+            recover_joint(database,temporary,config,history)
+        unvalidated=set(deferred_hints)-database._rebuild_revalidated_medoids
+        if unvalidated and replay.execute("SELECT 1 FROM candidates c WHERE c.status='withheld' "
+                "AND json_extract(c.payload,'$.reason')='prior_appearance_pending' AND EXISTS "
+                "(SELECT 1 FROM json_each(json_extract(c.payload,'$.prior_appearance_hints')) h "
+                'WHERE h.value IN (SELECT value FROM json_each(?))) LIMIT 1',(encoded(sorted(unvalidated)),)).fetchone():
+            database._rebuild_corroboration_pending=True
+        for row in replay.execute('SELECT DISTINCT person FROM members'):
+            mapping.setdefault(row[0],row[0])
+        from .reference_registry import invalidated_sources,InvalidatedSourceViews
+        with stage('Validate final reference ownership'):
+            invalid=invalidated_sources(history,replay,config,mapping)
+        if invalid:raise InvalidatedSourceViews(invalid)
+        from .subcomponents import finalize as finalize_subcomponents
+        with stage('Finalize supported identity subcomponents'):
+            needs_repair=config.data['clustering']['anchor_view_matching'] and replay.execute(
+                "SELECT 1 FROM candidates WHERE json_extract(payload,'$.global_view_consolidation.blocker')="
+                "'incomplete_strong_component' LIMIT 1").fetchone()
+            frozen=freeze(temporary,config,history) if needs_repair else None
+            repaired=finalize_subcomponents(temporary,config,mapping,history)
+        if repaired:
+            with stage('Retry queries against final canonical identities'):
+                recover_final(database,temporary,config,history,frozen)
+            for row in replay.execute('SELECT DISTINCT person FROM members'):
+                mapping.setdefault(row[0],row[0])
+            invalid=invalidated_sources(history,replay,config,mapping)
+            if invalid:raise InvalidatedSourceViews(invalid)
+        replay.commit()
+        from .ready_checkpoint import encode as encode_ready
+        if checkpoints.enabled:
+            ready.phase_payload = encode_ready(database, mapping, history)
+            ready.save(replay, len(selected), clock.value, final=True)
+        report_pages(replay)
+        _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
+    return _results(db, selected, config) if getattr(database, 'collect_publication_results', True) else {}
+
+
+@measured('results')
+@stage('Collect identity results')
+def _results(db, selected, config):
+    result = {}
+    policy = matching_policy(config)
+    def summaries():
+        for batch in _batches(selected):
+            grouped = {item['scan']: [] for item in batch}
+            for row in db.execute('SELECT scan,person,status,COUNT(*) AS observations FROM candidates '
+                'WHERE scan IN (SELECT value FROM json_each(?)) AND policy=? '
+                'GROUP BY scan,person,status ORDER BY scan,person,status',
+                (encoded(list(grouped)), policy)):
+                grouped[row['scan']].append({name: row[name] for name in ('person', 'status', 'observations')})
+            for item in batch:
+                yield item['scan'], grouped[item['scan']]
+    with tracking(
+        summaries(),
+        'Collect rebuilt identities',
+        unit='scene',
+        position=0,
+        total=len(selected),
+    ) as tracked:
+        for scan, rows in tracked:
+            result[scan] = rows
+    return result
