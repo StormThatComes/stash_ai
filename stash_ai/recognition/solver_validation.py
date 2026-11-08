@@ -207,13 +207,17 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                     coverage_changes=sum((predicted[k]['accepted_identity'] is None)!=(decisions[k]['accepted_identity'] is None)
                                          for k in labels), metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
         if not windows:
+            faceless = {r[0] for r in source.execute(
+                "SELECT b.id FROM body_observations b LEFT JOIN observations o ON o.id=b.face "
+                "WHERE b.id IN (SELECT value FROM json_each(?)) AND (o.embedding IS NULL OR o.rejected IS NOT NULL)",
+                (encoded(sorted(labels)),))} if source.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='body_observations'").fetchone() else set()
             for scenario in ('entangled','back','faceless'):
                 candidates = []
                 for oid,(scene,cue) in locations.items():
                     hard = samples[oid]['slices']
                     belongs = (scenario in hard if scenario!='faceless' else
-                               predicted[oid].get('evidence_kind')=='person' and
-                               (predicted[oid].get('evidence') or {}).get('reason')!='measured_face_association')
+                               oid in faceless)
                     if belongs:
                         candidates.append((scene,max(0,cue-1),min(counts[scene]-1,cue+1)))
                 window = next((candidate for candidate in sorted(candidates) if candidate not in windows),None)
