@@ -1,5 +1,5 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
-VIEW_POLICY = 'independent-held-out-perspectives-v5'
+VIEW_POLICY = 'independent-held-out-perspectives-v6'
 
 
 def select(tracks, settings, scores, rank, shot_of):
@@ -96,6 +96,13 @@ def verified_extra(kept, candidates, settings, scores, shot_of):
             bank = kept[:i]+kept[i+1:]
             if retrieves_independent_witness(bank,[kept[i]],settings,scores,shot_of):
                 return bank
+    # A rare look with exactly the required support still has a held-out
+    # evaluation: freeze all other shots for each query, then refit the full
+    # bank only when every independent query is recovered.
+    if len(kept)>=max(2,settings['attach_min_support']) and all(
+            retrieves_independent_witness(kept[:i]+kept[i+1:],[item],settings,scores,shot_of)
+            for i,item in enumerate(kept)):
+        return kept
     return []
 
 

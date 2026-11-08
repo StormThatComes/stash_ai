@@ -100,3 +100,23 @@ def test_local_qualified_roster_attaches_borderline_back_without_external_galler
     result=run(.03)
     assert result['6']['person']=='A' and result['6']['roster_context']['witnesses']
     assert result['7']['person'] is None
+
+
+def test_minimal_extra_view_requires_reciprocal_out_of_shot_recovery():
+    import json
+    import math
+    import numpy as np
+    from types import SimpleNamespace
+    from stash_ai.recognition.body_identity import defaults
+    from stash_ai.recognition.rooted_witnesses import verified_extra
+    settings = defaults()
+    score = SimpleNamespace(face_similarity=np.dot)
+    def tracks(similarity):
+        return [(f'a{i}',f'b{i}',dict(id=str(i),scan='s',cue=i,seconds=i,
+                     quality=json.dumps({'quality':{'pixel_digest':str(i)}}),_vector=np.array(v)))
+                for i,v in enumerate(([1.,0.],[similarity,math.sqrt(1-similarity**2)]))]
+    good = tracks(.86)
+    assert verified_extra(good,good,settings,score,lambda r:r['cue'])==good
+    weak = tracks(.82)
+    assert not verified_extra(weak,weak,settings,score,lambda r:r['cue'])
+    assert not verified_extra(good,good,settings,score,lambda r:0)
