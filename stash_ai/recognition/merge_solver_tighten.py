@@ -27,7 +27,7 @@ BODY = tuple('sapiensid.'+section+'.'+key for section in ('identities', 'global_
              for key in ('match_threshold', 'cohesion_threshold', 'ambiguity_margin', 'min_support')) + (
              'sapiensid.identities.attach_min_support', 'sapiensid.identities.min_appearance_distance')
 TRACK = 'sapiensid.identities.track_similarity_threshold'
-MATCHING = frozenset(FACE+VIEW+AUXILIARY+CONTEXT+HYBRID+BODY+(TRACK,))
+MATCHING = frozenset(FACE+VIEW+AUXILIARY+CONTEXT+HYBRID+BODY+(TRACK,'sapiensid.identities.scene_match_bonus'))
 
 
 def body_supported(row):
@@ -49,6 +49,8 @@ def route_parameters(decisions):
                 keys.update(k for k in BODY if '.identities.' in k)
             if reason in ('face_rooted_body_view','face_rooted_crossing','external_rear_view'):
                 keys.add(TRACK)
+                if reason == 'external_rear_view':
+                    keys.add('sapiensid.identities.scene_match_bonus')
             if row.get('body_global'):
                 keys.update(k for k in BODY if '.global_matching.' in k)
         else:

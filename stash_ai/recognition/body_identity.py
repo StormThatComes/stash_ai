@@ -17,9 +17,14 @@ from .person_anchor import pixel_gate,anchor_gate
 
 def defaults():
     return dict(enabled=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
-                track_similarity_threshold=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
+                track_similarity_threshold=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
+
+
+def scene_bonus(data):
+    value = data['sapiensid']['identities'].get('scene_match_bonus')
+    return data['clustering']['same_scene_match_bonus'] if value is None else value
 
 
 def enabled(config):
@@ -403,7 +408,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 if decisions[row['id']]['reason']=='body_anchor_quality':
                     decisions[row['id']]['reason']=regional['reason']
     from .body_perspectives import recover
-    track_settings = dict(settings,scene_context_bonus=config.data['clustering']['same_scene_match_bonus'],
+    track_settings = dict(settings,scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))
     recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()))
     for row in rows:

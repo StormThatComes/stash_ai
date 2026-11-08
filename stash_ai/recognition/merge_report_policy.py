@@ -14,6 +14,9 @@ def _floor(value):
 
 
 def parameter(data, path):
+    if path == 'sapiensid.identities.scene_match_bonus':
+        from .body_identity import scene_bonus
+        return scene_bonus(data)
     if path == 'sapiensid.identities.track_similarity_threshold':
         settings = data['sapiensid']['identities']
         threshold = settings.get('track_similarity_threshold')
