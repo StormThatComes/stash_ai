@@ -34,6 +34,8 @@ class Budget:
             self.free = shutil.disk_usage(self.directory).free
             if self.free < growth:
                 raise ResourceLimit('Insufficient free space in recognition scratch directory.')
+        from .scratch_ledger import reserve
+        reserve(self.directory, total, self.limit)
         self.used=total;self.peak=max(self.peak,total)
         if size:self.leases[owner]=size
         else:self.leases.pop(owner,None)
@@ -44,11 +46,11 @@ def scope(config):
     if _active.get() is not None:
         yield _active.get();return
     settings=config.data['execution']
-    directory=settings.get('rebuild_scratch_directory') or None
-    if directory:
-        directory=Path(directory).expanduser()
-        if not directory.is_absolute():directory=(config.source_path.parent if config.source_path else Path.cwd())/directory
-        directory.mkdir(parents=True,exist_ok=True)
+    from .work_locations import work_root
+    directory = work_root(config)
+    parent = os.environ.get('RECOGNITION_WORK_ROOT')
+    if parent and Path(parent).is_relative_to(directory):
+        directory = Path(parent)
     with tempfile.TemporaryDirectory(prefix='recognition-scratch-',dir=directory) as path:
         budget=Budget(settings.get('rebuild_scratch_bytes',256*1024**3),path)
         token=_active.set(budget)
@@ -60,7 +62,11 @@ def scope(config):
         finally:
             from .profiling import count
             count('scratch_reserved_peak_bytes',budget.peak)
-            _active.reset(token)
+            from .scratch_ledger import reserve
+            try:
+                reserve(path, 0, budget.limit)
+            finally:
+                _active.reset(token)
 
 
 def _release_paths(budget,path):
@@ -189,7 +195,7 @@ class Connection(sqlite3.Connection):
 
 def connect(**kwargs):
     budget=_active.get()
-    if not budget:return sqlite3.connect('',**kwargs)
+    if not budget:return sqlite3.connect(':memory:',**kwargs)
     descriptor,path=tempfile.mkstemp(suffix='.sqlite3',dir=budget.directory);os.close(descriptor)
     db=sqlite3.connect(path,factory=Connection,**kwargs)
     db.owned_path=path

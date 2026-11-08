@@ -318,6 +318,19 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command == 'run' or args.command == 'report-merge' and args.solve:
+        from .work_locations import invocation, validate_outputs
+        if args.faces_db is not None:
+            configured = load(args.face_config, device=getattr(args, 'device', None))
+            validate_outputs(configured, (args.faces_db,))
+        if args.command == 'report-merge':
+            validate_outputs(config, (args.output, args.yaml_output, args.checkpoint))
+        with invocation(config):
+            return _execute(args, config, services)
+    return _execute(args, config, services)
+
+
+def _execute(args, config, services):
     if args.command == 'migrate-config':
         from .config_export import migrate
         return migrate(config, args.output)

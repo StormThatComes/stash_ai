@@ -15,6 +15,10 @@ _reuse = None
 
 def initialize(event, updates=None, context=None, images=None, slots=None):
     global _cancel, _updates, _context, _reuse
+    import os
+    if root := os.environ.get('RECOGNITION_WORK_ROOT'):
+        from .work_locations import set_sqlite_work
+        set_sqlite_work(root)
     if _reuse is not None:_reuse.close()
     from .solver_worker_reuse import Reuse
     from multiprocessing.util import Finalize
@@ -247,8 +251,15 @@ class Trials(AbstractContextManager):
                 raise ValueError('Invalid checkpoint schedule event.')
         exhausted = False
         while self.pending or not exhausted:
+            independent = getattr(self.factory, 'independent', False)
             if not exhausted:
-                while not exhausted and len(self.pending) < self.execution.trials:
+                # Completed later trials no longer occupy CPU. Keep their
+                # results bounded and preserve canonical batch retirement.
+                capacity = self.execution.trials
+                if independent:
+                    self.harvest()
+                    capacity += min(self.execution.trials, sum(n in self.ready for n in self.pending))
+                while not exhausted and len(self.pending) < capacity:
                     try:
                         proposal = next(source)
                         if proposal is None:
@@ -274,6 +285,12 @@ class Trials(AbstractContextManager):
                         name = available[0]
                         break
                     wait([f for _, f in self.pending.values()], timeout=.2, return_when=FIRST_COMPLETED)
+            elif independent and self.pending[name][1] is not None and not self.pending[name][1].done():
+                active = [future for _, future in self.pending.values() if future is not None and not future.done()]
+                if active:
+                    wait(active, timeout=.2, return_when=FIRST_COMPLETED)
+                    if not self.pending[name][1].done() and not self.wait_reason and not exhausted:
+                        continue
             yield self.retire(name)
 
     def __exit__(self, *error):

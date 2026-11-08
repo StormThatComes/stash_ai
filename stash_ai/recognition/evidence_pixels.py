@@ -86,7 +86,8 @@ def _aliases(db,scope=None,namespace=None,*,budget=67108864):
                 pixels = np.frombuffer(raw, dtype='uint8')
                 sample = np.frombuffer(row['embedding'], dtype='<f4')
                 if scratch is None:
-                    scratch = sqlite3.connect('')
+                    from .scratch_space import connect
+                    scratch = connect()
                     scratch.row_factory = sqlite3.Row
                     scratch.execute('CREATE TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, observation TEXT, aspect REAL)')
                     scratch.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')

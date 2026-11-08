@@ -365,6 +365,9 @@ _process_meter = None
 
 
 def _initialize_process(event, native_threads, measure=False):
+    if root := os.environ.get('RECOGNITION_WORK_ROOT'):
+        from .work_locations import set_sqlite_work
+        set_sqlite_work(root)
     # Spawned workers receive no SQLite connection, CUDA model or coordinator
     # ContextVars. Only an event, immutable scene input and plain config cross.
     global _process_cancellation, _process_native, _process_meter

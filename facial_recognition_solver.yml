@@ -519,9 +519,9 @@ execution:
     # Combined capacity of private replay databases, reference pages, body witnesses and search files; includes
     # journal headroom. Excludes persistent caches, checkpoints and SQLite internal sort files. Range:
     # 1048576..1099511627776.
-    scratch_directory: null
-    # Scratch parent directory, relative to this YAML; null uses the system temporary directory. Run-owned files
-    # are removed on exit.
+    scratch_directory: recognition_work
+    # Scratch parent directory, relative to this YAML; null uses recognition_work next to the database.
+    # Run-owned files are removed on exit.
     parallel_scenes: true
     # Match independent local face scenes concurrently using the CPU worker/queue budget, then apply in scene
     # order; requires anchor_view_matching. Values: true, false.
@@ -592,6 +592,8 @@ execution:
 
 storage:
   # Recognition database, retained images and retention policy.
+  output_directory: null
+  # Additional directory for solver reports and checkpoints, relative to this YAML.
   database: faces_state.sqlite3
   # Recognition SQLite database path, relative to this YAML.
   max_crop_bytes: 1048576

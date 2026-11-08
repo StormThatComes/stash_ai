@@ -4,6 +4,7 @@ tests/test_owned_shutdown.py
 tests/test_recognition_backend.py
 tests/test_recognition_compute.py
 tests/test_recognition_config.py
+tests/test_recognition_configured_storage.py
 tests/test_recognition_detection_quality.py
 tests/test_recognition_diagnostic_safety.py
 tests/test_recognition_evidence_safety.py

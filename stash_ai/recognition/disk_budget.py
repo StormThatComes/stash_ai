@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+import os
 import shutil
 import time
 import threading
@@ -21,6 +22,7 @@ class Budget:
         self.checked=0.0
         self.lock=threading.RLock()
         self.reservations={}
+        self.ledger=None
 
     def check(self, growth=0, path=None, *, throttled=False):
         with self.lock:
@@ -32,12 +34,18 @@ class Budget:
         parent=self.database.parent
         roots=[p for p in parent.glob(self.database.name+'*') if not p.is_symlink()]
         roots.extend(self.roots)
+        if work := os.environ.get('RECOGNITION_WORK_ROOT'):
+            roots.append(Path(work))
         volumes={};seen=set()
         for root in roots:
             files=root.rglob('*') if root.is_dir() else (root,)
             for item in files:
                 if item.is_symlink() or not item.is_file():continue
-                stat=item.stat();key=(stat.st_dev,stat.st_ino)
+                try:
+                    stat=item.stat()
+                except FileNotFoundError:
+                    continue  # Another trial released its owned file.
+                key=(stat.st_dev,stat.st_ino)
                 if key in seen:continue
                 seen.add(key)
                 row=volumes.setdefault(stat.st_dev,dict(path=str(item.parent),used=0))
@@ -46,8 +54,19 @@ class Budget:
         while not target.exists():target=target.parent
         device=target.stat().st_dev
         volumes.setdefault(device,dict(path=str(target),used=0))
+        from contextlib import nullcontext
+        from .scratch_ledger import file_leases
+        reservations = dict(self.reservations)
+        with nullcontext(self.ledger) if self.ledger is not None else file_leases() as ledger:
+            if ledger is not None:
+                reservations.update((Path(path),(device,cap)) for path,device,cap in ledger.execute('SELECT * FROM files'))
         for dev,row in volumes.items():
-            held=sum(max(0,cap-p.stat().st_size) for p,(vol,cap) in self.reservations.items() if vol==dev)
+            held = 0
+            for path,(volume,cap) in reservations.items():
+                if volume == dev:
+                    try: size = path.stat().st_size
+                    except FileNotFoundError: size = 0
+                    held += max(0,cap-size)
             requested=row['used']+held+(growth if dev==device else 0)
             free=shutil.disk_usage(row['path']).free
             row.update(free=free, requested=requested, reserved=held)
@@ -94,15 +113,25 @@ def reserve_file(path, maximum):
         yield maximum
         return
     path=Path(path)
-    with budget.lock:
-        dev=path.stat().st_dev
-        volume=budget.check(path=path)[dev]
-        held=volume['requested']-volume['used']
-        existing=path.stat().st_size
-        cap=min(maximum,existing+volume['free']-budget.headroom-held)
-        if budget.limit:cap=min(cap,existing+budget.limit-volume['requested'])
-        cap=max(0,cap)
-        budget.reservations[path]=(dev,cap)
+    from .scratch_ledger import file_leases
+    with budget.lock, file_leases(write=True) as ledger:
+        budget.ledger = ledger
+        try:
+            dev=path.stat().st_dev
+            volume=budget.check(path=path)[dev]
+            held=volume['requested']-volume['used']
+            existing=path.stat().st_size
+            cap=min(maximum,existing+volume['free']-budget.headroom-held)
+            if budget.limit:cap=min(cap,existing+budget.limit-volume['requested'])
+            cap=max(0,cap)
+            if ledger is not None:
+                ledger.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)',(str(path),dev,cap))
+            budget.reservations[path]=(dev,cap)
+        finally:
+            budget.ledger = None
     try:yield cap
     finally:
-        with budget.lock:budget.reservations.pop(path,None)
+        with budget.lock, file_leases(write=True) as ledger:
+            budget.reservations.pop(path,None)
+            if ledger is not None:
+                ledger.execute('DELETE FROM files WHERE path=?',(str(path),))

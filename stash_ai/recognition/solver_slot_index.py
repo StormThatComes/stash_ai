@@ -47,13 +47,18 @@ class Slots(Mapping):
             raise KeyError(key)
         return row[0]
 
-    def prediction_delta(self, target, settings):
+    def attach(self, target):
         from pathlib import Path
-        from .body_identity import available, enabled
         path = self.db.execute('PRAGMA database_list').fetchone()[2]
         target.execute('ATTACH DATABASE ? AS solver_slots', (Path(path).as_uri() + '?mode=ro&immutable=1',))
+        target.execute('PRAGMA solver_slots.mmap_size=1073741824')
+
+    def prediction_delta(self, target, settings):
+        from .body_identity import available, enabled
+        attached = any(row[1] == 'solver_slots' for row in target.execute('PRAGMA database_list'))
+        if not attached:
+            self.attach(target)
         try:
-            target.execute('PRAGMA solver_slots.mmap_size=1073741824')
             owner = 'f.person'
             joins = 'LEFT JOIN members f ON f.observation=s.id'
             if enabled(settings) and available(target):
@@ -63,7 +68,8 @@ class Slots(Mapping):
                                   f'WHERE s.baseline IS NOT ({owner})')
             return dict(rows)
         finally:
-            target.execute('DETACH DATABASE solver_slots')
+            if not attached:
+                target.execute('DETACH DATABASE solver_slots')
 
 
 def open_maps(path):
