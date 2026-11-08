@@ -8,7 +8,36 @@ def addresses(goals):
     return ids | {oid for source in ids for oid in goals.get('physical_alternatives', {}).get(source, ())}
 
 
-def freeze(db, config, goals):
+def explicit_pairs(db,config,scope,items):
+    from .body_observations import contract
+    from .scan_heads import predicate
+    from .models import namespace
+    from .body_identity import enabled, available
+    if not enabled(config) or not available(db):
+        raise ValueError('Explicit physical pairs require retained body observations.')
+    pairs = {}
+    claimed = set()
+    for item in items:
+        fields = item.split(':')
+        if len(fields)!=2 or not all(fields):
+            raise ValueError('Physical pairs must be FACE_ID:BODY_ID.')
+        face,body = fields
+        if pairs.get(face)==body:
+            continue
+        if face in pairs or body in claimed:
+            raise ValueError('Physical labels must map faces and bodies one to one.')
+        row = db.execute('SELECT 1 FROM observations o JOIN body_observations b ON b.scan=o.scan AND b.cue=o.cue '
+            'JOIN scans s ON s.id=o.scan WHERE o.id=? AND b.id=? AND b.contract=? AND b.rejected IS NULL '
+            "AND b.embedding IS NOT NULL AND s.scope=? AND s.namespace=? AND s.status='complete' AND "+predicate(),
+            (face,body,contract(config),scope,namespace(config))).fetchone()
+        if not row:
+            raise ValueError('Physical labels must address compatible observations in the same current cue.')
+        pairs[face] = body
+        claimed.add(body)
+    return pairs
+
+
+def freeze(db, config, goals, pairs=None):
     from .body_identity import enabled, available
     from .body_observations import contract
     if not enabled(config) or not available(db):
@@ -23,6 +52,15 @@ def freeze(db, config, goals):
         'AND b.embedding IS NOT NULL AND b.contract=? '
         'AND b.face IN (SELECT value FROM json_each(?)) ORDER BY b.id', (contract(config), encoded(ids))):
         alternatives[row['face']].append(row['id'])
+    if pairs:
+        if set(pairs)-set(ids):
+            raise ValueError('Every explicit face must belong to a selected, non-excluded goal.')
+        explicit_bodies = set(pairs.values())
+        for face in list(alternatives):
+            alternatives[face] = [oid for oid in alternatives[face] if oid not in explicit_bodies]
+        for face,body in pairs.items():
+            alternatives[face] = [body]
+        goals['explicit_physical_pairs'] = dict(sorted(pairs.items()))
     goals['physical_alternatives'] = dict(alternatives)
     for group in goals['groups']:
         evidence = group['identity_evidence']

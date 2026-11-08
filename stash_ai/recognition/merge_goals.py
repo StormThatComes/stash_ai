@@ -5,7 +5,7 @@ from .merge_goal_index import evaluation_scope
 
 
 def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity', scene_exclusions=(),
-            observation_exclusions=()):
+            observation_exclusions=(), physical_pairs=()):
     from .merge_goal_identity import POLICY, freeze
     from .merge_goal_sets import freeze_set
     from .reference_roles import strict_sql
@@ -43,6 +43,11 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     exclusions = resolve_exclusions(db, config, scene_exclusions, scope, owners)
     from .merge_observation_exclusions import resolve as resolve_observations
     samples = resolve_observations(db, config, observation_exclusions, scope, owners)
+    from .physical_goal import explicit_pairs
+    pairs = explicit_pairs(db,config,scope,physical_pairs) if physical_pairs else {}
+    if pairs and not physical:
+        raise ValueError('Explicit physical pairs require the identity-physical goal policy.')
+    labelled_bodies = set(pairs.values())
     for group in groups:
         forbidden = {e['scene'] for e in exclusions if e['set'] == group['index']}
         forbidden_ids = {oid for e in samples if e['set'] == group['index'] for oid in e['observation_ids']}
@@ -60,7 +65,9 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             freeze_samples(db, config, rows, diagnostics)
             for row in rows:row['evidence_kind']='face'
             from .body_reports import goal_rows
-            rows.extend(goal_rows(db,config,identity))
+            rows.extend(r for r in goal_rows(db,config,identity) if r['id'] not in labelled_bodies)
+            if any(pairs.get(r['id']) in forbidden_ids for r in rows):
+                raise ValueError('A labelled physical alternative is excluded from its target set.')
             removed = [r for r in rows if r['scene'] in forbidden or r['id'] in forbidden_ids]
             if removed:
                 item['excluded_observations'] = [dict(id=r['id'], scene=r['scene']) for r in removed]
@@ -88,7 +95,7 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     if physical:
         result['goal_policy']['continuity'] = 'face_or_body'
         from .physical_goal import freeze as freeze_physical
-        freeze_physical(db, config, result)
+        freeze_physical(db, config, result, pairs)
     if exclusions:
         result['scene_exclusions'] = exclusions
     if samples:
@@ -145,7 +152,8 @@ def execute(args, config):
                 result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
                                  policy=getattr(args, 'goal_policy', 'identity'),
                                  scene_exclusions=getattr(args, 'exclude_performer_scene', None) or (),
-                                 observation_exclusions=getattr(args, 'exclude_performer_observation', None) or ())
+                                 observation_exclusions=getattr(args, 'exclude_performer_observation', None) or (),
+                                 physical_pairs=getattr(args,'physical_pair',()))
             with report_phase('Fingerprint retained inputs'):
                 result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
@@ -182,7 +190,8 @@ def execute(args, config):
                         console.update(validation=label)
                         console.message(label, decorative=True)
                     validation = validate_winner(config, db, result, validation_path, manifest=validation_manifest,
-                                                 progress=validation_step if console else None)
+                                                 progress=validation_step if console else None,
+                                                 compare_strategies=getattr(args,'compare_scene_strategies',False))
                     result['holdout_validation'] = validation
                     if console:
                         from .solver_explanation import holdout_summary
