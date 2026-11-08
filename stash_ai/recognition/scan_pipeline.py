@@ -125,6 +125,26 @@ class CpuStage:
                 try:future.result()
                 except BaseException:pass
 
+    def ordered_frames(self, function, jobs, *, extra=0):
+        """Bound independent pixel jobs across cue boundaries, preserving input order."""
+        pending = deque()
+        try:
+            for image, value in jobs:
+                while pending and (len(pending) >= 2*self.workers or not self.can_submit(image, extra=extra)):
+                    yield pending.popleft().result()
+                if self.can_submit(image, extra=extra):
+                    pending.append(self.submit(function, image, value, extra=extra))
+                else:
+                    yield function(image, value)
+            while pending:
+                yield pending.popleft().result()
+        finally:
+            for future in pending:
+                try:
+                    future.result()
+                except BaseException:
+                    pass
+
     def close(self):
         self.cancel.cancel()
         if self.executor is not None:
@@ -388,11 +408,17 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
     # Dense frames retain the existing bounded per-cue quality path.
     if len(batch)>1 and sum(map(len,faces_by_frame))*4096<=config.data['execution']['scan_queue_bytes']//4:
         from stash_ai.runtime.cleanup import closing
-        for position,(index,cue,image) in enumerate(batch):
-            def prepare_face(pixels,pair):
-                return prepare_record(pixels,pair,config,cue,callbacks['assess'],callbacks['rejection'],callbacks['geometry_contract'])
-            with closing(stage.ordered(prepare_face,image,enumerate(faces_by_frame[position])),name='close cross-cue quality') as entries:
-                prepared[position]=list(entries)
+        prepared = [[] for _ in batch]
+        def prepare_face(pixels, task):
+            position, cue, pair = task
+            return position, prepare_record(pixels, pair, config, cue, callbacks['assess'],
+                                             callbacks['rejection'], callbacks['geometry_contract'])
+        jobs = ((image, (position, cue, pair))
+                for position, (_, cue, image) in enumerate(batch)
+                for pair in enumerate(faces_by_frame[position]))
+        with closing(stage.ordered_frames(prepare_face, jobs), name='close cross-cue quality') as entries:
+            for position, entry in entries:
+                prepared[position].append(entry)
         visibility=cue_visibility(batch,prepared,visibility,config,stage)
     for position,(index, cue, image) in enumerate(batch):
         faces=faces_by_frame[position]

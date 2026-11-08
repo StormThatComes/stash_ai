@@ -52,16 +52,18 @@ def public_person(person):
     return dict(person, pose_refinement=details)
 
 
-def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces):
-    expected=contract(config)
-    people=model.frame_people
-    matches=model.face_matches
+def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expected=None, captured=None):
+    expected=expected or contract(config)
+    if captured is None:
+        people, matches = model.frame_people, model.face_matches
+    else:
+        people, matches, measurements = captured
     from .sapiensid_backend import association_choices
     choices=association_choices(faces,people)
     settings=config.data['sapiensid']['collection']
-    if len(people)>1 and config.data['execution']['scan_cpu_workers']>1:
+    if captured is None and len(people)>1 and config.data['execution']['scan_cpu_workers']>1:
         measurements=list(pipeline.stage.ordered(lambda pixels,person:quality(pixels,person,people,settings),image,people,extra=16384))
-    else:measurements=[quality(image,person,people,settings) for person in people]
+    elif captured is None:measurements=[quality(image,person,people,settings) for person in people]
     if people and image is not None:
         from .body_perspectives import frame_signature, orientation
         captured = getattr(image, '_recognition_cue_signature', None)

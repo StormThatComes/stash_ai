@@ -11,6 +11,9 @@ from stash_ai.runtime.cleanup import closing, cleanup
 class PersonCollector:
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory
+        from .body_observations import contract as body_contract
+        self.person_contract = contract(config) if config.data['sapiensid']['enabled'] else None
+        self.body_contract = body_contract(config) if self.person_contract else None
         self.model = None
         self.pipeline = None
         self.deferred = None
@@ -37,7 +40,7 @@ class PersonCollector:
         """Find sparse durable gaps for both face projections and independent body cues."""
         if not self.config.data['sapiensid']['enabled']:
             return set()
-        expected=contract(self.config)
+        expected=self.person_contract
         # Include every face in association, even if its identity evidence was
         # rejected. Otherwise a second face could disappear from ambiguity checks.
         missing={r[0] for r in db.execute('SELECT DISTINCT o.cue FROM observations o '
@@ -45,7 +48,7 @@ class PersonCollector:
             'WHERE o.scan=? AND o.rejected IS NULL AND p.observation IS NULL',(expected,scan))}
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
-            complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,body_contract(self.config)))}
+            complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,self.body_contract))}
             missing.update(set(range(total))-complete)
         return missing
 
@@ -119,7 +122,7 @@ class PersonCollector:
                                    "WHERE scan=? AND cue>=? AND cue<? AND json_extract(quality,'$.view_shot') IS NOT ?",args)
                         db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.view_shot',?) "
                                    "WHERE scan=? AND cue>=? AND cue<? AND json_extract(quality,'$.quality.view_shot') IS NOT ? "
-                                   "AND contract=?",(*args,body_contract(self.config)))
+                                   "AND contract=?",(*args,self.body_contract))
                     db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',('cue-view-shots:'+scan,encoded(shots)))
         finally:
             # Only sealed, completely inferred cues enter this buffer. Preserve
@@ -191,10 +194,36 @@ class PersonCollector:
             frames = [(image, [checked_detection(json.loads(r['geometry'])) for r in rows])
                       for _, _, _, image, rows, _, _, _ in self.pose_frames]
             self.model.detect_many(frames)
+            from .body_observations import enabled
+            if enabled(self.config) and all(frame[6] for frame in self.pose_frames):
+                self._collect_body_batch()
+                return
             for db, scan, index, image, rows, seconds, fresh, _ in self.pose_frames:
                 self._collect_frame(db, scan, index, image, rows=rows,fresh=fresh, seconds=seconds)
         finally:
             self._close_pose_frames()
+
+    def _collect_body_batch(self):
+        from .body_collection import collect, quality
+        settings = self.config.data['sapiensid']['collection']
+        frames = []
+        for db, scan, cue, image, rows, seconds, fresh, _ in self.pose_frames:
+            faces, people, matches = self._collect_frame(db, scan, cue, image, rows=rows,
+                fresh=fresh, seconds=seconds, capture=True)
+            frames.append((db, scan, cue, image, rows, seconds, faces, people, matches))
+        jobs = ((frame[3], (index, person, frame[7])) for index, frame in enumerate(frames)
+                for person in frame[7])
+        def measure(image, task):
+            index, person, people = task
+            return index, quality(image, person, people, settings)
+        measured = [[] for _ in frames]
+        with closing(self.pipeline.stage.ordered_frames(measure, jobs, extra=16384), name='close body quality') as stream:
+            for index, value in stream:
+                measured[index].append(value)
+        for frame, values in zip(frames, measured):
+            db, scan, cue, image, rows, seconds, faces, people, matches = frame
+            collect(self.pipeline, db, self.model, self.config, scan, cue, seconds, image, rows, faces,
+                    expected=self.body_contract, captured=(people, matches, values))
 
     def pending_bytes(self):
         # Completed inference waits for the same atomic face/body checkpoint.
@@ -234,27 +263,29 @@ class PersonCollector:
         from .body_observations import save_records
         save_records(db,self.config,rows)
 
-    def _collect_frame(self,db,scan,index,image,*,rows=None,fresh=False,seconds=0.):
+    def _collect_frame(self,db,scan,index,image,*,rows=None,fresh=False,seconds=0.,capture=False):
         if not self.config.data['sapiensid']['enabled']:return
         from .body_observations import enabled,contract as body_contract,repair_projections
         if enabled(self.config) and not fresh and db.execute(
                 'SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
-                (scan,body_contract(self.config),index)).fetchone():
+                (scan,self.body_contract,index)).fetchone():
             with db:repair_projections(db,self.config,scan,cue=index)
             return
-        self._load();expected=contract(self.config)
+        self._load();expected=self.person_contract
         if rows is None:rows=list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
         from .body_observations import enabled,contract as body_contract
         if enabled(self.config):
             from .crowd_context import attach_context
-            attach_context(self.model,image,scan,index,seconds,db=db,contract=body_contract(self.config))
+            attach_context(self.model,image,scan,index,seconds,db=db,contract=self.body_contract)
             self.model.detect(image,faces=faces)
             from .body_collection import collect
             if self.pipeline is None:
                 from .person_pipeline import PreparedCollector
                 self.pipeline=PreparedCollector(self.config,self.model,writer=self._write)
-            collect(self.pipeline,db,self.model,self.config,scan,index,seconds,image,rows,faces)
+            if capture:
+                return faces, tuple(self.model.frame_people), tuple(self.model.face_matches)
+            collect(self.pipeline,db,self.model,self.config,scan,index,seconds,image,rows,faces, expected=self.body_contract)
             return
         self.model.detect(image,faces=faces)
         if callable(getattr(self.model,'person_input',None)) and callable(getattr(self.model,'embed_inputs',None)):

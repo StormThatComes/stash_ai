@@ -155,18 +155,22 @@ class RFDETRDetector:
                                  f'query={query}, component={component} (zero-based).')
         # Select the person channel before any top-k limit: other classes and
         # the same query's alternative labels cannot consume the people budget.
-        scores = logits[..., registry.PERSON_LABEL].cpu().sigmoid()
-        boxes = boxes.cpu()
-        valid_geometry = (boxes[..., 2:] > 0).all(dim=-1)
+        # Compact on the inference device. Keep final sorting and NMS on CPU
+        # to preserve stable query order for equal scores.
+        scores = logits[..., registry.PERSON_LABEL].sigmoid()
         corners = torch.cat((boxes[..., :2] - boxes[..., 2:] / 2,
                              boxes[..., :2] + boxes[..., 2:] / 2), dim=-1)
+        scale = boxes.new_tensor([[w,h,w,h] for w,h in sizes])[:, None, :]
+        corners = torch.minimum((corners * scale).clamp_min(0), scale)
+        valid = ((boxes[..., 2:] > 0).all(dim=-1) & (scores > threshold) &
+                 (corners[..., 2:] > corners[..., :2]).all(dim=-1))
+        frames, queries = valid.nonzero(as_tuple=True)
+        packed = torch.cat((corners[frames, queries], scores[frames, queries, None]), dim=1).cpu()
+        frames = frames.cpu()
         results = []
-        for raw, confidence, valid, (width, height) in zip(corners, scores, valid_geometry, sizes):
-            box = raw * torch.tensor([width, height, width, height])
-            box[:, 0::2].clamp_(0, width)
-            box[:, 1::2].clamp_(0, height)
-            keep = valid & (confidence > threshold) & (box[:, 2:] > box[:, :2]).all(dim=1)
-            box, confidence = box[keep], confidence[keep]
+        for index in range(len(sizes)):
+            selected_rows = packed[frames == index]
+            box, confidence = selected_rows[:, :4], selected_rows[:, 4]
             order = torch.argsort(confidence, descending=True, stable=True)
             box, confidence = box[order], confidence[order]
             selected = nms(box, confidence, iou)[:maximum] if suppress else slice(None, maximum)

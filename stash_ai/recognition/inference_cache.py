@@ -116,14 +116,25 @@ class Store:
             self.db.executemany('DELETE FROM entries WHERE key=?',((key,) for key,_,_ in rows))
             self.used-=sum(size for _,size,_ in rows)
             for _,size,stage in rows:self.by_stage[stage]-=size
-    def get(self,key):
-        with self.lock:
-            row=self.db.execute('SELECT payload,checksum FROM entries WHERE key=?',(key,)).fetchone()
-            if row is None:return None
-            blob,checksum=row
-            if hashlib.sha256(blob).hexdigest()!=checksum:return None
-            try:return unpack(blob)
-            except (ValueError,TypeError,KeyError,OverflowError):return None
+    def get(self, key):
+        return self.get_many([key]).get(key)
+
+    def get_many(self, keys):
+        result = {}
+        for start in range(0, len(keys), 32):
+            group = keys[start:start+32]
+            with self.lock:
+                rows = list(self.db.execute('SELECT key,payload,checksum FROM entries WHERE key IN '
+                                            '(SELECT value FROM json_each(?))', (json.dumps(group),)))
+            for key, blob, checksum in rows:
+                if hashlib.sha256(blob).hexdigest() != checksum:
+                    continue
+                try:
+                    result[key] = unpack(blob)
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    continue
+        return result
+
     def put(self,key,value,stage='legacy'):
         blob=pack(value);size=len(blob)+512
         if size>min(4*1024**2,self.limit//4):return
@@ -182,12 +193,17 @@ def many(stage,contract,values,calculate,*,key=fingerprint):
     if store is None:return calculate(values)
     from .profiling import count
     prefix=fingerprint(['inference-cache-v1',runtime_versions(),stage,contract]);results={};missing=OrderedDict();keys=[]
+    unique = {}
     for value in values:
-        identity=prefix+':'+key(value);keys.append(identity)
-        if identity in results or identity in missing:continue
-        cached=store.get(identity)
-        if cached is None:missing[identity]=value
-        else:results[identity]=cached;count('inference_'+stage+'_hits')
+        identity = prefix + ':' + key(value)
+        keys.append(identity)
+        unique.setdefault(identity, value)
+    results = store.get_many(list(unique))
+    for identity, value in unique.items():
+        if identity not in results:
+            missing[identity] = value
+        else:
+            count('inference_'+stage+'_hits')
     if missing:
         computed=calculate(list(missing.values()))
         if len(computed)!=len(missing):raise ValueError('Cached inference returned an incompatible batch.')
