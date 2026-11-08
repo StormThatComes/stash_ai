@@ -3,8 +3,6 @@ VIEW_POLICY = 'independent-held-out-perspectives-v2'
 
 
 def select(tracks, settings, scores, rank, shot_of):
-    from .independent_evidence import body_vote, stamp, unit
-    from .body_identity import quality
     ordered = sorted(tracks, key=rank, reverse=True)
     if not ordered:
         return []
@@ -15,22 +13,27 @@ def select(tracks, settings, scores, rank, shot_of):
     seeds = list(starts.values())
     if len(seeds) > 8:
         seeds = [seeds[round(i*(len(seeds)-1)/7)] for i in range(8)]
+    return select_ordered(ordered, seeds, settings, scores, rank, shot_of)
+
+
+def select_ordered(ordered, seeds, settings, scores, rank, shot_of):
+    from itertools import chain
+    from .independent_evidence import body_vote, stamp, unit
+    from .body_identity import quality
     maximum = max(8, settings['attach_min_support'])
-    fingerprints = {}
-    for _,_,row in ordered:
-        vote = body_vote(row)
-        hashed = quality(row).get('appearance_hash')
-        fingerprints[row['id']] = unit(vote),stamp(vote),int(hashed,16) if hashed else None
     best, best_rank = [], ()
     for seed in seeds:
         selected, roots, shots = [], set(), set()
         pixels, cues, hashes = set(), set(), []
-        for item in (seed, *ordered):
+        for item in chain((seed,), ordered):
             start, end, row = item
             shot = shot_of(row)
             if shot in shots or start in roots or end in roots:
                 continue
-            pixel, cue, hashed = fingerprints[row['id']]
+            vote = body_vote(row)
+            pixel, cue = unit(vote), stamp(vote)
+            raw_hash = quality(row).get('appearance_hash')
+            hashed = int(raw_hash,16) if raw_hash else None
             if pixel in pixels or cue in cues or (hashed is not None and any(
                     (hashed ^ peer).bit_count() < settings['min_appearance_distance'] for peer in hashes)):
                 continue

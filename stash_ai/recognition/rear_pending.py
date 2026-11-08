@@ -69,6 +69,7 @@ class Pending:
                 self.owners[owner] = None
             else:
                 value = hashlib.sha256(self.search.mean_versions[owner].encode())
+                value.update(bytes([owner in getattr(self.search, 'unavailable', ())]))
                 # Include face vetoes, co-presence, aliases and the exact modes.
                 if self.audited:
                     value.update(str(version(self.db,'owner',owner)).encode())

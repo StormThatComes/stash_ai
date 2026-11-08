@@ -65,6 +65,26 @@ def load(db, config, scope, namespace, *, pages=None):
     def banks():
         cursor = db.execute(sql,(scope,namespace,contract(config),policy(config)))
         for (owner,kind), records in groupby(cursor,lambda raw:(raw['owner'],raw['perspective'])):
+            if pages is not None:
+                from .paged_tracks import Tracks
+                tracks = Tracks(pages, Witness)
+                pages.execute('DELETE FROM witnesses')
+                multiple_scans = False
+                for scan,group in groupby(records,lambda raw:raw['scan']):
+                    for raw in group:
+                        row = Witness(raw)
+                        row['roots'] = json.loads(row['roots'])
+                        tracks.add(row, local_shot(row))
+                    for kept in tracks.modes(scan,settings,scores,rank,local_shot):
+                        if len(kept)>=max(2,settings['attach_min_support']):
+                            yield owner,scan,[r for _,_,r in kept]
+                    if not multiple_scans:
+                        multiple_scans = pages.execute('SELECT 1 FROM witnesses WHERE scan<>? LIMIT 1',(scan,)).fetchone() is not None
+                if multiple_scans:
+                    for kept in tracks.modes(None,settings,scores,rank,lambda row:row['scan']):
+                        if len(kept)>=max(2,settings['attach_min_support']):
+                            yield owner,kept[0][2]['scan'],[r for _,_,r in kept]
+                continue
             tracks = []
             cost = 0
             for _,group in groupby(records,lambda row:row['scan']):
