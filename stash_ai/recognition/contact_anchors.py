@@ -48,7 +48,27 @@ def questionable_links(rows,settings,scores):
     return questionable
 
 
-def joint_body_claims(rows, decisions, rankings, settings):
+def body_pair_queries(rows,decisions):
+    """Only unresolved/competing auxiliary assignments may change owners."""
+    from .crowd_context import pair
+    mutable = {'body_core_attachment','body_anchor_quality','body_anchor_pixels','body_anchor_keypoint_rules',
+               'ambiguous_or_insufficient_face_body_bank','frozen_face_body_bank','body_group_ambiguous'}
+    cues = defaultdict(list)
+    for row in rows:
+        cues[row['cue']].append(row)
+    eligible = []
+    for members in cues.values():
+        if len(members)!=2 or any(r.get('_face_vector') is not None or r.get('face_person') for r in members):
+            continue
+        old = [decisions[r['id']] for r in members]
+        if any(d.get('reason') not in mutable for d in old) or all(d['person'] for d in old) and old[0]['person']!=old[1]['person']:
+            continue
+        if pair([json.loads(r['geometry']) for r in members]) is not None:
+            eligible.extend(members)
+    return eligible
+
+
+def joint_body_claims(rows, decisions, rankings, settings, *, reflection_threshold=1.):
     """Resolve a physical pair against frozen face-seeded body banks."""
     from .crowd_context import pair
     from .joint_claims import solve
@@ -58,9 +78,13 @@ def joint_body_claims(rows, decisions, rankings, settings):
     for members in cues.values():
         if len(members)!=2 or any(r['id'] not in rankings for r in members):
             continue
-        if any(json.loads(r['quality']).get('quality',{}).get('query_only') for r in members):
+        qualities = [json.loads(r['quality']).get('quality',{}) for r in members]
+        if any(q.get('query_only') or max(q.get('expected_people',0),q.get('detected_people',0))>2 for q in qualities):
             continue
         if pair([json.loads(r['geometry']) for r in members]) is None:
+            continue
+        faces = [r.get('_face_vector') for r in members]
+        if all(v is not None for v in faces) and len(faces[0])==len(faces[1]) and float(faces[0] @ faces[1])>=reflection_threshold:
             continue
         previous = [decisions[r['id']] for r in members]
         if all(d['person'] for d in previous) and previous[0]['person']!=previous[1]['person']:
