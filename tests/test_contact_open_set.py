@@ -19,3 +19,10 @@ def test_absent_query_uses_a_threshold_learned_on_another_scene():
     assert result['known']==2 and result['recovered']==2
     assert result['absent']==2 and result['false_accepts']==1
     assert open_set(items[:1])['uncalibrated_queries']==1
+
+
+def test_unenrolled_performer_is_scored_as_absent_only():
+    items=[dict(scene='1',truth='A',owner='A',distance=.1,absent=.7,enrolled=True),
+           dict(scene='2',truth='C',owner='A',distance=.6,absent=.6,enrolled=False)]
+    result=open_set(items)
+    assert result['known']==1 and result['absent']==2 and result['natural_absent']==1

@@ -107,15 +107,18 @@ def open_set(scores,target_far=.01):
         cutoff = np.nextafter(finite[allowance],-np.inf) if allowance<len(finite) else finite[-1]
         folds[scene] = dict(threshold=float(cutoff),calibration_count=len(calibration),queries=len(evaluation))
         for r in evaluation:
-            totals['known'] += 1
             totals['absent'] += 1
+            totals['false_accepts'] += int(r['absent'] is not None and r['absent']<=cutoff)
+            if not r.get('enrolled',True):
+                totals['natural_absent'] += 1
+                continue
+            totals['known'] += 1
             if r['distance'] is None or r['distance']>cutoff:
                 totals['known_withheld'] += 1
             elif r['owner']==r['truth']:
                 totals['recovered'] += 1
             else:
                 totals['known_wrong'] += 1
-            totals['false_accepts'] += int(r['absent'] is not None and r['absent']<=cutoff)
     return dict(target_false_accept_rate=target_far,folds=folds,**totals,
                 measured_false_accept_rate=totals['false_accepts']/totals['absent'] if totals['absent'] else None)
 
@@ -128,7 +131,8 @@ def compare(rows, counts, extractor):
         if query['reference']:
             continue
         eligible = [r for r in refs if r['cue']!=query['cue'] and r['pixels']!=query['pixels']]
-        if query['truth'] not in {r['truth'] for r in eligible} or len({r['truth'] for r in eligible})<2:
+        enrolled = query['truth'] in {r['truth'] for r in eligible}
+        if len({r['truth'] for r in eligible})<2:
             counts['without_competing_references'] += 1
             continue
         sapiens = [1.-float(np.dot(query['body'],r['body'])) for r in eligible]
@@ -138,7 +142,9 @@ def compare(rows, counts, extractor):
             owner,distance = top(ranked)
             _,absent = top([r for r in ranked if r[1]!=query['truth']])
             scores[model].append(dict(scene=query['cue'][0],truth=query['truth'],owner=owner,
-                                      distance=distance,absent=absent))
+                                      distance=distance,absent=absent,enrolled=enrolled))
+            if not enrolled:
+                continue
             result = ('abstained' if owner is None else 'own' if owner==query['truth']
                       else 'partner' if owner in query['others'] else 'foreign')
             totals[model][result] += 1
