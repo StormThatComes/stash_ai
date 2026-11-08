@@ -1,18 +1,22 @@
 """Scratch-backed exact radius search over independently certified view banks."""
 from collections.abc import Sequence
+import base64
 import hashlib
 import json
 
 import numpy as np
 
+from .config import digest
+from .dependencies import version
+from .profiling import count
 from .database import encoded
 from .rear_gallery import Gallery
 from .resource_errors import ResourceLimit
 
 
 class Banks(Sequence):
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, db, feature=None):
+        self.db, self.feature = db, feature
         self.owners = []
 
     def __len__(self):
@@ -23,12 +27,14 @@ class Banks(Sequence):
         rows = []
         for metadata, blob in self.db.execute(
                 'SELECT metadata,embedding FROM gallery WHERE bank=? ORDER BY ordinal',(index,)):
-            rows.append(dict(json.loads(metadata), _vector=np.frombuffer(blob,dtype='<f4')))
+            row = json.loads(metadata)
+            row['_vector'] = self.feature(row['id']) if blob is None else np.frombuffer(blob,dtype='<f4')
+            rows.append(row)
         return owner, source, rows
 
 
 class DiskGallery(Gallery):
-    def __init__(self, db, banks, limit):
+    def __init__(self, db, banks, limit, *, feature=None, cache=None, source=None):
         self.db = db
         db.execute('PRAGMA cache_size=-'+str(max(16,min(2048,limit//8192))))
         db.execute('CREATE TABLE gallery(bank INTEGER,ordinal INTEGER,metadata TEXT,embedding BLOB,'
@@ -36,28 +42,45 @@ class DiskGallery(Gallery):
         db.execute('CREATE TABLE bounds(bank INTEGER PRIMARY KEY,block INTEGER,center BLOB,radius REAL)')
         db.execute('CREATE INDEX bounds_block ON bounds(block,bank)')
         db.execute('CREATE TABLE blocks(block INTEGER PRIMARY KEY,center BLOB,radius REAL)')
-        self.banks = Banks(db)
+        self.banks = Banks(db,feature)
         self.versions = []
         block = []
         used = 0
         block_size = max(1,min(64,limit//(8*4096*8)))
-        for index,(owner,source,rows) in enumerate(banks):
-            used += len(owner)+len(source)+320
+        for index,(owner,source_name,rows) in enumerate(banks):
+            used += len(owner)+len(source_name)+320
             if used + 8*len(rows)*16384 > limit:
                 raise ResourceLimit('Perspective gallery directory exceeds sapiensid.execution.reference_bytes.')
-            self.banks.owners.append((owner,source))
-            stamp = hashlib.sha256(encoded([owner,source]).encode())
+            self.banks.owners.append((owner,source_name))
+            # Scratch rows are addresses into immutable retained evidence.
+            # The bounded durable cache holds numerical bounds for unchanged banks.
+            clocks = {scan:version(source,'raw-body',scan) for scan in {r['scan'] for r in rows}} if cache else {}
+            key = digest(['rear-bounds-v1',owner,source_name,clocks,[dict(r) for r in rows]]) if cache else None
+            kind = 'body-appearance-rear-bounds'
+            stored = cache.get(kind,key) if cache else None
+            stamp = hashlib.sha256(encoded([owner,source_name]).encode())
             vectors = []
             for ordinal, row in enumerate(rows):
-                vector = row['_vector']
-                vectors.append(vector.astype('float64'))
-                db.execute('INSERT INTO gallery VALUES (?,?,?,?)',
-                           (index,ordinal,encoded({k:v for k,v in row.items() if k!='_vector'}),vector.astype('<f4',copy=False).tobytes()))
-                stamp.update(encoded([row['id'],row['roots'],row['quality'],row.get('perspective','back')]).encode())
-                stamp.update(vector.tobytes())
-            self.versions.append(stamp.hexdigest())
-            center = np.mean(vectors,axis=0)
-            radius = max(np.linalg.norm(v-center) for v in vectors)
+                payload = {k:v for k,v in row.items() if k!='_vector'}
+                vector = row['_vector'] if stored is None or feature is None else None
+                db.execute('INSERT INTO gallery VALUES (?,?,?,?)',(index,ordinal,encoded(payload),
+                           None if feature else vector.astype('<f4',copy=False).tobytes()))
+                if stored is None:
+                    vectors.append(vector.astype('float64'))
+                    stamp.update(encoded([row['id'],row['roots'],row['quality'],row.get('perspective','back')]).encode())
+                    stamp.update(vector.tobytes())
+            if stored is None:
+                center = np.mean(vectors,axis=0)
+                radius = max(np.linalg.norm(v-center) for v in vectors)
+                checksum = stamp.hexdigest()
+                count('rear_gallery_rebuilt_bounds')
+                if cache:
+                    cache.put(kind,key,[checksum,base64.b64encode(center.astype('<f8').tobytes()).decode(),radius])
+            else:
+                checksum,raw_center,radius = stored
+                center = np.frombuffer(base64.b64decode(raw_center),dtype='<f8')
+                count('rear_gallery_reused_bounds')
+            self.versions.append(checksum)
             db.execute('INSERT INTO bounds VALUES (?,?,?,?)',
                        (index,index//block_size,center.astype('<f8').tobytes(),radius))
             block.append((center,radius))
@@ -93,8 +116,8 @@ class DiskGallery(Gallery):
                 active = inside(pivot,spread,possible)
                 if not active:
                     continue
-                for (blob,) in self.db.execute('SELECT embedding FROM gallery WHERE bank=?',(bank,)):
-                    vector = np.frombuffer(blob,dtype='<f4')
+                for blob,oid in self.db.execute("SELECT embedding,json_extract(metadata,'$.id') FROM gallery WHERE bank=?",(bank,)):
+                    vector = self.banks.feature(oid) if blob is None else np.frombuffer(blob,dtype='<f4')
                     for i in tuple(active):
                         if np.linalg.norm(queries[i]-vector)<=radii[i]:
                             results[i].add(bank)
