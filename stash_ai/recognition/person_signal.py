@@ -183,6 +183,8 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
     if legacy_association is not True and not legacy_boundaries:
         from .person_association import policy
         evidence['face_person_association'] = policy()
+        if legacy_association == 'v4':
+            evidence['face_person_association']['version'] = 'visible-landmark-track-retry-v4'
         if legacy_association == 'v3':
             evidence['face_person_association']['version'] = 'joint-landmark-assignment-v3'
         if legacy_association == 'partial':
@@ -191,7 +193,7 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
             evidence['face_person_association']['version'] = 'joint-landmark-assignment-v2'
     if legacy_association == 'joint' and 'refinement' in evidence.get('pose_refiner', {}):
         evidence['pose_refiner']['refinement']['version'] = 'pmpose-sam-pose2seg-refinement-v2'
-    elif legacy_association and legacy_association != 'v3' and 'refinement' in evidence.get('pose_refiner', {}):
+    elif legacy_association and legacy_association not in ('v3','v4') and 'refinement' in evidence.get('pose_refiner', {}):
         old = evidence['pose_refiner']['refinement']
         old.pop('masked_identity_crop', None)
         old['version'] = 'pmpose-sam-pose2seg-refinement-v1'

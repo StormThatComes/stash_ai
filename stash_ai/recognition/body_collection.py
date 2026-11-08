@@ -74,10 +74,16 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
                 measurement['view_shot'] = captured[1]
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
+    # A single pose containing distinct accepted faces is still an unresolved pair.
+    heads = [(f.box[0]+f.box[2]/2, f.box[1]+f.box[3]/2, min(f.box[2:]))
+             for f, row in zip(faces,rows) if row['rejected'] is None]
+    merged_pair = len(people)==1 and any(
+        np.hypot(x-u,y-v) >= max(4.,.7*max(size,other_size))
+        for i,(x,y,size) in enumerate(heads) for u,v,other_size in heads[i+1:])
     items=[]
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):
-        if row['rejected'] is None and match is None:
+        if row['rejected'] is None and (match is None or merged_pair):
             items.append(([row['id'],dict(person=None,identity_rejection='person_face_association_unavailable'),None,None],None))
     for index,person in enumerate(people):
         associated=next((i for i,m in enumerate(matches) if m==index),None)
@@ -98,6 +104,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measured['query_only'] = True
         if person.get('future_torso_retry'):
             measured.update(query_only=True,query_only_reason='future_torso_retry')
+        if merged_pair:
+            measured.update(expected_people=2, query_only=True, query_only_reason='unresolved_partner')
+            # Neither face owns a merged body. Keep the independent face observations.
+            row = face = None
         if refinement.get('mask_conflict'):
             reason = 'person_mask_conflict'
         if refinement.get('encoder_mask'):

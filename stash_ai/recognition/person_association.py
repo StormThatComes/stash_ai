@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='visible-landmark-track-retry-v4', containment_tolerance=.05,
+    return dict(version='contact-ownership-v5', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -69,9 +69,32 @@ def association_rejection(face, person):
     return None
 
 
+def confirmed_in_contact(face, person, people):
+    if person.get('pose_refinement', {}).get('separated'):
+        return True
+    left, top, right, bottom = person['bounds']
+    contact = any(min(right, p['bounds'][2]) > max(left, p['bounds'][0]) and
+                  min(bottom, p['bounds'][3]) > max(top, p['bounds'][1])
+                  for p in people if p is not person)
+    if not contact:
+        return True
+    aligned = []
+    for index, landmark in enumerate((2, 1, 0)):
+        if landmark >= len(getattr(face, 'landmarks', ())):
+            continue
+        point = person['keypoints'][index]
+        if (_visibility(person,index) >= .5 and min(point) >= 0 and
+                math.dist(point, face.landmarks[landmark]) <= .20 * min(face.box[2:])):
+            aligned.append((point,face.landmarks[landmark]))
+    return any(math.dist(a,c) >= 1 and math.dist(b,d) >= 1
+               for i,(a,b) in enumerate(aligned) for c,d in aligned[i+1:])
+
+
 def resolve(faces, people, choices):
     """Resolve competing head claims using a global assignment with abstention."""
     from collections import Counter
+    choices = [[p for p in candidates if confirmed_in_contact(face,people[p],people)]
+               for face,candidates in zip(faces,choices)]
     usage = Counter(p for candidates in choices for p in candidates)
     matches = [c[0] if len(c) == 1 and usage[c[0]] == 1 else None for c in choices]
     contested = [i for i, c in enumerate(choices) if c and matches[i] is None]

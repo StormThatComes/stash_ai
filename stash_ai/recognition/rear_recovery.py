@@ -97,15 +97,19 @@ def _scene(db, scan, stamp, gallery, search, config):
         if kind != 'back' and decision.get('query_perspective') != 'back':
             continue
         query = vector(row)
-        ranked = gallery.rank(query,scan,settings,quality(row).get('pixel_digest'))
-        best = winner(ranked, settings)
+        context = decision.get('shot_context')
+        effective = settings
+        if context and context['owner']==decision.get('open_face_root',{}).get('owner'):
+            effective = dict(settings,match_threshold=max(0.,settings['match_threshold']-context['bonus']))
+        ranked = gallery.rank(query,scan,effective,quality(row).get('pixel_digest'))
+        best = winner(ranked, effective)
         if best is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
             continue
         mean,low,owner,source,witnesses,_ = best
         if (owner==old or decision.get('open_face_root',{}).get('owner',owner)!=owner
-                or mean<settings['match_threshold'] or low<settings['cohesion_threshold']):
+                or mean<effective['match_threshold'] or low<settings['cohesion_threshold']):
             continue
         if row['face_embedding'] is not None and row['face_rejection'] is None:
             measured = face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
@@ -122,6 +126,8 @@ def _scene(db, scan, stamp, gallery, search, config):
                      previous=dict(decision,person=old,status=row['status'],role=row['role']),
                      source_tracks=[[*w['roots'],w['id']] for w in witnesses],
                      source_scans=sorted({w['scan'] for w in witnesses}))
+        if effective is not settings and mean<settings['match_threshold']:
+            proof['shot_context'] = context
         competitors = [(max(item[0],item[5]),item[2]) for item in ranked if item[2]!=owner]
         if competitors:
             runner,rival = max(competitors)
@@ -201,7 +207,9 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     from .rear_gallery import revision
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
-        pending = Pending(db,gallery,search,config.data['sapiensid']['identities'])
+        settings = config.data['sapiensid']['identities']
+        minimum = max(0.,settings['match_threshold'] - config.data['clustering']['same_scene_match_bonus'])
+        pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))
         for scan,scene in pending.candidates(scope,namespace,set(scans),stamp,active=active):
             decisions = _scene(db,scan,stamp,gallery,search,config)
             if apply(db,scan,decisions):

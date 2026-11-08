@@ -281,6 +281,10 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *
                                   reason='measured_face_association')
         if strong:seeds.setdefault(person,[]).append(row)
     # Face-linked bodies are frozen before processing faceless queries.
+    for row in rows:
+        if quality(row).get('query_only_reason') == 'unresolved_partner' and row['id'] not in decisions:
+            decisions[row['id']] = dict(person=None,status='withheld',role='auxiliary',
+                reason='unresolved_partner',track_blocker=dict(reason='unresolved_partner',cue=row['cue']))
     queries=[r for r in rows if r['id'] not in decisions]
     from .body_seed_modes import FrozenSeeds
     frozen=FrozenSeeds(seeds,scores,settings) if queries else None
@@ -380,7 +384,8 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *
                 if decisions[row['id']]['reason']=='body_anchor_quality':
                     decisions[row['id']]['reason']=regional['reason']
     from .body_perspectives import recover
-    recover(rows, decisions, seeds, settings, scores, guard, occupied=record.get('occupied_cues', ()))
+    track_settings = dict(settings,scene_context_bonus=config.data['clustering']['same_scene_match_bonus'])
+    recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()))
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:

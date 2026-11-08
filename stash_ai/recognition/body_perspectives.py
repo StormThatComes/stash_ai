@@ -45,7 +45,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
         for row in rows:
             if not row.get('face_person') and quality(row).get('orientation') == 'back':
-                decisions[row['id']]['track_blocker'] = dict(reason='no_face_root', cue=row['cue'])
+                decisions[row['id']].setdefault('track_blocker',dict(reason='no_face_root', cue=row['cue']))
         return
     by_cue = defaultdict(list)
     geometry = {}
@@ -70,7 +70,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     shot_ids, boundary = boundaries(by_cue, geometry)
     # A filtered partner is still an unknown competitor in a crowded transition.
     partial = {cue for cue,members in by_cue.items()
-               if any(geometry[r['id']][0].get('detected_people',len(members)) != len(members)
+               if any(max(geometry[r['id']][0].get('detected_people',len(members)),
+                          geometry[r['id']][0].get('expected_people',0)) != len(members)
                       for r in members)}
 
     track_threshold = settings.get('track_similarity_threshold')
@@ -268,6 +269,17 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             if not row.get('face_person') and before not in source_paths:
                 decision.setdefault('open_face_root',dict(owner=owner, observation=end))
             cursor = before
+    # Only a unique, same-shot path to a nearby strict face nominates an
+    # owner for a lower appearance threshold in the global competitor check.
+    for oid,decision in decisions.items():
+        hint = decision.get('open_face_root',{})
+        origin = lookup.get(hint.get('observation'))
+        row = lookup[oid]
+        if (origin is not None and row['cue'] not in partial and
+                shot_ids.get(origin['cue'])==shot_ids.get(row['cue']) and
+                abs(origin['cue']-row['cue'])<=3 and settings.get('scene_context_bonus',0.)>0):
+            decision['shot_context'] = dict(owner=hint['owner'],root=origin['id'],
+                                            bonus=settings['scene_context_bonus'])
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -306,8 +318,17 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 stop = failure[1]
             decision.setdefault('track_blocker', stop or dict(reason='no_independent_view',cue=row['cue']))
     from .crossing_tracks import crossings
-    crossed = crossings({cue:members for cue,members in by_cue.items() if cue not in partial},
-                        root,decisions,transition,margin)
+    occluded = {cue for cue,members in by_cue.items() if len(members)==1
+                and not members[0].get('face_person') and boundary.get(cue)=='continuous'
+                and boundary.get(cue+1)=='continuous'
+                and shot_ids.get(cue-1)==shot_ids.get(cue)==shot_ids.get(cue+1)}
+    crossed = crossings({cue:members for cue,members in by_cue.items() if cue not in partial or cue in occluded},
+                        root,decisions,transition,margin,occluded=occluded)
+    for cue in partial:
+        for row in by_cue[cue]:
+            if geometry[row['id']][0].get('query_only_reason')=='unresolved_partner':
+                decisions[row['id']].update(person=None,status='withheld',role='auxiliary',
+                                            reason='unresolved_partner')
     if not banks and not crossed:
         return
     owner_rows = defaultdict(list)

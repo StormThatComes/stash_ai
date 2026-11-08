@@ -44,8 +44,15 @@ def recover(database,selected,config):
                 queries.append(row)
         scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         for row in queries:
+            prior = decisions[row['id']]
+            blocker = prior.get('track_blocker', {}).get('reason')
+            if blocker in ('different_face_root','unresolved_partner','competing_transition'):
+                continue
+            rooted_owner = prior.get('open_face_root', {}).get('owner')
             ranked=[]
             for person,bank in banks.items():
+                if rooted_owner is not None and person != rooted_owner:
+                    continue
                 if copresent([row],bank) or not guard.allows(row,bank) or not guard.allows(row,bank,person):continue
                 mean,minimum=scores.compare([row],bank);ranked.append((mean,minimum,person))
             ranked.sort(key=lambda r:(-r[0],r[2]))

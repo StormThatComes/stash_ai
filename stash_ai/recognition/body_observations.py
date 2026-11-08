@@ -50,7 +50,7 @@ def _previous_contracts(config):
     # cores; retain their frozen banks only as conservative competitors.
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [previous, recent, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
+    return [_contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
         for association,boundaries in ((False,False),('joint',False),('partial',False),(True,False),(True,True))
         for version in ('independent-person-v2-rgb-pixels','independent-person-v1'))]
 
