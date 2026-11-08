@@ -75,3 +75,25 @@ def remember(model, image, people):
     history = getattr(model,'_crowd_history',{})
     model._crowd_history = {k:v for k,v in history.items() if k==(scan,cue-1)}
     model._crowd_history[scan,cue] = shot,seconds,pair(people)
+
+
+def preserves_faces(previous,found,old_matches,new_matches):
+    if len(old_matches)!=len(new_matches):
+        return False
+    for old,new in zip(old_matches,new_matches):
+        if old is None:
+            continue
+        center = torso(previous[old])
+        if new is None or center is None:
+            return False
+        # Match physical torsos, so detector ordering can change between passes.
+        box = previous[old]['bounds']
+        scale = math.hypot(box[2]-box[0],box[3]-box[1])
+        centres = [torso(p) for p in found]
+        if None in centres:
+            return False
+        distances = [math.dist(center,c) for c in centres]
+        if (distances[new]>.30*scale or any(d-distances[new]<.06*scale
+                                            for i,d in enumerate(distances) if i!=new)):
+            return False
+    return True

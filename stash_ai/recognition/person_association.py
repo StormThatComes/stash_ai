@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='contact-head-ownership-v6', containment_tolerance=.05,
+    return dict(version='contact-head-ownership-v7', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 

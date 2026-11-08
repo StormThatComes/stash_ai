@@ -1,7 +1,6 @@
 """Face contradictions and simultaneous claims veto body-only evidence."""
 from collections import defaultdict
 
-from .clustering import vector
 
 
 class FaceGuard:
@@ -17,11 +16,10 @@ class FaceGuard:
         self.bank_limit = min(8*1024**2, config.data['sapiensid']['execution']['reference_bytes']//16)
 
     def witnesses(self, person):
-        from .scan_heads import predicate as current_scan
+        from .body_scene_jobs import Witness, face_witness_query
         if self.frozen is not None:
-            from .body_scene_jobs import Witness
             for raw in self.frozen[person]:
-                yield raw.validated if isinstance(raw, Witness) else vector(raw)
+                yield raw if isinstance(raw,Witness) else Witness(raw['dimensions'],raw['embedding'])
             return
         key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
         if key in self.banks:
@@ -29,12 +27,9 @@ class FaceGuard:
             yield from self.banks[key][0]
             return
         retained, used = [], 512
-        for raw in self.db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-            'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-            "AND o.rejected IS NULL AND s.status='complete' AND "+current_scan(), (person,)):
-            value = vector(raw)
-            value.flags.writeable = False
-            used += value.nbytes+256
+        for raw in self.db.execute(face_witness_query(), (person,)):
+            value = Witness(*raw)
+            used += 2*len(value.embedding)+len(value.quality)+512
             if used <= self.bank_limit:
                 retained.append(value)
             else:
@@ -52,7 +47,7 @@ class FaceGuard:
         face = row.get('_face_vector')
         if face is None:
             return True
-        others = [r['_face_vector'] for r in bank if r.get('_face_vector') is not None]
+        others = (r['_face_vector'] for r in bank if r.get('_face_vector') is not None)
         if person is not None:
             # Stream complete face vetoes; a large owner must not allocate an
             # unbounded second reference bank outside the configured budget.
@@ -60,10 +55,27 @@ class FaceGuard:
         from .progress import tracking
         from stash_ai.runtime.cancellation import current
         token=current()
+        first = None
+        distinct_time = distinct_pixels = False
+        from .independent_evidence import unit
         with tracking(others,'Check body face vetoes',unit='face') as witnesses:
-            for other in witnesses:
+            for witness in witnesses:
                 if token is not None:token.check()
-                if len(face)!=len(other) or self.scores.face_similarity(face,other)<self.floor:return False
+                other = witness.validated if person is not None else witness
+                if len(face)!=len(other):
+                    return False
+                if self.scores.face_similarity(face,other)>=self.floor:
+                    continue
+                if person is None or witness.strict:
+                    return False
+                stamp = witness.scan,witness.seconds
+                pixel = unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality))
+                if first is None:
+                    first = stamp,pixel
+                distinct_time |= stamp!=first[0]
+                distinct_pixels |= pixel!=first[1]
+                if distinct_time and distinct_pixels:
+                    return False
         return True
 
 

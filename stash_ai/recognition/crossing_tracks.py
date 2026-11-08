@@ -82,14 +82,19 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
             if len(people)!=2 or people[0].get('seconds',0)-first[0].get('seconds',0)>60:
                 break
             pairs.append(people)
-            if all(r['id'] in roots for r in people):
-                owners = tuple(roots[r['id']] for r in people)
-                if len(set(owners))==2 and (len(pairs)>2 or hidden):
-                    if _window(pairs,owners,roots,decisions,transition,raw,margin,claims):
-                        for row in hidden:
-                            decision = decisions[row['id']]
-                            if decision.get('track_blocker',{}).get('reason')!='different_face_root':
-                                decision.update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
-                                                track_blocker=dict(reason='unresolved_partner',cue=row.get('cue',cue)))
+            final_roots = [roots.get(r['id']) for r in people]
+            first_roots = [roots.get(r['id']) for r in first]
+            if not any(final_roots):
+                continue
+            complete_end = all(final_roots)
+            owners = final_roots if complete_end else first_roots
+            if all(owners) and len(set(owners))==2 and (len(pairs)>2 or hidden):
+                if _window(pairs,owners,roots,decisions,transition,raw,margin,claims):
+                    for row in hidden:
+                        decision = decisions[row['id']]
+                        if decision.get('track_blocker',{}).get('reason')!='different_face_root':
+                            decision.update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
+                                            track_blocker=dict(reason='unresolved_partner',cue=row.get('cue',cue)))
+            if complete_end:
                 break
     return {oid:next(iter(options.values())) for oid,options in claims.items() if len(options)==1}

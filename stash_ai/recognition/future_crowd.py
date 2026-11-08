@@ -13,7 +13,7 @@ from .dependencies import supported, version
 
 def plans(db, scan, expected):
     groups = defaultdict(list)
-    for row in db.execute("""SELECT cue,id,seconds,geometry,rejected,
+    for row in db.execute("""SELECT cue,id,seconds,geometry,rejected,face,
             json_extract(quality,'$.quality.view_shot') AS shot
             FROM body_observations WHERE scan=? AND contract=? ORDER BY cue,id""",(scan,expected)):
         groups[row['cue']].append(row)
@@ -53,7 +53,7 @@ def plans(db, scan, expected):
                 left,top = min(b[0] for b in boxes),min(b[1] for b in boxes)
                 right,bottom = max(b[2] for b in boxes),max(b[3] for b in boxes)
                 if all(left<=x<right and top<=y<bottom for x,y in clean[later][0]):
-                    evidence = [(r['id'],r['geometry'],r['rejected']) for group in (rows,near,far) for r in group]
+                    evidence = [(r['id'],r['geometry'],r['rejected'],r['face']) for group in (rows,near,far) for r in group]
                     faces = list(map(tuple, db.execute('SELECT id,geometry,rejected FROM observations '
                                      'WHERE scan=? AND cue=? ORDER BY id',(scan,cue))))
                     yield cue, rows, shot, clean[later], digest([evidence,faces])
@@ -138,8 +138,16 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
         return
     for person in recovered:
         person['future_torso_retry'] = True
+    matches = associate(detections,recovered)
+    if rows:
+        from .crowd_context import preserves_faces
+        old = [json.loads(row['geometry']) for row in rows]
+        owners = {r['face']:i for i,r in enumerate(rows) if r['face'] and not r['rejected']}
+        old_matches = [owners.get(r['id']) if not r['rejected'] else None for r in faces]
+        if not preserves_faces(old,recovered,old_matches,matches):
+            return
     model.frame_people = recovered
-    model.face_matches = associate(detections,recovered)
+    model.face_matches = matches
     records = []
     with closing(PreparedCollector(config,model,writer=lambda _,batch:records.extend(batch))) as pipeline:
         collect(pipeline,db,model,config,scan,cue,seconds,image,faces,detections)

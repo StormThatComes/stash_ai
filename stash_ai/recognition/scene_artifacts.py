@@ -134,12 +134,12 @@ def body_key(db, scan, config):
     local_clocks=local_available(db)
     def signed(kind,key,records,dependency,dependency_key):
         read=lambda:derived_cache.fingerprint(db,records,key)
-        return cached(db,kind,key,'v4-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
+        return cached(db,kind,key,'v5-'+str(version(db,'heads')),read,checked=True,dependency=dependency if local_clocks else 'global',
                       dependency_key=dependency_key if local_clocks else '*') if audited else read()
     banks=[]
     for owner in sorted({root for _,root in roots}):
         banks.append(signed('body-scene-owner',owner,[(
-            'SELECT m.person,o.id,o.dimensions,o.embedding FROM observations o JOIN members m '
+            'SELECT m.person,o.id,o.dimensions,o.embedding,o.scan,o.seconds,o.quality,'+strict_sql()+' FROM observations o JOIN members m '
             'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
             "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))],'owner',owner))
     local=signed('body-scene-input',digest([scan,expected]),queries,'scene',scene_key(db,scan))
