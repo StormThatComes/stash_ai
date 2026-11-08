@@ -57,6 +57,11 @@ def test_external_rear_only_scene_requires_current_independent_roots(tmp_path, i
             unrelated,_ = scene(db,config,'3',[[0.,-1.]]*2)
             rebuild(state,[unrelated],config,{})
             assert not {r[0] for r in db.execute('SELECT observation FROM touched_rear')} & set(queries)
+            from stash_ai.recognition.rear_recovery import recover as refresh
+            db.execute("UPDATE body_members SET policy='old' WHERE observation IN "
+                       "(SELECT id FROM body_observations WHERE scan=?)",(unrelated['scan'],))
+            refresh(db,[unrelated],config)
+            assert all(row['person']=='A' for row in members())
             new_rival,_ = scene(db,config,'4',[[.55,.835]]*3)
             rebuild(state,[new_rival],config,{})
             assert all(r['person']!='A' and json.loads(r['proof'])['rear_retry']['reason']=='competing_owner'

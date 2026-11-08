@@ -117,7 +117,8 @@ def _scene(db, scan, stamp, gallery, search, config):
             if not guard.allows({'_face_vector':measured}, (), owner):
                 continue
         bank = search.bank.get(owner)
-        if bank is None or (scan,row['cue']) in bank['cues']:
+        if (bank is None or owner in search.unavailable or old in search.unavailable
+                or (scan,row['cue']) in bank['cues']):
             continue
         if old and (old not in search.bank or search.bank[old]['faces']
                     or any(s!=scan for s,_ in search.bank[old]['cues'])):
@@ -203,19 +204,19 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     from .body_global_search import Search
     from .rear_snapshot import apply
     from .assignment_delta import enqueue
-    stale = db.execute("""SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation
+    stale = db.execute("""SELECT DISTINCT m.person FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND m.person IS NOT NULL
-        AND m.role='anchor' AND b.contract NOT IN (SELECT value FROM json_each(?)) AND """+predicate()+
-        ' LIMIT 1',(scope,namespace,encoded(compatible_contracts(config)))).fetchone()
-    if stale:
-        return
+        AND m.role='anchor' AND b.contract NOT IN (SELECT value FROM json_each(?)) AND """+predicate(),(scope,namespace,encoded(compatible_contracts(config))))
+    from .identity_merges import canonical
+    unavailable = {canonical(db, row[0]) for row in stale}
     references = _banks(db,config,scope,namespace)
-    if any(b['stale_policy'] or b['missing_original'] for b in references.values()):
-        return
+    unavailable.update(owner for owner, bank in references.items()
+                       if bank['stale_policy'] or bank['missing_original'])
     from .rear_pending import Pending
     from .rear_gallery import revision
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
+        search.unavailable = unavailable
         settings = config.data['sapiensid']['identities']
         minimum = max(0.,settings['match_threshold'] - config.data['clustering']['same_scene_match_bonus'])
         pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))
