@@ -268,22 +268,6 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 progress(name, 'coordinator', dict(text='score goal assignments'))
                             consume_started = time.perf_counter()
                             item.update(consume(name, observations, retained, predictions))
-                            if runtime and runtime.profilebodies = compact(bodies, result['trials']['baseline']['independent_person'].get('identities', []))
-                        item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=evaluated.get('elapsed_seconds', time.perf_counter()-started),
-                            versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
-                        if evaluated.get('recovered_evaluation'):
-                            item['recovered_evaluation'] = True
-                        if runtime and runtime.profile:
-                            item["performance"] = dict(cpu_seconds=evaluated.get("cpu_seconds", time.process_time()-cpu_started),
-                                rebuild=rebuild_metrics, trial=evaluated.get('trial_profile'))
-                            item['performance']['result_wait_seconds'] = max(0.,time.perf_counter()-evaluated.get('finished_monotonic_seconds',time.perf_counter()))
-                        if runtime:
-                            item['worker'] = {k: evaluated[k] for k in ('worker_pid', 'started_monotonic_seconds', 'finished_monotonic_seconds','worker_cache_reused') if k in evaluated}
-                        if consume is not None:
-                            if getattr(progress, 'coordinator_status', False):
-                                progress(name, 'coordinator', dict(text='score goal assignments'))
-                            consume_started = time.perf_counter()
-                            item.update(consume(name, observations, retained, predictions))
                             if runtime and runtime.profile:
                                 result['performance']['consume_seconds'] += time.perf_counter()-consume_started
                         if evidence is not None:
