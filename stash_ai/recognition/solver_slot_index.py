@@ -26,7 +26,7 @@ def coordinator(images, source, config, scans):
         if capacity < 65536:
             raise ResourceLimit('Solver observation index exceeds the configured snapshot budget.')
         db.execute(f'PRAGMA max_page_count={capacity // 4096}')
-        db.execute('CREATE TABLE slots(ordinal INTEGER PRIMARY KEY,id TEXT UNIQUE,scene TEXT,retained TEXT,baseline TEXT)')
+        db.execute('CREATE TABLE slots(ordinal INTEGER PRIMARY KEY,id TEXT UNIQUE,scene TEXT,retained TEXT,baseline TEXT,goal INTEGER DEFAULT 0)')
         body = enabled(config) and available(source)
         join = " LEFT JOIN body_members b ON b.observation=o.id AND b.status='accepted'" if body else ''
         person = 'CASE WHEN b.observation IS NULL THEN f.person ELSE b.person END' if body else 'f.person'
@@ -41,12 +41,23 @@ def coordinator(images, source, config, scans):
             db.executemany('INSERT INTO slots(id,scene,retained,baseline) VALUES (?,?,?,?) '
                            'ON CONFLICT(id) DO UPDATE SET scene=excluded.scene,retained=excluded.retained,baseline=excluded.baseline',
                            ((oid,scene,owner,owner) for oid,scene,owner in source.execute(sql,args)))
+        from .merge_goal_index import current as goal_index
+        goals = goal_index()
+        if goals is not None:
+            db.executemany('UPDATE slots SET goal=1 WHERE id=?', ((oid,) for oid in goals.assessed_ids))
+        db.execute('CREATE TABLE outsiders(owner TEXT,retained TEXT,amount INTEGER)')
+        db.execute('CREATE INDEX outsiders_by_owner ON outsiders(owner)')
         db.execute('CREATE INDEX slot_baseline_owner ON slots(baseline,id)')
         db.execute('CREATE INDEX slot_scene ON slots(scene,id)')
         db.execute('CREATE INDEX baseline_initial_changes ON slots(id) WHERE retained IS NOT baseline')
         from .body_observations import coverage as body_coverage
         from .person_signal import coverage as hybrid_coverage
         scan_ids = [scan['id'] for scan in scans]
+        from .solver_body_counts import groups
+        if available(source):
+            db.execute('CREATE TABLE retained_body_groups(owner TEXT,status TEXT,role TEXT,reason,amount INTEGER)')
+            db.executemany('INSERT INTO retained_body_groups VALUES (?,?,?,?,?)',
+                           groups(source,scan_ids,contract(config)))
         db.execute('CREATE TABLE input_counts(body_enabled INTEGER, body TEXT, hybrid TEXT)')
         db.execute('INSERT INTO input_counts VALUES (?,?,?)',
                    (body, encoded(body_coverage(source, config, scan_ids)),
@@ -67,6 +78,9 @@ def apply_baseline(changes):
         raise ValueError('Missing solver coordinator index.')
     with slots.db:
         slots.db.executemany('UPDATE slots SET baseline=? WHERE id=?', ((person,oid) for oid,person in changes.items()))
+        slots.db.execute('DELETE FROM outsiders')
+        slots.db.execute('INSERT INTO outsiders SELECT baseline,retained,COUNT(*) FROM slots '
+                         'WHERE goal=0 AND baseline IS NOT NULL GROUP BY baseline,retained')
     return Slots(slots.db, 'baseline', len(slots))
 
 
@@ -137,6 +151,29 @@ class Slots(Mapping):
         else:
             hybrid.update(enabled=settings.data['sapiensid']['enabled'], matching=plain(settings.data['sapiensid']['matching']))
         return body, hybrid
+
+    def outsider_counts(self, owners):
+        import json
+        from collections import Counter
+        result = Counter()
+        for person, amount in self.db.execute('SELECT retained,SUM(amount) FROM outsiders WHERE '
+                    'owner IN (SELECT value FROM json_each(?)) GROUP BY retained', (json.dumps(list(owners)),)):
+            result[person] = amount
+        return result
+
+    def outsider_changes(self, changes):
+        from collections import defaultdict, Counter
+        from itertools import islice
+        import json
+        delta = defaultdict(Counter)
+        keys = iter(changes)
+        while block := list(islice(keys,512)):
+            for key, before, original in self.db.execute(
+                    'SELECT id,baseline,retained FROM slots WHERE goal=0 AND id IN (SELECT value FROM json_each(?))',
+                    (json.dumps(block),)):
+                delta[before][original] -= 1
+                delta[changes[key]][original] += 1
+        return delta
 
     def for_owners(self, owners):
         import json

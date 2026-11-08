@@ -7,6 +7,7 @@ class Predictions(Mapping):
     def __init__(self, baseline, changes):
         self.baseline, self.changes = baseline, changes
         self.changed_owners = None
+        self.outsider_delta = None
         if any(key not in baseline for key in changes):
             raise ValueError('Invalid baseline prediction delta.')
 
@@ -18,6 +19,14 @@ class Predictions(Mapping):
 
     def __iter__(self):
         return iter(self.baseline)
+
+    def outsider_counts(self, owners):
+        if self.outsider_delta is None:
+            self.outsider_delta = self.baseline.outsider_changes(self.changes)
+        counts = self.baseline.outsider_counts(owners)
+        for owner in owners:
+            counts.update(self.outsider_delta.get(owner, {}))
+        return counts
 
     def for_owners(self, owners):
         if hasattr(self.baseline, 'for_owners'):

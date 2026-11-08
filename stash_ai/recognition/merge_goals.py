@@ -248,11 +248,21 @@ def assess(goals, observations, retained, predicted):
                 resulting_identities=dict(destinations), fully_assigned_to_one=complete))
         for destination in counts:
             owners.setdefault(destination, []).append(group['index'])
-        owner_rows = predicted.for_owners(counts) if hasattr(predicted, 'for_owners') else predicted.items()
-        outsiders = {k for k,v in owner_rows if v is not None and v in counts and k not in goal_ids}
+        from .solver_slot_index import Slots
+        from .merge_goal_index import current as current_goals
+        index = current_goals()
+        if isinstance(retained, Slots) and index is not None and index.goals is goals:
+            outsider_counts = predicted.outsider_counts(counts)
+            outsider_total = sum(outsider_counts.values())
+            additional = sorted(owner for owner, n in outsider_counts.items() if owner is not None and n)
+        else:
+            owner_rows = predicted.for_owners(counts) if hasattr(predicted, 'for_owners') else predicted.items()
+            outsiders = {k for k,v in owner_rows if v is not None and v in counts and k not in goal_ids}
+            outsider_total = len(outsiders)
+            additional = sorted({retained[k] for k in outsiders if retained.get(k) is not None})
         largest = max(complete_owners.values(), default=0)
         groups.append(dict(index=group['index'], members=members, missing=missing, withheld=lost,
-            outsider_observations=len(outsiders), additional_retained_identities=sorted({retained[k] for k in outsiders if retained.get(k) is not None}),
+            outsider_observations=outsider_total, additional_retained_identities=additional,
             resulting_identities=dict(counts), fragments=len(counts),
             largest_complete_performers=largest, total_performers=len(members),
             complete_fraction=largest/len(members),

@@ -11,6 +11,9 @@ _evaluation = ContextVar('merge_goal_evaluation', default=None)
 class GoalIndex:
     def __init__(self, goals):
         self.goals = goals
+        self.assessed_ids = frozenset(r['id'] for g in goals['groups'] for member in g['members']
+                                      for r in member['observations']) | frozenset(
+            oid for ids in goals.get('physical_alternatives', {}).values() for oid in ids)
         from .physical_goal import addresses
         self.observation_ids = frozenset(addresses(goals))
         self.observation_ids |= frozenset(r['id'] for g in goals['groups']

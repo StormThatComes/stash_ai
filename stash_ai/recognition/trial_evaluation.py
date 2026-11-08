@@ -87,7 +87,12 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                     prediction_fields = dict(predictions=predictions)
                 scan_ids = [s['id'] for s in scans]
                 body_counts, hybrid = observations.input_counts(settings) if isinstance(observations, Slots) else (None,None)
-                bodies = body_report(target,settings,scan_ids,input_counts=body_counts)
+                bodies = None
+                if isinstance(observations, Slots):
+                    from .solver_body_counts import incremental
+                    bodies = incremental(observations.db,target,body_counts,scan_ids,len(observations))
+                if bodies is None:
+                    bodies = body_report(target,settings,scan_ids,input_counts=body_counts)
                 if hybrid is None:
                     hybrid = coverage(target,settings,scan_ids)
             with stage('Collect solver feedback'):
