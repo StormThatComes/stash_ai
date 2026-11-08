@@ -70,12 +70,13 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 counts[person]['one_id_turns'] += int(None not in ids and len(set(ids))==1)
                 roots = {owner for cue,owner in face_roots[scene,person]
                          if cue<=window[0] or cue>=window[-1]}
-                if len(roots)==1:
+                if roots:
                     counts[person]['anchored_turns'] += 1
-                    expected = next(iter(roots))
+                    counts[person]['face_root_conflicts'] += len(roots)>1
+                    expected = next(iter(roots)) if len(roots)==1 else None
                     foreign = any(owner==expected for partner,other in people.items() if partner!=person
                                   for cue in window for owner,_ in other.get(cue,()))
-                    counts[person]['own_id_turns'] += int(all(p==expected for p in ids) and not foreign)
+                    counts[person]['own_id_turns'] += int(expected is not None and all(p==expected for p in ids) and not foreign)
                 assigned = [p for p in ids if p is not None]
                 counts[person]['id_switches'] += sum(a!=b for a,b in zip(assigned,assigned[1:]))
         # Form pairs only in annotated entangled cues (usually two people).
