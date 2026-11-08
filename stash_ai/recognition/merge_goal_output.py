@@ -111,8 +111,11 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         if verdict:
             lines = [f"# Independent holdout: {verdict['status']}"]
             for name, measure in verdict['measures'].items():
-                lines.append(f"# {name}: {measure['baseline']}/{measure['baseline_total']} -> "
-                             f"{measure['winner']}/{measure['winner_total']} ({measure['status']})")
+                def display(side):
+                    total = measure.get(side+'_total')
+                    value = str(measure[side])
+                    return value if total is None else f'{value}/{total}'
+                lines.append(f"# {name}: {display('baseline')} -> {display('winner')} ({measure['status']})")
             serialized = '\n'.join(lines) + '\n' + serialized
         destination = yaml_output.expanduser().resolve()
         if yaml_owner is not None:

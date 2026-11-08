@@ -47,10 +47,10 @@ def route_parameters(decisions):
         if row.get('evidence_kind') == 'person':
             if reason != 'measured_face_association':
                 keys.update(k for k in BODY if '.identities.' in k)
-            if reason in ('face_rooted_body_view','face_rooted_crossing','external_rear_view'):
+            if reason in ('local_body_track','face_rooted_body_view','face_rooted_crossing','external_rear_view'):
                 keys.add(TRACK)
-                if reason == 'external_rear_view':
-                    keys.add('sapiensid.identities.scene_match_bonus')
+            if row.get('used_scene_bonus'):
+                keys.add('sapiensid.identities.scene_match_bonus')
             if row.get('body_global'):
                 keys.update(k for k in BODY if '.global_matching.' in k)
         else:

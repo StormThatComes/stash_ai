@@ -305,6 +305,8 @@ def holdout_verdict(metrics, contamination=None, incremental=None):
     for label,category,field,total,higher in (
             ('own_turns','sequences','own_id_turns','turns',True),
             ('correct_contacts','sequences','correct','crossings',True),
+            ('endpoint_returns','sequences','endpoint_returns','crossings',True),
+            ('both_recovered','sequences','both_recovered','crossings',True),
             ('partner_swaps','sequences','partner','crossings',False),
             ('false_joins','partners','false_joins','partner_pairs',False),
             ('split_references','visible','split_identities','reference_identities',False)):
@@ -312,7 +314,7 @@ def holdout_verdict(metrics, contamination=None, incremental=None):
         for trial in (base, final):
             group = trial[category]
             counts = group.get('contact_interior',{}) if field in ('correct','partner') else group
-            values.append((counts[field],group.get(total,group.get('anchored_turns',0))))
+            values.append((counts.get(field,0),group.get(total,group.get('anchored_turns',0))))
         (a,n),(b,m) = values
         if label=='own_turns':
             n=m=max(n,m)
@@ -326,6 +328,8 @@ def holdout_verdict(metrics, contamination=None, incremental=None):
     sequences = [trial['sequences'] for trial in (base,final)]
     first,last = (set(map(tuple,row.get('rooted_turns',()))) for row in sequences)
     risk('lost_turn_references',0,len(first-last),bool(first))
+    before,after = (set(map(tuple,row.get('returned_people',()))) for row in sequences)
+    risk('lost_person_endpoints',0,len(before-after),bool(before))
     episodes = (contamination or {}).get('episodes',[])
     for field in ('later_cues','other_scenes'):
         for i,item in enumerate(episodes):
