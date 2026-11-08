@@ -16,7 +16,13 @@ def configured_path(config, value):
 
 def work_root(config):
     value = config.data['execution'].get('rebuild_scratch_directory')
-    root = configured_path(config, value) if value else Path(config.database).parent / 'recognition_work'
+    if value:
+        root = configured_path(config, value)
+    elif hasattr(config, 'database'):
+        root = Path(config.database).parent / 'recognition_work'
+    else:
+        # Standalone model loaders may only have a model/YAML configuration.
+        root = configured_path(config, 'recognition_work')
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 
