@@ -203,7 +203,23 @@ class Scores:
         return (total/count,minimum) if count else (-1.,-1.)
 
 
-def _load_scene(db,scan,config):
+def _prepare_vectors(rows):
+    from functools import lru_cache
+    from .clustering import vector as face_vector
+
+    @lru_cache(maxsize=16)
+    def normalized(blob):
+        result = vector({'embedding': blob})
+        result.flags.writeable = False
+        return result
+
+    for row in rows:
+        row['_vector'] = normalized(row['embedding'])
+        row['_face_vector'] = (face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
+            if row['face_embedding'] is not None and row['face_rejected'] is None else None)
+
+
+def _load_scene(db,scan,config, *, prepare_vectors=True):
     settings=config.data['sapiensid']['identities'];expected=contract(config)
     record=db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()
     completed=db.execute('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)).fetchone()[0]
@@ -222,11 +238,9 @@ def _load_scene(db,scan,config):
         row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
             raise ResourceLimit('Person scene references exceed sapiensid.execution.reference_bytes.')
-        row['_vector']=vector(row)
-        from .clustering import vector as face_vector
-        row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
-            if row['face_embedding'] is not None and row['face_rejected'] is None else None)
         rows.append(row)
+    if prepare_vectors:
+        _prepare_vectors(rows)
     from .body_origins import origins_for_scene, ordered_owners
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
     origins=origins_for_scene(db,record)
@@ -241,7 +255,7 @@ def scene_plan(db,scan,config):
     return _plan(db,config,*_load_scene(db,scan,config))
 
 
-def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
+def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None, *, capture_hints=None):
     settings=config.data['sapiensid']['identities']
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
@@ -361,7 +375,10 @@ def _plan(db,config,record,rows,roots,origins_by_key,owners,frozen_faces=None):
             decisions[row['id']]['query_only_reason'] = q.get('query_only_reason','uncertain_body_geometry')
             decisions[row['id']]['retry_when'] = 'confirmed_core_changes'
     from .local_body_hints import observe
-    observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
+    if capture_hints is None:
+        observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
+    else:
+        capture_hints(groups, seeds, frozen)
     resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
@@ -383,7 +400,7 @@ def rebuild(database,selected,config,result):
         if enabled(config):
             with tracking(selected,'Build scene person identities',unit='scene') as items:
                 from .body_scene_jobs import planned
-                for scan,rows,decisions in planned(db,items,config):
+                for scan,rows,decisions in planned(db,items,config,ids_only=True):
                     plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
         from .assignment_delta import enqueue
         with db:
@@ -404,22 +421,30 @@ def rebuild(database,selected,config,result):
                 if removed:changed.add(scan['scene'])
             db.execute('DROP TABLE desired_body_members')
             stamp=policy(config)
-            for scan,rows,decisions in plans:
+            installation = database.installation
+            for scan, rows, decisions in plans:
+                people = {}
+                origins = []
+                memberships = []
                 for row in rows:
-                    decision=decisions[row['id']];person=decision['person']
-                    if person is not None:
-                        db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
-                            (person,scan['scope'],scan['namespace'],time.time(),None,
-                             f'stash-ai-recognition:{database.installation}:{person}'))
-                        if decision['reason']=='body_scene_core':
-                            db.execute('INSERT OR IGNORE INTO body_origins VALUES (?,?)',(row['id'],person))
-                    updated=db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?) ON CONFLICT(observation) DO UPDATE SET '
+                    oid = row['id']
+                    decision = decisions[oid]
+                    person = decision['person']
+                    if person is not None and person not in people:
+                        people[person] = (person, scan['scope'], scan['namespace'], time.time(), None,
+                                          f'stash-ai-recognition:{installation}:{person}')
+                    if person is not None and decision['reason'] == 'body_scene_core':
+                        origins.append((oid, person))
+                    memberships.append((oid, person, decision['role'], decision['status'], stamp, encoded(decision)))
+                db.executemany('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)', people.values())
+                db.executemany('INSERT OR IGNORE INTO body_origins VALUES (?,?)', origins)
+                updated = db.executemany('INSERT INTO body_members VALUES (?,?,?,?,?,?) ON CONFLICT(observation) DO UPDATE SET '
                         'person=excluded.person,role=excluded.role,status=excluded.status,policy=excluded.policy,proof=excluded.proof '
                         'WHERE body_members.person IS NOT excluded.person OR body_members.role IS NOT excluded.role '
                         'OR body_members.status IS NOT excluded.status OR body_members.policy IS NOT excluded.policy '
-                        'OR body_members.proof IS NOT excluded.proof',
-                        (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision))).rowcount
-                    if updated:changed.add(scan['scene'])
+                        'OR body_members.proof IS NOT excluded.proof', memberships).rowcount
+                if updated:
+                    changed.add(scan['scene'])
             for item in selected:
                 scan=db.execute('SELECT scope,namespace,scene FROM scans WHERE id=?',(item['scan'],)).fetchone()
                 enqueue(db,scan['scope'],scan['namespace'],item,config,scan['scene'] in changed,'body_scene_rebuild')

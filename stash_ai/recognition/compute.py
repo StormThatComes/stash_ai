@@ -57,12 +57,13 @@ class Compute:
         requested = settings.get('rebuild_workers', 1)
         self.requested_workers, self.available = requested, available
         native = settings.get('rebuild_native_threads', 1)
-        self.workers = max(1, min(requested or min(16, max(1, available-2)),
+        self.worker_capacity = max(1, min(requested or min(16, max(1, available-2)),
                                   max(1, available//native)))
         from .solver_execution import current as solver_execution
         solver = solver_execution()
+        self.solver_managed = solver is not None
         if solver is not None:
-            self.workers = max(1, solver.inner_workers - int(settings.get('rebuild_prefetch_scenes', False)))
+            self.worker_capacity = max(1, solver.inner_workers)
             native = 1
         self.native_threads = native
         from .resource_plan import plan
@@ -86,6 +87,14 @@ class Compute:
         self.fallbacks, self.records, self.preparation = Counter(), {}, Counter()
         self.scenes_applied = 0
         self.last_status = 0.
+
+    @property
+    def workers(self):
+        if self.solver_managed:
+            from .replay_memory import prefetch_busy
+            if prefetch_busy():
+                return max(1, self.worker_capacity - 1)
+        return self.worker_capacity
 
     def _account_queue(self, size):
         from .run_cache import current
@@ -163,7 +172,7 @@ class Compute:
         from threadpoolctl import threadpool_limits
         self.native = threadpool_limits(limits=self.native_threads, user_api='blas')
         try:
-            self.executor = ThreadPoolExecutor(max_workers=self.workers,
+            self.executor = ThreadPoolExecutor(max_workers=self.worker_capacity,
                                                 thread_name_prefix='recognition-cpu')
         except BaseException:
             cleanup([self.native.restore_original_limits])
@@ -178,7 +187,7 @@ class Compute:
         context = multiprocessing.get_context('spawn')
         self.process_event = context.Event()
         self.cancel.subscribe(self.process_event.set)
-        self.process_executor = ProcessPoolExecutor(max_workers=self.workers, mp_context=context,
+        self.process_executor = ProcessPoolExecutor(max_workers=self.worker_capacity, mp_context=context,
             initializer=_initialize_process, initargs=(self.process_event, self.native_threads, self.meter is not None))
 
     def _invoke(self, function, job):
@@ -251,7 +260,9 @@ class Compute:
                 if self.workers == 1:
                     yield self._invoke(function, job)
                     continue
-                while self.pending and (len(self.pending) >= self.workers*2
+                workers = self.workers
+                inflight = workers if workers < self.worker_capacity else 2*workers
+                while self.pending and (len(self.pending) >= inflight
                                         or self.bytes + job.size > self.limit):
                     yield self._take()
                 self._account_queue(self.bytes+job.size)
