@@ -48,7 +48,7 @@ def _global_rivals(search, batch):
 
 
 def _rows(db, scan, stamp):
-    return db.execute("""SELECT b.id,b.cue,b.scan,b.face,b.quality,b.geometry,b.embedding,
+    return db.execute("""SELECT b.id,b.cue,b.seconds,b.scan,b.face,b.quality,b.geometry,b.embedding,
         m.person,m.status,m.role,m.proof,f.rejected AS face_rejection,f.embedding AS face_embedding,
         f.dimensions AS face_dimensions,fm.person AS face_owner FROM body_observations b
         LEFT JOIN observations f ON f.id=b.face LEFT JOIN members fm ON fm.observation=f.id JOIN body_members m

@@ -21,6 +21,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     counts = defaultdict(lambda: defaultdict(int))
 
     turn_roots = []
+    returned_people = []
     missing_boundaries = 0
 
     def continuous(scene, a, b):
@@ -104,6 +105,9 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 # A measured swap or mixed projection during contact cannot count
                 # as success; abstention inside contact is allowed.
                 endpoint_returns += int(recovered)
+                if None not in expected and len(set(expected)) == 2:
+                    returned_people.extend((scene,p,window[0],window[-1]) for p,own,last in
+                                           zip((a,b),expected,result) if own==last)
                 wrong = withheld = False
                 for person, own in zip((a,b), expected):
                     middle = [owner for cue in window[1:-1] for owner,_ in people[person][cue]]
@@ -126,7 +130,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     def macro(success,total):
         rates = [c.get(success,0)/c[total] for c in counts.values() if c.get(total)]
         return sum(rates)/len(rates) if rates else None
-    return dict(rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
+    return dict(returned_people=sorted(returned_people), rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),
                 crossings=crossings,contact_interior=middle_outcomes,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,

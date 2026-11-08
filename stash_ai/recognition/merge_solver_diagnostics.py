@@ -131,6 +131,7 @@ def latest_decisions(db, observation_ids):
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
                 body_global=bool(proof.get('global_merge')),
+                used_scene_bonus=bool(proof.get('roster_context') or proof.get('reason')=='external_rear_view' and proof.get('shot_context')),
                 **({'track_blocker':proof['track_blocker']} if proof.get('track_blocker') else {}),
                 **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))
     return result
