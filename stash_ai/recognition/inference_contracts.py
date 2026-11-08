@@ -24,6 +24,8 @@ def pose(config):
     if backend=='vitpose_plus_large':
         from .vitpose_registry import contract
         model=contract()
+        if config.data['execution'].get('vitpose_device_decode'):
+            model = [model,'compact-dark-v1']
     elif backend=='sapiens':
         from .sapiens_pose_registry import contract
         model=contract(p['sapiens_variant'])

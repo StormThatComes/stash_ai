@@ -126,7 +126,11 @@ class RFDETRDetector:
             if len({image.size for image in rgb})==1:
                 # One transfer for the usual fixed-size VTT frames. Resize stays
                 # on the original device with identical interpolation settings.
-                inputs=to_device(torch.stack([transforms.to_tensor(image) for image in rgb]),self.device)
+                if torch.device(self.device).type == 'cuda':
+                    pixels = torch.stack([transforms.pil_to_tensor(image) for image in rgb])
+                    inputs = to_device(pixels,self.device).to(torch.get_default_dtype()).div_(255)
+                else:
+                    inputs = to_device(torch.stack([transforms.to_tensor(image) for image in rgb]), self.device)
                 inputs=transforms.resize(inputs,[registry.RESOLUTION,registry.RESOLUTION],antialias=False)
             else:
                 inputs = torch.stack([transforms.resize(to_device(transforms.to_tensor(image),self.device),

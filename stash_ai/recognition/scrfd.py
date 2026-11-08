@@ -18,6 +18,7 @@ class ScrfdDetector:
     def __init__(self, config, paths, *, runtime_info=None):
         self.config = config
         self.session = None
+        self.pixel_pool = None
         key = config.data['models']['detector']
         if key not in ('scrfd_10g', 'scrfd_2_5g'):
             raise ValueError('SCRFD adapter requires a five-keypoint SCRFD detector.')
@@ -134,7 +135,10 @@ class ScrfdDetector:
         return self.decode(outputs, scale_x=scale_x, scale_y=scale_y, config=self.config)
 
     def detect_many(self,images):
-        if not getattr(self,'dynamic_batch',False) or len(images)<=1:return [self.detect(image) for image in images]
+        if len(images) <= 1:
+            return [self.detect(image) for image in images]
+        if not getattr(self,'dynamic_batch',False):
+            return self._static_many(images)
         import numpy as np
         prepared=[self._blob(image) for image in images]
         outputs=self.session.run(self.output_names,{self.input_name:np.concatenate([row[0] for row in prepared])})
@@ -143,5 +147,35 @@ class ScrfdDetector:
         return [self.decode([value[i] for value in outputs],scale_x=sx,scale_y=sy,config=self.config)
                 for i,(_,sx,sy) in enumerate(prepared)]
 
+    def _static_many(self, images):
+        from concurrent.futures import ThreadPoolExecutor
+        settings = self.config.data['execution']
+        # Reserve space for current/next 640x640 float blobs and resize buffers.
+        if settings['scan_cpu_workers'] < 2 or settings['scan_queue_bytes'] < 32*1024**2:
+            return [self.detect(image) for image in images]
+        if self.pixel_pool is None:
+            self.pixel_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='scrfd-pixels')
+        preparing = self.pixel_pool.submit(self._blob,images[0])
+        decoding = None
+        results = []
+        try:
+            for pos in range(len(images)):
+                tensor, sx, sy = preparing.result()
+                preparing = self.pixel_pool.submit(self._blob,images[pos+1]) if pos+1 < len(images) else None
+                outputs = self.session.run(self.output_names, {self.input_name:tensor})
+                if decoding is not None:
+                    results.append(decoding.result())
+                decoding = self.pixel_pool.submit(self.decode,outputs,scale_x=sx,scale_y=sy,config=self.config)
+            results.append(decoding.result())
+            return results
+        finally:
+            for future in (preparing,decoding):
+                if future is not None and not future.cancel():
+                    from concurrent.futures import wait
+                    wait((future,))
+
     def close(self):
+        if self.pixel_pool is not None:
+            self.pixel_pool.shutdown(wait=True, cancel_futures=True)
+            self.pixel_pool = None
         self.session = None

@@ -52,7 +52,7 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
+        'execution': {'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'vitpose_device_decode': False, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
                       'rebuild_parallel_scenes': True, 'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'detector_batch_size': 1, 'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
@@ -228,6 +228,8 @@ def validate(data):
         raise ValueError('execution.profile_rebuild must be boolean.')
     if data['execution']['rebuild_nomination_device'] not in ('cpu','auto'):
         raise ValueError('execution.rebuild_nomination_device must be cpu or auto.')
+    if type(data['execution']['vitpose_device_decode']) is not bool:
+        raise ValueError('execution.vitpose_device_decode must be boolean.')
     directory=data['execution']['rebuild_scratch_directory']
     if directory is not None and (not isinstance(directory,str) or not directory.strip() or '\x00' in directory):
         raise ValueError('execution.rebuild_scratch_directory must be a path or null.')

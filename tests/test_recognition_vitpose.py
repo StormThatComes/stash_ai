@@ -282,3 +282,28 @@ def test_real_transformer_loads_verified_safetensors_and_runs_coco_expert(tmp_pa
         points, scores = refiner.predict(image, [[0, 0, 100, 200]])
     assert points.shape == (1, 17, 2) and scores.shape == (1, 17)
     assert np.isfinite(points).all() and np.isfinite(scores).all()
+
+
+def test_compact_device_math_matches_reference_peaks_and_falls_back_for_flat_maps():
+    torch = pytest.importorskip('torch')
+    transformers = pytest.importorskip('transformers')
+    from stash_ai.recognition.vitpose_decode import compact
+    processor = transformers.VitPoseImageProcessor()
+    decoder = vitpose_pose.ViTPoseLarge(None,processor,device='cpu',batch_size=2)
+    y,x = torch.meshgrid(torch.arange(64),torch.arange(48),indexing='ij')
+    maps = torch.stack([torch.exp(-((x-cx)**2 + (y-cy)**2)/8) for cx,cy in [(20.2,34.7),(31.8,16.4)]])
+    maps = maps[:,None].expand(2,17,64,48).contiguous()
+    boxes = [np.array([[10,20,100,200],[160,50,90,160]],dtype=np.float32)]
+    expected = decoder._decode(SimpleNamespace(heatmaps=maps),boxes,2)
+    actual = compact(maps,boxes,processor,lambda: pytest.fail('unexpected reference fallback'))
+    for got,want in zip(actual,expected):
+        np.testing.assert_allclose(got,want,rtol=0,atol=1e-4)
+    assert compact(torch.ones_like(maps),boxes,processor,lambda:'reference') == 'reference'
+
+
+def test_benchmark_detects_changed_visibility_and_face_association():
+    from benchmarks.benchmark_crowded_vtt import compare_pose
+    a = {('1',2,(0,0,10,10)): [([[1.,2.],[3.,4.]], 'face')]}
+    b = {('1',2,(0,0,10,10)): [([[2.,2.],[-1.,-1.]], None)]}
+    assert compare_pose(a,b) == dict(changed_box_counts=0, changed_face_associations=1,
+                                     changed_visible_keypoints=1, max_visible_displacement_pixels=1.)
