@@ -605,3 +605,24 @@ The independent verdict records coverage and baseline/finalist counts in JSON an
 Up to three distinct contact episodes are perturbed separately in both private replays.
 Threshold proposals use a bounded two-person path when both goal owners are labelled
 in consecutive cues of the same measured shot. The proposal is validated by the usual full replay.
+
+### Comparing body recognition strategies
+
+Add `--compare-scene-strategies` to a run with `--solve --solver-validation holdout.json`.
+It replays the finalist on the same retained embeddings with tracklets off and on,
+each with the body scene bonus disabled, fixed or evidence-weighted. The positive
+bonus uses the finalist's effective value, then the face scene bonus, then 0.03.
+The `holdout_validation.scene_strategies` rows give the effective settings,
+physical coverage, accepted fragments per labelled performer, own-ID turns,
+contact exits and partner swaps. These comparisons do not retune the finalist.
+
+Use `--goal-policy identity-physical --physical-pair FACE_ID:BODY_ID` to label
+one training vote whose face and body have different baseline assignments.
+Repeat the option for more pairs. Both observations must come from the same
+current scan and cue. The face must belong to a selected goal. The label
+overrides its automatic physical alternative during goal scoring.
+
+Each omitted cue window now has a `damage` result for baseline and winner.
+It counts correct same-person pairs lost outside that window and incorrect
+cross-person pairs introduced by its omission, grouping projections by physical
+person and cue. The independent verdict includes both measures.

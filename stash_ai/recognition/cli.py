@@ -46,6 +46,10 @@ class RecognitionParser(argparse.ArgumentParser):
                 self.error('Outside impact limits must be nonnegative.')
             if any(v is not None for v in outside) and not result.solve:
                 self.error('Outside impact limits require --solve.')
+            if result.compare_scene_strategies and not result.solver_validation:
+                self.error('--compare-scene-strategies requires --solver-validation')
+            if result.physical_pair and result.goal_policy != 'identity-physical':
+                self.error('--physical-pair requires --goal-policy identity-physical')
             if result.solver_validation and not result.solve:
                 self.error('--solver-validation requires --solve')
             if result.yaml_output and not result.solve:
@@ -259,6 +263,10 @@ def parser():
         help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')
     merge_report.add_argument('--solver-validation', type=Path, help='After choosing the winner, replay a labelled holdout manifest and up to three omitted cue series.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
+    merge_report.add_argument('--compare-scene-strategies',action='store_true',
+        help='Compare six tracklet and body scene-bonus variants on the same labelled holdout.')
+    merge_report.add_argument('--physical-pair',action='append',default=[],metavar='FACE:BODY',
+        help='Label two retained observations of one physical person in one cue for identity-physical training goals. Repeatable.')
     merge_report.add_argument('--goal-policy', choices=('identity','identity-physical','strict'), default='identity',
         help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; identity-physical also accepts a frozen linked body as the same physical vote; strict requires every original observation. Applies to solver and set evaluation.')
     merge_report.add_argument('--exclude-performer-scene', action='append', type=performer_scene,

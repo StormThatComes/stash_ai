@@ -157,7 +157,7 @@ def read_manifest(manifest_path):
             document.get('series', []), triples, visible)
 
 
-def validate_winner(config, training, result, manifest_path, *, manifest=None, progress=None):
+def validate_winner(config, training, result, manifest_path, *, manifest=None, progress=None, compare_strategies=False):
     scenes, samples, labels, database, series, triples, visible = manifest or read_manifest(manifest_path)
     conflict = training.execute('SELECT DISTINCT scene FROM scans WHERE scope=? AND namespace=? AND '
                                 'scene IN (SELECT value FROM json_each(?)) LIMIT 1',
@@ -196,11 +196,15 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         else:
             groups = {k:[oid for oid in ids if oid in labels] for k,ids in groups.items()}
             cases = []
-        full = evaluate(settings,replay_labels,variants={'winner':winner},variant_started=announce,**options)
+        from .scene_strategy_validation import variants, strategy_summary, omission_damage
+        strategies = variants(winner) if compare_strategies else {}
+        full = evaluate(settings,replay_labels,variants={'winner':winner,**strategies},variant_started=announce,**options)
         predicted = full['trials']['winner/joint']['decisions']
         references = [oid for oid,row in samples.items() if row.get('reference')]
         metrics = {name:dict(_metrics(labels,samples,locations,trial['decisions'],partner_sets=triples,timing=timing),
                              visible=visible_scores(groups,trial['decisions'],labels,references)) for name,trial in full['trials'].items()}
+        strategy_results = {name:strategy_summary(cfg,metrics.pop(name+'/joint'),labels,locations,
+                            full['trials'][name+'/joint']['decisions']) for name,cfg in strategies.items()}
         contamination = dict(status='no_labelled_contact_pair')
         if cases:
             from .contact_holdout import stress_cases
@@ -290,16 +294,20 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             group = sorted(labels.keys()-excluded)
             before = _metrics(labels,samples,locations,predicted,excluded,triples,timing)
             for mode in ('rejected','empty'):
-                trial = evaluate(winner,labels,omitted_cues=window,omission_mode=mode,**options)['trials']['baseline/joint']['decisions']
+                omitted = evaluate(settings,labels,variants={'winner':winner},omitted_cues=window,omission_mode=mode,**options)['trials']
+                trial = omitted['winner/joint']['decisions']
+                damage = {name:omission_damage(labels,locations,group,full['trials'][name+'/joint']['decisions'],
+                                               omitted[name+'/joint']['decisions']) for name in ('baseline','winner')}
                 delta = _partition_delta(predicted,trial,group)
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
-                                   excluded_labels=len(excluded), **delta, reference=before, omitted=after))
-    return dict(verdict=holdout_verdict(metrics, contamination, incremental), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
+                                   excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
+    return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress),
+                scene_strategies=strategy_results, selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
 
-def holdout_verdict(metrics, contamination=None, incremental=None):
+def holdout_verdict(metrics, contamination=None, incremental=None, omissions=()):
     base, final = (metrics[name+'/joint'] for name in ('baseline','winner'))
     results = {}
     for label,category,field,total,higher in (
@@ -346,6 +354,11 @@ def holdout_verdict(metrics, contamination=None, incremental=None):
             risk(order+'_'+field,record['baseline'][field],record[field],True)
     if not incremental:
         risk('import_order',0,0,False)
+    for row in omissions:
+        for field in ('lost_correct_pairs','new_false_joins'):
+            damage = row['damage']
+            name = f"omission_{row['scene']}_{row['first_cue']}_{row['last_cue']}_{row['mode']}_{field}"
+            risk(name,damage['baseline'][field],damage['winner'][field],row['scored']>=2)
     states = {r['status'] for r in results.values()}
     status = next(s for s in ('regressed','improved','unchanged','no_coverage') if s in states)
     return dict(status=status,measures=results)
