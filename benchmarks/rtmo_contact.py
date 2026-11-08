@@ -93,19 +93,22 @@ def torso_nms(candidates,scale,settings):
     return keep
 
 
-def needs_retry(image,faces,people):
+def needs_retry(image,faces,people,*,missing_only=False):
     if len(people)>2 or len(faces)>2:
         return False
     context = getattr(image,'_recognition_crowd',None)
     if len(people)<2:
         return len(faces)==2 or bool(context and context[4])
+    if missing_only:
+        return False
     (a,b,c,d),(e,f,g,h) = [p['bounds'] for p in people]
     intersection = max(0,min(c,g)-max(a,e))*max(0,min(d,h)-max(b,f))
     return intersection > .2*min((c-a)*(d-b),(g-e)*(h-f))
 
 
 class ContactModel(SapiensIDFaces):
-    def __init__(self,config,paths,stats,*,torso_nms=False):
+    def __init__(self,config,paths,stats,*,torso_nms=False,missing_only=False):
+        self.missing_only = missing_only
         self.torso_nms = torso_nms
         self.rtmo = None
         self.stats = stats
@@ -113,7 +116,7 @@ class ContactModel(SapiensIDFaces):
 
     def _activate(self,image,faces,people):
         super()._activate(image,faces,people)
-        if not needs_retry(image,faces,self.frame_people):
+        if not needs_retry(image,faces,self.frame_people,missing_only=self.missing_only):
             return faces
         self.stats['retry_cues'] += 1
         if self.rtmo is None:

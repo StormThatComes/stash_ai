@@ -149,7 +149,7 @@ def validate(settings):
             raise ValueError(f'sapiensid.{section}.{key} requires a lowercase SHA256.')
 
 
-def contract(config,*,legacy_boundaries=False,legacy_association=False):
+def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -203,6 +203,10 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False):
         old['version'] = 'pmpose-sam-pose2seg-refinement-v1'
     from .inference_precision import contract as precision_contract
     evidence.update(precision_contract(config))
+    refinement = s['pose'].get('refinement',{})
+    if (refinement.get('enabled') and refinement.get('masked_identity_crop')
+            and not legacy_mask_quality and not legacy_association and not legacy_boundaries):
+        evidence['body_mask_quality'] = 'interior-laplacian-v1'
     return digest(evidence)
 
 

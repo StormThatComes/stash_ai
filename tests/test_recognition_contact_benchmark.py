@@ -12,8 +12,8 @@ def test_contact_variants_share_detector_and_keep_source_config(tmp_path):
     cfg = configured(tmp_path)
     variants = dict(contact_variants(cfg,tmp_path))
     assert [v.data['sapiensid']['pose']['backend'] for v in variants.values()]==[
-        'vitpose_plus_large','pmpose','vitpose_plus_large','vitpose_plus_large']
-    assert len({v.database for v in variants.values()})==4
+        'vitpose_plus_large','pmpose','vitpose_plus_large','vitpose_plus_large','vitpose_plus_large']
+    assert len({v.database for v in variants.values()})==5
     assert all(v.data['sapiensid']['pose']['detector']=='rfdetr_xl' for v in variants.values())
     assert variants['rfdetr-masked-pmpose'].data['sapiensid']['pose']['refinement']['masked_identity_crop']
 
@@ -75,8 +75,8 @@ def test_one_invocation_scans_all_variants_without_publishing(tmp_path,monkeypat
     monkeypatch.setattr('stash_ai.recognition.person_collection.PersonCollector',collector)
     labels = {'1':{'0':[dict(truth='A',point=[80,100],reference=True)]}}
     result = run(cfg,labels,tmp_path,compare_contact=True)
-    assert models==[('vitpose_plus_large',False),('pmpose',False),('vitpose_plus_large',True),('vitpose_plus_large',True)]
-    assert len(result)==4 and all(v['verified_vtt_cues']==v['cues']>0 for v in result.values())
+    assert models==[('vitpose_plus_large',False),('pmpose',False),('vitpose_plus_large',True),('vitpose_plus_large',True),('vitpose_plus_large',True)]
+    assert len(result)==5 and all(v['verified_vtt_cues']==v['cues']>0 for v in result.values())
     assert all(v['scored_cues']==1 for v in result.values())
     assert not client.writes and not cfg.database.exists()
 

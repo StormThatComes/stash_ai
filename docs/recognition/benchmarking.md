@@ -176,3 +176,14 @@ breakdown for poses with a predicted wrist closer to the partner's labelled
 wrist. This closed-set ranking measures the encoder signal separately from
 the end-to-end identity assignments. The optional model only runs in the
 benchmark and its working files use the configured benchmark directory.
+
+The `rfdetr-vitpose-rtmo-missing` profile only retries missing people with two face or
+temporal torso cues. `delta_from_vitpose` reports the change in correct pairs,
+partner joins, missing/duplicate poses and time per 1,000 cues.
+
+The optional paired KPR report also removes the query's true identity from the
+reference gallery. Each model calibrates its distance cutoff at the same target
+false-accept rate (1%) using absent probes from other labelled scenes. It reports
+actual held-out false accepts, correctly recovered known queries and abstentions.
+Include at least two scenes with competing references. A single scene reports
+missing calibration. These retrieval results do not change production assignments.

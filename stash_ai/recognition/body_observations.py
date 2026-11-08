@@ -30,11 +30,11 @@ def available(db):
     return db.execute("SELECT 1 FROM sqlite_master WHERE name='body_observations' AND type='table'").fetchone() is not None
 
 
-def _contract(config,version,*,legacy_boundaries=False,legacy_association=False):
+def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
     return digest([version,person_contract(config,legacy_boundaries=legacy_boundaries,
-                                          legacy_association=legacy_association),settings])
+                                          legacy_association=legacy_association,legacy_mask_quality=legacy_mask_quality),settings])
 
 
 def contract(config):
@@ -48,11 +48,12 @@ def compatible_contracts(config):
 def _previous_contracts(config):
     # Old association/crop policies and grayscale digests cannot train current
     # cores; retain their frozen banks only as conservative competitors.
+    old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
     return [_contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),
-            _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
+            _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, old_mask, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
         for association,boundaries in ((False,False),('v4',False),('joint',False),('partial',False),(True,False),(True,True))
         for version in ('independent-person-v2-rgb-pixels','independent-person-v1'))]
 

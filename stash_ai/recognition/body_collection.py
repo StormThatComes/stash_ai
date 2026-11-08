@@ -5,12 +5,16 @@ import numpy as np
 from .body_observations import contract, identifier
 
 
-def _pixels(image,bounds):
+def _pixels(image,bounds,mask=None):
     left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
         lap=(4*values[1:-1,1:-1]-values[:-2,1:-1]-values[2:,1:-1]
              -values[1:-1,:-2]-values[1:-1,2:])
+        if mask is not None:
+            interior = (mask[1:-1,1:-1] & mask[:-2,1:-1] & mask[2:,1:-1]
+                        & mask[1:-1,:-2] & mask[1:-1,2:])
+            lap = lap[interior]
         sharpness=float(lap.var()) if lap.size else 0.
         pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
@@ -23,8 +27,16 @@ def _pixels(image,bounds):
 def quality(image,person,people,settings):
     from .inference_cache import many
     bounds=person['bounds'];left,top,right,bottom=bounds
-    sharpness,pixel_digest,appearance_hash=many('body_quality','body-pixels-v1',[(image,bounds)],
-        lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
+    packed = person.get('pose_refinement',{}).get('encoder_mask')
+    if packed:
+        from .person_geometry import encoder_crop, unpack_mask
+        width,height = right-left,bottom-top
+        mask = unpack_mask(packed,width,height)
+        with encoder_crop(image,bounds,packed) as crop:
+            sharpness,pixel_digest,appearance_hash = _pixels(crop,(0,0,width,height),mask)
+    else:
+        sharpness,pixel_digest,appearance_hash=many('body_quality','body-pixels-v1',[(image,bounds)],
+            lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     overlap=0.
     for other in people:
         if other is person:continue
@@ -37,6 +49,8 @@ def quality(image,person,people,settings):
     border=sum((left==0,top==0,right==image.width,bottom==image.height))
     measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,sharpness=sharpness,
                   keypoints=points,detected_keypoints=detected,overlap=overlap,border_edges=border)
+    if packed:
+        measured['foreground_hash'] = appearance_hash
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
             'person_keypoints' if points<settings['min_keypoints'] else
@@ -117,12 +131,6 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             row = face = None
         if refinement.get('mask_conflict'):
             reason = 'person_mask_conflict'
-        if refinement.get('encoder_mask'):
-            from .person_geometry import encoder_crop
-            with encoder_crop(image, person['bounds'], refinement['encoder_mask']) as foreground:
-                _, measured['pixel_digest'], measured['foreground_hash'] = _pixels(
-                    foreground, (0, 0, foreground.width, foreground.height))
-            measured['appearance_hash'] = measured['foreground_hash']
         face_accepted=row is not None and row['rejected'] is None
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None

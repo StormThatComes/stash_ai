@@ -51,19 +51,23 @@ def used_keypoints(person):
     return sum(x>=0 and y>=0 for x,y in body_points(person))
 
 
+def unpack_mask(packed,width,height):
+    import base64
+    count = width*height
+    bits = np.frombuffer(base64.b64decode(packed,validate=True),dtype='uint8')
+    if len(bits)!=(count+7)//8:
+        raise ValueError('Identity mask dimensions differ from the person crop.')
+    return np.unpackbits(bits,count=count).reshape(height,width).astype(bool)
+
+
 def encoder_crop(image, bounds, packed=None):
     """Return an owned RGB crop. The optional bit mask is local to these bounds."""
-    import base64
     from PIL import Image
     crop = image.crop(bounds)
     if not packed:
         return crop
     with crop:
-        count = crop.width * crop.height
-        bits = np.frombuffer(base64.b64decode(packed, validate=True), dtype='uint8')
-        if len(bits) != (count + 7) // 8:
-            raise ValueError('Identity mask dimensions differ from the person crop.')
-        mask = np.unpackbits(bits, count=count).reshape(crop.height, crop.width).astype(bool)
+        mask = unpack_mask(packed,crop.width,crop.height)
         pixels = np.array(crop.convert('RGB'))
         pixels[~mask] = 127
         return Image.fromarray(pixels)
