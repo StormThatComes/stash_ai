@@ -95,16 +95,39 @@ class Pending:
         budget = self.search.config.data['sapiensid']['execution']['reference_bytes'] if self.search.mean_versions else 0
         changed = changed_modes(self.search,previous,budget)
         scope_generation = [version(self.db), version(self.db, 'heads')] if self.local_clocks else None
-        for scan,scene in self.db.execute("SELECT s.id,s.scene FROM scans s WHERE scope=? AND namespace=? "
-                                          "AND status='complete' AND "+predicate(),(scope,namespace)):
+        from .profiling import count
+        reverse = None
+        nominated = None
+        if self.local_clocks and self.banks:
+            from .rear_reverse import ReverseIndex
+            reverse = ReverseIndex(self.db,scope,namespace,stamp,self)
+            nominated = reverse.nominate(self,changed)
+        base = " FROM scans s "
+        if self.local_clocks:
+            base += ("LEFT JOIN evidence_versions b ON b.kind='raw-body' AND b.key=s.id "
+                     "LEFT JOIN evidence_versions f ON f.kind='raw-observations' AND f.key=s.id "
+                     "LEFT JOIN evidence_versions l ON l.kind='scene' AND l.key=json_array(s.scope,s.namespace,s.scene) ")
+            fields = 's.id,s.scene,COALESCE(b.version,0),COALESCE(f.version,0),COALESCE(l.version,0)'
+        else:
+            fields = 's.id,s.scene'
+        heads = self.db.execute('SELECT '+fields+base+"WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND "
+                                +predicate(),(scope,namespace))
+        for scan,scene,*clocks in heads:
+            count('rear_scene_headers')
             key = 'rear-pending:' + digest([scope,namespace,scene])
+            identity = ([scan,stamp,*clocks] if self.local_clocks else
+                        [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None,
+                         version(self.db,'raw-observations',scan) if self.audited else None])
+            if reverse is not None:
+                reverse.state['scans'][scan] = identity
+                if (nominated is not None and scan not in selected and scan not in nominated
+                        and reverse.previous.get('scans',{}).get(scan)==identity
+                        and self.db.execute('SELECT 1 FROM metadata WHERE key=?',(key,)).fetchone()):
+                    count('rear_scenes_skipped_by_reverse_index')
+                    continue
+            count('rear_scene_envelopes_read')
             saved = self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
             entry = json.loads(saved[0]) if saved else {}
-            identity = [scan,stamp,version(self.db,'raw-body',scan) if self.audited else None,
-                        version(self.db,'raw-observations',scan) if self.audited else None]
-            if self.local_clocks:
-                from .local_dependencies import scene_key
-                identity.append(version(self.db, 'scene', scene_key(self.db, scan)))
             refresh = (not self.audited or (scan in selected and not self.local_clocks)
                        or entry.get('identity') != identity or 'balls' not in entry)
             if refresh:
@@ -121,6 +144,8 @@ class Pending:
             revision = self.generation(entry,banks)
             certified = scan not in selected or (self.local_clocks and entry.get('checked_scope') == scope_generation)
             if certified and not refresh and not near_change and entry.get('checked')==revision:
+                if reverse is not None:
+                    reverse.store(scan,entry,banks,self)
                 continue
             if scan in selected or scan in active or banks:
                 yield scan,scene
@@ -130,9 +155,13 @@ class Pending:
                     WHERE b.scan=? AND rival IS NOT NULL ORDER BY rival""",(scan,))]
                 revision = self.generation(entry,banks)
                 entry['checked_scope'] = scope_generation
+            if reverse is not None:
+                reverse.store(scan,entry,banks,self)
             entry['checked'] = revision
             value = encoded(entry)
             if not saved or saved[0]!=value:
                 self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(key,value))
+        if reverse is not None:
+            reverse.finish()
         if previous != self.search.mean_versions:
             self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(catalogue,encoded(self.search.mean_versions)))

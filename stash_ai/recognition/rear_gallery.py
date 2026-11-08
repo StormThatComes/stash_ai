@@ -65,6 +65,15 @@ def load(db, config, scope, namespace, *, pages=None):
         measured = row.get('shot')
         return tuple(json.loads(measured)) if measured else ('unknown',row['scan'])
 
+    from .derived_cache import current
+    from .dependencies import supported
+    from .local_dependencies import available
+    cache = current() if pages is not None and supported(db) and available(db) and db.execute(
+        'PRAGMA user_version').fetchone()[0]>=13 else None
+    if cache is not None:
+        from .dependency_schema import validate_triggers
+        validate_triggers(db,required=True)
+
     def banks():
         cursor = db.execute(sql,(scope,namespace,contract(config),policy(config)))
         for (owner,kind), records in groupby(cursor,lambda raw:(raw['owner'],raw['perspective'])):
@@ -72,21 +81,10 @@ def load(db, config, scope, namespace, *, pages=None):
                 from .paged_tracks import Tracks
                 tracks = Tracks(pages, Witness)
                 pages.execute('DELETE FROM witnesses')
-                multiple_scans = False
-                for scan,group in groupby(records,lambda raw:raw['scan']):
-                    for raw in group:
-                        row = Witness(raw)
-                        row['roots'] = json.loads(row['roots'])
-                        tracks.add(row, local_shot(row))
-                    for kept in tracks.modes(scan,settings,scores,rank,local_shot):
-                        if len(kept)>=max(2,settings['attach_min_support']):
-                            yield owner,scan,[r for _,_,r in kept]
-                    if not multiple_scans:
-                        multiple_scans = pages.execute('SELECT 1 FROM witnesses WHERE scan<>? LIMIT 1',(scan,)).fetchone() is not None
-                if multiple_scans:
-                    for kept in tracks.modes(None,settings,scores,rank,lambda row:row['scan']):
-                        if len(kept)>=max(2,settings['attach_min_support']):
-                            yield owner,kept[0][2]['scan'],[r for _,_,r in kept]
+                from .rear_bank_cache import selections
+                for label,rows in selections(db,pages,records,tracks,Witness,settings,scores,rank,local_shot,
+                                             cache,policy(config)):
+                    yield owner,label,rows
                 continue
             tracks = []
             cost = 0
@@ -109,7 +107,7 @@ def load(db, config, scope, namespace, *, pages=None):
                         yield owner,kept[0][2]['scan'],[r for _,_,r in kept]
     if pages is not None:
         from .perspective_pages import DiskGallery
-        return DiskGallery(pages,banks(),limit)
+        return DiskGallery(pages,banks(),limit,feature=feature,cache=cache,source=db)
     retained = []
     used = 0
     for owner,source,rows in banks():
