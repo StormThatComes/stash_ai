@@ -188,7 +188,8 @@ def validate_triggers(db, *, required=False):
     from .shared_person_evidence import TRIGGERS as shared_triggers
     from .local_dependencies import TRIGGERS as local_triggers,LEGACY_TRIGGERS as old_local
     from .scene_owner_index import TRIGGERS as owner_triggers
-    accepted={**owner_triggers,**local_triggers,**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
+    from .rear_scene_changes import TRIGGERS as rear_triggers
+    accepted={**rear_triggers,**owner_triggers,**local_triggers,**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     legacy=db.execute('PRAGMA user_version').fetchone()[0]<15
@@ -205,6 +206,7 @@ def validate_triggers(db, *, required=False):
     if db.execute('PRAGMA user_version').fetchone()[0]>=12:expected.update(shared_triggers);expected.update(PIXEL_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=13:expected.update(local_triggers)
     if db.execute('PRAGMA user_version').fetchone()[0]>=15:expected.update(owner_triggers)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=16:expected.update(rear_triggers)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
 

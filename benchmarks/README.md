@@ -270,3 +270,12 @@ CI exercises only tiny semantic/resource fixtures. It asserts outcomes, bounded
 storage and transaction behavior, never wall-clock speed. No new GPU/model
 smoke or downloaded asset is required. Production timings need a separate run on
 the intended hardware; synthetic tests do not predict GPU throughput.
+
+Run `python -m benchmarks.benchmark_rear_index --profile library --scenes 10000 --face-config facial_recognition.yml`
+to compare selective rear-gallery nomination against exhaustive changes on synthetic
+two-person VTT scenes. The workload has 300 cues per scene, 210 with two body
+observations, recurring performers, clothing changes and visually similar partners.
+It reuses 576 dense 4096-dimensional view vectors. The output reports true changes,
+nominated scenes, missed changes, SQLite footprint, SQL statement count and process
+I/O where available. Supplying the recognition configuration uses its work directory.
+Without a configuration, the benchmark runs in memory.
