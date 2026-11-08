@@ -186,7 +186,7 @@ def compare_pose(reference, candidate):
                 changed_visible_keypoints=visibility,max_visible_displacement_pixels=max_error)
 
 
-def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False, compare_contact=False, kpr_config=None, kpr_weights=None):
+def run(config, labels, directory, *, profile_cuda=False, body_batches=None, compare_vitpose=False, compare_contact=False, kpr_config=None, kpr_weights=None, kpr_python=None):
     from stash_ai.recognition.backend import LazyBackend
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.models import namespace
@@ -201,7 +201,7 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
     url = os.getenv('STASH_URL','http://localhost:9999')
     results = {}
     catalogue = {}
-    if (kpr_config is None)!=(kpr_weights is None) or kpr_config and not compare_contact:
+    if (kpr_config is None)!=(kpr_weights is None) or kpr_config and not compare_contact or kpr_python and not kpr_config:
         raise ValueError('Use --kpr-config and --kpr-weights together with --compare-contact.')
     if compare_contact:
         from stash_ai.recognition.crowd_labels import validate
@@ -336,7 +336,7 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                     def source_for(scene):
                         with closing(services.source(client,client.scene(scene),cfg)) as source:
                             yield CheckedSource(source,scene,catalogue,False)
-                    extractor = kpr_contact.Extractor(kpr_config,kpr_weights,directory,cfg.data['models']['device'])
+                    extractor = kpr_contact.Extractor(kpr_config,kpr_weights,directory,cfg.data['models']['device'],kpr_python)
                     results[name]['paired_reid'] = kpr_contact.run(state.connection,selected,labels,source_for,extractor)
                     del extractor
                 if compare_vitpose:
@@ -354,6 +354,7 @@ if __name__=='__main__':
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--labels',type=Path,required=True)
     parser.add_argument('--cuda-profile',action='store_true')
+    parser.add_argument('--kpr-python',type=Path,help='Python interpreter of the upstream KPR environment.')
     parser.add_argument('--kpr-config',type=Path,help='Upstream KPR evaluation YAML for paired contact retrieval.')
     parser.add_argument('--kpr-weights',type=Path,help='Trained KPR checkpoint for the selected YAML.')
     modes = parser.add_mutually_exclusive_group()
@@ -370,4 +371,4 @@ if __name__=='__main__':
     parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='crowded-vtt-',dir=parent) as directory:
         print(json.dumps(run(config,json.loads(args.labels.read_text()),Path(directory),
-                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode,compare_contact=args.compare_contact,kpr_config=args.kpr_config,kpr_weights=args.kpr_weights),indent=2))
+                             profile_cuda=args.cuda_profile, body_batches=args.body_batches,compare_vitpose=args.compare_vitpose_decode,compare_contact=args.compare_contact,kpr_config=args.kpr_config,kpr_weights=args.kpr_weights,kpr_python=args.kpr_python),indent=2))

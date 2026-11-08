@@ -2,6 +2,10 @@
 from collections import Counter, defaultdict
 from contextlib import closing
 import json
+from pathlib import Path
+from itertools import groupby
+import subprocess
+import sys
 import time
 
 import numpy as np
@@ -26,38 +30,48 @@ def prompts(image,people,index):
 
 
 class Extractor:
-    def __init__(self,config,weights,directory,device):
-        from torchreid.scripts.builder import build_config
-        from torchreid.tools.feature_extractor import KPRFeatureExtractor
-        from yacs.config import CfgNode
-        import torch
+    """Run the optional upstream stack in its own Python environment."""
+    def __init__(self,config,weights,directory,device,python=None):
         if not weights.is_file() or not config.is_file():
             raise ValueError('KPR comparison requires an existing upstream YAML and trained checkpoint.')
-        options = CfgNode(dict(model=dict(load_weights=str(weights.resolve())),
-                               data=dict(save_dir=str(directory.resolve()))))
-        cfg = build_config(config_path=str(config),config=options)
-        if device=='cpu':
-            cfg.use_gpu = False
-        if device=='cuda' and not cfg.use_gpu:
-            raise ValueError('KPR cannot use the requested CUDA device.')
-        if not cfg.model.kpr.keypoints.use_negative_keypoints or cfg.model.promptable_trans.disable_inference_prompting:
-            raise ValueError('KPR config must enable negative keypoints and inference prompting.')
-        self.model = KPRFeatureExtractor(cfg,verbose=False)
-        self.device = 'cuda' if cfg.use_gpu else 'cpu'
-        self.torch = torch
+        self.config,self.weights = config.resolve(),weights.resolve()
+        self.directory = directory/'kpr-inputs'
+        self.directory.mkdir()
+        self.python = python or sys.executable
+        self.device = device
+        self.batches = 0
 
-    def __call__(self,samples):
-        with self.torch.inference_mode():
-            _,features,visibility,_ = self.model(samples)
-        return list(zip(features.detach().cpu(),visibility.detach().cpu()))
+    def stage(self,samples):
+        batch = self.batches
+        self.batches += 1
+        fields = {f'{key}_{i}':value for i,sample in enumerate(samples) for key,value in sample.items()}
+        np.savez(self.directory/f'input-{batch}.npz',**fields)
+        return [(batch,i) for i in range(len(samples))]
 
-    def distances(self,query,references):
-        from torchreid.metrics.distance import compute_distance_matrix_using_bp_features
-        features,visible = zip(*references)
-        matrix,_ = compute_distance_matrix_using_bp_features(query[0][None],self.torch.stack(features),
-            query[1][None],self.torch.stack(visible),use_gpu=False,use_logger=False)
-        common = (self.torch.stack(visible).bool() & query[1].bool()).flatten(1).any(dim=1)
-        return np.where(common.numpy(),matrix[0].numpy(),np.inf)
+    def extract(self,rows):
+        if not rows:
+            return
+        worker = Path(__file__).with_name('kpr_worker.py')
+        subprocess.run([str(self.python),str(worker),str(self.config),str(self.weights),str(self.directory),
+                        str(self.batches),self.device],check=True)
+        self.device = (self.directory/'device.txt').read_text()
+        for batch,items in groupby(rows,key=lambda r:r['kpr'][0]):
+            with np.load(self.directory/f'output-{batch}.npz',allow_pickle=False) as result:
+                features,visible = result['features'],result['visible']
+                if not np.isfinite(features).all() or not np.isfinite(visible).all() or np.any(visible<0):
+                    raise ValueError('Invalid KPR part features or visibility.')
+                for row in items:
+                    i = row['kpr'][1]
+                    row['kpr'] = features[i],visible[i]
+
+    @staticmethod
+    def distances(query,references):
+        # Upstream mean of Euclidean part distances, weighted by shared visibility.
+        features,visible = (np.stack(values) for values in zip(*references))
+        weights = np.sqrt(visible*query[1])
+        parts = np.linalg.norm(features-query[0],axis=-1)
+        total = weights.sum(axis=-1)
+        return np.divide((weights*parts).sum(axis=-1),total,out=np.full_like(total,np.inf,dtype=float),where=total>0)
 
 
 def closest(distances, refs):
@@ -137,7 +151,8 @@ def run(db,selected,labels,source_for,extractor):
                             body=vector(dict(embedding=raw[i][1])),pixels=sha256(sample['image'].tobytes()).digest())))
                     if selected_poses:
                         samples,items = zip(*selected_poses)
-                        for features,row in zip(extractor(list(samples)),items,strict=True):
+                        for features,row in zip(extractor.stage(samples),items,strict=True):
                             rows.append(dict(row,kpr=features))
+    extractor.extract(rows)
     result = compare(rows,counts,extractor)
     return dict(result,device=extractor.device,elapsed_seconds=time.monotonic()-started)

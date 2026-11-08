@@ -133,8 +133,8 @@ activity on CUDA. On CPU omit `--cuda-profile`.
 python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels contact-labels.json --compare-contact --cuda-profile
 ```
 
-The three variants use RF-DETR-XL with ViTPose++, RF-DETR-XL with masked
-PMPose, and the first variant with an additional full-frame RTMO-S pass on
+The variants use RF-DETR-XL with ViTPose++, RF-DETR-XL with masked
+PMPose, and two variants with an additional full-frame RTMO-S pass (box or torso-aware NMS) on
 unresolved face/pose counts, overlapping boxes or temporal two-person
 evidence. RTMO's pinned COCO17 ONNX model downloads into the configured model
 directory if missing-model downloads are enabled. All variants scan the
@@ -156,11 +156,12 @@ cues. These retries use the neighbouring retained VTT pixels and timestamps.
 ### Optional paired KPR retrieval
 
 Install the [upstream KPR project](https://github.com/VlSomers/keypoint_promptable_reidentification/tree/e3e6ee2ffb74fd86a39518ce9a25ff91fbd973fa)
-and its dependencies in the benchmark environment. Use its trained Occluded
+and its dependencies in its own Python 3.10 environment. Pass that interpreter
+via --kpr-python. Recognition runs in the normal stash_ai environment. Use the trained Occluded
 PoseTrack checkpoint and matching YAML. Pass both local paths explicitly.
 
 ```shell
-python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels contact-labels.json --compare-contact --kpr-config /models/kpr/kpr_occ_posetrack_test.yaml --kpr-weights /models/kpr/kpr_occ_pt_IN_82.34_92.33_42323828.pth.tar
+python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels contact-labels.json --compare-contact --kpr-python /opt/kpr/bin/python --kpr-config /models/kpr/kpr_occ_posetrack_test.yaml --kpr-weights /models/kpr/kpr_occ_pt_IN_82.34_92.33_42323828.pth.tar
 ```
 
 Mark clean reference cues for at least two performers. The paired retrieval

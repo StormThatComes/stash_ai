@@ -179,3 +179,11 @@ def test_paired_reid_scores_both_models_with_the_same_foreign_reference():
     result = compare(rows,Counter(),probe)['paired_top1']
     assert result['sapiensid']=={'own':1,'mixed_wrist_own':1}
     assert result['kpr']=={'partner':1,'mixed_wrist_partner':1}
+
+
+def test_kpr_distance_uses_only_shared_visible_parts():
+    from benchmarks.kpr_contact import Extractor
+    query = np.zeros((2,3)),np.array([1.,0.])
+    reference = np.array([[1.,0.,0.],[9.,9.,9.]]),np.array([.5,1.])
+    invisible = query[0],np.array([0.,1.])
+    assert Extractor.distances(query,[reference,invisible]).tolist()==[1.,np.inf]
