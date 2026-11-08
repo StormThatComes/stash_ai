@@ -16,7 +16,7 @@ def _envelopes(db, scan, stamp):
     balls = []
     owners = set()
     for row in db.execute("""SELECT CASE WHEN COALESCE(json_extract(b.quality,'$.quality.orientation'),'unknown')<>'front'
-            OR json_extract(m.proof,'$.query_perspective')='back' THEN b.embedding END AS embedding,
+            OR json_extract(m.proof,'$.query_perspective') IN ('back','side') THEN b.embedding END AS embedding,
             m.person FROM body_observations b
             JOIN body_members m ON b.id=m.observation WHERE b.scan=? AND m.policy=? AND b.rejected IS NULL
             AND b.embedding IS NOT NULL ORDER BY b.cue,b.id""", (scan,stamp)):

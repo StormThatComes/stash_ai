@@ -75,11 +75,16 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     # A single pose containing distinct accepted faces is still an unresolved pair.
-    heads = [(f.box[0]+f.box[2]/2, f.box[1]+f.box[3]/2, min(f.box[2:]))
-             for f, row in zip(faces,rows) if row['rejected'] is None]
-    merged_pair = len(people)==1 and any(
-        np.hypot(x-u,y-v) >= max(4.,.7*max(size,other_size))
-        for i,(x,y,size) in enumerate(heads) for u,v,other_size in heads[i+1:])
+    distinct_faces = merged_pair = False
+    if len(people)==1 and len(faces)>=2:
+        left,top,right,bottom = people[0]['bounds']
+        heads = [(f.box[0]+f.box[2]/2,f.box[1]+f.box[3]/2,min(f.box[2:]))
+                 for f,row in zip(faces,rows) if row['rejected'] is None]
+        for i,(x,y,size) in enumerate(heads):
+            for u,v,other in heads[i+1:]:
+                if np.hypot(x-u,y-v) >= max(4.,.7*max(size,other)):
+                    distinct_faces = True
+                    merged_pair |= left<=x<right and top<=y<bottom and left<=u<right and top<=v<bottom
     items=[]
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):
@@ -104,8 +109,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measured['query_only'] = True
         if person.get('future_torso_retry'):
             measured.update(query_only=True,query_only_reason='future_torso_retry')
+        if distinct_faces:
+            measured['expected_people'] = 2
         if merged_pair:
-            measured.update(expected_people=2, query_only=True, query_only_reason='unresolved_partner')
+            measured.update(query_only=True, query_only_reason='unresolved_partner')
             # Neither face owns a merged body. Keep the independent face observations.
             row = face = None
         if refinement.get('mask_conflict'):

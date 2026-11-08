@@ -154,7 +154,8 @@ class Gallery:
             if rows[0].get('perspective','back')==perspective and len(independent)>=max(2,settings['attach_min_support']):
                 scores, witnesses = zip(*independent)
                 source = witnesses[0].get('scan',source)
-                result.append((sum(scores)/len(scores), min(scores), owner, source, witnesses, rival_score))
+                proof = tuple({k:w[k] for k in ('id','scan','roots') if k in w} for w in witnesses)
+                result.append((sum(scores)/len(scores), min(scores), owner, source, proof, rival_score))
             else:
                 # Losing independent support cannot remove a plausible rival.
                 result.append((-1., -1., owner, source, (), rival_score))

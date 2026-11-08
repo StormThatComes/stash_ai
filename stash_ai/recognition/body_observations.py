@@ -51,7 +51,7 @@ def _previous_contracts(config):
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
     return [_contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
-        for association,boundaries in ((False,False),('joint',False),('partial',False),(True,False),(True,True))
+        for association,boundaries in ((False,False),('v4',False),('joint',False),('partial',False),(True,False),(True,True))
         for version in ('independent-person-v2-rgb-pixels','independent-person-v1'))]
 
 
