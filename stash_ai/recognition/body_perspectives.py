@@ -485,6 +485,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
     from collections import Counter
     claims = Counter((owner,lookup[oid]['cue']) for oid,owner in proposed.items())
     protected = set()
+    split = set()
     retry = {}
     for old,members in owner_rows.items():
         core = [r for r in members if decisions[r['id']]['reason']=='body_scene_core']
@@ -492,6 +493,16 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             continue
         targets = {proposed.get(r['id']) for r in core}
         if None in targets or len(targets)!=1:
+            if settings.get('tracklet_matching'):
+                from .body_tracklets import split_members
+                def occupied(row,target):
+                    from .crowd_context import pair
+                    return ((row.get('face_person') and decisions[row['id']].get('person') not in (None,target))
+                            or any(other['cue']==row['cue'] and other['id']!=row['id'] and
+                                   pair([json.loads(row['geometry']),json.loads(other['geometry'])]) is not None
+                                   for other in seeds.get(target,())))
+                allowed = split_members(core,proposed,occupied,settings)
+                split.update(oid for oid in allowed if claims[proposed[oid],lookup[oid]['cue']]==1)
             protected.add(old)
             continue
         target = next(iter(targets))
@@ -507,7 +518,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                               reason='fragment_auxiliary_retry',retry_owner=target,
                               retry_when='confirmed_core_changes')
     for oid,owner,angle,proof,score in candidates:
-        if oid in retry or decisions[oid]['person'] in protected or claims[owner,lookup[oid]['cue']] != 1:
+        if oid in retry or (decisions[oid]['person'] in protected and oid not in split) or claims[owner,lookup[oid]['cue']] != 1:
             continue
         rooted = {k:v for k,v in decisions[oid].items() if k in ('rooted_view','rooted_track','view_exclusion','orientation_measurement')}
         decisions[oid] = dict(person=owner, status='accepted', role='auxiliary',

@@ -63,7 +63,7 @@ _GROUPS = (
      'provisional=cross_scene_provisional min_merge_support cooccurrence_merge_threshold'),
 
     ('matching.body.identities', 'sapiensid.identities',
-     'enabled match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus ambiguity_margin min_support attach_min_support '
+     'enabled tracklet_matching match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus ambiguity_margin min_support attach_min_support '
      'min_appearance_distance'),
     ('matching.body.anchors', 'sapiensid.identities',
      'min_keypoints=anchor_min_keypoints min_person_pixels=anchor_min_person_pixels '
