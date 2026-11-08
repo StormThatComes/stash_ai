@@ -29,6 +29,10 @@ def map_bounded(function, items, *, cost, payload=lambda item: item, kind, cache
 
     def flush():
         from collections import deque
+        if all(found is not None for _, _, found in batch):
+            for item, _, found in batch:
+                yield item, found
+            return
         jobs = (Work(i, kind, found if found is not None else payload(item), amount, ready=found is not None)
                 for i, (item, amount, found) in enumerate(batch))
         queued = deque()
