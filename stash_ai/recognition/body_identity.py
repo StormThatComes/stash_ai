@@ -203,7 +203,23 @@ class Scores:
         return (total/count,minimum) if count else (-1.,-1.)
 
 
-def _load_scene(db,scan,config):
+def _prepare_vectors(rows):
+    from functools import lru_cache
+    from .clustering import vector as face_vector
+
+    @lru_cache(maxsize=16)
+    def normalized(blob):
+        result = vector({'embedding': blob})
+        result.flags.writeable = False
+        return result
+
+    for row in rows:
+        row['_vector'] = normalized(row['embedding'])
+        row['_face_vector'] = (face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
+            if row['face_embedding'] is not None and row['face_rejected'] is None else None)
+
+
+def _load_scene(db,scan,config, *, prepare_vectors=True):
     settings=config.data['sapiensid']['identities'];expected=contract(config)
     record=db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()
     completed=db.execute('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)).fetchone()[0]
@@ -222,11 +238,9 @@ def _load_scene(db,scan,config):
         row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
             raise ResourceLimit('Person scene references exceed sapiensid.execution.reference_bytes.')
-        row['_vector']=vector(row)
-        from .clustering import vector as face_vector
-        row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
-            if row['face_embedding'] is not None and row['face_rejected'] is None else None)
         rows.append(row)
+    if prepare_vectors:
+        _prepare_vectors(rows)
     from .body_origins import origins_for_scene, ordered_owners
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
     origins=origins_for_scene(db,record)
