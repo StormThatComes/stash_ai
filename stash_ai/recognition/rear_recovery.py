@@ -56,6 +56,26 @@ def _rows(db, scan, stamp):
         ORDER BY b.cue,b.id""",(scan,stamp))
 
 
+def _occupied_torsos(db, scan, stamp, config):
+    from .pose_policy import anchor_sql
+    from .reference_roles import strict_sql
+    # Only trusted face/body anchors can exclude a physically distinct rival.
+    source = """SELECT b.id,b.cue,b.geometry,m.person FROM body_observations b
+        JOIN body_members m ON m.observation=b.id JOIN observations o ON o.id=b.face
+        JOIN members f ON f.observation=o.id AND f.person=m.person
+        WHERE b.scan=? AND m.policy=? AND m.role='anchor' AND m.status='accepted'
+        AND o.rejected IS NULL AND b.rejected IS NULL AND """ + strict_sql('o','f') + ' AND '+anchor_sql('o',config.data['clustering'])
+    torsos = defaultdict(list)
+    for oid,cue,geometry,owner in db.execute(source,(scan,stamp)):
+        torsos[cue].append((oid,owner,json.loads(geometry)))
+    return torsos
+
+
+def impossible_owners(row,person,torsos):
+    from .crowd_context import pair
+    return {owner for oid,owner,other in torsos if oid!=row['id'] and pair([person,other]) is not None}
+
+
 def _scene(db, scan, stamp, gallery, search, config):
     from .body_perspectives import orientation
     settings = config.data['sapiensid']['identities']
@@ -68,6 +88,7 @@ def _scene(db, scan, stamp, gallery, search, config):
     from .rear_gallery import winner
     guard = FaceGuard(db, config)
     batch = []
+    torsos = _occupied_torsos(db,scan,stamp,config)
     waiting = {}
     decisions = {}
     def verify_batch():
@@ -106,6 +127,9 @@ def _scene(db, scan, stamp, gallery, search, config):
         bonus = config.data['clustering']['same_scene_match_bonus'] if roster else 0.
         search_settings = dict(settings,match_threshold=max(0.,settings['match_threshold']-bonus))
         ranked = gallery.rank(query,scan,search_settings,quality(row).get('pixel_digest'),perspective=kind)
+        occupied = impossible_owners(row,person,torsos.get(row['cue'],()))
+        if occupied:
+            ranked = [candidate for candidate in ranked if candidate[2] not in occupied]
         best = winner(ranked,settings,contextual=roster,bonus=bonus)
         if best is None:
             if ranked:
@@ -141,7 +165,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             runner,rival = max(competitors)
             proof.update(runner=runner,rival=rival,rival_scope='certified_rear_views')
         proposals[row['id']] = (owner,row['cue'],old,proof)
-        batch.append((row['id'], query, {owner,old}, mean-settings['ambiguity_margin']))
+        batch.append((row['id'], query, {owner,old} | occupied, mean-settings['ambiguity_margin']))
         if len(batch) >= min(search.block, 32):
             verify_batch()
     verify_batch()

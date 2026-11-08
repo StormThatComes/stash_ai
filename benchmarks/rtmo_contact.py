@@ -12,6 +12,9 @@ MODEL_URL = ('https://download.openmmlab.com/mmpose/v1/projects/rtmo/onnx_sdk/'
 MODEL_SHA = 'd0703d40d19f3921da51ae725402d5fdae4d2478c7442072d3101bd396f370d8'
 
 
+from stash_ai.recognition.crowd_context import preserves_faces
+
+
 class RTMO:
     def __init__(self, config):
         from stash_ai.recognition.sapiensid_downloads import install
@@ -88,23 +91,6 @@ def torso_nms(candidates,scale,settings):
             if len(keep)>=settings['max_people_per_frame']:
                 break
     return keep
-
-
-def preserves_faces(previous,found,old_matches,new_matches):
-    for old,new in zip(old_matches,new_matches):
-        if old is None:
-            continue
-        center = torso(previous[old])
-        if new is None or center is None:
-            return False
-        # Match physical torsos, so detector ordering can change between passes.
-        box = previous[old]['bounds']
-        scale = math.hypot(box[2]-box[0],box[3]-box[1])
-        distances = [math.dist(center,torso(p)) for p in found]
-        if (distances[new]>.30*scale or any(d-distances[new]<.06*scale
-                                            for i,d in enumerate(distances) if i!=new)):
-            return False
-    return True
 
 
 def needs_retry(image,faces,people):

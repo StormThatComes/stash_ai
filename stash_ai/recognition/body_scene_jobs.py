@@ -31,11 +31,22 @@ from functools import cached_property
 class Witness:
     dimensions: int
     embedding: bytes
+    strict: bool = True
+    scan: str = ''
+    seconds: float = 0.
+    quality: str = '{}'
 
     @cached_property
     def validated(self):
         from .clustering import vector
         return vector({'dimensions': self.dimensions, 'embedding': self.embedding})
+
+
+def face_witness_query():
+    from .reference_roles import strict_sql
+    return "SELECT o.dimensions,o.embedding,"+strict_sql()+",o.scan,o.seconds,json_object(" + (
+        "'evidence_pixel_sha256',json_extract(o.quality,'$.evidence_pixel_sha256'),"
+        "'evidence_crop_sha256',json_extract(o.quality,'$.evidence_crop_sha256'))") + _bank_source()
 
 
 def _bank_source():
@@ -45,7 +56,6 @@ def _bank_source():
 
 
 def _witnesses(db, owners, limit, cache, generation, charges):
-    where = _bank_source()
     frozen={}
     used=0
     for person in sorted(owners):
@@ -63,7 +73,7 @@ def _witnesses(db, owners, limit, cache, generation, charges):
         if used>limit:return None,0
         # Keep raw values. Validate in traversal order on demand, just like the
         # serial guard; a veto may stop before a later corrupt witness.
-        frozen[person]=tuple(Witness(*r) for r in db.execute('SELECT o.dimensions,o.embedding'+where,(person,)))
+        frozen[person]=tuple(Witness(*r) for r in db.execute(face_witness_query(),(person,)))
         if cache is not None:
             cache.put(key, (frozen[person], charge), charge)
     return frozen,used
