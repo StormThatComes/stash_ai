@@ -257,3 +257,11 @@ or guarantees. No edits to thresholds, memberships or published performers occur
 
 For multi-set solving and JSON interpretation, see [merge goals](solver.md) and
 [solver reports](solver-report.md).
+
+Each identity manifest sample includes an `explanation` for the recorded face
+or body assignment. It distinguishes the active configuration, evidence from
+another matching policy, and membership with no retained decision. References
+are typed face/body observation IDs. Track endpoints and the sighting between
+them are labelled separately. A recorded predecessor links to the applicable
+chain in the report's `identity_merges`; unrelated family merges are omitted.
+Missing measurements and references remain unavailable.

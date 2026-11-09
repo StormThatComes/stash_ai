@@ -66,7 +66,8 @@ def report(db,config,scans,*,input_counts=None):
     return dict(result,assignments=dict(counts),reasons=dict(reasons),identities=identities)
 
 
-def export_members(db,config,person,directory,*,policies=None,crops=None):
+def export_members(db,config,person,directory,*,policies=None,crops=None,merges=None):
+    from . import assignment_explanation
     from .identity_report import _image
     from .person_audit import _draw
     from .alignment_audit import _png
@@ -101,11 +102,15 @@ def export_members(db,config,person,directory,*,policies=None,crops=None):
         admission=admission_report.person(quality,config,policies,row['contract'],independent=True)
         image['thresholds']=admission_panel.export(image,admission,directory,name,
             observation=row['id'],role=row['role'],rejection=row['rejected'])
-        samples.append(dict(observation_id=row['id'],evidence_kind='person',linked_face=row['face'],
+        proof = json.loads(row['proof'])
+        description = assignment_explanation.body(proof, linked_face=row['face'], role=row['role'],
+            status=row['assignment_status'], policy=row['policy'], current=row['policy']==policy(config),
+            merges=merges or {}, target=person['id'])
+        samples.append(dict(explanation=description, observation_id=row['id'],evidence_kind='person',linked_face=row['face'],
             scene_id=scene,scan_id=row['scan'],scan_status=row['scan_status'],cue_index=cue,seconds=row['seconds'],
             contract=row['contract'],contract_matches_current=row['contract']==contract(config),
             quality=quality,geometry=geometry,retained_rejection=row['rejected'],image=image,admission=admission,
-            assignment=dict(role=row['role'],status=row['assignment_status']),decision=json.loads(row['proof']),
+            assignment=dict(role=row['role'],status=row['assignment_status']),decision=proof,
             anchor_pixel_gate=pixel_gate(row['quality'],config.data['sapiensid']['identities']),
             anchor_gate=admission['anchor_gate'],
             policy_matches_current=row['policy']==policy(config),
