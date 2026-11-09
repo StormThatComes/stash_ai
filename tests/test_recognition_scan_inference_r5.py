@@ -75,3 +75,28 @@ def test_collector_batches_owned_frames_and_commits_complete_cues(tmp_path):
             with pytest.raises(ValueError):image.getpixel((0,0))
     finally:
         collector.close()
+
+
+def test_failed_async_checkpoint_keeps_last_durable_cue(tmp_path):
+    import sqlite3
+    from types import SimpleNamespace
+    from stash_ai.recognition.scan_writes import Writer
+    path = tmp_path/'checkpoint.sqlite'
+    with sqlite3.connect(path) as db:
+        db.executescript('CREATE TABLE scans(id,cursor); INSERT INTO scans VALUES ("s",0);'
+                         'CREATE TABLE metadata(key PRIMARY KEY,value);'
+                         'CREATE TABLE observations(a,b,c,d,e,f,g,h,i,j,k,l)')
+        def fail(db, records):
+            db.execute("INSERT INTO metadata VALUES ('tentative','1')")
+            raise ValueError('partial body evidence')
+        committed = []
+        writer = Writer(SimpleNamespace(connection=db,path=path,lock=True),
+                        SimpleNamespace(write_records=fail),committed.append,True)
+        writer.submit(('s',1,[],[],[(0,0)],None))
+        writer.submit(('s',2,[],[object()],[(0,0)],None))
+        import pytest
+        with pytest.raises(ValueError, match='partial body evidence'):
+            writer.close()
+        assert committed == [1]
+        assert db.execute('SELECT cursor FROM scans').fetchone()[0] == 1
+        assert not db.execute("SELECT 1 FROM metadata WHERE key='tentative'").fetchone()

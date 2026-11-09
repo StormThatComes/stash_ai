@@ -1,4 +1,6 @@
 """Bounded CPU preparation/JPEG work around one caller-owned inference stage."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, Future
 import threading
@@ -7,6 +9,19 @@ from itertools import islice
 from stash_ai.runtime.cancellation import Cancellation, use
 from stash_ai.runtime.cleanup import cleanup
 from stash_ai.runtime import shutdown
+
+
+_executor = ContextVar('recognition_pixel_executor', default=None)
+
+
+@contextmanager
+def shared_workers(workers):
+    with ThreadPoolExecutor(workers, thread_name_prefix='recognition-pixels') as executor:
+        token = _executor.set(executor)
+        try:
+            yield
+        finally:
+            _executor.reset(token)
 
 
 class OwnedFuture(Future):
@@ -69,7 +84,8 @@ class CpuStage:
             return future
         if self.executor is None:
             shutdown.require_idle()
-            self.executor = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix='recognition-pixels')
+            self.executor = _executor.get() or ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix='recognition-pixels')
+            self.shared = self.executor is _executor.get()
         if not self.can_submit(image,extra=extra):
             raise BufferError('Consume recognition CPU results before submitting another job.')
         key,owned = self._acquire_image(image)
@@ -147,7 +163,13 @@ class CpuStage:
 
     def close(self):
         self.cancel.cancel()
-        if self.executor is not None:
+        if self.executor is not None and self.shared:
+            from concurrent.futures import wait
+            with self.lock:
+                futures = list(self.pending)
+            if futures:
+                wait(futures)
+        elif self.executor is not None:
             shutdown.call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
         with self.lock:self.pending.clear();self.bytes=0
 
@@ -392,38 +414,53 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
                     row[5] = row[5].result()['crop']
             yield index,cue,values
     retained=0
-    detected=None
-    detect_many=getattr(backend,'detect_faces_many',None)
+    detect_many = getattr(backend, 'detect_faces_many', None)
     maximum = config.data['execution']['detector_batch_size']
     detector = getattr(backend, 'ort_detector', None)
     if detector is not None and getattr(detector, 'dynamic_batch', None) is False:
-        maximum = max(maximum,min(4,len(batch)))
-    if len(batch)>1 and maximum>1 and callable(detect_many):
-        detected=[]
-        for start in range(0,len(batch),maximum):
-            images=[image for _,_,image in batch[start:start+maximum]]
-            result=detect_many(images)
-            if len(result)!=len(images):raise ValueError('Face detector returned an incompatible output batch.')
-            detected.extend(result)
-    faces_by_frame=[]
-    for position,(_,_,image) in enumerate(batch):
-        faces_by_frame.append(sorted(detected[position] if detected is not None else backend.detect(image),key=lambda face:tuple(face.row)))
-    prepared=[None]*len(batch)
-    # Dense frames retain the existing bounded per-cue quality path.
-    if len(batch)>1 and sum(map(len,faces_by_frame))*4096<=config.data['execution']['scan_queue_bytes']//4:
-        from stash_ai.runtime.cleanup import closing
-        prepared = [[] for _ in batch]
-        def prepare_face(pixels, task):
-            position, cue, pair = task
-            return position, prepare_record(pixels, pair, config, cue, callbacks['assess'],
-                                             callbacks['rejection'], callbacks['geometry_contract'])
-        jobs = ((image, (position, cue, pair))
-                for position, (_, cue, image) in enumerate(batch)
-                for pair in enumerate(faces_by_frame[position]))
-        with closing(stage.ordered_frames(prepare_face, jobs), name='close cross-cue quality') as entries:
-            for position, entry in entries:
-                prepared[position].append(entry)
-        visibility=cue_visibility(batch,prepared,visibility,config,stage)
+        maximum = max(maximum, min(4, len(batch)))
+    faces_by_frame = []
+    prepared = [None] * len(batch)
+    pending = deque()
+
+    def prepare_face(pixels, task):
+        cue, pair = task
+        return prepare_record(pixels, pair, config, cue, callbacks['assess'],
+                              callbacks['rejection'], callbacks['geometry_contract'])
+
+    def consume():
+        position, future = pending.popleft()
+        prepared[position].append(future.result())
+
+    retained_faces = 0
+    for start in range(0, len(batch), maximum):
+        chunk = batch[start:start+maximum]
+        images = [image for _, _, image in chunk]
+        if len(batch)>1 and maximum>1 and callable(detect_many):
+            detections = detect_many(images)
+            if len(detections) != len(images):
+                raise ValueError('Face detector returned an incompatible output batch.')
+        else:
+            detections = [backend.detect(image) for image in images]
+        # CPU preparation for this detector block overlaps inference of the next.
+        for offset, faces in enumerate(detections):
+            position = start + offset
+            faces = sorted(faces, key=lambda face: tuple(face.row))
+            faces_by_frame.append(faces)
+            retained_faces += len(faces)
+            if len(batch) == 1 or retained_faces*4096 > config.data['execution']['scan_queue_bytes']//4:
+                continue
+            prepared[position] = []
+            _, cue, image = chunk[offset]
+            for pair in enumerate(faces):
+                while pending and (len(pending) >= 2*stage.workers or not stage.can_submit(image)):
+                    consume()
+                future = stage.submit(prepare_face, image, (cue, pair))
+                pending.append((position, future))
+    while pending:
+        consume()
+    if all(entries is not None for entries in prepared):
+        visibility = cue_visibility(batch, prepared, visibility, config, stage)
     for position,(index, cue, image) in enumerate(batch):
         faces=faces_by_frame[position]
         values=[]
