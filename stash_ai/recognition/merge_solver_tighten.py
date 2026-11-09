@@ -49,7 +49,7 @@ def route_parameters(decisions):
             if reason == 'body_scene_core':
                 keys.update(local+k for k in ('min_support','match_threshold','cohesion_threshold','ambiguity_margin','min_appearance_distance'))
             elif reason in ('body_core_attachment','frozen_face_body_bank','joint_body_claim','scene_body_attachment',
-                            'body_confirmed_core_attachment','face_rooted_body_view','external_rear_view'):
+                            'body_confirmed_core_attachment','fragment_body_attachment','face_rooted_body_view','external_rear_view'):
                 if not row.get('face_endpoints'):
                     keys.update(local+k for k in ('match_threshold','cohesion_threshold','ambiguity_margin'))
                     if reason != 'body_core_attachment':

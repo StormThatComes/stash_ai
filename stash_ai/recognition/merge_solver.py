@@ -147,7 +147,7 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False, compare_scene_strategies=False):
     from .solver_execution import current as execution_plan
     runtime = execution_plan()
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside, outsiders
@@ -185,7 +185,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
     from .solver_progress import heartbeat
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,execution=runtime.signature() if runtime else None)),
+        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':2} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
@@ -379,6 +379,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         query_feedback.priorities = dict(latest_feedback.get('targets', {}).get('priorities', {}))
     retire = lambda name: None
     pending_search = {}
+    scene_trials = {}
+    finalists = []
     def stream():
         nonlocal search, bidirectional, stop_reason, retire
         trials, attempts, probes_attempted = 1, 0, 0
@@ -454,6 +456,49 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         {v[3] for v in pending_search.values()}):
                 del feedback[old]
         retire = completed
+        if compare_scene_strategies:
+            from .scene_strategy_validation import training_profiles, tuning_profiles
+            def scene_trial(label,parent,changes,phase):
+                nonlocal trials,previous_name,previous_changes
+                changes = normalize(config,changes)
+                patch = proposal(config,changes)
+                key = digest(patch['yaml_patch'])
+                if not patch['changes']:
+                    return 'baseline'
+                if key in seen:
+                    return None
+                seen.add(key)
+                name = f'trial-{trials}'
+                trials += 1
+                patches[name],families[name] = patch,'hybrid'
+                origins[name] = dict(search_phase=phase,search_parent=parent,search_strategy=label)
+                transitions[name] = transition(previous_name,previous_changes,changes)
+                previous_name,previous_changes = name,changes
+                return name
+            request.independent = True
+            for label,changes in training_profiles(config):
+                if trials>=search_limit:
+                    break
+                name = scene_trial(label,'baseline',changes,'scene_strategy')
+                if name:
+                    scene_trials[label] = [name]
+                    if name!='baseline':
+                        yield name,patched(config,changes_for(name))
+            while any(n not in summaries and n not in failures for runs in scene_trials.values() for n in runs):
+                yield None
+            qualified = [(label,runs[0]) for label,runs in scene_trials.items() if runs[0] in ranks]
+            leaders = sorted(qualified,key=lambda item:ranking(item[1]),reverse=True)[:2]
+            finalists.extend(label for label,_ in leaders)
+            for label,parent,changes in tuning_profiles(config,[(k,n,changes_for(n)) for k,n in leaders]):
+                if trials>=search_limit:
+                    break
+                name = scene_trial(label,parent,changes,'scene_refinement')
+                if name and name!='baseline':
+                    scene_trials[label].append(name)
+                    yield name,patched(config,changes_for(name))
+            while any(n not in summaries and n not in failures for runs in scene_trials.values() for n in runs):
+                yield None
+            request.independent = False
         while trials < search_limit and attempts < search_limit * 100:
             reserve = allowance(search_limit, changes_for(best),
                 feedback[best]['provenance']['active_parameters'])
@@ -754,6 +799,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 tested_hybrid[gate] = sorted(values)
         phases = ('targeted', 'feasibility', 'baseline_exploration', 'adaptive', 'bidirectional',
                   'refinement', 'restart', 'tightening', 'minimization', 'robustness')
+        if compare_scene_strategies:
+            phases += ('scene_strategy','scene_refinement')
         if compare_anchor_rules:
             phases += ('anchor_rules',)
         return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
@@ -772,7 +819,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             robustness=dict(selected=best,checks=robustness.get(best,[]),
                 validated=bool(confidence(robustness.get(best,[]))),
                 candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
-            search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
+            search=dict(scene_finalists={k:changes_for(max((n for n in scene_trials[k] if n in ranks),key=ranking))
+                                         for k in finalists},scene_families_tested=len(scene_trials),
+                        max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
                         recovered_evaluations=sum(bool(t.get('recovered_evaluation')) for items in
                             (result['trials'], failures) for n,t in items.items() if n not in restored_names),
                         attempted=len(result['trials'])+len(failures), failed_trials=len(failures),

@@ -58,7 +58,7 @@ def proposal(config, changes):
             assign(patch, regional, plain(parameter(config.data, regional)))
         assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
-                            direction='replace' if path == regional else
+                            direction='replace' if path == regional or path.endswith(('tracklet_matching','endpoint_matching','scene_bonus_mode')) else
                             'disable' if value is None else 'enable' if type(value) is bool or current is None else
                             'decrease' if value < current else 'increase'))
     if config.document_version == 2:

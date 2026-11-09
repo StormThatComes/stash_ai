@@ -155,7 +155,7 @@ def repair_candidates(config, changes, sources, safe):
                 end = safe.get(key, parameter(config.data, key))
                 if start == end:
                     continue
-                if type(start) is bool or start is None or end is None:
+                if type(start) not in (int,float) or type(end) not in (int,float):
                     value = end
                 elif key in domains and domains[key].kind is int:
                     value = domains[key].project(start + (end-start)*fraction)

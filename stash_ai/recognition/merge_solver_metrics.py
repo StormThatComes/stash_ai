@@ -18,5 +18,5 @@ def magnitude(changes):
 def signature(changes, config=None):
     def value(key,v):
         current=parameter(config.data,key) if config else v
-        return round(float(v)/scale(key,current)/.02) if type(v) is not bool else v
+        return round(float(v)/scale(key,current)/.02) if type(v) in (int,float) else v
     return tuple((k,value(k,v)) for k,v in sorted(changes.items()))

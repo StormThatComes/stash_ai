@@ -120,7 +120,7 @@ def refinement(config, changes, options):
     for key, current in sorted(changes.items()):
         original = parameter(config.data, key)
         values = [original]
-        if type(current) is not bool:
+        if type(current) in (int,float):
             if key in domains and domains[key].kind is int:
                 values += [domains[key].project(current-1),domains[key].project(current+1)]
             else:

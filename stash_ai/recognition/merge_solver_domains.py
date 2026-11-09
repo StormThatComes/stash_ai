@@ -75,10 +75,17 @@ def support_baseline_changes(config):
 
 def normalize(config, changes):
     domains = registry(config)
-    if set(changes)-domains.keys():
+    from .scene_strategy_validation import STRATEGY_KEYS
+    categories = {k:v for k,v in changes.items() if k in STRATEGY_KEYS[:3] and config.data['sapiensid']['enabled']}
+    if any(type(v) is not bool for k,v in categories.items() if k.endswith('tracklet_matching')) or any(
+            v is not None and type(v) is not bool for k,v in categories.items() if k.endswith('endpoint_matching')) or any(
+            v not in ('fixed','evidence') for k,v in categories.items() if k.endswith('scene_bonus_mode')):
+        raise ValueError('Invalid scene strategy.')
+    if set(changes)-domains.keys()-categories.keys():
         raise ValueError('Solver proposals may only change registered retained-evidence parameters.')
     patch = {k: (domains[k].project(v) if k.endswith('_support') or v != parameter(config.data, k) else v)
-             for k, v in changes.items()}
+             for k, v in changes.items() if k not in categories}
+    patch.update(categories)
     def value(key):
         return patch.get(key, parameter(config.data, key))
     def ordered(lower, upper):
