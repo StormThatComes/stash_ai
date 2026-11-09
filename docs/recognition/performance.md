@@ -111,6 +111,22 @@ scene per boundary rather than an unbounded event list. Set `log_vram: false` to
 queries and logs without disabling cleanup. VRAM is separate from
 `execution.rebuild.memory_bytes`, which budgets CPU working allocations.
 
+The VTT scan shares its pixel worker pool between face and person preparation.
+When CPU workers and face microbatches are enabled, preparation from one
+detector batch can run during the next detection. File-backed scans can keep
+one complete checkpoint transaction in flight. Recognition reports a durable
+cursor after its face rows, pose evidence and shot state commit together.
+
+To compare SapiensID batches on the same labelled scenes and configured pose
+backend, run the following from the repository root.
+
+```shell
+python -m benchmarks.benchmark_crowded_vtt --config facial_recognition.yml --labels labels.json --body-batches 1 2 4 --cuda-profile
+```
+
+Compare actual forward batch sizes, bodies per second, peak CUDA allocation
+and assignment quality before choosing the encoder batch size.
+
 `execution.scan.prefetch_frames` defaults to 4 ready thumbnail crops. A CPU producer
 decodes/crops images ahead of inference, preserves cue order and owns independent
 copies until consumed. The queue retains at most that many ready crops, plus the

@@ -120,27 +120,16 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     saved = db.execute('SELECT value FROM metadata WHERE key=?',(shots_key,)).fetchone()
     shots = json.loads(saved[0]) if saved else []
 
+    from .scan_writes import Writer
+    writer = Writer(database, collector, lambda value: progress(scanned=value, total=record['total'],
+                    scene=str(scene['id'])), config.data['execution']['scan_cpu_workers'] > 1 and (grouped or on_cue is None))
+
     def checkpoint():
-        nonlocal pending_bytes
-        supplemental=collector.take_records() if grouped else []
-        from stash_ai.runtime.console import current_report, activity
-        with activity(current_report(), 'save VTT checkpoint', wait='SQLite write'), db:
-            from .pixel_storage import compact
-            from .cold_payloads import put,available
-            cold=available(db)
-            compacted=[]
-            for row in pending:
-                row=list(row);row[7]=compact(db,row[7]);row[11]=put(db,row[11],supported=cold);compacted.append(row)
-            db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', compacted)
-            if supplemental:
-                collector.write_records(db,supplemental)
-            db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
-            if shots:
-                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(shots_key,encoded(shots)))
-            if shot_state and shot_state[0]+1 == cursor:
-                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(shot_key,encoded(shot_state)))
-        pending.clear();pending_bytes=0
-        progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
+        nonlocal pending_bytes, pending
+        supplemental = collector.take_records() if grouped else []
+        writer.submit((identifier, cursor, pending, supplemental, tuple(shots), shot_state))
+        pending = []
+        pending_bytes = 0
 
     try:
         from .scan_pipeline import CpuStage
@@ -184,6 +173,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                             on_cue(db,identifier,index,image)
 
         checkpoint()
+        writer.drain()
         with db:
             db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))
             db.execute('DELETE FROM metadata WHERE key=?',('partial-view-shot:' + identifier,))
@@ -198,8 +188,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             # replayed from the last durable cursor, never half-published.
             pending.clear()
             cleanup([('abort person checkpoint',collector.abort)])
-        else:cleanup([('save recognition checkpoint', checkpoint)])
+        elif not writer.failed:cleanup([('save recognition checkpoint', checkpoint)])
         raise
     finally:
         from stash_ai.runtime.cleanup import cleanup
-        cleanup([('close recognition backend', backend.close)])
+        cleanup([('finish scan checkpoint writer', writer.close), ('close recognition backend', backend.close)])

@@ -274,6 +274,10 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                         cuda = torch.cuda
                         cuda.synchronize()
                         cuda.reset_peak_memory_stats()
+                from stash_ai.recognition.adaptive_gpu import batch_sizes
+                sizes = resources.enter_context(batch_sizes())
+                from stash_ai.recognition.scan_pipeline import shared_workers
+                resources.enter_context(shared_workers(cfg.data['execution']['scan_cpu_workers']))
                 start = time.monotonic()
                 for scene in sorted(labels,key=int):
                     item = client.scene(scene)
@@ -311,6 +315,8 @@ def run(config, labels, directory, *, profile_cuda=False, body_batches=None, com
                 results[name] = dict(**score(state.connection,selected,labels,reference_config=cfg if compare_contact else None), cues=cues,
                                      cues_per_second=cues/elapsed, bodies_per_second=bodies/elapsed,
                                      peak_torch_cuda_allocated_bytes=peak,
+                                     forward_batches=[dict(model=model, size=size, calls=calls)
+                                                      for (model,size),calls in sorted(sizes.items())],
                                      scan_seconds_per_1000_cues=elapsed*1000/cues,
                                      cuda_activity_seconds_per_1000_cues=gpu_us/(1000*cues) if profile_cuda else None)
                 if compare_contact:

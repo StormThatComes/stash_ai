@@ -146,8 +146,11 @@ class SapiensIDV1Encoder:
         if not 1<=len(prepared)<=self.max_batch_size:
             raise ValueError('SapiensID prepared batch exceeds configured limit.')
         from .gpu_transfers import to_device
-        tensors=[to_device(self.torch.cat(parts,dim=0),self.device) for parts in zip(*prepared)]
-        return self._encode(*tensors)
+        tensors = [self.torch.cat(parts, dim=0) for parts in zip(*prepared)]
+        validated = all(t.device.type == 'cpu' for t in tensors)
+        if validated:
+            self._validate_alignment(tensors[1], tensors[2], len(prepared), tensors[0].device)
+        return self._encode(*(to_device(t, self.device) for t in tensors), validated=validated)
 
     def _check_owner(self):
         if get_ident() != self.owner:
@@ -174,37 +177,44 @@ class SapiensIDV1Encoder:
             keypoints, masks = self.aligner(batch)
         return self._encode(batch, keypoints, masks)
 
-    def _encode(self, batch, keypoints, masks):
+    def _validate_alignment(self, keypoints, masks, count, device):
+        torch = self.torch
+        if (not isinstance(keypoints, torch.Tensor)
+                or keypoints.shape != (count, 22, 2)
+                or keypoints.device != device
+                or keypoints.dtype not in (torch.float16, torch.float32, torch.float64)):
+            raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
+        missing = (keypoints == -1).all(dim=-1)
+        valid = ((keypoints >= 0) & (keypoints <= 1)).all(dim=-1)
+        if (not isinstance(masks, torch.Tensor)
+                or masks.shape != (count, *INPUT_SIZE)
+                or masks.device != device or masks.dtype != torch.bool):
+            raise ValueError('SapiensID aligner must return (N,384,384) boolean masks.')
+        finite, normalized, foreground = torch.stack((torch.isfinite(keypoints).all(),
+            (missing | valid).all(), masks.flatten(1).any(dim=1).all())).tolist()
+        if not finite:
+            raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
+        if not normalized:
+            raise ValueError('SapiensID keypoints must be normalized or (-1,-1).')
+        if not foreground:
+            raise ValueError('SapiensID person mask must contain foreground pixels.')
+
+    def _encode(self, batch, keypoints, masks, *, validated=False):
         torch = self.torch
         count = len(batch)
         with torch.inference_mode():
-            if (not isinstance(keypoints, torch.Tensor)
-                    or keypoints.shape != (count, 22, 2)
-                    or keypoints.device != self.device
-                    or keypoints.dtype not in (torch.float16, torch.float32, torch.float64)):
-                raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
-            missing = (keypoints == -1).all(dim=-1)
-            valid = ((keypoints >= 0) & (keypoints <= 1)).all(dim=-1)
-            if (not isinstance(masks, torch.Tensor)
-                    or masks.shape != (count, *INPUT_SIZE)
-                    or masks.device != self.device or masks.dtype != torch.bool):
-                raise ValueError('SapiensID aligner must return (N,384,384) boolean masks.')
-            finite, normalized, foreground = torch.stack((torch.isfinite(keypoints).all(),
-                (missing | valid).all(), masks.flatten(1).any(dim=1).all())).tolist()
-            if not finite:
-                raise ValueError('SapiensID aligner must return finite (N,22,2) keypoints.')
-            if not normalized:
-                raise ValueError('SapiensID keypoints must be normalized or (-1,-1).')
-            if not foreground:
-                raise ValueError('SapiensID person mask must contain foreground pixels.')
+            if not validated:
+                self._validate_alignment(keypoints, masks, count, self.device)
             features = self.model(batch, foreground_masks=masks, ldmks=keypoints)
             if (not isinstance(features, torch.Tensor)
                     or features.shape != (count, EMBEDDING_DIMENSIONS)
                     or features.device != self.device or features.dtype not in
-                    (torch.float16, torch.float32, torch.float64)
-                    or not torch.isfinite(features).all().item()):
+                    (torch.float16, torch.float32, torch.float64)):
                 raise ValueError('SapiensID model must return finite (N,4096) embeddings.')
             values = features.detach().float().cpu().numpy()
+            import numpy as np
+            if not np.isfinite(values).all():
+                raise ValueError('SapiensID model must return finite (N,4096) embeddings.')
         # Double precision L2 normalization matches the existing embedding
         # namespace implementation; threshold calibration is still required.
         return [body_embedding(row) for row in values]

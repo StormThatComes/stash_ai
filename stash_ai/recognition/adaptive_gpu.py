@@ -3,6 +3,7 @@ import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+_sizes = ContextVar('recognition_batch_sizes', default=None)
 _observer = ContextVar('recognition_gpu_batches', default=None)
 
 
@@ -13,6 +14,17 @@ def observe_batches(callback):
         yield
     finally:
         _observer.reset(token)
+
+
+@contextmanager
+def batch_sizes():
+    from collections import Counter
+    histogram = Counter()
+    token = _sizes.set(histogram)
+    try:
+        yield histogram
+    finally:
+        _sizes.reset(token)
 
 
 class Batches:
@@ -42,6 +54,9 @@ class Batches:
                 from .profiling import pipeline_count
                 pipeline_count('cuda_oom_retries')
             else:
+                histogram = _sizes.get()
+                if histogram is not None:
+                    histogram[self.kind, len(batch)] += 1
                 results.extend(result);position+=len(batch);continue
             # Leave the except block first so the failed forward traceback no
             # longer retains device tensors. No CPU/device migration or skips.

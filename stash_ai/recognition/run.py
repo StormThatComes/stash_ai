@@ -273,7 +273,8 @@ def _execute(args, config, *, services, display):
                     if resources:
                         resources.prefetch = inputs
                     inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
-                    with gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered), estimate=False) as scenes:
+                    from .scan_pipeline import shared_workers
+                    with shared_workers(config.data['execution']['scan_cpu_workers']), gpu.phase('vtt'), ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered), estimate=False) as scenes:
                         from .scene_batches import Batches
                         batch_size=config.data['execution']['sequential_scene_batch_size'] if sequential else 1
                         def release_faces():
