@@ -2,9 +2,24 @@
 
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
+- [Desktop detection tuner](#desktop-detection-tuner)
 - [Full-cue face and pose detection audit](#full-cue-face-and-pose-detection-audit)
 - [Single-cue parameter comparisons](#single-cue-parameter-comparisons)
 - [Read-only five-landmark alignment audit](#read-only-five-landmark-alignment-audit)
+
+## Desktop detection tuner
+
+Run `python stash_ai.py recognition tune-detection --face-config facial_recognition.yml` on
+a Windows or Linux desktop. Tkinter and Pillow ImageTk are required for this command.
+Use `python -m tkinter` to check the interpreter. On Debian the Tk package is
+`python3-tk`. The tuner connects to Stash using the usual `STASH_URL` and `STASH_API_KEY`.
+
+Enter a **Scene ID** and choose **Load scene**, or supply an initial `--scene-id` on the
+command line. The slider, Previous and Next browse raw VTT crops at their original
+zero-based indices. Select a detector setting, enter its value and press **Set value**.
+Only **Run detection** loads models and computes an annotated image. Each detection
+uses only the selected cue, independently of navigation history. Edits are local to the
+window. The recognition database and Stash identities are never modified.
 
 ## Full-cue face and pose detection audit
 

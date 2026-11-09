@@ -215,6 +215,11 @@ def parser():
     detection.add_argument('--face-config', type=Path, help='Current detector YAML; default facial_recognition.yml.')
     detection.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
     detection.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
+    desktop = commands.add_parser('tune-detection', allow_abbrev=False,
+        help='Browse original VTT cues and run face/pose detection on demand in a desktop window.')
+    desktop.add_argument('--scene-id', type=stash_id, help='Optional initial scene to preview.')
+    desktop.add_argument('--face-config', type=Path, help='Recognition YAML; default facial_recognition.yml.')
+    desktop.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
     portraits = commands.add_parser('portraits', allow_abbrev=False,
         help="Refresh existing identities' portraits without scanning or rebuilding identities.",
         description='Refresh portraits from retained identity memberships and current portrait settings. '
@@ -359,6 +364,15 @@ def _execute(args, config, services):
         return audit(args, config, services=services)
     if args.command == 'audit-detection':
         from .detection_audit import execute
+        return execute(args, config, services=services)
+    if args.command == 'tune-detection':
+        try:
+            from .tune_window import execute
+        except ImportError as error:
+            if error.name not in ('tkinter', '_tkinter', 'PIL.ImageTk'):
+                raise
+            raise RuntimeError('Install Tkinter and Pillow ImageTk for this Python environment. '
+                               'Check Tk with python -m tkinter.') from error
         return execute(args, config, services=services)
     if args.command == 'report':
         from .fragmentation_report import execute
