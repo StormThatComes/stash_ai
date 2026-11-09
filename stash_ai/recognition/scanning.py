@@ -139,8 +139,6 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             from .scan_pipeline import cue_batches, process_cues
             # Batch size one retains the previous failure/checkpoint boundary.
             maximum = max(config.data['execution']['recognizer_batch_size'],config.data['execution']['detector_batch_size'])
-            if maximum > 1 and cpu.workers > 1:
-                maximum *= 2
             with closing(cue_batches(frames, maximum, config.data['execution']['scan_queue_bytes']//2),
                          name='close cue microbatch') as batches:
                 for batch in batches:
