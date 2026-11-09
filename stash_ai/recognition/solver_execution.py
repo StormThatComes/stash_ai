@@ -63,16 +63,20 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
     body_bound = person['reference_bytes']
     if source is not None:
         rows = 0
-        for table in ('observations', 'body_observations'):
-            if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-                amount, count = source.execute(f'SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(quality)+length(geometry)),0),COUNT(*) '
-                    f'FROM {table} WHERE scan IN (SELECT id FROM scans WHERE scope=? AND namespace=?)', (scope, namespace)).fetchone()
+        if source.execute('PRAGMA user_version').fetchone()[0] >= 10:
+            from .solver_scan_sizes import scoped
+            shared, rows = scoped(source, scope, namespace)
+        else:
+            for table in ('observations', 'body_observations'):
+                if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    amount, count = source.execute(f'SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(quality)+length(geometry)),0),COUNT(*) '
+                        f'FROM {table} WHERE scan IN (SELECT id FROM scans WHERE scope=? AND namespace=?)', (scope, namespace)).fetchone()
+                    shared += amount; rows += count
+            if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_evidence'").fetchone():
+                amount, count = source.execute('SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(metadata)),0),COUNT(*) '
+                    'FROM person_evidence WHERE observation IN (SELECT o.id FROM observations o JOIN scans s ON s.id=o.scan '
+                    'WHERE s.scope=? AND s.namespace=?)', (scope, namespace)).fetchone()
                 shared += amount; rows += count
-        if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_evidence'").fetchone():
-            amount, count = source.execute('SELECT COALESCE(SUM(COALESCE(length(embedding),0)+length(metadata)),0),COUNT(*) '
-                'FROM person_evidence WHERE observation IN (SELECT o.id FROM observations o JOIN scans s ON s.id=o.scan '
-                'WHERE s.scope=? AND s.namespace=?)', (scope, namespace)).fetchone()
-            shared += amount; rows += count
         # Bound materialized vectors, metadata and Python wrappers conservatively.
         evidence_bound = 16*shared + 4096*rows + 4*1024**2
         face_bound = min(face_bound, evidence_bound)

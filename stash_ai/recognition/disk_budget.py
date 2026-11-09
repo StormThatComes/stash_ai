@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 import os
+import stat
 import shutil
 import time
 import threading
@@ -23,6 +24,7 @@ class Budget:
         self.lock=threading.RLock()
         self.reservations={}
         self.ledger=None
+        self.directories = {}
 
     def check(self, growth=0, path=None, *, throttled=False):
         with self.lock:
@@ -36,20 +38,36 @@ class Budget:
         roots.extend(self.roots)
         if work := os.environ.get('RECOGNITION_WORK_ROOT'):
             roots.append(Path(work))
-        volumes={};seen=set()
-        for root in roots:
-            files=root.rglob('*') if root.is_dir() else (root,)
-            for item in files:
-                if item.is_symlink() or not item.is_file():continue
-                try:
-                    stat=item.stat()
-                except FileNotFoundError:
-                    continue  # Another trial released its owned file.
-                key=(stat.st_dev,stat.st_ino)
-                if key in seen:continue
-                seen.add(key)
-                row=volumes.setdefault(stat.st_dev,dict(path=str(item.parent),used=0))
-                row['used']+=stat.st_size
+        volumes = {}
+        seen = set()
+        visited = set()
+        pending = list(roots)
+        while pending:
+            item = pending.pop()
+            try:
+                info = item.lstat()
+            except FileNotFoundError:
+                continue
+            key = (info.st_dev, info.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            if stat.S_ISDIR(info.st_mode):
+                visited.add(item)
+                stamp = (key, info.st_mtime_ns, info.st_ctime_ns)
+                cached = self.directories.get(item)
+                if cached is None or cached[0] != stamp or time.monotonic() - cached[2] >= 5:
+                    try:
+                        children = tuple(item.iterdir())
+                    except FileNotFoundError:
+                        continue
+                    cached = self.directories[item] = stamp, children, time.monotonic()
+                pending.extend(cached[1])
+            elif stat.S_ISREG(info.st_mode):
+                row = volumes.setdefault(info.st_dev, dict(path=str(item.parent), used=0))
+                row['used'] += info.st_size
+        for directory in self.directories.keys() - visited:
+            del self.directories[directory]
         target=Path(path or parent)
         while not target.exists():target=target.parent
         device=target.stat().st_dev
