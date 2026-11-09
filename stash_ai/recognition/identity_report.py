@@ -17,7 +17,7 @@ from .fragmentation_report import _open_readonly
 from .models import namespace
 from .pose_policy import is_anchor
 from .scanning import scan_identity
-from . import admission_report, admission_panel
+from . import admission_report, admission_panel, assignment_explanation
 
 
 from .decision_evidence import REASONS, DECISION_FIELDS, recorded, explanation
@@ -78,15 +78,17 @@ def _merges(db, person):
                                status=row['status'], evidence=_object(row['evidence'])) for row in rows]
 
 
-def _decisions(db, person, family, policy):
+def _decisions(db, person, family, policy, *, observation=None):
+    from .reference_roles import observation_sql
+    condition = "" if observation is None else " AND " + observation_sql("c") + "=?"
+    args = (person["id"],) if observation is None else (person["id"], observation)
     result = defaultdict(list)
     # One metadata pass over this person's members; avoid a full candidate-table
     # lookup for every exported image. Historical policies remain separate.
     rows = db.execute(
         "SELECT c.* FROM candidates c JOIN observations o ON o.scan=c.scan "
-        "AND o.id=json_extract(c.payload,'$.observation') "
-        'JOIN members m ON m.observation=o.id WHERE m.person=? ORDER BY c.policy,c.id',
-        (person['id'],))
+        f"AND o.id={observation_sql('c')} "
+        'JOIN members m ON m.observation=o.id WHERE m.person=?' + condition + ' ORDER BY c.policy,c.id', args)
     for row in rows:
         from .decision_contexts import unpack
         payload = unpack(db,row['payload'])
@@ -111,7 +113,7 @@ def _assignment(decisions):
         'category': category,
         'role': ('anchor' if category.startswith('anchor') else
                  'auxiliary' if category.startswith('auxiliary') else
-                 'attachment' if category == 'hybrid-attachment' else 'unknown'),
+                 'attachment' if category in ('hybrid-attachment', 'body-merge-attachment') else 'unknown'),
         'evidence_status': ('recorded_current_policy' if current else
                             'recorded_other_policy' if supporting else 'membership_only'),
         'reason_codes': sorted({item['recorded']['reason'] for item in selected if item['recorded'].get('reason')}),
@@ -155,6 +157,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
         requested, person = _select(db, model_namespace, identity_id, performer_id, scope)
         policies = admission_report.Policies(db, config, person['scope'], model_namespace)
         family, merges = _merges(db, person)
+        merge_index = {row['source']: row for row in merges}
         invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
             'JOIN scans s ON s.id=o.scan WHERE m.person=? AND (s.scope<>? OR s.namespace<>?) LIMIT 1',
             (person['id'], person['scope'], model_namespace)).fetchone()
@@ -212,7 +215,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             from .retained_annotations import export as annotate
             image = _image(cold_crop(db,row['crop']) if row['crop'] is not None or client is None else crops.face(row['id']), directory / name,
                            annotate=lambda rgb, path: annotate(rgb, path, geometry, quality.get('crop_bounds')))
-            eligible = assignment['category'] != 'hybrid-attachment' and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
+            eligible = assignment['category'] not in ('hybrid-attachment', 'body-merge-attachment') and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
             reference_count += int(eligible)
             sample = {
                 'observation_id': row['id'], 'scene_id': scene, 'scan_id': row['scan_id'],
@@ -223,6 +226,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'quality': {key: quality[key] for key in QUALITY_FIELDS if key in quality},
                 'geometry': geometry, 'source_rect': json.loads(row['rect']),
                 'assignment': assignment, 'decisions': recorded,
+                'explanation': assignment_explanation.face(recorded, assignment, merge_index, person['id']),
                 'original_identity_ids': origins.get(row['id'], []),
                 'current_anchor_eligible': eligible,
                 'current_reference_selected': eligible and reference_count <= config.data['clustering']['max_samples_per_person'],
@@ -243,7 +247,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             counts[image['status']] += 1
             counts[assignment['role']] += 1
         from .body_reports import export_members
-        for sample in export_members(db,config,person,directory,policies=policies,crops=crops):
+        for sample in export_members(db,config,person,directory,policies=policies,crops=crops,merges=merge_index):
             report['samples'].append(sample)
             counts[sample['image']['status']]+=1
             counts[sample['assignment']['role']]+=1
