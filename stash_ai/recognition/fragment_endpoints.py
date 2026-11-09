@@ -98,6 +98,7 @@ class ExternalEndpoints:
                 if reject_rival is None or not reject_rival(rival,local):
                     return None
         # Disk galleries fetch one bank at a time; all eligible banks participate.
+        best = None
         for index in self.banks.get(owner,()):
             _,_,bank = self.gallery.banks[index]
             for w in bank:
@@ -109,7 +110,11 @@ class ExternalEndpoints:
                     continue
                 score = min(float(a[0] @ b[0]) for a in local for b in external)
                 if np.isfinite(score) and score>=self.minimum:
-                    return owner,score,w
+                    key = (-score,w['scan'],tuple(w['roots']),w.get('id',''))
+                    if best is None or key<best[0]:
+                        best = key,w
+        if best is not None:
+            return owner,-best[0][0],best[1]
         return None
 
 

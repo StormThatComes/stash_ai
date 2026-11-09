@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v32-visual-tracks',contract(config),matching_policy(config),
+    return digest(['body-local-v33-fragment-claims',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -320,8 +320,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     frozen=FrozenSeeds(seeds,scores,settings) if queries else None
     anonymous = {}
     if settings.get('tracklet_matching') and queries:
-        from .body_tracklets import plan
+        from .body_tracklets import plan, claim_fragments
         anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen)
+        claim_fragments(rows,anonymous,decisions,frozen,guard,settings)
         queries = [r for r in queries if r['id'] not in decisions]
     remaining=[]
     borderline=[]

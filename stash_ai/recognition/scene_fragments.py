@@ -6,6 +6,59 @@ from .body_identity import copresent, independent, quality, scene_bonus
 from .body_origins import physical_key
 
 
+def plausible_pairs(rows, threshold):
+    """Tile singleton nominations. Re-score every possible hit with the production scorer."""
+    from .nomination_bounds import ball, upper
+    import numpy as np
+    width = 16
+    blocks = []
+    for start in range(0,len(rows),width):
+        data = np.stack([r['_vector'] for r in rows[start:start+width]])
+        blocks.append((data,ball(data)))
+    for i,(left,first) in enumerate(blocks):
+        for j in range(i,len(blocks)):
+            right,second = blocks[j]
+            # Conservative float32 dot-product error for unit embeddings.
+            error = 2*left.shape[1]*np.finfo(np.float32).eps
+            if upper(first,second)+error < threshold:
+                continue
+            hits = left.astype('float64') @ right.astype('float64').T >= threshold-error
+            if i==j:
+                hits = np.triu(hits,1)
+            for a,b in zip(*np.nonzero(hits)):
+                yield rows[i*width+a],rows[j*width+b]
+
+
+def reconcile_neighbours(groups,settings,scores,guard):
+    """Join mutually separated complete-link components; keep only two scores per component."""
+    best = defaultdict(list)
+    keys = sorted(groups)
+    for i,a in enumerate(keys):
+        for b in keys[i+1:]:
+            left,right = groups[a],groups[b]
+            if copresent(left,right) or not all(guard.allows(r,right) for r in left) or not all(
+                    guard.allows(r,left) for r in right):
+                continue
+            mean,low = scores.compare(left,right)
+            for own,peer in ((a,b),(b,a)):
+                best[own].append((mean,peer,low))
+                best[own].sort(key=lambda item:(-item[0],item[1]))
+                del best[own][2:]
+    def winner(key):
+        options = best[key]
+        if not options:
+            return None
+        mean,peer,low = options[0]
+        rival = options[1][0] if len(options)>1 else -1.
+        if (mean>=settings['match_threshold'] and low>=settings['cohesion_threshold']
+                and mean-rival>=settings['ambiguity_margin']):
+            return peer
+    for a in keys:
+        b = winner(a)
+        if b and a<b and winner(b)==a:
+            groups[a].extend(groups.pop(b))
+
+
 def preserve_fragments(record, rows, decisions, settings, scores, guard):
     """Retain coherent near misses as provisional satellites, never training seeds."""
     # Retain the strongest neighbour of each sample. Store O(n) edges even
@@ -14,18 +67,17 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
     owners = {key:key for key in groups}
     nearest = {}
     ordered = sorted(rows, key=lambda r:r['id'])
-    for i, row in enumerate(ordered):
-        for peer in ordered[i+1:]:
-            a, b = row['id'], peer['id']
-            if copresent([row],groups[b]) or not guard.allows(row,groups[b]):
-                continue
-            score, minimum = scores.compare([row],groups[b])
-            if score < settings['match_threshold'] or minimum < settings['cohesion_threshold']:
-                continue
-            edge = (-score, a, b)
-            for oid in (a,b):
-                if oid not in nearest or edge < nearest[oid]:
-                    nearest[oid] = edge
+    for row,peer in plausible_pairs(ordered,max(settings['match_threshold'],settings['cohesion_threshold'])):
+        a, b = row['id'], peer['id']
+        if copresent([row],groups[b]) or not guard.allows(row,groups[b]):
+            continue
+        score, minimum = scores.compare([row],groups[b])
+        if score < settings['match_threshold'] or minimum < settings['cohesion_threshold']:
+            continue
+        edge = (-score, a, b)
+        for oid in (a,b):
+            if oid not in nearest or edge < nearest[oid]:
+                nearest[oid] = edge
     for _, a, b in sorted(set(nearest.values())):
         first, second = owners[a], owners[b]
         if first == second:
@@ -39,6 +91,7 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
             for r in right:
                 owners[r['id']] = first
             del groups[second]
+    reconcile_neighbours(groups,settings,scores,guard)
     for original in groups.values():
         group = [r for r in original if all(
             scores.compare([r],original)[1]-scores.compare([r],other)[0]>=settings['ambiguity_margin']
@@ -93,12 +146,19 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
     presence = {}
     entrant_banks = {}
     proposals = {}
+    joint_options = defaultdict(dict)
+    competitors = {}
+    fragment_rows = defaultdict(list)
+    for row in rows:
+        person = decisions[row['id']].get('person')
+        if person and not quality(row).get('query_only'):
+            fragment_rows[person].append(row)
     components = defaultdict(list)
     for row in rows:
         decision = decisions[row['id']]
         if decision['status']=='accepted' or decision.get('reason') not in (
                 'body_scene_core','body_anchor_quality','body_anchor_keypoint_rules','body_anchor_pixels',
-                'ambiguous_or_insufficient_face_body_bank','anonymous_body_track'):
+                'ambiguous_or_insufficient_face_body_bank','anonymous_body_track','body_group_ambiguous'):
             continue
         q = quality(row)
         shot = q.get('view_shot')
@@ -111,6 +171,7 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
             continue
         rank = modes.rank(row,guard)
         choices = []
+        competitors[row['id']] = {v[2]:v[5] for v in rank}
         for _,_,p,_,_,_ in rank:
             if p not in confirmed or p==decision['person']:
                 continue
@@ -131,15 +192,56 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
                 # Same-shot members of this query fragment cannot vote for themselves.
                 own = decision.get('person'),shot
                 if own not in entrant_banks:
-                    entrant_banks[own] = independent((r for r in banks.get(own[0],())
+                    entrant_banks[own] = independent((r for r in fragment_rows.get(own[0],())
                                                      if shots[r['cue']] not in (None,shot)),settings)
                 entrant = entrant_score(scores,row,entrant_banks[own],settings,bonus)
                 runner = max(entrant,max((item[5] for item in rank if item[2] not in (p,decision['person'])),default=-1.))
-                if (mean>=settings['match_threshold']-bonus*weight and low>=settings['cohesion_threshold']
-                        and mean-runner>=settings['ambiguity_margin']):
-                    choices.append((mean,p,runner,weight,[r['id'] for r in witnesses[:minimum]],entrant))
+                if mean>=settings['match_threshold']-bonus*weight and low>=settings['cohesion_threshold']:
+                    option = (mean,p,runner,weight,[r['id'] for r in witnesses[:minimum]],entrant)
+                    previous = joint_options[row['id']].get(p)
+                    if previous is None or option>previous:
+                        joint_options[row['id']][p] = option
+                    if mean-runner>=settings['ambiguity_margin']:
+                        choices.append(option)
         if choices and len({c[1] for c in choices})==1:
             proposals[row['id']] = max(choices)
+    # Competing roster claims in one physical cue must share one assignment.
+    from .joint_claims import solve
+    by_cue = defaultdict(list)
+    for row in rows:
+        by_cue[row['cue']].append(row)
+    margin = max(1e-6,settings['ambiguity_margin'])
+    for members in by_cue.values():
+        if len(members)!=2 or not all(r['id'] in competitors for r in members):
+            continue
+        if pair([json.loads(r['geometry']) for r in members]) is None:
+            continue
+        ids = [r['id'] for r in members]
+        if not (joint_options[ids[0]].keys() & joint_options[ids[1]].keys()):
+            continue
+        domains = []
+        for oid in ids:
+            options = joint_options[oid]
+            abstain = max([settings['match_threshold']-bonus-margin,*(o[5] for o in options.values())])
+            domains.append([(None,abstain),*((p,o[0]) for p,o in options.items())])
+            proposals.pop(oid,None)
+        result = solve(domains,lambda i,a,j,b:a[0] is None or a[0]!=b[0],margin)
+        if result is None:
+            continue
+        resolved = {}
+        for i,(p,score) in enumerate(result):
+            if p is None:
+                continue
+            oid = ids[i]
+            _,_,_,weight,witnesses,entrant = joint_options[oid][p]
+            explained = result[1-i][0]
+            runner = max(entrant,max((v for k,v in competitors[oid].items()
+                if k not in (p,decisions[oid]['person'],explained)),default=-1.))
+            if score-runner<margin:
+                break
+            resolved[oid] = (score,p,runner,weight,witnesses,entrant)
+        else:
+            proposals.update(resolved)
     # Preserve a provisional fragment as a unit until every member agrees.
     for ids in components.values():
         if any(i not in proposals for i in ids) or len({proposals[i][1] for i in ids})!=1:
