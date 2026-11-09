@@ -9,6 +9,7 @@ from .database import encoded
 from .identity_merges import canonical
 from .scan_heads import predicate as current_scan
 from .progress import tracking
+from .profiling import measured
 from .body_global_banks import banks
 
 ROUTES=('body_global','body_scene')
@@ -179,6 +180,7 @@ def _scenes(db,people):
     return scenes
 
 
+@measured('body_global_reconciliation')
 def reconcile(database,selected,config):
     """Caller owns the same transaction as local assignments; no partial plan."""
     db=database.connection;selection={s['scene'] for s in selected}

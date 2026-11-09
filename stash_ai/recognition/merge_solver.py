@@ -819,7 +819,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             robustness=dict(selected=best,checks=robustness.get(best,[]),
                 validated=bool(confidence(robustness.get(best,[]))),
                 candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
-            search=dict(scene_finalists={k:changes_for(max((n for n in scene_trials[k] if n in ranks),key=ranking))
+            search=dict(scene_finalists={k:{c['parameter']:c['proposed'] for c in input_patch(
+                            max((n for n in scene_trials[k] if n in ranks),key=ranking))['changes']}
                                          for k in finalists},scene_families_tested=len(scene_trials),
                         max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
                         recovered_evaluations=sum(bool(t.get('recovered_evaluation')) for items in

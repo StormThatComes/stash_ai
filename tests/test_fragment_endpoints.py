@@ -122,3 +122,30 @@ def test_best_external_witness_is_invariant_to_gallery_order():
         index.gallery = SimpleNamespace(banks=[('A','s2',[w]) for w in banks])
         owner,score,w = index.match('s1','back',dict(rooted_track=dict(owner='A',roots=['a','b'])),set(),[])
         assert (owner,score,w['id'])==('A',.98,'high')
+
+
+def test_local_attachment_keeps_split_faces_for_global_revalidation():
+    from stash_ai.recognition.body_identity import Scores, defaults
+    from stash_ai.recognition.body_perspectives import recover
+    settings=dict(defaults(),tracklet_matching=True,face_threshold=.85,face_margin=.1)
+    scores=Scores(SimpleNamespace(data={'sapiensid':{'execution':{
+        'max_witness_comparisons':10000,'reference_bytes':2**20}}}))
+    rows,seeds,decisions=[],{'A':[],'B':[]},{}
+    for start,owner,kind,brightness in [(0,'A','back',15),(5,'A','back',180),(10,'B','front',80)]:
+        for offset in range(3):
+            cue=start+offset
+            oid=str(cue)
+            root=offset!=1
+            q=dict(pixel_digest=oid,orientation=kind,view_shot=start,keypoints=12,sharpness=80,
+                   frame_signature=(bytes([brightness,15,15])*16).hex())
+            row=dict(id=oid,cue=cue,seconds=cue,scan='s',quality=json.dumps({'quality':q}),
+                     geometry='{"bounds":[0,0,80,100]}',_vector=np.array([owner=='A',owner=='B'],dtype='f4'),
+                     _face_vector=np.array([1.,0.]) if root else None,face_person=owner if root else None)
+            rows.append(row)
+            if root:
+                seeds[owner].append(row)
+            decisions[oid]=dict(person=row['face_person'],status='accepted' if root else 'withheld',
+                                reason='measured_face_association' if root else 'body_anchor_quality')
+    recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *args:True))
+    assert decisions['1']['reason']=='face_rooted_body_view'
+    assert decisions['1']['endpoint_pairs']==[dict(people=['A','B'],roots=['0','2','10','12'],minimum=1.)]

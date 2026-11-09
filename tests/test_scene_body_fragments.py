@@ -91,3 +91,16 @@ def test_scores_from_different_modalities_cannot_outvote_each_other():
     decisions={'q':{}}
     assert not separated_proposals(options,decisions,{'q':{'cue':1}},.1)
     assert decisions['q']['track_blocker']['reason']=='conflicting_modalities'
+
+
+def test_sparse_singletons_do_not_trigger_an_all_pairs_rival_pass():
+    import numpy as np
+    from types import SimpleNamespace
+    from stash_ai.recognition.scene_fragments import preserve_fragments
+    from stash_ai.recognition.body_identity import defaults
+    from tests.test_contact_body_claims import body
+    rows = [body(str(i),i,30) for i in range(40)]
+    for r,v in zip(rows,np.eye(40,dtype='f4')):
+        r['_vector'] = v
+    # Comparisons are impossible both as winners and as rivals.
+    preserve_fragments({},rows,{},defaults(),SimpleNamespace(),SimpleNamespace())

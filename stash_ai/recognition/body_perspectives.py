@@ -124,13 +124,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if skipped:
             continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
         else:
-            continuous = boundary[b['cue']] == 'continuous'
+            continuous = shot_ids[a['cue']]==shot_ids[b['cue']] and boundary[b['cue']] == 'continuous'
         if not continuous:
             if not diagnose:
                 return None
             from .perspective_shots import measurements
             difference,structure,colour = measurements(sa.reshape(-1,3),sb.reshape(-1,3))
-            if skipped and shot_ids[a['cue']]!=shot_ids[b['cue']]:
+            if shot_ids[a['cue']]!=shot_ids[b['cue']]:
                 return fail(1,'shot_change',1,0)
             if structure>16:
                 return fail(1,'cut_structure',structure,16)

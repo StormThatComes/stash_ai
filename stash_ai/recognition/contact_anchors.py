@@ -38,6 +38,9 @@ def questionable_links(rows,settings,scores):
                     if q.get('frame_signature') and other.get('frame_signature'):
                         signatures = [np.frombuffer(bytes.fromhex(v['frame_signature']), np.uint8).astype(float).reshape(-1,3)
                                       for v in (q,other)]
+                        from .perspective_shots import change
+                        if change(*signatures,True)!='continuous':
+                            continue
                         offset = translation(q,other,*signatures)
                     if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset):
                         continue

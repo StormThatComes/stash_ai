@@ -37,9 +37,11 @@ def pairs(db,scan,config,limit):
                   cue=cue,observation=oid,peer=peer,status=status,reason=reason,recorded=explicit)
         if key not in candidates or explicit and not candidates[key]['recorded']:
             candidates[key] = item
+    ordered = sorted(cues)
+    previous = dict(zip(ordered[1:],ordered))
     for oid,(cue,fragment,status,proof) in rows.items():
         blocker = proof.get('track_blocker') or {}
-        peer = blocker.get('peer')
+        peer = blocker.get('peer') or blocker.get('rival')
         reason = blocker.get('reason') or proof.get('reason')
         if peer in rows:
             add(oid,rows[peer][1],reason,True,peer)
@@ -47,7 +49,10 @@ def pairs(db,scan,config,limit):
             if other!='new_participant':
                 add(oid,other,reason,True)
         # Adjacent solitary records nominate an inspection, not an asserted cause.
-        if len(cues[cue])==1 and len(cues.get(cue-1,()))==1:
-            peer=cues[cue-1][0]
-            add(oid,rows[peer][1],blocker.get('reason') or 'unverified_adjacent_fragments',False,peer)
+        before = previous.get(cue)
+        if len(cues[cue])==1 and before is not None and len(cues[before])==1:
+            peer=cues[before][0]
+            adjacent = cue==before+1
+            add(oid,rows[peer][1],blocker.get('reason') or (
+                'unverified_adjacent_fragments' if adjacent else 'cue_gap'),False,peer)
     return sorted(candidates.values(),key=lambda x:(not x['recorded'],x['cue'],x['fragments']))[:limit]
