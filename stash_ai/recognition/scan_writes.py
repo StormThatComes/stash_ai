@@ -1,6 +1,5 @@
 """One outstanding complete-cue transaction per scan; only the owner reports progress."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
 import sqlite3
 
 from .database import encoded
@@ -29,13 +28,6 @@ def write(db, batch, collector):
     return cursor
 
 
-def write_file(path, batch, collector):
-    with closing(sqlite3.connect(path, timeout=30)) as db:
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA foreign_keys=ON')
-        return write(db, batch, collector)
-
-
 class Writer:
     def __init__(self, database, collector, progress, asynchronous):
         self.db = database.connection
@@ -43,10 +35,24 @@ class Writer:
         self.collector = collector
         self.progress = progress
         self.executor = None
+        self.worker_db = None
         self.future = None
         self.failed = False
         if asynchronous and self.path and not self.db.in_transaction and getattr(database, 'lock', None):
             self.executor = ThreadPoolExecutor(1, thread_name_prefix='recognition-checkpoint')
+
+    def write_batch(self, batch):
+        # Created, reused and closed on the single writer thread.
+        if self.worker_db is None:
+            self.worker_db = sqlite3.connect(self.path, timeout=30)
+            self.worker_db.row_factory = sqlite3.Row
+            self.worker_db.execute('PRAGMA foreign_keys=ON')
+        return write(self.worker_db, batch, self.collector)
+
+    def close_connection(self):
+        if self.worker_db is not None:
+            self.worker_db.close()
+            self.worker_db = None
 
     def drain(self):
         if self.future is not None:
@@ -65,11 +71,14 @@ class Writer:
         if self.executor is None:
             self.progress(write(self.db, batch, self.collector))
         else:
-            self.future = self.executor.submit(write_file, self.path, batch, self.collector)
+            self.future = self.executor.submit(self.write_batch, batch)
 
     def close(self):
         try:
             self.drain()
         finally:
             if self.executor:
-                self.executor.shutdown(wait=True)
+                try:
+                    self.executor.submit(self.close_connection).result()
+                finally:
+                    self.executor.shutdown(wait=True)
