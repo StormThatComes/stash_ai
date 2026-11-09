@@ -889,3 +889,18 @@ are auxiliary, and the proof retains the exact face roots and body witnesses.
 A complete body fragment moves only when all its members agree on the same
 target. This route works within a scene; global reconciliation uses the usual
 original-witness safeguards across scenes.
+
+### Retained VTT scene continuity
+
+Local SapiensID paths compare adjacent cue evidence using shot appearance,
+torso geometry and alternative owners. A change in VTT sampling cadence alone
+does not cut a path or exclude a labelled holdout episode. An adjacent cue
+can still contain a cut. Face roots on either side of a path can identify it
+when the strongest admissible path is separated from its rivals.
+
+The fragmentation report includes recorded face/body and body/body split
+examples and pending global merges with their required scene selections.
+Replaying that selection revalidates current evidence. The optional solver
+comparison `--compare-scene-strategies` tests families on training goals
+within `--max-trials`; provide a budget above 12 for independent finalist
+tuning. The holdout reports back, contact and entrant coverage separately.

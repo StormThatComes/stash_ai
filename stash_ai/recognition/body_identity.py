@@ -493,7 +493,8 @@ def rebuild(database,selected,config,result):
         if enabled(config):
             with tracking(selected,'Build scene person identities',unit='scene') as items:
                 from .body_scene_jobs import planned
-                for scan,rows,decisions in planned(db,items,config,ids_only=True):
+                from .profiling import timed_stream
+                for scan,rows,decisions in timed_stream('body_scene_planning',planned(db,items,config,ids_only=True)):
                     plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
         from .assignment_delta import enqueue
         with db:

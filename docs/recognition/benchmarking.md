@@ -187,3 +187,24 @@ false-accept rate (1%) using absent probes from other labelled scenes. It report
 actual held-out false accepts, correctly recovered known queries and abstentions.
 Include at least two scenes with competing references. A single scene reports
 missing calibration. These retrieval results do not change production assignments.
+
+### Fragmentation at library scale
+
+Run the retained assignment pipeline for increasing scene counts with:
+
+```sh
+python -m benchmarks.benchmark_fragment_pipeline --config facial_recognition.yml --scenes 32 128 1000 10000
+```
+
+Each scene defaults to 300 VTT cues with two detected people and two face
+records in seven of every ten cues. The fixture varies sampling intervals,
+view, outfit and recurring actors. Rear face detections have no usable face
+embedding. Both full and incremental runs use the configured work directory,
+disk and memory budgets. At 10,000 scenes body vectors alone occupy about
+64 GiB. The benchmark releases each temporary database before the next run.
+
+Each JSON line reports local planning and global reconciliation time, sampled
+coordinator RSS, SQLite reads, available process I/O counters, solver trials
+and the physical assignment partition. Compare the incremental result before
+and after revalidating the complete selection against the cold partition.
+A small smoke run can use `--scenes 2 --cues 10 --batch 1 --solver-trials 2`.
