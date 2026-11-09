@@ -104,11 +104,14 @@ def partition(db):
         conflicts += len(physical)>1
         if len(physical)==1:
             assigned[truth][physical.pop()] += 1
+    by_owner = Counter()
+    true_pairs = 0
+    for counts in assigned.values():
+        by_owner.update(counts)
+        true_pairs += sum(v*(v-1)//2 for v in counts.values())
     return dict(sha256=h.hexdigest(),physical_observations=n,withheld=missing,projection_conflicts=conflicts,
                 extra_fragments=sum(max(0,len(people)-1) for people in assigned.values()),
-                false_joins=sum(len(truths)-1 for truths in (
-                    [truth for truth,counts in assigned.items() if owner in counts]
-                    for owner in set().union(*(set(counts) for counts in assigned.values())))))
+                false_merge_pairs=sum(v*(v-1)//2 for v in by_owner.values())-true_pairs)
 
 
 def measure(state,items,config):

@@ -14,15 +14,17 @@ def plausible_pairs(rows, threshold):
     blocks = []
     for start in range(0,len(rows),width):
         data = np.stack([r['_vector'] for r in rows[start:start+width]])
-        blocks.append((data,ball(data)))
-    for i,(left,first) in enumerate(blocks):
+        blocks.append(ball(data))
+    for i,first in enumerate(blocks):
+        left = np.stack([r['_vector'] for r in rows[i*width:(i+1)*width]]).astype('float64')
         for j in range(i,len(blocks)):
-            right,second = blocks[j]
+            second = blocks[j]
             # Conservative float32 dot-product error for unit embeddings.
             error = 2*left.shape[1]*np.finfo(np.float32).eps
             if upper(first,second)+error < threshold:
                 continue
-            hits = left.astype('float64') @ right.astype('float64').T >= threshold-error
+            right = left if i==j else np.stack([r['_vector'] for r in rows[j*width:(j+1)*width]]).astype('float64')
+            hits = left @ right.T >= threshold-error
             if i==j:
                 hits = np.triu(hits,1)
             for a,b in zip(*np.nonzero(hits)):
@@ -31,10 +33,19 @@ def plausible_pairs(rows, threshold):
 
 def reconcile_neighbours(groups,settings,scores,guard):
     """Join mutually separated complete-link components; keep only two scores per component."""
+    if not any(len(group)>1 for group in groups.values()):
+        return
+    import numpy as np
+    from .nomination_bounds import ball, upper
     best = defaultdict(list)
     keys = sorted(groups)
+    bounds = {k:ball(np.stack([r['_vector'] for r in groups[k]])) for k in keys}
+    error = 2*len(groups[keys[0]][0]['_vector'])*np.finfo(np.float32).eps
+    rival_floor = settings['match_threshold']-settings['ambiguity_margin']
     for i,a in enumerate(keys):
         for b in keys[i+1:]:
+            if upper(bounds[a],bounds[b])+error<rival_floor:
+                continue
             left,right = groups[a],groups[b]
             if copresent(left,right) or not all(guard.allows(r,right) for r in left) or not all(
                     guard.allows(r,left) for r in right):
@@ -93,6 +104,8 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
             del groups[second]
     reconcile_neighbours(groups,settings,scores,guard)
     for original in groups.values():
+        if len(original)<max(2,settings['attach_min_support']):
+            continue
         group = [r for r in original if all(
             scores.compare([r],original)[1]-scores.compare([r],other)[0]>=settings['ambiguity_margin']
             for other in groups.values() if other is not original and not copresent([r],other)
