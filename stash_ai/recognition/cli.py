@@ -219,6 +219,7 @@ def parser():
         help='Browse original VTT cues and run face/pose detection on demand in a desktop window.')
     desktop.add_argument('--scene-id', type=stash_id, help='Optional initial scene to preview.')
     desktop.add_argument('--face-config', type=Path, help='Recognition YAML; default facial_recognition.yml.')
+    desktop.add_argument('--compare-config', type=Path, help='Open Configuration B from a second YAML.')
     desktop.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override detector execution device.')
     portraits = commands.add_parser('portraits', allow_abbrev=False,
         help="Refresh existing identities' portraits without scanning or rebuilding identities.",

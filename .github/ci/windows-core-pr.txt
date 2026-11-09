@@ -2,6 +2,7 @@ tests/test_history_schema_atomicity.py
 tests/test_owned_shutdown.py
 tests/test_recognition_compute.py
 tests/test_recognition_configured_storage.py
+tests/test_recognition_detection_tuner.py
 tests/test_recognition_model_recovery.py
 tests/test_recognition_models.py
 tests/test_recognition_parallel_recovery.py

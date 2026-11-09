@@ -21,6 +21,22 @@ Only **Run detection** loads models and computes an annotated image. Each detect
 uses only the selected cue, independently of navigation history. Edits are local to the
 window. The recognition database and Stash identities are never modified.
 
+Enable **Compare A/B** to show two copies of the same cue. Select **B** under
+**Edit configuration**, use **Copy A to B** or enter a second file path and choose
+**Load YAML**. You can also start with both files:
+
+```sh
+python stash_ai.py recognition tune-detection --scene-id 123 --face-config baseline.yml --compare-config candidate.yml
+```
+
+The two panels share zoom and scrolling. **Differences** lists the edited detector
+settings. **Run detection** computes the missing results sequentially on one model
+thread. Identical configurations share their result. Changing B preserves A for the
+current cue. Navigating during detection immediately clears the overlays, and late
+results cannot replace the new preview. An error is shown in the affected panel,
+so you can fix a setting and retry that panel. The full-scene CLI audit can also use
+previous cues for temporal evidence; this tuner always inspects an isolated cue.
+
 ## Full-cue face and pose detection audit
 
 Use `recognition audit-detection` to tune the detectors visually on **every VTT

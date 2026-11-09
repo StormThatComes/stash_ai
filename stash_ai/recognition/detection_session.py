@@ -2,8 +2,9 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import os
+from pathlib import Path
 
-from stash_ai.runtime.cleanup import closing
+from stash_ai.runtime.cleanup import cleanup, closing
 from .config import plain
 
 
@@ -56,6 +57,15 @@ def load_detector(services, config, factory, write):
     return factory(config, paths)
 
 
+def same_settings(left, right):
+    """Compare effective settings and asset roots, independent of YAML file names/comments."""
+    if left is right:
+        return True
+    left_root = left.source_path.parent if left.source_path else Path.cwd()
+    right_root = right.source_path.parent if right.source_path else Path.cwd()
+    return left_root == right_root and left.model_dir == right.model_dir and left.data == right.data
+
+
 class CueDetector:
     """Owned by one inference thread. Keep at most one configured model set loaded."""
     def __init__(self, services, *, factory=detector_factory, write=print):
@@ -66,7 +76,7 @@ class CueDetector:
 
     def render(self, frame, config, *, mask_options=None):
         from .detection_audit import render_frame
-        if self.detector is None or self.config != config:
+        if self.detector is None or not same_settings(self.config, config):
             self.close()
             self.detector = load_detector(self.services, config, self.factory, self.write)
             self.config = config
@@ -77,11 +87,17 @@ class CueDetector:
                     mask_options=mask_options) as (result, record):
                 return result.copy(), record
         except Exception:
-            self.close()
+            cleanup([self.close])
             raise
 
     def close(self):
         detector, self.detector = self.detector, None
         self.config = None
         if detector is not None:
-            detector.close()
+            try:
+                detector.close()
+            finally:
+                del detector
+                from .gpu_memory import reclaim, torch_memory
+                if torch_memory() is not None:
+                    reclaim()
