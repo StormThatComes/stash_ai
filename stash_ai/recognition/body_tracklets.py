@@ -45,9 +45,8 @@ def paths(rows, settings, scores, occupied=()):
             continue
         qa,_,_,sa = geometry[left_valid[0]['id']]
         qb,_,_,sb = geometry[right_valid[0]['id']]
-        gap = right_valid[0]['seconds']-left_valid[0]['seconds']
         continuous = np.abs(sa-sb).mean()<=8 if skipped else change(sa,sb,True)=='continuous'
-        if qa['view_shot']!=qb['view_shot'] or not 0<gap<=12 or not continuous:
+        if qa['view_shot']!=qb['view_shot'] or not continuous:
             continue
         offset = None if skipped else translation(qa,qb,sa,sb)
         edges = {}
@@ -55,7 +54,7 @@ def paths(rows, settings, scores, occupied=()):
             _,ba,ta,_ = geometry[a['id']]
             for b in right_valid:
                 _,bb,tb,_ = geometry[b['id']]
-                if not rejection(ba,bb,ta,tb,gap,translation=offset):
+                if not rejection(ba,bb,ta,tb,translation=offset):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
         for (a,b),value in edges.items():
             rival = max((s for (i,j),s in edges.items() if (i==a)!=(j==b)),default=-1.)
@@ -74,7 +73,7 @@ def paths(rows, settings, scores, occupied=()):
                     if reverse:
                         boxes.reverse()
                         torsos.reverse()
-                    return bool(rejection(*boxes,*torsos,gap,translation=offset))
+                    return bool(rejection(*boxes,*torsos,translation=offset))
                 if not all(excluded(r,a,b,False) for r in left) or not all(excluded(r,b,a,True) for r in right):
                     continue
                 left_q,_,left_torso,_ = geometry[a]
@@ -149,16 +148,19 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
         for i,row in enumerate(chain):
             if row['id'] in decisions or copresent([row],seeds[owner]) or not guard.allows(row,seeds[owner],owner):
                 continue
-            j,root = min(anchors,key=lambda v:(abs(i-v[0]),v[0]))
-            if abs(i-j)>12 or abs(row['seconds']-root['seconds'])>60:
+            # Both ends can establish ownership. Challenge the strongest
+            # admissible path against exactly the same frozen rivals.
+            routes = [(min(strengths[min(i,j):max(i,j)]), -abs(i-j), root['id'])
+                      for j,root in anchors if abs(i-j)<=12]
+            if not routes:
                 continue
-            floor = min(strengths[min(i,j):max(i,j)])
+            floor, _, root_id = max(routes)
             ranked = frozen.rank(row,guard)
             rival, rival_owner = max(((v[5],v[2]) for v in ranked if v[2]!=owner),default=(-1.,None))
             if floor-rival < max(.025,settings['ambiguity_margin']):
                 continue
             decisions[row['id']] = dict(person=owner,status='accepted',role='auxiliary',
-                reason='local_body_track',root=root['id'],track_floor=floor,runner=rival,rival=rival_owner,
+                reason='local_body_track',root=root_id,track_floor=floor,runner=rival,rival=rival_owner,
                 threshold=settings.get('track_similarity_threshold') if settings.get('track_similarity_threshold') is not None else settings['cohesion_threshold'],
                 required_margin=max(.025,settings['ambiguity_margin']))
     return anonymous

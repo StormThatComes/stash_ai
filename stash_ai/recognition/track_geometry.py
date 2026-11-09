@@ -10,7 +10,7 @@ def torso_points(person):
             and min(points[i]) >= 0 and (visibility is None or visibility[i] >= .5)}
 
 
-def rejection(ba, bb, ta, tb, gap, *, translation=None):
+def rejection(ba, bb, ta, tb, *, translation=None):
     if translation is not None:
         dx,dy = translation
         bb = [bb[0]-dx,bb[1]-dy,bb[2]-dx,bb[3]-dy]
@@ -40,7 +40,7 @@ def rejection(ba, bb, ta, tb, gap, *, translation=None):
             origin,destination = (np.stack([torso[i] for i in common]) for torso in (ta,tb))
             spans = [np.linalg.norm(points.max(axis=0)-points.min(axis=0)) for points in (origin,destination)]
             stable = (min(spans)>=6 and max(spans)<=1.35*min(spans) and
-                      np.linalg.norm(destination-origin,axis=1).max() <= min(spans)*min(.35,.15+.025*gap))
+                      np.linalg.norm(destination-origin,axis=1).max() <= min(spans)*.25)
         else:
             stable = False
         if not stable:

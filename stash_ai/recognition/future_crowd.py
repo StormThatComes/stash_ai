@@ -26,8 +26,7 @@ def plans(db, scan, expected):
             continue
         before,after = groups[cue-1],groups[cue+1]
         shot = before[0]['shot']
-        if (shot is None or any(row['shot']!=shot for row in (*before,*after)) or
-                not 0<after[0]['seconds']-before[0]['seconds']<=24):
+        if shot is None or any(row['shot']!=shot for row in (*before,*after)):
             continue
         faces = list(map(tuple,db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? '
                                          'ORDER BY id',(scan,cue))))
@@ -42,10 +41,10 @@ def plans(db, scan, expected):
             continue
         for later in range(cue+1,cue+5):
             near = groups.get(later,())
-            if not near or any(r['shot']!=shot for r in near) or not 0<near[0]['seconds']-rows[0]['seconds']<=12:
+            if not near or any(r['shot']!=shot for r in near):
                 break
             far = groups.get(later+1,())
-            if (far and all(r['shot']==shot for r in far) and 0<far[0]['seconds']-near[0]['seconds']<=12
+            if (far and all(r['shot']==shot for r in far)
                     and follows(clean.get(later),clean.get(later+1))):
                 boxes = [json.loads(r['geometry']).get('bounds') for r in rows]
                 if not all(boxes):
@@ -65,7 +64,7 @@ def recover(collector, db, scan, source):
     if not body_observations.enabled(config) or config.data['sapiensid']['pose']['backend']=='yolo':
         return
     expected = contract(config)
-    key = 'future-crowd:'+scan
+    key = 'future-crowd-visual-v2:'+scan
     audited = supported(db)
     def generation():
         return [expected,version(db,'raw-body',scan),version(db,'raw-observations',scan)] if audited else None
@@ -114,8 +113,7 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
             for stored,geometry,quality in db.execute('SELECT seconds,geometry,quality FROM body_observations '
                     'WHERE scan=? AND contract=? AND cue=? ORDER BY id',(scan,expected,side)):
                 q = json.loads(quality).get('quality',{})
-                if (not q.get('frame_signature') or q.get('view_shot')!=shot or
-                        not 0 < (seconds-stored)*(cue-side) <= 12):
+                if not q.get('frame_signature') or q.get('view_shot')!=shot:
                     return
                 other = np.frombuffer(bytes.fromhex(q['frame_signature']),dtype='uint8').astype(float).reshape(-1,3)
                 if change(other,signature,True)!='continuous':

@@ -29,9 +29,8 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
             return False
         if not timing:
             return True
-        start, left = timing[scene,a]
-        end, right = timing[scene,b]
-        return 0 < end-start <= 12 and (left is None or right is None or left == right)
+        left, right = timing[scene,a][1], timing[scene,b][1]
+        return left is None or right is None or left == right
 
     def episodes(scene, cues, active):
         nonlocal missing_boundaries

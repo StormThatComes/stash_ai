@@ -62,7 +62,7 @@ def attach_context(model, image, scan, cue, seconds, *, db=None, contract=None):
     support = None
     if all(prior) and all(item[0]==shot for item in prior):
         first,second = prior
-        if 0<second[1]-first[1]<=12 and 0<seconds-second[1]<=12 and follows(first[2],second[2]):
+        if follows(first[2],second[2]):
             support = second[2]
     image._recognition_crowd = (scan,cue,shot,seconds,support)
 
