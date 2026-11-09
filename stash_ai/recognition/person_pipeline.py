@@ -93,9 +93,7 @@ class PreparedCollector:
             if metadata['identity_rejection'] is None:
                 value=self.model.person_input(image,face)
                 self._submit(cue, record, image, value)
-        cue['sealed']=True
-        if len(self.cues)>=2*self.step:self.infer()
-        self.commit(wait=len(self.cues)>=2*self.step)
+        self.finish_cue(cue)
 
     def collect_items(self,db,image,items):
         if self.db is not None and self.db is not db:raise RuntimeError('Person pipeline database owner changed.')
@@ -104,9 +102,17 @@ class PreparedCollector:
             cue['rows'].append(record)
             if value is not None:
                 self._submit(cue, record, image, value)
-        cue['sealed']=True
-        if len(self.cues)>=2*self.step:self.infer()
-        self.commit(wait=len(self.cues)>=2*self.step)
+        self.finish_cue(cue)
+
+    def finish_cue(self, cue):
+        cue['sealed'] = True
+        # Sparse VTT cues may contain markers but no encoder input. Give those
+        # markers a bounded lookahead instead of forcing a partial forward.
+        high_water = 2 * self.step if self.step == 1 else 4 * self.step
+        pressure = len(self.cues) >= high_water or self.stage.bytes >= self.stage.limit // 2
+        if pressure or (len(self.cues) >= 2*self.step and len(self.jobs) >= self.step):
+            self.infer()
+        self.commit(wait=pressure)
 
     def infer(self):
         if not self.jobs:return

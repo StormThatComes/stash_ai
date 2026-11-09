@@ -52,7 +52,9 @@ class Writer:
         if self.future is not None:
             future, self.future = self.future, None
             try:
-                cursor = future.result()
+                from stash_ai.runtime.console import activity, current_report
+                with activity(current_report(), 'save VTT checkpoint', wait='SQLite write'):
+                    cursor = future.result()
             except BaseException:
                 self.failed = True
                 raise
