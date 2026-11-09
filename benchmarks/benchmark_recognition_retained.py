@@ -61,13 +61,26 @@ def _ram(config):
 
 @contextmanager
 def _working(config):
-    import tempfile
-    with tempfile.TemporaryDirectory(prefix='recognition-benchmark-') as directory:
-        with closing(sqlite3.connect(Path(directory)/'evidence.sqlite3')) as db:
-            db.row_factory=sqlite3.Row
-            db.execute('PRAGMA cache_size=-32768')
-            db.execute('PRAGMA temp_store=FILE')
-            yield db
+    from stash_ai.recognition.scratch_space import scope as scratch_scope, connect
+    with scratch_scope(config), closing(connect()) as db:
+        db.row_factory=sqlite3.Row
+        db.execute('PRAGMA cache_size=-32768')
+        db.execute('PRAGMA temp_store=MEMORY')
+        yield db
+
+
+@contextmanager
+def _trial_state(config, seed, installation, *, labelled):
+    if labelled:
+        from stash_ai.recognition.scratch_space import scope as scratch_scope, directory
+        with scratch_scope(config), directory(prefix='labelled-replay-') as folder:
+            with FaceDatabase(Path(folder)/'trial.sqlite3') as state:
+                seed.backup(state.connection)
+                yield state
+    else:
+        with _working(config) as target:
+            seed.backup(target)
+            yield SimpleNamespace(connection=target,installation=installation)
 
 
 def _selection(source, scenes, all_scenes, scope, namespace):
@@ -150,9 +163,20 @@ def semantic_hash(db):
 
 
 def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
-        workers=(1, 2), repeats=1, database=None):
+        workers=(1, 2), repeats=1, database=None, validation=None):
     if repeats < 1 or not workers or len(workers) != len(set(workers)):
         raise ValueError('Require positive repeats and distinct worker budgets.')
+    annotations = None
+    if validation is not None:
+        from stash_ai.recognition.solver_validation import read_manifest
+        annotated_scenes,samples,labels,label_db,_,triples,_ = read_manifest(validation)
+        if scenes and set(scenes)!=set(annotated_scenes) or all_scenes:
+            raise ValueError('Labelled benchmark selection must match its manifest.')
+        if label_db and database and Path(database).resolve()!=label_db:
+            raise ValueError('Benchmark database differs from the labelled manifest.')
+        database = database or label_db
+        scenes = annotated_scenes
+        annotations = samples,labels,triples
     namespace = namespace or model_namespace(config)
     started = time.perf_counter()
     with _working(config) as seed:
@@ -181,6 +205,12 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
                         retained_observations=seed.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
                         historical_people=seed.execute('SELECT COUNT(*) FROM people').fetchone()[0], dimensions=dimensions,
                         config_sha256=digest(config.data))
+        if annotations:
+            from stash_ai.recognition.solver_validation import _locations
+            timing = {}
+            locations = _locations(seed,[{'id':s['scan']} for s in selected],labels,timing=timing)
+            if labels.keys()!=locations.keys():
+                raise ValueError('Every benchmark label must identify a retained observation in the selected scenes.')
         snapshot_seconds = time.perf_counter()-started
         trials = []
         for requested in workers:
@@ -189,15 +219,27 @@ def run(config, scenes=None, *, all_scenes=False, scope=None, namespace=None,
                 data['execution'].update(rebuild_workers=requested, profile_rebuild=True, rebuild_checkpoint_scenes=0)
                 validate(data)
                 trial_config = replace(config, data=data)
-                with _working(config) as target:
-                    seed.backup(target)
-                    state = SimpleNamespace(connection=target, installation=installation)
+                with _trial_state(trial_config,seed,installation,labelled=bool(annotations)) as state:
+                    target = state.connection
                     for mode in ('cold', 'cached'):
                         with sampled_rss() as memory:
                             start, cpu = time.perf_counter(), time.process_time()
                             rebuild_selected(state, selected, trial_config)
                             wall, used = time.perf_counter()-start, time.process_time()-cpu
-                        trials.append(dict(requested_workers=requested, repeat=repeat, mode=mode,
+                        quality = {}
+                        if annotations:
+                            from stash_ai.recognition.evaluation_scenarios import snapshot
+                            from stash_ai.recognition.solver_validation import _metrics
+                            from stash_ai.recognition.scene_strategy_validation import strategy_summary
+                            _,decisions,_ = snapshot(target,trial_config,labels)
+                            metrics = _metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing)
+                            quality = strategy_summary(trial_config,metrics,labels,locations,decisions)
+                        sql = state.last_rebuild_profile['sql']
+                        fetches = state.last_rebuild_profile['sql_fetch']
+                        trials.append(dict(quality=quality,
+                            sqlite_select_statements=sum(row['calls'] for k,row in sql.items() if k.startswith('select:')),
+                            sqlite_rows_fetched=sum(row['rows'] for row in fetches.values()),
+                            requested_workers=requested, repeat=repeat, mode=mode,
                             wall_seconds=wall, process_cpu_seconds=used, memory=memory,
                             semantic_sha256=semantic_hash(target), profile=state.last_rebuild_profile))
         return dict(format=1, scope='local-retained-evidence-rebuild-only', manifest=manifest,
@@ -215,6 +257,7 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--database')
     selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--validation', help='Solver holdout JSON with labelled scenes and observations.')
     selection.add_argument('--scene-id', nargs='+')
     selection.add_argument('--all-scenes', action='store_true')
     parser.add_argument('--scope')
@@ -225,7 +268,7 @@ def main():
     try:
         result = run(load(args.config), args.scene_id, all_scenes=args.all_scenes,
             scope=args.scope, namespace=args.namespace, workers=tuple(args.workers),
-            repeats=args.repeats, database=args.database)
+            repeats=args.repeats, database=args.database, validation=args.validation)
     except (ValueError, sqlite3.DatabaseError) as error:
         parser.exit(2, f'Benchmark failed: {error}\n')
     print(json.dumps(result, indent=2))

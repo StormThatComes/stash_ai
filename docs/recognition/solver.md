@@ -626,3 +626,10 @@ Each omitted cue window now has a `damage` result for baseline and winner.
 It counts correct same-person pairs lost outside that window and incorrect
 cross-person pairs introduced by its omission, grouping projections by physical
 person and cue. The independent verdict includes both measures.
+
+### Measuring a labelled retained sample
+
+Run `python -m benchmarks.benchmark_recognition_retained --config facial_recognition.yml --validation holdout.json --workers 1`.
+The manifest selects current scans and labels in the solver validation format. Cold and cached private copies report physical coverage, fragments per performer, false joins, partner swaps, elapsed time, sampled peak RSS, SELECT count and fetched rows. Source images and model inference are outside the measurement. The synthetic 10,000-scene index control runs with `python -m benchmarks.benchmark_rear_index --profile library --scenes 10000`.
+
+Rear recovery narrows candidate scenes to 16-cue blocks with conservative gallery bounds. Blocks connected by an original owner are re-evaluated together. Eligible face endpoints keep their block active even when body similarity is low. The counters `rear_fragments_examined`, `rear_fragments_skipped` and `rear_fragment_queries_reused` are available with rebuild profiling.

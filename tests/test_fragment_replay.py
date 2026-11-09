@@ -56,3 +56,50 @@ def test_export_mixed_holdout_counts(tmp_path):
     dest = tmp_path/'proposal.yml'
     export(config,results,tmp_path/'result.json',dest,yaml_mode='diff')
     assert '0 -> 1 (regressed)' in dest.read_text() and '1/1 -> 0/1' in dest.read_text()
+
+
+def test_fragment_replay_matches_full_scan_on_added_changed_and_removed_rival(tmp_path):
+    from io import BytesIO
+    from types import SimpleNamespace
+    import numpy as np
+    from stash_ai.recognition.database import FaceDatabase,encoded
+    from stash_ai.recognition.derived_cache import scope
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.rear_gallery import Gallery
+    from stash_ai.recognition.rear_pending import Pending
+    from stash_ai.recognition.rear_fragments import select
+    from stash_ai.recognition.rear_recovery import _scene
+    from tests.test_recognition_body_identity import configuration, scene
+    cfg = configuration(tmp_path)
+    cfg.data['execution'].update(rebuild_cache_bytes=2**23,derived_cache_bytes=2**23)
+    axis = np.zeros(4096,dtype='<f4')
+    axis[0]=1.
+    with FaceDatabase(cfg.database) as state, scope(state,cfg):
+        db=state.connection
+        item,ids=scene(db,cfg,vectors=[[1,0],[-1,0],[0,1]],times=[0,16,32])
+        stamp = policy(cfg)
+        db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.orientation','back')")
+        for oid in ids:
+            db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',(oid,None,'auxiliary','withheld',stamp,
+                       encoded(dict(person=None,status='withheld',role='auxiliary',reason='body_anchor_quality'))))
+        def gallery(owners):
+            return Gallery([(owner,'external',[dict(id=owner+str(i),scan='external',roots=['l','r'],
+                    quality='{}',_vector=v) for i in range(2)]) for owner,v in owners])
+        scan=item['scan']
+        for rival, expected in [(None,'A'),(axis,None),(-axis,'A'),(None,'A')]:
+            owners=[('A',axis)]+([('B',rival)] if rival is not None else [])
+            g=gallery(owners)
+            from stash_ai.recognition.rear_gallery import revision
+            g.revision=revision(g)
+            search=SimpleNamespace(config=cfg,bank={p:dict(cues=set()) for p,_ in owners},unavailable=set(),
+                                   mean_versions={},block=8,entries=[],index=BytesIO(),identities=[])
+            pending=Pending(db,g,search,cfg.data['sapiensid']['identities'])
+            blocks=select(db,scan,stamp,pending)
+            assert blocks==([0,1] if rival is not None and rival[0]==-1 else [0])
+            full=_scene(db,scan,stamp,g,search,cfg)
+            partial=_scene(db,scan,stamp,g,search,cfg,blocks=blocks,pending=pending)
+            assert encoded(full)==encoded(partial)
+            assert partial.get(ids[0],{}).get('person')==expected
+        db.execute("INSERT INTO people VALUES ('old','scope','ns',0,NULL,'old')")
+        db.execute("UPDATE body_members SET person='old' WHERE observation IN (?,?)",ids[:2])
+        assert select(db,scan,stamp,pending)==[0,1]

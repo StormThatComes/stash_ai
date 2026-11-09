@@ -69,3 +69,19 @@ def test_foreign_or_executable_schema_is_refused_without_modification(tmp_path):
     with pytest.raises(ValueError, match='triggers or views'):
         benchmark.run(config, all_scenes=True, namespace='ns', workers=(1,))
     assert config.database.read_bytes() == before
+
+
+def test_labelled_replay_measures_physical_quality_and_sqlite_reads(tmp_path):
+    from tests.test_recognition_body_identity import configuration, scene
+    cfg=configuration(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        item,ids=scene(state.connection,cfg)
+        state.connection.commit()
+    manifest=tmp_path/'labels.json'
+    manifest.write_text(json.dumps(dict(scenes=['1'],observations={i:dict(truth='A',slices=['back']) for i in ids})))
+    result=benchmark.run(cfg,namespace='ns',workers=(1,),validation=manifest)
+    assert result['identical_semantics']
+    for trial in result['trials']:
+        assert trial['quality']['fragments_per_performer']=={'A':1}
+        assert trial['quality']['physical_coverage']==1
+        assert trial['sqlite_select_statements']>0 and trial['sqlite_rows_fetched']>0
