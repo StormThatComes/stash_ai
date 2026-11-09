@@ -34,7 +34,7 @@ def _open_readonly(path):
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
         if (db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID
-                or db.execute('PRAGMA user_version').fetchone()[0] not in (5, 6, 7, 8, 9, 10, 11, 12, 15, SCHEMA_VERSION)):
+                or db.execute('PRAGMA user_version').fetchone()[0] not in (5, 6, 7, 8, 9, 10, 11, 12, 15, 16, SCHEMA_VERSION)):
             raise ValueError('Unsupported facial recognition database/version.')
         _reject_executable_schema(db)
         db.execute('BEGIN')  # One consistent snapshot, including during another recognition run.
@@ -469,6 +469,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         from .hybrid_evidence import report as hybrid_report
         from .body_reports import report as body_report
+        from .fragment_pair_report import pairs as fragment_pairs
+        from .alias_scene_index import pending
         from .body_global import report as body_global_report
         from .publication_queue import inventory,plan
         publication_state=dict(inventory(db,scan['scope'],scan['namespace']),
@@ -482,6 +484,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
             'independent_person': body_report(db,config,[scan['id']]),
+            'scene_fragment_pairs': fragment_pairs(db,scan['id'],config,limit),
+            'pending_body_merges': pending(db,scan['scope'],scan['namespace'],scan['scene'],limit),
             'person_consolidation': body_global_report(db,config,scan['scope'],scan['namespace']),
             'hybrid': hybrid_report(
                 db,config,scan['scope'],scan['namespace']),

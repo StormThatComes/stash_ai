@@ -34,7 +34,7 @@ def test_directory_selects_changed_and_nominated_scans_across_rollback(tmp_path)
 
 
 def test_v15_migration_preserves_members_and_seeds_full_first_pass(tmp_path):
-    from stash_ai.recognition.database import SCHEMA_V15, APPLICATION_ID
+    from stash_ai.recognition.database import SCHEMA_V15, SCHEMA_VERSION, APPLICATION_ID
     path=tmp_path/'old.db'
     with sqlite3.connect(path) as db:
         db.executescript(SCHEMA_V15)
@@ -42,7 +42,7 @@ def test_v15_migration_preserves_members_and_seeds_full_first_pass(tmp_path):
         db.execute(f'PRAGMA application_id={APPLICATION_ID}')
         db.execute("INSERT INTO metadata VALUES ('installation','00000000-0000-0000-0000-000000000001')")
     with FaceDatabase(path) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()[0]==16
+        assert state.connection.execute('PRAGMA user_version').fetchone()[0]==SCHEMA_VERSION
         assert state.connection.execute('SELECT count(*) FROM rear_indexed_scenes').fetchone()[0]==0
 
 

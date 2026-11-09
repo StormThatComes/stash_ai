@@ -45,6 +45,20 @@ def test_partial_scope_reports_but_does_not_apply_merge(tmp_path):
         rebuild(state,[a],c,{a['scan']:[]});rebuild(state,[b],c,{b['scan']:[]})
         assert state.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==0
         assert any(d['outcome']=='merge' for d in report(state.connection,c,'scope','ns')['decisions'])
+        from stash_ai.recognition.alias_scene_index import pending
+        db = state.connection
+        entries = pending(db,'scope','ns','1',10)
+        assert len(entries)==1 and entries[0]['required_scenes']==['1','2']
+        assert set(entries[0]['owner_versions'])==set(entries[0]['people'])
+        rebuild(state,[a,b],c,{a['scan']:[],b['scan']:[]})
+        assert not pending(db,'scope','ns','1',10)
+        assert {r[0] for r in db.execute('SELECT scene FROM body_alias_scenes')}=={'1','2'}
+        db.execute('SAVEPOINT temp_alias_edit')
+        db.execute('DELETE FROM identity_merges')
+        assert not db.execute('SELECT 1 FROM body_alias_scenes').fetchone()
+        db.execute('ROLLBACK TO temp_alias_edit')
+        db.execute('RELEASE temp_alias_edit')
+        assert db.execute('SELECT COUNT(*) FROM body_alias_scenes').fetchone()[0]==2
 
 
 def test_global_disabled_retains_separate_scene_cores(tmp_path):

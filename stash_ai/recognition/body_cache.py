@@ -23,6 +23,12 @@ def matching_settings(config):
 
 def cached(db,selected,config):
     if not supported(db):return False
+    if db.execute('PRAGMA user_version').fetchone()[0]>=17 and selected:
+        scope,namespace = db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
+        if db.execute('SELECT 1 FROM pending_body_merges WHERE scope=? AND namespace=? AND NOT EXISTS '
+                '(SELECT 1 FROM json_each(scenes) WHERE value NOT IN (SELECT value FROM json_each(?))) LIMIT 1',
+                (scope,namespace,encoded([s['scene'] for s in selected]))).fetchone():
+            return False
     row=db.execute('SELECT value FROM metadata WHERE key=?',(key(selected,config),)).fetchone()
     return bool(row and json.loads(row[0])==dict(format=2,generation=version(db)))
 
