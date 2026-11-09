@@ -2,8 +2,9 @@
 import tkinter as tk
 from tkinter import ttk
 
+from .config import defaults
 from .config_help import HELP
-from .config_layout import leaf_items, v2_document
+from .config_layout import POINT_FIELDS, get, leaf_items, v2_document
 from .detection_parameters import apply_edits
 
 
@@ -28,6 +29,9 @@ class Settings:
         document = v2_document(config.data, source=config.source)
         self.base = {path: value for path, value in leaf_items(document)
                      if path.startswith(('face.detector.', 'pose.'))}
+        # An operator may write 1 for a real-valued threshold. Parse according to
+        # the schema so that threshold can still be changed to (for example) 0.8.
+        self.schema = v2_document(defaults())
         self.edits = {}
 
     def value(self, path):
@@ -35,17 +39,19 @@ class Settings:
 
     def edit(self, path, text):
         original = self.base[path]
-        if path in CHOICES or isinstance(original, str):
+        default = get(self.schema, path)
+        if isinstance(default, str):
             value = text
-        elif isinstance(original, bool):
+        elif isinstance(default, bool):
             if text not in ('true', 'false'):
                 raise ValueError(f'{path} requires true or false.')
             value = text == 'true'
-        elif path.startswith(('pose.refinement.', 'pose.deduplication.')) and text == 'null':
+        elif (text == 'null' and path.startswith(('pose.refinement.', 'pose.deduplication.'))
+              and path.rpartition('.')[2] in POINT_FIELDS):
             value = None
         else:
             try:
-                value = int(text) if type(original) is int else float(text)
+                value = int(text) if type(default) is int else float(text)
             except ValueError as error:
                 raise ValueError(f'Enter a number for {path}.') from error
         if original == value:

@@ -45,6 +45,7 @@ class Worker:
             self.executor.submit(release).result()
         finally:
             self.executor.shutdown(wait=True)
+            self.future = None
 
 
 class SceneBrowser:
