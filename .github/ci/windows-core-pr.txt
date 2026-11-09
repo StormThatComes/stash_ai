@@ -17,3 +17,4 @@ tests/test_recognition_shutdown_safety.py
 tests/test_recognition_solver_progress.py
 tests/test_recognition_state_safety.py
 tests/test_verified_model_inputs.py
+tests/test_recognition_identity_inspector.py

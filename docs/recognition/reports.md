@@ -265,3 +265,20 @@ are typed face/body observation IDs. Track endpoints and the sighting between
 them are labelled separately. A recorded predecessor links to the applicable
 chain in the report's `identity_merges`; unrelated family merges are omitted.
 Missing measurements and references remain unavailable.
+
+### Desktop identity inspector
+
+Open an English-language window on Windows or Linux with a graphical desktop:
+
+```sh
+python stash_ai.py recognition inspect-identity --performer-id 123
+python stash_ai.py recognition inspect-identity --identity-id ID --observation-id OBSERVATION --faces-db faces_state.sqlite3
+```
+
+The scene and zero-based cue filters can be combined with an exact observation
+ID. Select a result to see its stored crop, explanation and related merge.
+The reference selector steps through recorded witnesses and track endpoints.
+Each action uses a short read-only snapshot. Paging retrieves metadata only;
+selecting a row reads its images on demand. Nothing is exported. Missing crops
+or references remain visible as such. Tkinter and Pillow ImageTk are needed
+only for desktop viewing; check the installation with `python -m tkinter`.

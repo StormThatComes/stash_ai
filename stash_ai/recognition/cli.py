@@ -249,6 +249,15 @@ def parser():
     identity.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer namespace.')
     identity.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     identity.add_argument('--scope', help='Stash scope; required if the performer ID occurs in multiple scopes.')
+    inspect = commands.add_parser('inspect-identity', allow_abbrev=False,
+        help='Open the offline desktop inspector for recorded observation assignments.')
+    selector = inspect.add_mutually_exclusive_group(required=True)
+    selector.add_argument('--identity-id', help='Internal identity ID.')
+    selector.add_argument('--performer-id', type=stash_id, help='Linked numeric Stash performer ID.')
+    inspect.add_argument('--scope', help='Stash instance scope.')
+    inspect.add_argument('--observation-id', help='Initially show this retained observation.')
+    inspect.add_argument('--face-config', type=Path, help='Recognition YAML selecting the model namespace.')
+    inspect.add_argument('--faces-db', type=Path, help='Existing recognition SQLite database.')
     merge_report = commands.add_parser('report-merge', allow_abbrev=False,
         help='Compare two Stash performers or internal identities and propose verified YAML changes for frozen-catalogue consolidation (offline, read-only).')
     selector = merge_report.add_mutually_exclusive_group(required=True)
@@ -377,6 +386,15 @@ def _execute(args, config, services):
         return execute(args, config, services=services)
     if args.command == 'report':
         from .fragmentation_report import execute
+        return execute(args, config)
+    if args.command == 'inspect-identity':
+        try:
+            from .identity_window import execute
+        except ImportError as error:
+            if error.name not in ('tkinter', '_tkinter', 'PIL.ImageTk'):
+                raise
+            raise RuntimeError('The identity inspector requires Tkinter and Pillow ImageTk. '
+                               'Check Tk with python -m tkinter.') from error
         return execute(args, config)
     if args.command == 'report-identity':
         from .identity_report import execute
