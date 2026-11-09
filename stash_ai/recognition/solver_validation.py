@@ -13,6 +13,7 @@ from .offline_evaluation import evaluate, _selection
 
 
 def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(), timing=None):
+    from .scene_strategy_validation import physical_owner
     records = [dict(observation=oid, scene=locations[oid][0], truth=truth,
                     predicted=decisions[oid]['accepted_identity']) for oid, truth in labels.items() if oid not in exclude]
     all_metrics = evaluate_identities(records)
@@ -25,7 +26,7 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
         owners = {row['predicted'] for row in rows if row['predicted'] is not None}
         conflicts += len(owners)>1
         projections.append(dict(observation=encoded([scene,cue,truth]),scene=scene,truth=truth,
-            predicted=next(iter(owners)) if len(owners)==1 else None,
+            predicted=physical_owner(owners),
             slices={s for row in rows for s in samples[row['observation']]['slices']}))
     provisional = [dict(row, predicted=decisions[row['observation']]['identity'])
                    for row in records if row['predicted'] is None
@@ -35,7 +36,7 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
     from .sequence_validation import sequence_metrics
     metrics['physical'] = dict(evaluate_identities(projections),projection_conflicts=conflicts,
         slices={name:evaluate_identities([row for row in projections if name in row['slices']])
-                for name in ('back','entangled')})
+                for name in ('back','entangled','entrant')})
     metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude,timing=timing)
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
@@ -61,25 +62,35 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
 def partner_metrics(triples, labels, locations, decisions, exclude):
     """Each performer/cue relation votes once, including face and body projections."""
     from collections import defaultdict
-    positive = defaultdict(list)
-    negative = defaultdict(list)
+    from .scene_strategy_validation import physical_owner
+    projections = defaultdict(set)
+    for oid,truth in labels.items():
+        if oid not in exclude:
+            owner = decisions[oid]['accepted_identity']
+            if owner is not None:
+                projections[(truth,*locations[oid])].add(owner)
+    positive, negative = {}, {}
     for face, back, partner in triples:
         for first, second, same in ((face, back, True), (back, partner, False), (face, partner, False)):
             if first in exclude or second in exclude:
                 continue
-            a, b = (decisions[oid]['accepted_identity'] for oid in (first, second))
             addresses = tuple(sorted((labels[oid], *locations[oid]) for oid in (first, second)))
             if addresses[0] == addresses[1]:
                 continue
-            (positive if same else negative)[addresses].append(a is not None and a == b)
+            left,right = (projections[key] for key in addresses)
+            if same:
+                owner = physical_owner(left)
+                positive[addresses] = owner is not None and owner==physical_owner(right)
+            else:
+                negative[addresses] = bool(left & right)
     counts = defaultdict(Counter)
-    for key, values in positive.items():
-        counts[key[0][0]].update(target_pairs=1, recovered=int(all(values)))
-    for key, values in negative.items():
+    for key, recovered in positive.items():
+        counts[key[0][0]].update(target_pairs=1, recovered=int(recovered))
+    for key, joined in negative.items():
         for performer in {address[0] for address in key}:
-            counts[performer].update(partner_pairs=1, false_joins=int(any(values)))
-    return dict(target_pairs=len(positive), recovered=sum(map(all, positive.values())),
-                partner_pairs=len(negative), false_joins=sum(map(any, negative.values())),
+            counts[performer].update(partner_pairs=1, false_joins=int(joined))
+    return dict(target_pairs=len(positive), recovered=sum(positive.values()),
+                partner_pairs=len(negative), false_joins=sum(negative.values()),
                 per_performer=dict(sorted(counts.items())))
 
 
@@ -133,8 +144,8 @@ def read_manifest(manifest_path):
     labels = {}
     for oid, row in samples.items():
         if (not isinstance(row,dict) or not isinstance(row.get('truth'),str) or not row['truth'].strip()
-                or not isinstance(row.get('slices'),list) or any(s not in ('back','entangled') for s in row['slices'])):
-            raise ValueError('Each validation observation needs truth and a list of back/entangled slices.')
+                or not isinstance(row.get('slices'),list) or any(s not in ('back','entangled','entrant') for s in row['slices'])):
+            raise ValueError('Each validation observation needs truth and a list of back/entangled/entrant slices.')
         if type(row.get('reference', False)) is not bool:
             raise ValueError('Validation reference must be a boolean.')
         labels[oid] = row['truth']
@@ -198,6 +209,18 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             cases = []
         from .scene_strategy_validation import variants, strategy_summary, omission_damage
         strategies = variants(winner) if compare_strategies else {}
+        selected = {}
+        if strategies:
+            if result.get('groups'):
+                from .merge_goals import evaluate as train, objective
+                training_trials = train(winner, result, training, variants=strategies)['trials']
+                order = sorted(strategies, key=lambda name:objective(training_trials[name]['goal_result']), reverse=True)
+            else:
+                # Direct evaluation without labelled training goals uses a fixed paired comparison.
+                order = ['paths-only-evidence', 'tracks-1-evidence']
+            selected = {name:strategies[name] for name in order[:2]}
+        stress_variants = {'winner':winner, **selected}
+        tested = ('baseline', *stress_variants)
         full = evaluate(settings,replay_labels,variants={'winner':winner,**strategies},variant_started=announce,**options)
         predicted = full['trials']['winner/joint']['decisions']
         references = [oid for oid,row in samples.items() if row.get('reference')]
@@ -212,9 +235,9 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             episodes = []
             for kind,case in stress_cases(cases,visible,scans,samples,locations):
                 scene = next(s['scene'] for s in scans if s['id']==case[0])
-                stressed = evaluate(settings,replay_labels,variants={'winner':winner},swapped_bodies=case,**options)
+                stressed = evaluate(settings,replay_labels,variants=stress_variants,swapped_bodies=case,**options)
                 item = dict(kind=kind,scene=scene,cue=case[1],bodies=list(case[2:]))
-                for name in ('baseline','winner'):
+                for name in tested:
                     key = name+'/joint'
                     decisions = stressed['trials'][key]['decisions']
                     before = full['trials'][key]['decisions']
@@ -238,17 +261,17 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             for name, sequence in [('face_first',order),('rear_first',list(reversed(order)))]:
                 if progress:
                     progress('Holdout incremental '+name)
-                staged = evaluate(settings,labels,variants={'winner':winner},
+                staged = evaluate(settings,labels,variants=stress_variants,
                                   **dict(options,batch_sizes=(1,),ordered_scenes=sequence))
                 by_variant = {}
-                for variant in ('baseline','winner'):
+                for variant in tested:
                     joint = full['trials'][variant+'/joint']['decisions']
                     replay = staged['trials'][variant+'/batch-1']['decisions']
                     by_variant[variant] = dict(**_partition_delta(joint,replay,labels),
                         coverage_changes=sum((joint[k]['accepted_identity'] is None) !=
                                              (replay[k]['accepted_identity'] is None) for k in labels))
                 decisions = staged['trials']['winner/batch-1']['decisions']
-                incremental[name] = dict(order=sequence, baseline=by_variant['baseline'], **by_variant['winner'],
+                incremental[name] = dict(order=sequence, strategies={s:by_variant[s] for s in selected}, baseline=by_variant['baseline'], **by_variant['winner'],
                     metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
         if not windows:
             faceless = {r[0] for r in source.execute(
@@ -294,16 +317,16 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             group = sorted(labels.keys()-excluded)
             before = _metrics(labels,samples,locations,predicted,excluded,triples,timing)
             for mode in ('rejected','empty'):
-                omitted = evaluate(settings,labels,variants={'winner':winner},omitted_cues=window,omission_mode=mode,**options)['trials']
+                omitted = evaluate(settings,labels,variants=stress_variants,omitted_cues=window,omission_mode=mode,**options)['trials']
                 trial = omitted['winner/joint']['decisions']
                 damage = {name:omission_damage(labels,locations,group,full['trials'][name+'/joint']['decisions'],
-                                               omitted[name+'/joint']['decisions']) for name in ('baseline','winner')}
+                                               omitted[name+'/joint']['decisions']) for name in tested}
                 delta = _partition_delta(predicted,trial,group)
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
     return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress),
-                scene_strategies=strategy_results, selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
+                scene_strategies=strategy_results, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
 
@@ -333,6 +356,10 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=())
         status = ('no_coverage' if not covered else 'regressed' if after>before else
                   'improved' if after<before else 'unchanged')
         results[label] = dict(baseline=before,winner=after,status=status)
+    physical = [trial.get('physical', {}) for trial in (base, final)]
+    covered = all(p.get('observations', 0) for p in physical)
+    for field in ('withheld', 'extra_fragments', 'false_merge_pairs', 'projection_conflicts'):
+        risk('physical_' + field, physical[0].get(field, 0), physical[1].get(field, 0), covered)
     sequences = [trial['sequences'] for trial in (base,final)]
     first,last = (set(map(tuple,row.get('rooted_turns',()))) for row in sequences)
     risk('lost_turn_references',0,len(first-last),bool(first))

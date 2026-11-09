@@ -189,7 +189,7 @@ def _scene(db, scan, stamp, gallery, search, config):
         bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
         best = winner(ranked,settings,owner_bonuses=bonuses)
         endpoint = None
-        if best is None and settings.get('tracklet_matching') and hasattr(search,'endpoints'):
+        if best is None and hasattr(search,'endpoints'):
             endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked)
         if best is None and endpoint is None:
             if ranked:
@@ -346,7 +346,8 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     gallery.revision = revision(gallery)
     with Search(db,config,references) as search:
         search.unavailable = unavailable
-        if config.data['sapiensid']['identities'].get('tracklet_matching'):
+        from .fragment_endpoints import enabled as endpoints_enabled
+        if endpoints_enabled(config.data['sapiensid']['identities']):
             from .fragment_endpoints import ExternalEndpoints
             search.endpoints = ExternalEndpoints(db,gallery,config)
         settings = config.data['sapiensid']['identities']

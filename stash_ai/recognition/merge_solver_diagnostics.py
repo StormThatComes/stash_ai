@@ -130,7 +130,7 @@ def latest_decisions(db, observation_ids):
                 witnesses=list(proof.get('source_tracks') or proof.get('witness_ids') or ())[:8], rival=proof.get('rival'),
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
-                body_global=bool(proof.get('global_merge')),
+                body_global=bool(proof.get('global_merge')), face_endpoints=proof.get('route')=='fragment_face_endpoints',
                 used_scene_bonus=bool(proof.get('roster_context') or proof.get('reason')=='external_rear_view' and proof.get('shot_context')),
                 **({'track_blocker':proof['track_blocker']} if proof.get('track_blocker') else {}),
                 **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))
@@ -153,7 +153,8 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality, *, wrong=No
             add('assignment', 'accepted_wrong_owner', row['observation'],
                 route=row['reason'], witnesses=row.get('witnesses', []),
                 owner=row.get('owner'), rival=row.get('rival'), **conflict,
-                score=measured.get('score'), runner=measured.get('runner'),
+                score=measured.get('score',measured.get('track_floor')), runner=measured.get('runner'),
+                threshold=measured.get('threshold'), required_margin=measured.get('required_margin'),
                 margin=(measured['score'] - measured['runner']
                         if 'score' in measured and 'runner' in measured else None))
         if row['status'] != 'accepted':

@@ -45,8 +45,19 @@ def route_parameters(decisions):
         reason = row.get('reason') or ''
         keys = set()
         if row.get('evidence_kind') == 'person':
-            if reason != 'measured_face_association':
-                keys.update(k for k in BODY if '.identities.' in k)
+            local = 'sapiensid.identities.'
+            if reason == 'body_scene_core':
+                keys.update(local+k for k in ('min_support','match_threshold','cohesion_threshold','ambiguity_margin','min_appearance_distance'))
+            elif reason in ('body_core_attachment','frozen_face_body_bank','joint_body_claim','scene_body_attachment',
+                            'body_confirmed_core_attachment','face_rooted_body_view','external_rear_view'):
+                if not row.get('face_endpoints'):
+                    keys.update(local+k for k in ('match_threshold','cohesion_threshold','ambiguity_margin'))
+                    if reason != 'body_core_attachment':
+                        keys.add(local+'attach_min_support')
+            elif reason == 'local_body_track':
+                keys.add(local+'ambiguity_margin')
+            if row.get('face_endpoints'):
+                keys.update(('recognition.match_threshold','sapiensid.matching.face_floor'))
             if reason in ('local_body_track','face_rooted_body_view','face_rooted_crossing','external_rear_view'):
                 keys.add(TRACK)
             if row.get('used_scene_bonus'):

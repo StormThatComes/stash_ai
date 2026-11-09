@@ -16,7 +16,7 @@ from .person_anchor import pixel_gate,anchor_gate
 
 
 def defaults():
-    return dict(enabled=False,tracklet_matching=False,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+    return dict(enabled=False,tracklet_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
@@ -335,7 +335,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             good=admissible and mean-runner>=settings['ambiguity_margin']
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
-                score=mean,minimum=minimum,runner=runner,rival=rival,
+                score=mean,minimum=minimum,runner=runner,rival=rival,threshold=settings['match_threshold'],
+                required_margin=settings['ambiguity_margin'],
                 witness_ids=[w['id'] for w in bank[:8]])
             cue_choices[row['id']] = ranked
             if not good and anchor(row,settings):
