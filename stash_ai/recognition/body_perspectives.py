@@ -120,14 +120,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             return None
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
-        gap = b['seconds'] - a['seconds']
         skipped = b['cue'] - a['cue'] > 1
         if skipped:
             continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
         else:
             continuous = boundary[b['cue']] == 'continuous'
-        if not 0 < gap <= 12:
-            return fail(0,'elapsed_seconds',gap,12)
         if not continuous:
             if not diagnose:
                 return None
@@ -144,7 +141,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         pair = a['cue'],b['cue']
         if pair not in camera_offsets:
             camera_offsets[pair] = translation(qa,qb,sa,sb) if not skipped else None
-        blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}), gap,
+        blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}),
                             translation=camera_offsets[pair])
         if blocked:
             return fail(*blocked)
@@ -263,7 +260,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             member = lookup[successor]
             skipped += member['cue']-previous['cue']-1
             previous = member
-            if skipped > 1 or member['seconds'] - lookup[start]['seconds'] > 60:
+            if skipped > 1 or member['cue'] - lookup[start]['cue'] > 12:
                 successor = None
                 break
             if member.get('face_person') is not None:
@@ -275,7 +272,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if not path:
             continue
         last = path[-1]
-        if successor in root and (lookup[successor]['seconds'] - lookup[start]['seconds'] > 60
+        if successor in root and (lookup[successor]['cue'] - lookup[start]['cue'] > 12
                 or skipped + lookup[successor]['cue'] - previous['cue'] - 1 > 1):
             successor = None
         if root.get(successor) != owner:
@@ -309,7 +306,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         while before := previous_links.get(cursor):
             row = lookup[before]
             skipped += lookup[cursor]['cue']-row['cue']-1
-            if before in root or skipped > 1 or lookup[end]['seconds']-row['seconds']>60:
+            if before in root or skipped > 1 or lookup[end]['cue']-row['cue']>12:
                 break
             decision = decisions[before]
             if row.get('face_person') and decision.get('person') != owner:

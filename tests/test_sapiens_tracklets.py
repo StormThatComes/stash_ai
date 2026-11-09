@@ -104,3 +104,34 @@ def test_presence_is_independent_of_thumbnail_sampling_rate():
         roots=[dict(id=str(i),seconds=i*10,cue=i*step) for i in (0,2,4)]
         return Presence(roots,shots).weight(dict(cue=step,seconds=10))
     assert weight(1)==weight(5)
+
+
+def test_visual_track_uses_strongest_root_and_ignores_vtt_spacing():
+    from tests.test_contact_body_claims import body
+    from stash_ai.recognition.body_tracklets import paths
+    from stash_ai.recognition.sequence_validation import sequence_metrics
+    from stash_ai.recognition.roster_presence import Presence
+    rows = [body(str(i), i, 30) for i in range(4)]
+    rows[0]['_vector'] = np.array([math.cos(.61), math.sin(.61)])
+    scores = SimpleNamespace(face_similarity=np.dot)
+    guard = SimpleNamespace(allows=lambda *args: True)
+    bank = SimpleNamespace(rank=lambda *args: [(.76,.76,'B',(),True,.76)])
+    def replay(times):
+        for row,seconds in zip(rows,times):
+            row['seconds'] = seconds
+        decisions = {str(i):dict(person='A') for i in (0,3)}
+        plan({},rows,{'A':[rows[0],rows[3]]},decisions,defaults(),scores,guard,bank)
+        assert decisions['1']['root']=='3'
+        labels = {r['id']:'actor' for r in rows}
+        samples = {r['id']:dict(slices=['back'] if r['cue'] in (1,2) else []) for r in rows}
+        locations = {r['id']:('s',r['cue']) for r in rows}
+        predicted = {i:dict(accepted_identity=d['person'], evidence_kind='person' if i in ('1','2') else 'face',
+                            evidence={'reason':'candidate_group'}) for i,d in decisions.items()}
+        metrics = sequence_metrics(labels,samples,locations,predicted,timing={
+            ('s',r['cue']):(r['seconds'],0) for r in rows})
+        assert metrics['own_id_turns']==1
+        weight = Presence([rows[0],rows[-1]],{i:i for i in range(4)}).weight(rows[1])
+        return decisions, metrics, weight
+    assert replay([0,1,2,3])==replay([0,15,40,110])
+    rows[1]['quality'] = json.dumps({'quality':dict(view_shot=1,frame_signature='ee'*48)})
+    assert all('0' not in [r['id'] for r in chain] for chain,_ in paths(rows,defaults(),scores))

@@ -90,7 +90,7 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
             if len(people)==1 and cue in occluded and len(hidden)<2:
                 hidden.append(people[0])
                 continue
-            if len(people)!=2 or people[0].get('seconds',0)-first[0].get('seconds',0)>60:
+            if len(people)!=2:
                 break
             pairs.append(people)
             final_roots = [roots.get(r['id']) for r in people]

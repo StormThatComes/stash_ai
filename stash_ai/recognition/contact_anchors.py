@@ -31,8 +31,7 @@ def questionable_links(rows,settings,scores):
             for cue in (row['cue']-1,row['cue']+1):
                 ranked = []
                 for peer,other in clean[cue]:
-                    gap = abs(peer['seconds']-row['seconds'])
-                    if other.get('view_shot')!=q['view_shot'] or not 0<gap<=12:
+                    if other.get('view_shot')!=q['view_shot']:
                         continue
                     geom = json.loads(peer['geometry'])
                     offset = None
@@ -40,7 +39,7 @@ def questionable_links(rows,settings,scores):
                         signatures = [np.frombuffer(bytes.fromhex(v['frame_signature']), np.uint8).astype(float).reshape(-1,3)
                                       for v in (q,other)]
                         offset = translation(q,other,*signatures)
-                    if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),gap,translation=offset):
+                    if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset):
                         continue
                     ranked.append((scores.face_similarity(row['_vector'],peer['_vector']),peer['face_person']))
                 own = max((v for v,p in ranked if p==row['face_person']),default=-1.)

@@ -80,7 +80,7 @@ def contact_interval(db,config,owners,oid,peer,*,measured=None):
     from .track_geometry import rejection, torso_points, translation
     def adjacent(i,j):
         return (i in layers and j in layers and layers[i][:2]==layers[j][:2] and
-                0<layers[j][2]-layers[i][2]<=12 and change(layers[i][6],layers[j][6],True)=='continuous')
+                change(layers[i][6],layers[j][6],True)=='continuous')
     while adjacent(start-1,start):
         start -= 1
     while adjacent(end,end+1):
@@ -94,7 +94,7 @@ def contact_interval(db,config,owners,oid,peer,*,measured=None):
             left,right = layers[cue][5][i],layers[cue+1][5][j]
             if not left.get('bounds') or not right.get('bounds') or rejection(
                     left['bounds'],right['bounds'],torso_points(left),torso_points(right),
-                    layers[cue+1][2]-layers[cue][2], translation=translation(layers[cue][7][i],layers[cue+1][7][j],
+                    translation=translation(layers[cue][7][i],layers[cue+1][7][j],
                     layers[cue][6],layers[cue+1][6])):
                 return None
             return float(np.dot(a[i],b[j]))
