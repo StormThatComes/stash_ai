@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v29-track-continuity',contract(config),matching_policy(config),
+    return digest(['body-local-v30-scene-presence',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 

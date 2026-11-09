@@ -135,12 +135,14 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}
         if not known:
-            if any(r['id'] in decisions for r in chain):
-                continue
             if len(independent(chain,settings))>=2:
                 key = uuid.uuid5(uuid.NAMESPACE_URL,'anonymous-track:'+physical_key(record,chain[0]))
                 for row in chain:
-                    anonymous[row['id']] = str(key)
+                    prior = decisions.get(row['id'])
+                    if prior is None:
+                        anonymous[row['id']] = str(key)
+                    elif prior.get('person') is not None:
+                        prior['anonymous_fragment'] = str(key)
             continue
         owner = next(iter(known))
         anchors = [(i,r) for i,r in enumerate(chain) if r['id'] in roots]

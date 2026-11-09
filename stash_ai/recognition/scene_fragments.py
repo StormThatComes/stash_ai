@@ -84,7 +84,14 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
     if not use_roster:
         return
     minimum = max(2,settings['attach_min_support'],config.data['clustering']['same_scene_min_support'])
+    from .roster_presence import Presence, entrant_score
+    from .crowd_context import pair
+    import json
+    shots = {r['cue']:quality(r).get('view_shot') for r in rows}
+    lookup = {r['id']:r for r in rows}
     by_shot = {}
+    presence = {}
+    entrant_banks = {}
     proposals = {}
     components = defaultdict(list)
     for row in rows:
@@ -117,21 +124,40 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
                 mean,low = scores.compare([row],witnesses)
                 weight = 1.
                 if settings.get('scene_bonus_mode')=='evidence':
-                    distance = min(abs(r['cue']-row['cue']) for r in witnesses)
-                    weight = 1/(1+distance/30)
-                runner = max((item[5] for item in rank if item[2] not in (p,decision['person'])),default=-1.)
+                    if key not in presence:
+                        presence[key] = Presence(witnesses,shots)
+                    weight,_ = presence[key].weight(row)
+                # An entrant may have independent body evidence of its own.
+                # Same-shot members of this query fragment cannot vote for themselves.
+                own = decision.get('person'),shot
+                if own not in entrant_banks:
+                    entrant_banks[own] = independent((r for r in banks.get(own[0],())
+                                                     if shots[r['cue']] not in (None,shot)),settings)
+                entrant = entrant_score(scores,row,entrant_banks[own],settings,bonus)
+                runner = max(entrant,max((item[5] for item in rank if item[2] not in (p,decision['person'])),default=-1.))
                 if (mean>=settings['match_threshold']-bonus*weight and low>=settings['cohesion_threshold']
                         and mean-runner>=settings['ambiguity_margin']):
-                    choices.append((mean,p,runner,weight,[r['id'] for r in witnesses[:minimum]]))
+                    choices.append((mean,p,runner,weight,[r['id'] for r in witnesses[:minimum]],entrant))
         if choices and len({c[1] for c in choices})==1:
             proposals[row['id']] = max(choices)
     # Preserve a provisional fragment as a unit until every member agrees.
     for ids in components.values():
         if any(i not in proposals for i in ids) or len({proposals[i][1] for i in ids})!=1:
-            for i in ids:
+            allowed = set()
+            if settings.get('tracklet_matching'):
+                from .body_tracklets import split_members
+                def occupied(row, target):
+                    geom = json.loads(row['geometry'])
+                    return any(peer['cue']==row['cue'] and peer['id']!=row['id'] and
+                               pair([geom,json.loads(peer['geometry'])]) is not None
+                               for peer in modes.seeds.get(target,()))
+                targets = {oid:proposals[oid][1] for oid in ids if oid in proposals}
+                allowed = split_members([lookup[i] for i in ids],targets,occupied,settings)
+            for i in set(ids)-allowed:
                 proposals.pop(i,None)
-    for oid,(mean,owner,runner,weight,witnesses) in proposals.items():
+    for oid,(mean,owner,runner,weight,witnesses,entrant) in proposals.items():
         decisions[oid].update(person=owner,status='accepted',role='auxiliary',reason='scene_body_attachment',
-                              score=mean,runner=runner,witness_ids=witnesses)
+                              score=mean,runner=runner,entrant_score=entrant,threshold=settings['match_threshold']-bonus*weight,
+                              required_margin=settings['ambiguity_margin'],witness_ids=witnesses)
         if mean<settings['match_threshold']:
             decisions[oid]['roster_context'] = dict(owner=owner,bonus=bonus*weight,witnesses=witnesses)
