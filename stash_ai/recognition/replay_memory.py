@@ -99,9 +99,22 @@ class Lookahead:
             self.pending=Future()
             self.pending.set_exception(error)
             return
-        if self.executor is None:
-            self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='recognition-replay-input')
-        self.pending=self.executor.submit(self._prepare,scan)
+        from .solver_cpu_loans import prefetch, release_prefetch
+        if not prefetch():
+            self.pending = Future()
+            try:
+                self.pending.set_result(self._prepare(scan))
+            except Exception as error:
+                self.pending.set_exception(error)
+            return
+        try:
+            if self.executor is None:
+                self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='recognition-replay-input')
+            self.pending = self.executor.submit(self._prepare, scan)
+        except BaseException:
+            release_prefetch()
+            raise
+        self.pending.add_done_callback(lambda _: release_prefetch())
 
     def take(self, scan):
         self.release_prepared()

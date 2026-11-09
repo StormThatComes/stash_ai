@@ -214,7 +214,8 @@ class Slots(Mapping):
                               'WHERE retained IS NOT baseline) d JOIN solver_slots.slots s ON s.id=d.id')
             rows = target.execute(f'SELECT s.id,{owner} FROM {population} {joins} '
                                   f'WHERE s.baseline IS NOT ({owner})')
-            return dict(rows)
+            from .solver_delta_transport import collect
+            return collect(rows)
         finally:
             if not attached:
                 target.execute('DETACH DATABASE solver_slots')

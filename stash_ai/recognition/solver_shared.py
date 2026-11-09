@@ -34,6 +34,7 @@ class Arrays:
         self.disabled = False
         self.verified = {}
         self.pending = {}
+        self.claims = {}
         try:
             self.db = sqlite3.connect(self.directory/'ledger.sqlite', timeout=.2)
         except sqlite3.Error:
@@ -118,6 +119,40 @@ class Arrays:
         count('shared_numeric_hits')
         return value
 
+    def claim(self, signature):
+        """One producer per key; never wait while holding another product claim."""
+        from stash_ai.storage.writer_lock import acquire_writer_lock
+        from stash_ai.runtime.cancellation import current
+        import time
+        if self.disabled or signature is None or signature in self.claims:
+            return None
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                # Fixed stripes bound filesystem metadata across thousands of trials.
+                lock = acquire_writer_lock(self.directory / ('compute-' + signature[:2]))
+            except RuntimeError:
+                value = self.get(signature)
+                if value is not None or self.claims or time.monotonic() >= deadline:
+                    return value
+                token = current()
+                if token is not None:
+                    token.check()
+                time.sleep(.02)
+            except OSError:
+                return None
+            else:
+                self.claims[signature] = lock
+                value = self.get(signature)
+                if value is not None:
+                    self.release(signature)
+                return value
+
+    def release(self, signature):
+        lock = self.claims.pop(signature, None)
+        if lock is not None:
+            lock.close()
+
     def put(self, signature, value):
         if self.disabled or signature is None or value.dtype.hasobject or value.nbytes + 512 > self.limit:
             return value
@@ -175,6 +210,8 @@ class Arrays:
                     Path(filename).unlink(missing_ok=True)
 
     def close(self):
+        for signature in tuple(self.claims):
+            self.release(signature)
         if self.db is not None:
             try:
                 self.flush_pending()
@@ -208,4 +245,9 @@ def numerical(kind, arrays, calculate, extra=()):
         return calculate()
     signature = key(kind, arrays, extra)
     value = shared.get(signature)
-    return shared.put(signature, calculate()) if value is None else value
+    if value is None and sum(a.nbytes for a in arrays) >= 65536:
+        value = shared.claim(signature)
+    try:
+        return shared.put(signature, calculate()) if value is None else value
+    finally:
+        shared.release(signature)

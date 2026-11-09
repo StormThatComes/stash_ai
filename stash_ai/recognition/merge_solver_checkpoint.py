@@ -148,13 +148,21 @@ class Journal:
         self.document.setdefault('schedule', []).append(dict(kind=kind, name=name))
         self.events.append(dict(kind='schedule', entry=dict(kind=kind, name=name)))
 
-    def save_raw_result(self, name, settings, result):
+    def save_raw_result(self, name, settings, result, *, delta_directory=None):
+        from .solver_delta_transport import Delta
+        delta = result.get('prediction_delta')
+        sidecar = None
+        if isinstance(delta, Delta):
+            sidecar = delta.archive(delta_directory, self.directory, name)
+            result = dict(result, prediction_delta=None)
         content = json.dumps(result, allow_nan=False)
         filename = name + '-raw-' + sha(content.encode()) + '.json'
         path = self.directory / filename
         AtomicFile(path, sha(path.read_bytes()) if path.exists() else None).write(content)
         self.document.setdefault('raw_results', {})[name] = dict(file=filename,
             sha256=sha(content.encode()), configuration=digest(plain(settings.data)))
+        if sidecar is not None:
+            self.document['raw_results'][name]['delta'] = sidecar
         self.events.append(dict(kind='raw', name=name, entry=self.document['raw_results'][name]))
 
     def raw_result(self, name, settings=None):
@@ -169,7 +177,11 @@ class Journal:
         content = (self.directory / row['file']).read_bytes()
         if sha(content) != row['sha256']:
             raise ValueError('Corrupt completed trial result.')
-        return json.loads(content)
+        result = json.loads(content)
+        if 'delta' in row:
+            from .solver_delta_transport import Delta
+            result['prediction_delta'] = Delta.from_archive(name, row['delta'])
+        return result
 
     def task(self, name, settings, status):
         if status not in ('queued', 'running', 'completed', 'failed', 'interrupted'):
@@ -204,6 +216,10 @@ class Journal:
         # The applied record is durable before its superseded raw result is removed.
         if raw is not None and Path(raw['file']).name == raw['file']:
             (self.directory/raw['file']).unlink(missing_ok=True)
+            if sidecar := raw.get('delta'):
+                from .solver_delta_transport import Delta
+                archived = Delta.from_archive(name, sidecar)
+                (self.directory/archived.filename).unlink(missing_ok=True)
         if self.winner and winner_text is not None:self.winner.write(winner_text)
 
 

@@ -11,10 +11,14 @@ _cancel = None
 _updates = None
 _context = None
 _reuse = None
+_delta_directory = None
 
 
-def initialize(event, updates=None, context=None, images=None, slots=None):
-    global _cancel, _updates, _context, _reuse
+def initialize(event, updates=None, context=None, images=None, slots=None, delta_directory=None, cpu_state=None):
+    global _cancel, _updates, _context, _reuse, _delta_directory
+    _delta_directory = delta_directory
+    from .solver_cpu_loans import initialize as cpu_initialize
+    cpu_initialize(cpu_state)
     import os
     if root := os.environ.get('RECOGNITION_WORK_ROOT'):
         from .work_locations import set_sqlite_work
@@ -57,7 +61,13 @@ def work(request):
             progress.starting('Prepare worker cache')
         reused = _reuse.prepare(request) if _reuse is not None else False
         try:
-            result = evaluate(request, progress=progress)
+            from .solver_cpu_loans import active
+            from .solver_delta_transport import worker_target
+            settings = request.config.data['execution']
+            target = (worker_target(_delta_directory, min(settings['replay_snapshot_bytes'], settings['rebuild_scratch_bytes']))
+                      if _delta_directory is not None else nullcontext())
+            with active(), target:
+                result = evaluate(request, progress=progress)
             result['worker_cache_reused'] = reused
             return result
         finally:
@@ -86,6 +96,10 @@ class Trials(AbstractContextManager):
         from pathlib import Path
         from .solver_shared import Arrays
         self.shared_directory = str(Path(context['seed_path']).parent/'numerical')
+        from tempfile import TemporaryDirectory
+        self.delta_workspace = TemporaryDirectory(prefix='prediction-deltas-', dir=Path(context['seed_path']).parent)
+        self.delta_directory = Path(self.delta_workspace.name)
+        self.cpu_state = context_mp.Array('i', (execution.cpus - execution.trials, 0, 0))
         self.shared_bytes = min(execution.memory_bytes // 16, 1024**3)
         if not Arrays.prepare(self.shared_directory):
             self.shared_directory = None
@@ -99,6 +113,10 @@ class Trials(AbstractContextManager):
             self.journal.schedule(kind, name)
 
     def dispatch(self, name, settings, *, restored=False):
+        with self.journal.events.group() if self.journal else nullcontext():
+            self._dispatch(name, settings, restored=restored)
+
+    def _dispatch(self, name, settings, *, restored=False):
         from .trial_evaluation import settings_for_replay
         settings = settings_for_replay(settings, self.execution)
         if name in self.pending:
@@ -134,7 +152,7 @@ class Trials(AbstractContextManager):
                                if key not in ('observations', 'baseline_predictions')}
                 self.executor = ProcessPoolExecutor(max_workers=self.execution.trials,
                     mp_context=multiprocessing.get_context('spawn'), initializer=initialize,
-                    initargs=(self.event, self.updates, context, images, slots))
+                    initargs=(self.event, self.updates, context, images, slots, self.delta_directory, self.cpu_state))
             future = self.executor.submit(work, task)
         self.pending[name] = settings, future
         self.dispatched[name] = time.monotonic()
@@ -156,7 +174,7 @@ class Trials(AbstractContextManager):
                     raise
                 self.ready[name] = result
                 if self.journal:
-                    self.journal.save_raw_result(name, settings, result)
+                    self.journal.save_raw_result(name, settings, result, delta_directory=self.delta_directory)
                 if self.telemetry and not stopping:
                     first = next(iter(self.pending))
                     waiting = first if self.execution.scheduling == 'batch' and first != name else None
@@ -169,6 +187,17 @@ class Trials(AbstractContextManager):
                         compact='ready · waiting for ' + waiting if waiting else 'ready · awaiting application'))
         if not stopping:
             self.report_status()
+
+    def unpack(self, result, *, remove=False):
+        from .solver_delta_transport import Delta
+        delta = result.get('prediction_delta')
+        if not isinstance(delta, Delta):
+            return result
+        directory = self.journal.directory if delta.journal else self.delta_directory
+        values = delta.read(directory)
+        if remove and not delta.journal:
+            (self.delta_directory/delta.filename).unlink()
+        return dict(result, prediction_delta=values)
 
     def drain_updates(self):
         if self.updates is None:
@@ -319,3 +348,4 @@ class Trials(AbstractContextManager):
                 if self.updates is not None:
                     self.updates.close()
                     self.updates.join_thread()
+                self.delta_workspace.cleanup()

@@ -32,6 +32,11 @@ class Reuse:
         return False
 
     def completed(self):
+        from .solver_shared import current
+        shared = current()
+        if shared:
+            for key in tuple(shared.claims):
+                shared.release(key)
         if self.cache is not None:self.cache.retain_numeric()
 
     def close(self):
