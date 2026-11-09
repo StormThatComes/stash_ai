@@ -14,6 +14,9 @@ def bulk(target):
         if target.execute("SELECT 1 FROM sqlite_master WHERE name='scene_owners'").fetchone():
             from .scene_owner_index import populate
             populate(target)
+        if target.execute("SELECT 1 FROM sqlite_master WHERE name='body_alias_scenes'").fetchone():
+            from .alias_scene_index import populate as alias_scenes
+            alias_scenes(target)
         for name, sql in triggers:
             # A replay may shadow observations with a TEMP vector-source view.
             # Bind restored triggers to the trusted main schema explicitly.

@@ -174,9 +174,8 @@ def _scenes(db,people):
     candidates=db.execute('SELECT DISTINCT s.scene FROM candidates c JOIN scans s ON s.id=c.scan '
         'WHERE c.person IN (SELECT value FROM json_each(?))',(encoded_people,))
     scenes={r[0] for r in bodies}|{r[0] for r in faces}|{r[0] for r in candidates}
-    for row in db.execute('SELECT target,evidence FROM identity_merges'):
-        proof=json.loads(row['evidence'])
-        if proof.get('route') in ROUTES and canonical(db,row['target']) in people:scenes.update(proof.get('scenes',()))
+    from .alias_scene_index import inherited
+    scenes.update(inherited(db,encoded_people))
     return scenes
 
 
@@ -202,12 +201,21 @@ def reconcile(database,selected,config):
     result=(report(db,config,scope,namespace) if solver() is not None else
             checkpoint_report(db,selected,config,'body-global',lambda:_report(db,config,scope,namespace,compact=True)))
     from .publication_queue import enqueue
+    from .alias_scene_index import remember, expire
+    indexed = db.execute('PRAGMA user_version').fetchone()[0]>=17
+    from .config import digest
+    current_policy = digest([policy(config),config.data['sapiensid']['global_matching']])
+    if indexed:
+        expire(db,scope,namespace,current_policy,selection)
     proof_bytes=0
     for decision in result['decisions']:
         if decision['outcome']!='merge':continue
         people=decision['people'];scenes=_scenes(db,people)
         if not scenes<=selection:
-            decision.update(outcome='blocked',blockers=['identity_outside_selected_scenes'],required_scenes=sorted(scenes,key=int));continue
+            decision.update(outcome='blocked',blockers=['identity_outside_selected_scenes'],required_scenes=sorted(scenes,key=int))
+            if indexed:
+                remember(db,scope,namespace,current_policy,people,scenes)
+            continue
         rows=list(db.execute('SELECT p.id,p.created,EXISTS(SELECT 1 FROM members WHERE person=p.id) AS has_face FROM people p '
             'WHERE p.id IN (SELECT value FROM json_each(?)) ORDER BY has_face DESC,p.created,p.id',(encoded(people),)))
         target=rows[0]['id']
