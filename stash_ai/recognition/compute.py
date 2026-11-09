@@ -264,7 +264,8 @@ class Compute:
             raise RuntimeError('Recognition CPU result stream is still active.')
         from contextlib import nullcontext
         from .solver_cpu_loans import borrow
-        lease = borrow() if self.loan_capacity else nullcontext()
+        enclosing_loan = self.loan
+        lease = borrow() if self.loan_capacity and enclosing_loan is None else nullcontext(enclosing_loan)
         self.loan = lease.__enter__()
         previous = -1
         try:
@@ -315,7 +316,7 @@ class Compute:
                 self.cancel.cancel()
                 for future, _ in self.pending:
                     future.cancel()
-            self.loan = None
+            self.loan = enclosing_loan
             lease.__exit__(None, None, None)
             self.publish('stopping' if self.pending else 'coordinator')
 
