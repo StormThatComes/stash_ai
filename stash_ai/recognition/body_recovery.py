@@ -55,12 +55,15 @@ def recover(database,selected,config):
             allowed = [item for item in ranking if item[4] and item[2] in confirmed]
             if not allowed:
                 continue
-            mean,minimum,person,*_ = allowed[0]
-            runner = max((item[5] for item in ranking if item[2]!=person),default=-1.)
+            mean,minimum,person,witnesses,*_ = allowed[0]
+            runner,rival = max(((item[5],item[2]) for item in ranking if item[2]!=person), default=(-1., None))
             if (rooted_owner in (None,person) and person in confirmed and mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
                     and mean-runner>=settings['ambiguity_margin']):
                 decisions[row['id']].update(person=person,status='accepted',role='auxiliary',
-                    reason='body_confirmed_core_attachment',score=mean,minimum=minimum,runner=runner)
+                    reason='body_confirmed_core_attachment',score=mean,minimum=minimum,runner=runner,rival=rival,
+                    threshold=settings['match_threshold'],cohesion_threshold=settings['cohesion_threshold'],
+                    required_margin=settings['ambiguity_margin'],reference_count=len(witnesses),
+                    witness_ids=[w['id'] for w in witnesses[:8]])
         before = {r['id']:(r['person'],r['status']) for r in rows}
         resolve_claims(rows,decisions,config,scores=scores)
         for row in rows:

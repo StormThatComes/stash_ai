@@ -27,7 +27,7 @@ def _rank(groups, query, config, *, cache=None, observation=None, frozen=None, c
             float('-inf'), cohesion,
             exact=(lambda g,q: cache.scores(g,q,observation)) if cache is not None else None):
         if minimum >= cohesion:
-            best_two(ranked, (mean, group.identifier, group))
+            best_two(ranked, (mean, group.identifier, group, minimum))
     return ranked
 
 
@@ -136,7 +136,10 @@ def apply_scene_context(database, selected, config, *, progress=None):
                             continue
                         proof = {'scene': item['scene'], 'match_bonus': bonus,
                                  'threshold': local_match, 'cohesion_threshold': local_cohesion,
-                                 'reference_context': strict_context,
+                                 'reference_context': strict_context, 'minimum': ranked[0][3],
+                                 'ambiguity_margin': settings['ambiguity_margin'],
+                                 'scoring_references': group.sample_ids,
+                                 **({'rival_cluster': ranked[1][1]} if len(ranked)>1 else {}),
                                  'support': [{'seconds': seconds, 'observation': observation}
                                              for seconds, observation in cores[group.identifier].items()]}
                         db.execute('INSERT INTO members VALUES (?,?)', (row['id'], group.identifier))

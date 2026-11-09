@@ -417,7 +417,8 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
             for source,proof in proofs:
                 db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
                 db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
-                db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
+                db.execute("UPDATE candidates SET payload=json_set(payload,'$.first_merge_source',"
+                    "coalesce(json_extract(payload,'$.first_merge_source'),person),'$.merged_from',person,"
                     "'$."+evidence_field+"',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
     return tuple(replace(view,group=Group(canonical(db,view.group.identifier),view.group.samples,True,
         view.group.sample_ids)) for view in views)

@@ -305,12 +305,13 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                                    (source, target, time.time(), encoded(evidence), 'pending'))
                         db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
                         if local_state is None:
-                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
+                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.first_merge_source',coalesce(json_extract(payload,'$.first_merge_source'),person),'$.merged_from',person),person=? "
                                        'WHERE person=?', (target, source))
                         else:
                             # Local mergers are ephemeral in the replay. Preserve
                             # their complete proof on durable candidate rows.
                             db.execute("UPDATE candidates SET payload=json_set(payload,"
+                                "'$.first_merge_source',coalesce(json_extract(payload,'$.first_merge_source'),person),"
                                 "'$.merged_from',person,'$.same_scene_merge',json(?)),person=? WHERE person=?",
                                 (encoded(evidence), target, source))
                         for group in components.pop(source):

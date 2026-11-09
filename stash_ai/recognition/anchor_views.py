@@ -280,7 +280,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                         continue
                     old = by_person.get(group.identifier)
                     if old is None or score > old[0]:
-                        by_person[group.identifier] = (score, group, view)
+                        by_person[group.identifier] = (score, group, view, lowest)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
                 if not ranked:
                     if saw_pose:
@@ -294,7 +294,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 _probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked)>1 and ranked[0][1][0]-ranked[1][1][0] < margin:
                     continue
-                person, (score, group, view) = ranked[0]
+                person, (score, group, view, lowest) = ranked[0]
                 if _competing_anchor(rival_anchors, person, query, score, margin):
                     _probe(db, row['candidate'], 'competing_identity')
                     continue
@@ -310,7 +310,9 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 proof = {
                     'format': 1, 'scene_scan': scan, 'medoid': view.medoid,
                     'anchor_support': view.support_count, 'support_ids': view.support_ids,
-                    'match_score': score, 'threshold': threshold,
+                    'match_score': score, 'threshold': threshold, 'minimum': lowest,
+                    'cohesion_threshold': grouping['view_cohesion_threshold'],
+                    **({'rival_cluster': ranked[1][0], 'runner': ranked[1][1][0]} if len(ranked)>1 else {}),
                     'ambiguity_margin': margin}
                 db.execute("UPDATE candidates SET person=?,status='pending',"
                            "payload=json_set(payload,'$.reason','anchor_view_pending',"

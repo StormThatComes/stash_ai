@@ -290,7 +290,7 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         for group,score,low in compare(history.groups,query,threshold-margin,grouping['cohesion_threshold']):
             if low>=grouping['cohesion_threshold']:
                 if group.identifier not in choices or score>choices[group.identifier][0]:
-                    choices[group.identifier]=(score,'strict',None,score>=threshold)
+                    choices[group.identifier]=(score,'strict',None,score>=threshold,None,low,group.sample_ids,threshold)
         strict_rows.append(dict(choices))
         for group,score,low in compare(views,query,effective_view_threshold-margin,effective_view_cohesion):
             view=by_group[id(group)]
@@ -312,7 +312,7 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
                 continue
             admissible=score>=effective_view_threshold+premium and (not quarantine_only or view.authority=='quarantined_core')
             if previous is None or score>previous[0] or score==previous[0] and admissible and not previous[3]:
-                choices[group.identifier]=(score,'view',view.medoid,admissible,view)
+                choices[group.identifier]=(score,'view',view.medoid,admissible,view,low,group.sample_ids,effective_view_threshold+premium)
         mixed_rows.append(choices)
         if potential is not None and not potential and any(value[3] for value in choices.values()):
             potential.append(True)
@@ -372,7 +372,12 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         pose_query_support=max([2]+[pose_fallback(row['geometry'],value[4].pose)[1]
             for row,value in zip(rows,values) if value[1]=='view' and relaxed_pose]),
         strict_appearance=strict_appearance,threshold=effective_view_threshold,cohesion_threshold=effective_view_cohesion,
-        rival_score=ranked[1][0] if len(ranked)>1 else None,
+        minimum=min(v[5] for v in values),
+        scoring_references=list(dict.fromkeys(i for v in values for i in v[6])),
+        match_gate_range=[min(v[7] for v in values), max(v[7] for v in values)],
+        cohesion_gate_range=[min(grouping['cohesion_threshold'] if v[1]=='strict' else effective_view_cohesion for v in values),
+                             max(grouping['cohesion_threshold'] if v[1]=='strict' else effective_view_cohesion for v in values)],
+        rival_cluster=ranked[1][1] if len(ranked)>1 else None, rival_score=ranked[1][0] if len(ranked)>1 else None,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 

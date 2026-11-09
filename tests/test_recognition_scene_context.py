@@ -1,5 +1,5 @@
 """Scene context may attach weak faces, never establish or bridge identities."""
-import json
+from stash_ai.recognition.decision_contexts import unpack
 import math
 
 import numpy as np
@@ -27,7 +27,7 @@ def replay(db, config, scenes):
 
 
 def candidates(db, scan, config):
-    return [(row['status'], row['person'], json.loads(row['payload'])) for row in db.connection.execute(
+    return [(row['status'], row['person'], unpack(db.connection,row['payload'])) for row in db.connection.execute(
         "SELECT c.* FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
         'WHERE c.scan=? AND c.policy=? ORDER BY o.cue,o.id', (scan, matching_policy(config)))]
 

@@ -282,3 +282,13 @@ Each action uses a short read-only snapshot. Paging retrieves metadata only;
 selecting a row reads its images on demand. Nothing is exported. Missing crops
 or references remain visible as such. Tkinter and Pillow ImageTk are needed
 only for desktop viewing; check the installation with `python -m tkinter`.
+
+New matches record the historical references used before a group was updated,
+the measured minimum similarity, applicable thresholds, and the scored rival
+when available. A seed has no matching reference. Replay cluster IDs and
+resolved identity IDs are labelled separately. Body banks may retain a bounded
+list of example witnesses alongside the total reference count. A certified
+lower bound is displayed as a bound; exact scores are shown only if measured.
+Shared face-merge evidence is stored by content address and resolved on read.
+Older decisions are still readable. The next selected rebuild reuses compatible
+scan embeddings and populates the additional evidence.

@@ -336,8 +336,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
                 score=mean,minimum=minimum,runner=runner,rival=rival,threshold=settings['match_threshold'],
-                required_margin=settings['ambiguity_margin'],
-                witness_ids=[w['id'] for w in bank[:8]])
+                required_margin=settings['ambiguity_margin'], cohesion_threshold=settings['cohesion_threshold'],
+                reference_count=len(bank), witness_ids=[w['id'] for w in bank[:8]])
             cue_choices[row['id']] = ranked
             if not good and anchor(row,settings):
                 borderline.append(row)
@@ -407,13 +407,16 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         used.add(person)
         support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
         for row in group:
-            decisions[row['id']]=dict(person=person,status=status,role='anchor',reason='body_scene_core',independent_support=support)
+            decisions[row['id']]=dict(person=person,status=status,role='anchor',reason='body_scene_core',independent_support=support,
+                required_support=settings['min_support'])
     # Weak observations may attach to frozen accepted cores but never train them.
     banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']
     for row in weak:
         if (len(banks)==1 and not copresent([row],banks[0][1]) and guard.allows(row,banks[0][1])
                 and scores.certifies(row,banks[0][1],max(settings['match_threshold'],settings['cohesion_threshold']))):
-            decisions[row['id']]=dict(person=banks[0][0],status='accepted',role='auxiliary',reason='body_core_attachment')
+            decisions[row['id']]=dict(person=banks[0][0],status='accepted',role='auxiliary',reason='body_core_attachment',
+                certified_floor=max(settings['match_threshold'], settings['cohesion_threshold']),
+                reference_count=len(banks[0][1]), witness_ids=[w['id'] for w in banks[0][1][:8]])
             continue
         ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks
             if not copresent([row],g) and guard.allows(row,g)],key=lambda x:(-x[0][0],x[1]))
@@ -421,6 +424,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin']
         decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
             reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+        if good:
+            (mean, minimum), _, witnesses = best
+            decisions[row['id']].update(score=mean, minimum=minimum, threshold=settings['match_threshold'],
+                cohesion_threshold=settings['cohesion_threshold'], required_margin=settings['ambiguity_margin'],
+                reference_count=len(witnesses), witness_ids=[w['id'] for w in witnesses[:8]])
+            if len(ranked)>1:
+                decisions[row['id']].update(runner=runner, rival=ranked[1][1])
         rules=settings.get('anchor_keypoint_rules',{})
         if not good and (rules.get('all') or rules.get('any')):
             regional=anchor_gate(row['quality'],settings)['keypoint_rules']

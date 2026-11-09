@@ -2,6 +2,8 @@
 # Categories describe the recorded assignment path, not whether the face was
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
+    'prior_reference_identity': ('anchor-historical-view', 'A previously supported view confirmed this observation.'),
+    'hybrid_query': ('hybrid-attachment', 'The query attached using frozen face and body comparisons.'),
     'body_global_identity': ('body-merge-attachment', 'The original identity was consolidated through a global body merge.'),
     'hybrid_identity': ('hybrid-attachment', 'Merged using frozen face and SapiensID evidence; source observations remain attachment-only.'),
     'final_recovery_identity': ('anchor-recovered', 'Independent queries matched original frozen references after canonical label consolidation; attachment-only.'),
@@ -36,11 +38,11 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
-    'hybrid_merge', 'body_merge_origin',
+    'hybrid_merge', 'hybrid_query', 'body_merge_origin', 'face_comparison', 'compared_references',
     'final_recovery',
     'strict_appearance',
     'pose_recovery',
-    'final_subcomponent_merge',
+    'final_subcomponent_merge', 'replay_merge_chain',
     'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation', 'reference_registry', 'provisional_pool',
     'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
