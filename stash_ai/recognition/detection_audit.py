@@ -1,12 +1,11 @@
 """Fresh, read-only full-cue face/pose detection exports for visual tuning."""
-from contextlib import contextmanager
-from dataclasses import replace
-import os
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png, _private_directory, _write_json
 from .config import plain
+from .detection_session import detector_factory as default_detector, load_detector, open_scene
 from .detection_associations import REASON_LABELS, explain_associations, face_label
 from .detection_callouts import draw_leaders, label_height, layout_faces
 from .detection_masks import MaskOptions, append_details, draw_masks, draw_prompts
@@ -158,27 +157,12 @@ def execute(args, config, *, services=None, detector_factory=None):
         from .detection_sweep import load_variants
         variants = load_variants(sweep, config)
     services = services or Services()
-    if detector_factory is None:
-        from .sapiensid_backend import SapiensIDFaces
-        detector_factory = lambda cfg, paths: SapiensIDFaces(cfg, paths, load_identity=False)
-    # Always visit original VTT indices. Disable persistent HTTP caching so an
-    # audit cannot modify the recognition database or its companion media DB.
-    data = plain(config.data)
-    data['execution'].update(max_cues=0, media_cache_bytes=0)
-    source_config = replace(config, data=data)
+    detector_factory = detector_factory or default_detector
     report = RunReport(args.progress_style == 'verbose', tqdm.write)
-    url = os.getenv('STASH_URL', 'http://localhost:9999')
-    with present(report, args.progress_style, status_position=1), closing(
-            services.client(url=url, api_key=os.getenv('STASH_API_KEY', ''),
-                            timeout=config.data['execution']['timeout_seconds']),
-            name='close detection audit HTTP') as client:
-        with activity(report, 'Load scene VTT and sprites'):
-            scene = client.scene(args.scene_id)
-            source = services.source(client, scene, source_config)
-        with closing(source, name='close detection audit source'):
-            if (not source.cues or not source.coverage['complete_sampling'] or
-                    len(source.cues) != source.coverage['total_cues']):
-                raise ValueError('Detection audit requires a nonempty, complete VTT cue source.')
+    with present(report, args.progress_style, status_position=1):
+        with ExitStack() as stack:
+            with activity(report, 'Load scene VTT and sprites'):
+                source = stack.enter_context(open_scene(services, config, args.scene_id))
             if cue_index is not None and cue_index >= len(source.cues):
                 raise ValueError(f'Cue index {cue_index} is outside this scene; valid indices: 0..{len(source.cues)-1}.')
             if variants is not None:
@@ -188,8 +172,7 @@ def execute(args, config, *, services=None, detector_factory=None):
                                      services, detector_factory, report, mask_options=mask_options)
             else:
                 with activity(report, 'Load face and pose detectors'):
-                    paths = services.assets(config, keys=[config.data['models']['detector']], write=report.write)
-                    detector = detector_factory(config, paths)
+                    detector = load_detector(services, config, detector_factory, report.write)
                 with closing(detector, name='close detection audit detectors'):
                     directory = _private_directory(directory)
                     total = len(source.cues) if cue_index is None else 1

@@ -1,7 +1,5 @@
 """Independent parameter trials on one original VTT cue, stacked without resizing."""
 import csv
-from copy import deepcopy
-from dataclasses import replace
 from io import StringIO
 import json
 from pathlib import Path
@@ -9,14 +7,13 @@ from tempfile import TemporaryDirectory
 
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png
-from .config import _freeze, effective_data, parse_yaml
-from .config_layout import INTERNAL_PATHS, VITPOSE_BATCH, get, put, v2_document
+from .config import parse_yaml
+from .detection_parameters import apply_edits
+from .detection_session import load_detector, read_cue
 
 
 MAX_VARIANTS = 64  # In addition to the baseline.
 MAX_PIXELS = 40_000_000  # Bound the final RGB canvas before allocating it.
-FACE_PARAMETERS = {'models.detector', 'detection.score_threshold',
-                   'detection.nms_threshold', 'detection.max_faces_per_frame'}
 
 
 def load_variants(path, config):
@@ -41,7 +38,6 @@ def load_variants(path, config):
     if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_VARIANTS:
         raise ValueError(f'Detection sweep requires a table of 1..{MAX_VARIANTS} parameter/value rows.')
     variants = [(config, dict(variant_index=0, parameter=None, value=None, baseline_value=None))]
-    baseline = v2_document(config.data, source=config.source)
     for index, row in enumerate(rows, 1):
         prefix = f'Detection sweep row {index}'
         if not isinstance(row, dict) or set(row) != {'parameter', 'value'}:
@@ -49,29 +45,12 @@ def load_variants(path, config):
         parameter = row['parameter']
         if not isinstance(parameter, str):
             raise ValueError(f'{prefix}: expected a dotted parameter name.')
-        public = INTERNAL_PATHS.get(parameter, parameter)
-        if not (public.startswith('pose.') or public.startswith('face.detector.')):
-            raise ValueError(f'{prefix}: unsupported detector parameter {parameter!r}. '
-                             'Use face.detector or pose settings (v1 names are also accepted).')
-        document = deepcopy(baseline)  # Each row starts from the same baseline.
         try:
-            old = get(document, public)
-        except KeyError as error:
-            raise ValueError(f'{prefix}: unknown parameter {parameter!r}.') from error
-        if old is None and parameter in INTERNAL_PATHS:
-            old = get(config.data, parameter)
-        if isinstance(old, (dict, list)):
-            raise ValueError(f'{prefix}: expected a leaf parameter, got {parameter!r}.')
-        put(document, public, row['value'])
-        if parameter == 'sapiensid.pose.batch_size':
-            # A legacy sweep always set both the frame and ViTPose limits.
-            put(document, VITPOSE_BATCH, row['value'])
-        try:
-            _, data = effective_data(document)
+            variant, previous = apply_edits(config, {parameter: row['value']})
         except (ValueError, TypeError) as error:
             raise ValueError(f'{prefix} ({parameter}): {error}') from error
-        variants.append((replace(config, data=_freeze(data)),
-                         dict(variant_index=index, parameter=parameter, value=row['value'], baseline_value=old)))
+        variants.append((variant, dict(variant_index=index, parameter=parameter,
+                                       value=row['value'], baseline_value=previous[parameter])))
     return variants
 
 
@@ -148,34 +127,27 @@ def audit_sweep(source, variants, scene_id, cue_index, directory, services, dete
     filename = f'scene-{scene_id}_cue-{cue_index:06d}_sweep.png'
     # Read the unannotated crop once. Reusing rendered PNGs would contaminate the
     # input with annotations; reusing detection results would hide threshold effects.
-    with closing(source.frames_indices([cue_index]), name='close sweep frames') as images:
-        try:
-            index, cue, image = next(images)
-        except StopIteration:
-            raise ValueError('Detection sweep did not receive the selected VTT cue.') from None
-        if index != cue_index:
-            raise ValueError('Detection sweep source returned a different cue index.')
-        with closing(image, name='close sweep image'), TemporaryDirectory(dir=directory) as temporary:
-            # Keep only one model set and one rendered panel in RAM at a time.
-            with WorkProgress(report, 'Detection parameter sweep', len(variants), unit='trial', key='trials') as progress:
-                for current, metadata in variants:
-                    label = 'baseline' if metadata['parameter'] is None else (
-                        f"trial {metadata['variant_index']}: {metadata['parameter']}={_value(metadata['value'])}")
-                    with activity(report, f'Load detectors for {label}'):
-                        assets = services.assets(current, keys=[current.data['models']['detector']], write=report.write)
-                        detector = detector_factory(current, assets)
-                    with closing(detector, name='close sweep detectors'), activity(report, f'Detect {label}'):
-                        # Isolate even a backend that mutates its input.
-                        with image.copy() as trial_image, render_frame(
-                                trial_image, detector, scene_id, index, cue,
-                                mask_options=mask_options) as (annotated, record):
-                            record.update(metadata, file=filename)
-                            path = Path(temporary) / f"{metadata['variant_index']:03d}.png"
-                            _png(annotated, path)
-                            records.append(record)
-                            paths.append(path)
-                    progress.advance(faces=len(record['faces']), people=len(record['people']))
-            dimensions = _stack(records, paths, scene_id, directory / filename)
+    frame = read_cue(source, scene_id, cue_index)
+    with closing(frame.image), TemporaryDirectory(dir=directory) as temporary:
+        # Keep only one model set and one rendered panel in RAM at a time.
+        with WorkProgress(report, 'Detection parameter sweep', len(variants), unit='trial', key='trials') as progress:
+            for current, metadata in variants:
+                label = 'baseline' if metadata['parameter'] is None else (
+                    f"trial {metadata['variant_index']}: {metadata['parameter']}={_value(metadata['value'])}")
+                with activity(report, f'Load detectors for {label}'):
+                    detector = load_detector(services, current, detector_factory, report.write)
+                with closing(detector, name='close sweep detectors'), activity(report, f'Detect {label}'):
+                    # Isolate even a backend that mutates its input.
+                    with frame.image.copy() as trial_image, render_frame(
+                            trial_image, detector, scene_id, frame.index, frame.cue,
+                            mask_options=mask_options) as (annotated, record):
+                        record.update(metadata, file=filename)
+                        path = Path(temporary) / f"{metadata['variant_index']:03d}.png"
+                        _png(annotated, path)
+                        records.append(record)
+                        paths.append(path)
+                progress.advance(faces=len(record['faces']), people=len(record['people']))
+        dimensions = _stack(records, paths, scene_id, directory / filename)
     return dict(scene_id=scene_id, cue_index=cue_index, file=filename, output_dimensions=dimensions,
                 comparison='baseline_then_independent_single_parameter_trials',
                 counts=dict(cues_exported=1, variants_exported=len(records),
