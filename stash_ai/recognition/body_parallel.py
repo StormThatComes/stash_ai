@@ -58,8 +58,8 @@ def comparisons(evidence, requests):
                     pool.fallback('body_proof_admission')
                     resolved[position] = evidence.compare(left, right, kind)
                     continue
-                a = tuple(evidence.feature(row, kind) for row in left)
-                b = tuple(evidence.feature(row, kind) for row in right)
+                a = evidence.features(left, kind)
+                b = evidence.features(right, kind)
                 from .body_numeric import lookup
                 identity, found = lookup(a, b, kind)
                 if found is not None:

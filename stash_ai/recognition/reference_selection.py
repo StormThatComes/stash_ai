@@ -45,7 +45,14 @@ def select(rows, maximum, *, vector_reader=None, quality_reader=None, state=None
     # Frozen pivots prevent gradually changing observations from joining a mode.
     from .independent_evidence import Votes, unit
     def evidence(row):
-        return unit(dict(row, scan=row['scan'] if 'scan' in row.keys() else row['scene']))
+        if '_selection_unit' not in row:
+            row['_selection_unit'] = unit(dict(row, scan=row.get('scan', row['scene'])))
+        return row['_selection_unit']
+    if state is not None:
+        for entry in pool:
+            entry[1].pop('_selection_unit', None)
+        for slot in state.get('reserves', ()):
+            slot['best'][1].pop('_selection_unit', None)
     reserves = state.get('reserves',[]) if state is not None else []
 
     def reserve(entry):

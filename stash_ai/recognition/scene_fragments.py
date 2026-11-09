@@ -15,15 +15,23 @@ def plausible_pairs(rows, threshold):
     for start in range(0,len(rows),width):
         data = np.stack([r['_vector'] for r in rows[start:start+width]])
         blocks.append(ball(data))
+    from functools import lru_cache
+    # Bound auxiliary matrices even for an unusually dense scene.
+    block_bytes = width * len(rows[0]['_vector']) * 8 if rows else 1
+
+    @lru_cache(maxsize=max(1, min(len(blocks), 8 * 1024**2 // block_bytes)))
+    def matrix(index):
+        return np.stack([r['_vector'] for r in rows[index*width:(index+1)*width]]).astype('float64')
+
     for i,first in enumerate(blocks):
-        left = np.stack([r['_vector'] for r in rows[i*width:(i+1)*width]]).astype('float64')
+        left = matrix(i)
         for j in range(i,len(blocks)):
             second = blocks[j]
             # Conservative float32 dot-product error for unit embeddings.
             error = 2*left.shape[1]*np.finfo(np.float32).eps
             if upper(first,second)+error < threshold:
                 continue
-            right = left if i==j else np.stack([r['_vector'] for r in rows[j*width:(j+1)*width]]).astype('float64')
+            right = left if i == j else matrix(j)
             hits = left @ right.T >= threshold-error
             if i==j:
                 hits = np.triu(hits,1)

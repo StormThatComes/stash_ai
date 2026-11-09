@@ -233,11 +233,19 @@ class _Cluster:
             centre=self.total/self.centre_count
             first=max(range(len(self.examples)),key=lambda i:(float(np.dot(self.examples[i],centre))+.01*self.qualities[i],-i))
             chosen=[first]
-            while len(chosen)<maximum:
-                shots = {self.shots[j] for j in chosen if len(self.shots[j]) == 3}
-                chosen.append(max((i for i in range(len(self.examples)) if i not in chosen),
-                    key=lambda i:(len(self.shots[i]) == 3 and self.shots[i] not in shots,
-                                  1.-max(float(np.dot(self.examples[i],self.examples[j])) for j in chosen)+.03*self.qualities[i],-i)))
+            remaining = set(range(len(self.examples))) - {first}
+            nearest = [float('-inf')] * len(self.examples)
+            shots = set()
+            while len(chosen) < maximum:
+                last = chosen[-1]
+                if len(self.shots[last]) == 3:
+                    shots.add(self.shots[last])
+                for i in remaining:
+                    nearest[i] = max(nearest[i], float(np.dot(self.examples[i], self.examples[last])))
+                winner = max(remaining, key=lambda i: (len(self.shots[i]) == 3 and self.shots[i] not in shots,
+                                                       1. - nearest[i] + .03 * self.qualities[i], -i))
+                chosen.append(winner)
+                remaining.remove(winner)
             chosen.sort()
             self.examples=[self.examples[i] for i in chosen]
             self.observations=[self.observations[i] for i in chosen]
