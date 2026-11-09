@@ -336,6 +336,8 @@ def _execute(args, config, *, services, display):
                                         counts['pose_backfilled'] += filled
                                         counts['pose_cues'] += filled
                                         counts['vtt_complete'] += 1
+                                    from .solver_scan_sizes import retain
+                                    retain(database.connection, scan)
                                     counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                                     from .rejection_summary import summary as rejection_summary
                                     rejected=rejection_summary(database.connection,scan,config)

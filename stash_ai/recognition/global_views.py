@@ -398,9 +398,15 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
             people=decision['people']
             summary={k:v for k,v in decision.items() if k!='people'}
             if any(person in related for person in people):
-                db.execute("UPDATE candidates SET payload=json_set(payload,'$.global_view_consolidation',json(?)) "
-                           'WHERE policy=? AND person IN (SELECT value FROM json_each(?))',
-                           (encoded(summary),policy,encoded(people)))
+                # A single summary can expand thousands of candidate rows.
+                # Supply one payload per row to the replay writer so each batch
+                # reserves enough pages, including when an outer transaction owns it.
+                payload = encoded(summary)
+                candidates = db.execute('SELECT id FROM candidates WHERE policy=? '
+                                        'AND person IN (SELECT value FROM json_each(?)) ORDER BY id',
+                                        (policy, encoded(people)))
+                db.executemany("UPDATE candidates SET payload=json_set(payload,'$.global_view_consolidation',json(?)) "
+                               'WHERE id=?', ((payload, oid) for oid, in candidates))
             if decision['outcome']!='merge':
                 continue
             target,*sources=sorted(people,key=lambda p:order[p])
