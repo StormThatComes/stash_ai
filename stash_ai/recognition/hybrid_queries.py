@@ -54,7 +54,7 @@ def _recover(database, selected, config, claims, *, births=()):
             body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
             if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
                 raise ValueError('Invalid retained SapiensID query feature.')
-            choices=[];face_choices=[];query_modes={};body_candidates=[]
+            choices=[];face_choices=[];query_modes={};body_candidates=[];minimums={}
             face_batch=np.asarray([face],dtype='float64')
             body_batch=np.asarray([body],dtype='float64') if body is not None else None
             if observe is not None:
@@ -64,6 +64,7 @@ def _recover(database, selected, config, claims, *, births=()):
                 f=scores(face_batch,faces)
                 if f is None or f['minimum']<settings['face_floor']:continue
                 admissible=(not identity.guard_face_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
+                minimums['face', identity.person, id(group)] = f['minimum']
                 face_choices.append((f['mean'],identity.person,admissible,group))
                 if body is not None:body_candidates.append((identity,group,bodies))
             # Prefer a strict face proof; body scores never compete with face scores.
@@ -75,7 +76,9 @@ def _recover(database, selected, config, claims, *, births=()):
                     modes=identity.body_modes if bodies is identity.persons else core_modes.get(id(bodies),())
                     measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
                     measures=[m for m in measures if m is not None]
-                    if measures:query_modes[identity.person,id(group)]=measures[0]['mode_index']
+                    if measures:
+                        query_modes[identity.person,id(group)]=measures[0]['mode_index']
+                        minimums['face_and_body', identity.person, id(group)] = measures[0]['minimum']
                     score=max((m['mean'] for m in measures),default=None)
                     admissible=bool(measures and not identity.guard_missing and (not identity.unsupported_body_modes or
                         (bodies is identity.persons and bool(modes))) and
@@ -95,11 +98,17 @@ def _recover(database, selected, config, claims, *, births=()):
                     peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):
                 if observe is not None:query_decision(row['id'],'copresence','copresence_conflict',owner=owner)
                 continue
+            competing = [(value, peer) for value,peer,_,_ in (face_choices if signal=='face' else choices)
+                         if peer!=owner and value is not None and value==rival_score]
             proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
                        core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
                        reference_role='attachment',reference_selected=False,
                        body_mode=query_modes.get((owner,id(group))) if signal=='face_and_body' else None,
-                       independent_query_support=None)
+                       minimum=minimums.get((signal,owner,id(group))),
+                       match_threshold=config.data['recognition']['match_threshold'] if signal=='face' else None,
+                       cohesion_threshold=config.data['clustering']['cohesion_threshold'] if signal=='face' else settings['person_threshold'],
+                       ambiguity_margin=config.data['recognition']['ambiguity_margin'] if signal=='face' else settings['ambiguity_margin'],
+                       rival=min(peer for _,peer in competing) if competing else None, independent_query_support=None)
             from .independent_evidence import body_vote
             vote=(body_vote(row) if signal=='face_and_body' else
                   {k:row[k] for k in ('scan','seconds','quality')})

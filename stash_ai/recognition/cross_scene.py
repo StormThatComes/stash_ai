@@ -60,7 +60,7 @@ def _rank_reference(samples, references, match, cohesion):
         # Qualification and competition differ: a weak edge may prohibit
         # attachment without making a high-mean rival disappear.
         ranked.append((mean,evidence[0][2].identifier,evidence[0][2],
-                       all(item[1]>=cohesion for item in evidence)))
+                       all(item[1]>=cohesion for item in evidence), min(item[1] for item in evidence)))
     ranked.sort(key=lambda v:(-v[0],v[1]))
     return ranked
 
@@ -149,7 +149,10 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                 continue
             proof = {'format':1,'scope':scopes['scope'],'namespace':scopes['namespace'],
                      'source_scenes':sorted(group.scenes),'target':target.identifier,
-                     'similarity':round(ranked[0][0],6),
+                     'similarity':round(ranked[0][0],6), 'minimum':ranked[0][4],
+                     'scoring_references':target.sample_ids, 'threshold':match, 'cohesion_threshold':cohesion,
+                     'ambiguity_margin':margin,
+                     **({'runner':ranked[1][0],'rival_cluster':ranked[1][1]} if len(ranked)>1 else {}),
                      'support':len(group.independent),'frozen':True}
             # Existing people already carry verified independent support.
             for row, _ in group.rows:
@@ -276,7 +279,8 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
             proof = {'format':1,'scope':scopes['scope'],'namespace':scopes['namespace'],
                      'sources':sorted(g.person for g in group),
                      'scenes':sorted(set().union(*(g.scenes for g in group))),
-                     'support':len(independent),'frozen':True}
+                     'support':len(independent), 'required_support':settings['min_identity_support'],
+                     'support_ids':[r['id'] for r in independent], 'frozen':True}
             # Do not borrow the relaxed same-scene threshold. New provisional
             # people have no pre-existing members and cannot act as merge votes.
             for g in group:

@@ -67,7 +67,7 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
                             exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
                         if low >= grouping['cohesion_threshold']:
                             from .global_views import rank_person
-                            rank_person(ranked, (mean, group.identifier, group))
+                            rank_person(ranked, (mean, group.identifier, group, low))
                     scores = [entry[0] for entry in ranked[:2]]
                     if ranked and ranked[0][0] >= settings['match_threshold']:
                         if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
@@ -77,7 +77,9 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
                             if not _competing_anchor(groups,ranked[0][1],query,ranked[0][0],settings['ambiguity_margin']):
                                 person, status, reason = ranked[0][1], 'pending', 'auxiliary_identity'
                                 confirmation=dict(format=1,frozen=True,identity=person,
-                                    support_ids=ranked[0][2].sample_ids,score=ranked[0][0],
+                                    support_ids=ranked[0][2].sample_ids,score=ranked[0][0], minimum=ranked[0][3],
+                                    ambiguity_margin=settings['ambiguity_margin'],
+                                    **({'rival_cluster':ranked[1][1]} if len(ranked)>1 else {}),
                                     match_threshold=settings['match_threshold'],cohesion_threshold=grouping['cohesion_threshold'])
                             else:
                                 reason='auxiliary_ambiguous'
@@ -185,7 +187,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                         continue
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
-                        by_person[group.identifier] = (mean, group, view)
+                        by_person[group.identifier] = (mean, group, view, lowest)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
                 if not ranked:
                     if saw_cohesion:
@@ -197,7 +199,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                 _view_probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked) > 1 and ranked[0][1][0]-ranked[1][1][0] < margin:
                     continue
-                person, (score, group, view) = ranked[0]
+                person, (score, group, view, lowest) = ranked[0]
                 if not pose_matches(row['geometry'],view.pose):
                     _view_probe(db, row['candidate'], 'pose_mismatch')
                     continue
@@ -213,7 +215,9 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                 proof = {'pose': view.pose, 'medoid': view.medoid, 'authority': view.authority,
                          'anchor_verified_support': view.support_count,
                          'support_examples': list(view.support),
-                         'match_score': score, 'threshold': threshold,
+                         'match_score': score, 'threshold': threshold, 'minimum': lowest,
+                    'cohesion_threshold': grouping['view_cohesion_threshold'],
+                    **({'rival_cluster': ranked[1][0], 'runner': ranked[1][1][0]} if len(ranked)>1 else {}),
                          'ambiguity_margin': margin}
                 db.execute("UPDATE candidates SET person=?,status='pending',"
                            "payload=json_set(payload,'$.reason','view_identity_pending',"

@@ -16,13 +16,16 @@ def describe(trace):
         lines.append('Membership is recorded. No accepted decision explaining it was retained.')
     for decision in trace['decisions']:
         lines.extend(('', decision['summary'], f"Reason: {decision['reason']}"))
+        if decision.get('reference_role'):
+            lines.append('Recorded reference role: ' + decision['reference_role'])
         metrics = decision['metrics']
         for key, value in metrics.items():
             label = key.replace('_', ' ').capitalize()
             lines.append(f'{label}: {value:.4f}' if isinstance(value, float) else f'{label}: {value}')
-        score = metrics.get('score', metrics.get('match_score'))
-        if score is not None and metrics.get('runner') is not None:
-            lines.append(f"Observed lead: {score - metrics['runner']:.4f}")
+        score = metrics.get('score', metrics.get('match_score', metrics.get('mean_score', metrics.get('similarity'))))
+        runner = metrics.get('runner', metrics.get('rival_score'))
+        if score is not None and runner is not None:
+            lines.append(f"Observed lead: {score - runner:.4f}")
         if not decision['references']:
             lines.append('No source observation IDs retained for this decision.')
         if not any(k in metrics for k in ('runner','rival','rival_score')):

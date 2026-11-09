@@ -322,6 +322,9 @@ class FaceDatabase(AbstractContextManager):
             db.execute('CREATE INDEX IF NOT EXISTS scans_latest ON scans(scope,namespace,scene)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_scan_policy ON candidates(scan,policy,person,status)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
+            from .decision_contexts import MERGE_KEY
+            db.execute(f'CREATE INDEX IF NOT EXISTS candidates_merge_context ON candidates({MERGE_KEY}) '
+                       f'WHERE {MERGE_KEY} IS NOT NULL')
             # Scoped model-link isolation resolves performer IDs for each selected
             # scene; avoid rescanning the entire identity catalog every time.
             db.execute('CREATE INDEX IF NOT EXISTS person_shared_embedding ON person_evidence(embedding) WHERE length(embedding)<256')

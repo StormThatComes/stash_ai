@@ -76,7 +76,9 @@ class IdentityReader:
                         edge['evidence'] = merges[edge['source']]['evidence']
                     elif kind == 'face':
                         decision = next(d for d in decisions if d['policy']==step['policy'] and d['supports_membership'])
-                        edge['evidence'] = decision['recorded'].get(edge['proof_location'])
+                        evidence = decision['recorded'].get(edge['proof_location'])
+                        edge['evidence'] = (evidence[edge['proof_index']]['evidence']
+                                            if 'proof_index' in edge else evidence)
             associations = []
             if kind == 'face' and bodies_available(db):
                 associations = [dict(kind='body', observation=r[0], label='Linked body in this cue')

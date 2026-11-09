@@ -482,8 +482,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 entrant = entrant_score(scores,row,entrant_banks[own],settings,settings['scene_context_bonus'])
                 if entrant>runner:
                     runner,rival = entrant,'new_participant'
+            measurements = dict(minimum=low, threshold=settings['match_threshold']-bonus,
+                                cohesion_threshold=settings['cohesion_threshold'], required_margin=margin)
             if rival is not None:
-                rival_evidence[row['id'],owner,mean] = dict(rival=rival,runner=runner)
+                measurements.update(rival=rival, runner=runner)
+            rival_evidence[row['id'],owner,mean] = measurements
             if mean-runner < margin:
                 decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:

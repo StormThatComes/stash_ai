@@ -241,8 +241,11 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
                      source_scans=sorted({w['scan'] for w in witnesses}))
         if endpoint:
             proof.pop('score')
-            proof.update(route='fragment_face_endpoints',face_score=face_score,
+            proof.update(route='fragment_face_endpoints',face_score=face_score,face_threshold=search.endpoints.minimum,
                          local_roots=decision['rooted_track']['roots'])
+        else:
+            proof.update(minimum=low, threshold=settings['match_threshold']-bonuses.get(owner,0.),
+                         cohesion_threshold=settings['cohesion_threshold'], required_margin=settings['ambiguity_margin'])
         if mean<settings['match_threshold']:
             if context and context['owner']==owner:
                 proof['shot_context'] = context

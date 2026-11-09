@@ -94,6 +94,7 @@ def latest_decisions(db, observation_ids):
     """
     import json
     from .reference_roles import observation_sql, index
+    from .decision_contexts import unpack
     index(db)  # The solver calls this only on its disposable replay database.
     rows = db.execute('SELECT o.id,c.scan,c.person,c.status,c.payload FROM observations o '
         'JOIN candidates c ON c.rowid=(SELECT c2.rowid FROM candidates c2 WHERE '+
@@ -101,7 +102,7 @@ def latest_decisions(db, observation_ids):
         'WHERE o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id', (encoded(sorted(observation_ids)),))
     result = []
     for row in rows:
-        payload = json.loads(row['payload'])
+        payload = unpack(db, row['payload'])
         merge_proofs = [payload[k] for k in ('strict_partition', 'global_view_merge', 'final_subcomponent_merge')
                         if isinstance(payload.get(k), dict)]
         evidence = payload.get('hybrid_query') or payload.get('view_prototype') or payload.get('strict_confirmation') or {}

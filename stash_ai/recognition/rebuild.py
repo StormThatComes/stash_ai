@@ -104,8 +104,34 @@ def _apply_members(db, replay, mapping, changed=None):
 
 
 def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
+    from functools import lru_cache
+
+    @lru_cache(maxsize=8)
+    def replay_merges(source):
+        # The cold replay's UUIDs may never be published. Capture the actual
+        # edges before binding the surviving group to a durable identity.
+        chain, seen = [], set()
+        while source:
+            if source in seen:
+                raise ValueError('Cycle in replay identity merges.')
+            seen.add(source)
+            edge = replay.execute('SELECT target,evidence FROM identity_merges WHERE source=?', (source,)).fetchone()
+            if edge is None:
+                break
+            proof = json.loads(edge['evidence'])
+            route = ('same_scene_merge' if proof.get('same_scene_local') else
+                     'view_merge' if 'medoids' in proof else 'strict_merge')
+            chain.append(dict(source=source, target=edge['target'], route=route, evidence=proof))
+            source = edge['target']
+        return chain
+
     for row in replay.execute('SELECT * FROM candidates WHERE policy=?', (policy,)):
         payload = json.loads(row['payload'])
+        origin = payload.pop('first_merge_source', None)
+        if origin:
+            chain = replay_merges(origin)
+            if chain:
+                payload['replay_merge_chain'] = chain
         from .reference_roles import STRICT_REASONS
         payload['reference_selected'] = payload.get('observation') in representative_ids
         payload['reference_role'] = ('strict' if row['status'] == 'accepted' and payload.get('reason') in STRICT_REASONS else 'attachment')
@@ -114,6 +140,11 @@ def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
         if payload.get('provisional_pool'):
             payload['identity_basis']='frozen_unresolved_pool'
             payload['provisional_pool']['identity']=mapping.get(row['person'])
+        for name in ('face_comparison','same_scene_context','strict_confirmation','anchor_view','view_prototype',
+                     'cross_scene','shared_reference','historical_reference','final_recovery','pose_recovery','strict_appearance'):
+            proof = payload.get(name)
+            if isinstance(proof, dict) and proof.get('rival_cluster') in mapping:
+                proof['rival'] = mapping[proof['rival_cluster']]
         payload['reference_context'] = context
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
