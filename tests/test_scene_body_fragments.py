@@ -61,3 +61,33 @@ def test_scene_roster_does_not_access_unfrozen_external_face_banks(tmp_path):
         serial=_plan(db,cfg,*data)[2]
         worker=_plan(None,cfg,*data,frozen_faces={})[2]
         assert serial==worker
+
+
+def test_four_compatible_observations_survive_nearest_neighbour_pairs(tmp_path):
+    from tests.test_contact_body_claims import body
+    from tests.test_recognition_body_identity import configuration
+    from stash_ai.recognition.body_identity import Scores, defaults
+    from stash_ai.recognition.scene_fragments import preserve_fragments, plausible_pairs
+    from types import SimpleNamespace
+    import numpy as np
+    rows = [body(str(i),i,40) for i in range(4)]
+    for row,angle in zip(rows,(0,1,19,20)):
+        row['_vector'] = np.array([np.cos(np.deg2rad(angle)),np.sin(np.deg2rad(angle))],dtype='f4')
+    scene = dict(scene='1',scope='s',namespace='n',input_sha='v')
+    cfg = configuration(tmp_path)
+    decisions = {r['id']:dict(reason='ambiguous_or_insufficient_face_body_bank') for r in rows}
+    preserve_fragments(scene,rows,decisions,defaults(),Scores(cfg),SimpleNamespace(allows=lambda *args:True))
+    assert len({d['person'] for d in decisions.values()})==1
+    assert all(d['status']=='provisional' for d in decisions.values())
+    rng=np.random.default_rng(3)
+    rows=[dict(id=i,_vector=v/np.linalg.norm(v)) for i,v in enumerate(rng.normal(size=(50,8)).astype('f4'))]
+    hits={(a['id'],b['id']) for a,b in plausible_pairs(rows,.5) if a['_vector']@b['_vector']>=.5}
+    assert hits=={(i,j) for i,a in enumerate(rows) for j,b in enumerate(rows) if i<j and a['_vector']@b['_vector']>=.5}
+
+
+def test_scores_from_different_modalities_cannot_outvote_each_other():
+    from stash_ai.recognition.body_perspectives import separated_proposals
+    options = [('q','A','endpoint_faces',[],.85),('q','B','back',[],.99)]
+    decisions={'q':{}}
+    assert not separated_proposals(options,decisions,{'q':{'cue':1}},.1)
+    assert decisions['q']['track_blocker']['reason']=='conflicting_modalities'

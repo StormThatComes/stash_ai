@@ -106,3 +106,19 @@ def test_weak_profile_veto_needs_two_independent_foreign_faces():
     assert not guard.allows(dict(query,face_quality='{"pose_deviation":0.1}'),(), 'A')
     witnesses.append(face(2))
     assert not guard.allows(query,(), 'A')
+
+
+def test_best_external_witness_is_invariant_to_gallery_order():
+    from stash_ai.recognition.fragment_endpoints import ExternalEndpoints
+    index = ExternalEndpoints.__new__(ExternalEndpoints)
+    index.minimum,index.body_floor = .85,.75
+    witnesses = [dict(id=name,scan='s2',perspective='side',roots=[name+'1',name+'2']) for name in ('low','high')]
+    index.banks = {'A':[0,1]}
+    def face(root,owner):
+        x = .86 if root.startswith('low') else .98 if root.startswith('high') else 1.
+        return np.array([x,(1-x*x)**.5]),root
+    index.face = face
+    for banks in (witnesses,witnesses[::-1]):
+        index.gallery = SimpleNamespace(banks=[('A','s2',[w]) for w in banks])
+        owner,score,w = index.match('s1','back',dict(rooted_track=dict(owner='A',roots=['a','b'])),set(),[])
+        assert (owner,score,w['id'])==('A',.98,'high')

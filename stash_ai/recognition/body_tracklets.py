@@ -166,6 +166,50 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     return anonymous
 
 
+def claim_fragments(rows,anonymous,decisions,frozen,guard,settings):
+    """Challenge an entire anonymous path against independent frozen face-seeded modes."""
+    from .body_identity import independent
+    if not anonymous or not frozen or not frozen.seeds:
+        return
+    components = defaultdict(list)
+    for row in rows:
+        key = anonymous.get(row['id']) or decisions.get(row['id'],{}).get('anonymous_fragment')
+        if key:
+            components[key].append(row)
+    for fragment,members in components.items():
+        queries = [r for r in members if r['id'] in anonymous]
+        votes = independent(queries,settings)
+        if len(votes)<2:
+            continue
+        known = {decisions[r['id']]['person'] for r in members if r['id'] in decisions}
+        rankings = {r['id']:{v[2]:v for v in frozen.rank(r,guard)} for r in queries}
+        common = set.intersection(*(set(bank) for bank in rankings.values()))
+        if known:
+            common &= known if len(known)==1 else set()
+        options = []
+        for owner in sorted(common):
+            matches = [rankings[r['id']][owner] for r in queries]
+            if any(v[1]<settings['cohesion_threshold'] or frozen.support[id(v[3])]<settings['attach_min_support']
+                   for v in matches):
+                continue
+            def rival(oid):
+                return max((v[5] for p,v in rankings[oid].items() if p!=owner),default=-1.)
+            if any(rival(r['id'])>=v[0]+settings['ambiguity_margin'] for r,v in zip(queries,matches)):
+                continue
+            mean = sum(rankings[r['id']][owner][0] for r in votes)/len(votes)
+            runner = sum(rival(r['id']) for r in votes)/len(votes)
+            if mean>=settings['match_threshold'] and mean-runner>=settings['ambiguity_margin']:
+                options.append((owner,mean,runner))
+        if len(options)==1:
+            owner,mean,runner = options[0]
+            for row in queries:
+                decisions[row['id']] = dict(person=owner,status='accepted',role='auxiliary',
+                    reason='fragment_body_attachment',fragment=fragment,score=mean,runner=runner,
+                    witness_ids=[r['id'] for r in rankings[row['id']][owner][3][:8]],
+                    fragment_support=len(votes),threshold=settings['match_threshold'],
+                    required_margin=settings['ambiguity_margin'])
+
+
 def split_members(core, proposed, occupied, minimum):
     """Release a contiguous supported side only across a physical contradiction."""
     from .body_identity import independent

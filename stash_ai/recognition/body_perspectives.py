@@ -410,10 +410,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                                             reason='unresolved_partner')
     from .fragment_endpoints import nominations
     from .fragment_endpoints import split_owner_nominations
+    endpoint_pairs = defaultdict(list)
     for member,proof in split_owner_nominations(looks,lookup,root,shot_ids,scores,settings):
-        decisions[member].setdefault('endpoint_pairs',[]).append(proof)
+        endpoint_pairs[member].append(proof)
     bridges = nominations(looks,lookup,root,shot_ids,scores,settings)
     if not banks and not crossed and not bridges:
+        for oid,proofs in endpoint_pairs.items():
+            decisions[oid]['endpoint_pairs'] = proofs
         return
     owner_rows = defaultdict(list)
     rival_evidence = {}
@@ -444,6 +447,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 decision['status']=='accepted' and decision.get('reason')!='body_scene_core'):
             continue
         kind = decision.get('query_perspective') or geometry[row['id']][0].get('orientation')
+        from .crowd_context import pair
+        person_geometry = json.loads(row['geometry'])
+        occupied = {root[peer['id']] for peer in by_cue[row['cue']] if peer['id'] in root and
+                    peer['id']!=row['id'] and pair([person_geometry,json.loads(peer['geometry'])]) is not None}
         for (owner, perspective, _), (bank, proof) in banks.items():
             if decision.get('open_face_root', {}).get('owner', owner) != owner:
                 continue
@@ -467,7 +474,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             competing = [(scores.compare([row],others)[0], p) for p,others in owner_rows.items()
                          if p not in (owner,decision['person']) and not copresent([row],others)
                          and guard.allows(row,others)]
-            competing.extend((scores.compare([row],other)[0], p) for (p,_,_),(other,_) in banks.items() if p!=owner)
+            competing.extend((scores.compare([row],other)[0], p) for (p,_,_),(other,_) in banks.items()
+                             if p!=owner and p not in occupied)
             runner, rival = max(competing, default=(-1.,None))
             if bonus:
                 from .roster_presence import entrant_score
@@ -488,22 +496,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 decision['track_blocker'] = dict(reason='competing_owner', cue=row['cue'], rival=rival)
             else:
                 candidates.append((row['id'],owner,perspective,[track for _,track in external],mean))
-    # Several modes can support one claim. Keep its strongest independent proof.
-    best = {}
-    for item in candidates:
-        address = item[:2]
-        if address not in best or item[-1] > best[address][-1]:
-            best[address] = item
-    by_observation = defaultdict(list)
-    for item in best.values():
-        by_observation[item[0]].append(item)
-    candidates = []
-    for oid,options in sorted(by_observation.items()):
-        options.sort(key=lambda item:(-item[-1],item[1]))
-        if len(options)>1 and options[0][-1]-options[1][-1]<margin:
-            decisions[oid]['track_blocker'] = dict(reason='competing_owner',rival=options[1][1],cue=lookup[oid]['cue'])
-        else:
-            candidates.append(options[0])
+    candidates = separated_proposals(candidates,decisions,lookup,margin)
     proposed = {oid: owner for oid, owner, *_ in candidates}
     # Check all core votes before moving anything. Weak satellites cannot
     # veto a coherent core, but a measured face or simultaneous claim can.
@@ -567,6 +560,38 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 bonus=owner_bonus(previous,owner,settings.get('scene_context_bonus',0.)),
                 witnesses=previous.get('roster_witnesses',{}).get(owner,[]))
         decisions[oid].update(rooted)
+    # Global reconciliation revalidates these four face roots independently of
+    # the local attachment chosen for the row carrying the nomination.
+    for oid,proofs in endpoint_pairs.items():
+        decisions[oid]['endpoint_pairs'] = proofs
+
+
+def separated_proposals(candidates,decisions,lookup,margin):
+    by_observation = defaultdict(lambda: defaultdict(list))
+    for item in candidates:
+        route = item[2] if item[2] in ('crossing','endpoint_faces') else 'body'
+        by_observation[item[0]][route].append(item)
+    output = []
+    for oid,routes in sorted(by_observation.items()):
+        winners = []
+        for route in ('endpoint_faces','crossing','body'):
+            best = {}
+            for item in routes.get(route,()):
+                if item[1] not in best or item[-1]>best[item[1]][-1]:
+                    best[item[1]] = item
+            options = sorted(best.values(),key=lambda it:(-it[-1],it[1]))
+            if not options:
+                continue
+            if len(options)>1 and options[0][-1]-options[1][-1]<margin:
+                decisions[oid]['track_blocker'] = dict(reason='competing_owner',rival=options[1][1],cue=lookup[oid]['cue'])
+                break
+            winners.append(options[0])
+        else:
+            if len({item[1] for item in winners})==1:
+                output.append(winners[0])
+            elif winners:
+                decisions[oid]['track_blocker'] = dict(reason='conflicting_modalities',cue=lookup[oid]['cue'])
+    return output
 
 
 def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False, settings=None):
