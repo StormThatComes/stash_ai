@@ -2,7 +2,8 @@
 from collections import defaultdict
 import json
 
-from .track_geometry import rejection, torso_points
+from .track_geometry import rejection, torso_points, translation
+import numpy as np
 
 
 def crowded_link(q):
@@ -34,7 +35,12 @@ def questionable_links(rows,settings,scores):
                     if other.get('view_shot')!=q['view_shot'] or not 0<gap<=12:
                         continue
                     geom = json.loads(peer['geometry'])
-                    if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),gap):
+                    offset = None
+                    if q.get('frame_signature') and other.get('frame_signature'):
+                        signatures = [np.frombuffer(bytes.fromhex(v['frame_signature']), np.uint8).astype(float).reshape(-1,3)
+                                      for v in (q,other)]
+                        offset = translation(q,other,*signatures)
+                    if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),gap,translation=offset):
                         continue
                     ranked.append((scores.face_similarity(row['_vector'],peer['_vector']),peer['face_person']))
                 own = max((v for v,p in ranked if p==row['face_person']),default=-1.)

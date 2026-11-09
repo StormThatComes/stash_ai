@@ -8,26 +8,45 @@ from .body_origins import physical_key
 
 def preserve_fragments(record, rows, decisions, settings, scores, guard):
     """Retain coherent near misses as provisional satellites, never training seeds."""
-    groups = []
-    for row in rows:
-        ranked = []
-        for group in groups:
-            if not copresent([row],group) and guard.allows(row,group):
-                mean, low = scores.compare([row],group)
-                ranked.append((mean,low,group))
-        ranked.sort(key=lambda item:item[0],reverse=True)
-        if not ranked or ranked[0][0]<settings['match_threshold'] or ranked[0][1]<settings['cohesion_threshold']:
-            groups.append([row])
-        elif len(ranked)==1 or ranked[0][0]-ranked[1][0]>=settings['ambiguity_margin']:
-            ranked[0][2].append(row)
-    for group in groups:
+    # Retain the strongest neighbour of each sample. Store O(n) edges even
+    # when many observations in one scene look alike. Freeze all rivals before pruning.
+    groups = {r['id']:[r] for r in rows}
+    owners = {key:key for key in groups}
+    nearest = {}
+    ordered = sorted(rows, key=lambda r:r['id'])
+    for i, row in enumerate(ordered):
+        for peer in ordered[i+1:]:
+            a, b = row['id'], peer['id']
+            if copresent([row],groups[b]) or not guard.allows(row,groups[b]):
+                continue
+            score, minimum = scores.compare([row],groups[b])
+            if score < settings['match_threshold'] or minimum < settings['cohesion_threshold']:
+                continue
+            edge = (-score, a, b)
+            for oid in (a,b):
+                if oid not in nearest or edge < nearest[oid]:
+                    nearest[oid] = edge
+    for _, a, b in sorted(set(nearest.values())):
+        first, second = owners[a], owners[b]
+        if first == second:
+            continue
+        left, right = groups[first], groups[second]
+        if copresent(left,right) or not all(guard.allows(r,right) for r in left):
+            continue
+        mean, low = scores.compare(left,right)
+        if mean >= settings['match_threshold'] and low >= settings['cohesion_threshold']:
+            left.extend(right)
+            for r in right:
+                owners[r['id']] = first
+            del groups[second]
+    for original in groups.values():
+        group = [r for r in original if all(
+            scores.compare([r],original)[1]-scores.compare([r],other)[0]>=settings['ambiguity_margin']
+            for other in groups.values() if other is not original and not copresent([r],other)
+            and guard.allows(r,other))]
+        group.sort(key=lambda r:r['id'])
         votes = independent(group,settings)
         if len(votes)<max(2,settings['attach_min_support']):
-            continue
-        # A rival discovered later may invalidate this proposal.
-        if any(scores.compare([r],group)[1]-scores.compare([r],other)[0]<settings['ambiguity_margin']
-               for r in group for other in groups if other is not group and not copresent([r],other)
-               and guard.allows(r,other)):
             continue
         owner = str(uuid5(NAMESPACE_URL,'near-body-fragment:'+physical_key(record,group[0])))
         for row in group:
