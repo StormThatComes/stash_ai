@@ -22,7 +22,33 @@ def variants(config):
         data = plain(tracks.data)
         data['sapiensid']['identities']['endpoint_matching'] = False
         result[f'paths-only-{mode}'] = replace(config, data=data)
+    for mode in ('off','fixed','evidence'):
+        off = result[f'tracks-0-{mode}']
+        data = plain(off.data)
+        data['sapiensid']['identities']['endpoint_matching'] = True
+        result[f'endpoints-only-{mode}'] = replace(config,data=data)
     return result
+
+
+STRATEGY_KEYS = tuple('sapiensid.identities.'+key for key in (
+    'tracklet_matching','endpoint_matching','scene_bonus_mode','scene_match_bonus'))
+
+
+def training_profiles(config):
+    from .merge_report_policy import parameter
+    for name,variant in variants(config).items():
+        yield name,{k:parameter(variant.data,k) for k in STRATEGY_KEYS}
+
+
+def tuning_profiles(config, families):
+    from .merge_report_policy import parameter
+    # Alternate families so a short remaining trial budget is shared fairly.
+    for key in ('sapiensid.identities.match_threshold','sapiensid.identities.track_similarity_threshold',
+                'recognition.match_threshold'):
+        for step in (-.02,.02):
+            for name,trial,patch in families:
+                value = max(0.,min(1.,parameter(config.data,key)+step))
+                yield name,trial,dict(patch,**{key:value})
 
 
 def physical_owner(values):

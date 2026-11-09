@@ -279,7 +279,7 @@ def parser():
     merge_report.add_argument('--solver-validation', type=Path, help='After choosing the winner, replay a labelled holdout manifest and up to three omitted cue series.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--compare-scene-strategies',action='store_true',
-        help='Compare six tracklet and body scene-bonus variants on the same labelled holdout.')
+        help='Screen tracklet, endpoint and scene-support families on training goals and compare them on the labelled holdout.')
     merge_report.add_argument('--physical-pair',action='append',default=[],metavar='FACE:BODY',
         help='Label two retained observations of one physical person in one cue for identity-physical training goals. Repeatable.')
     merge_report.add_argument('--goal-policy', choices=('identity','identity-physical','strict'), default='identity',

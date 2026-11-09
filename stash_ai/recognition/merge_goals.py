@@ -175,6 +175,7 @@ def execute(args, config):
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                      compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
                                      compact_report=compact_report,
+                                    compare_scene_strategies=getattr(args,'compare_scene_strategies',False),
                                     yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
                                     targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
                                         key: getattr(args, attr, None) for key, attr in (

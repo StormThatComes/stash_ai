@@ -18,7 +18,7 @@ def test_damage_counts_each_physical_person_once():
     assert omission_damage(labels,coords,labels,result('AAAB'),result('AABB'))==dict(lost_correct_pairs=1,new_false_joins=1)
 
 
-def test_six_strategies_share_retained_observations(tmp_path):
+def test_all_strategy_families_share_retained_observations(tmp_path):
     config = configuration(tmp_path)
     ns = namespace(config)
     with FaceDatabase(config.database) as state:
@@ -33,7 +33,9 @@ def test_six_strategies_share_retained_observations(tmp_path):
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
         result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
                                manifest,compare_strategies=True)
-    assert len(result['scene_strategies'])==9
+    assert len(result['scene_strategies'])==12
+    assert result["verdict"]["status"]=="insufficient_coverage"
+    assert result["verdict"]["slice_coverage"]["entrant"]==dict(observations=0,performers=0)
     assert all(r['fragments_per_performer']=={'A':1} for r in result['scene_strategies'].values())
     assert all(set(w['damage'])=={'baseline','winner',*result['stress_strategies']} for w in result['omissions'])
 
@@ -81,3 +83,18 @@ def test_partner_target_recovers_from_body_when_labelled_face_is_withheld():
     decisions = {k:dict(accepted_identity=None if k=='face' else truth) for k,truth in labels.items()}
     metrics = partner_metrics([('front','face','partner')],labels,coords,decisions,())
     assert metrics['recovered']==1 and metrics['false_joins']==0
+
+
+def test_training_screens_and_tunes_two_families_within_solver_budget(tmp_path):
+    from tests.test_recognition_solver_feasibility import body_handoff
+    from stash_ai.recognition.fragmentation_report import _open_readonly
+    from stash_ai.recognition.merge_goals import resolve
+    from stash_ai.recognition.merge_solver import solve
+    config,_,_ = body_handoff(tmp_path)
+    with closing(_open_readonly(config.database)) as db:
+        goals = resolve(db,config,[['900']],policy='identity-physical')
+        result = solve(config,goals,db,maximum=16,compare_scene_strategies=True)
+    assert result['search']['scene_families_tested']==12
+    assert len(result['search']['scene_finalists'])==2
+    assert result['search']['attempted']<=16
+    assert any(t.get('search_phase')=='scene_refinement' for t in result['simulation']['trials'].values())

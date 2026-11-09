@@ -210,7 +210,12 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         from .scene_strategy_validation import variants, strategy_summary, omission_damage
         strategies = variants(winner) if compare_strategies else {}
         selected = {}
-        if strategies:
+        trained = result.get('search',{}).get('scene_finalists',{})
+        if strategies and trained:
+            for name,patch in trained.items():
+                strategies[name] = patched(settings,patch)
+                selected[name] = strategies[name]
+        elif strategies:
             if result.get('groups'):
                 from .merge_goals import evaluate as train, objective
                 training_trials = train(winner, result, training, variants=strategies)['trials']
@@ -325,12 +330,13 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
-    return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress),
+    return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress, require_slices=compare_strategies or any(
+                k.startswith('sapiensid.identities.scene_') for k in changes)),
                 scene_strategies=strategy_results, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
 
-def holdout_verdict(metrics, contamination=None, incremental=None, omissions=()):
+def holdout_verdict(metrics, contamination=None, incremental=None, omissions=(), *, require_slices=False):
     base, final = (metrics[name+'/joint'] for name in ('baseline','winner'))
     results = {}
     for label,category,field,total,higher in (
@@ -386,6 +392,15 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=())
             damage = row['damage']
             name = f"omission_{row['scene']}_{row['first_cue']}_{row['last_cue']}_{row['mode']}_{field}"
             risk(name,damage['baseline'][field],damage['winner'][field],row['scored']>=2)
+    coverage = {}
+    for name in ('back','entangled','entrant'):
+        slices = [p.get('slices',{}).get(name,{}) for p in physical]
+        count = min(s.get('observations',0) for s in slices)
+        coverage[name] = dict(observations=count,performers=min(s.get('truth_identities',0) for s in slices))
+        for field in ('withheld','extra_fragments','false_merge_pairs'):
+            risk(f'{name}_{field}',slices[0].get(field,0),slices[1].get(field,0),count>0)
     states = {r['status'] for r in results.values()}
     status = next(s for s in ('regressed','improved','unchanged','no_coverage') if s in states)
-    return dict(status=status,measures=results)
+    if require_slices and status!='regressed' and any(not c['observations'] for c in coverage.values()):
+        status = 'insufficient_coverage'
+    return dict(status=status,measures=results,slice_coverage=coverage)
