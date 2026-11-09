@@ -67,6 +67,11 @@ class Compute:
         if solver is not None:
             self.worker_capacity = max(1, solver.inner_workers)
             native = 1
+        from .solver_cpu_loans import capacity
+        self.loan_capacity = capacity() if solver else None
+        self.loan = None
+        if self.loan_capacity:
+            self.worker_capacity = self.loan_capacity
         self.native_threads = native
         from .resource_plan import plan
         self.resources = plan(config)
@@ -93,6 +98,9 @@ class Compute:
 
     @property
     def workers(self):
+        if self.loan_capacity:
+            from .solver_cpu_loans import available
+            return self.loan if self.loan is not None else available()
         if self.solver_managed:
             from .replay_memory import prefetch_busy
             if prefetch_busy():
@@ -254,6 +262,11 @@ class Compute:
             self.drain_numeric()
         if self.pending:
             raise RuntimeError('Recognition CPU result stream is still active.')
+        from contextlib import nullcontext
+        from .solver_cpu_loans import borrow
+        enclosing_loan = self.loan
+        lease = borrow() if self.loan_capacity and enclosing_loan is None else nullcontext(enclosing_loan)
+        self.loan = lease.__enter__()
         previous = -1
         try:
             for job in jobs:
@@ -305,6 +318,8 @@ class Compute:
                 self.cancel.cancel()
                 for future, _ in self.pending:
                     future.cancel()
+            self.loan = enclosing_loan
+            lease.__exit__(None, None, None)
             self.publish('stopping' if self.pending else 'coordinator')
 
     def independent_scenes(self, function, jobs, *, backend):

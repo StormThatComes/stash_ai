@@ -219,7 +219,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         active_stage = 'Prepare replay'
                         try:
                             if pool and name != 'baseline':
-                                evaluated = pool.ready.pop(name)
+                                evaluated = pool.unpack(pool.ready.pop(name), remove=True)
                                 if evaluated.get('failed'):
                                     error = ResourceLimit(evaluated['error'])
                                     error.replay_stage = evaluated['stage']

@@ -67,3 +67,43 @@ def test_raw_result_checks_configuration_and_checksum(tmp_path):
     (journal.directory/entry['file']).write_text('{}')
     with pytest.raises(ValueError, match='Corrupt'):
         journal.raw_result('trial-1', config)
+
+
+def test_dense_delta_survives_worker_cleanup_and_journal_resume(tmp_path, monkeypatch):
+    from stash_ai.recognition.solver_delta_transport import collect, worker_target, Delta
+    from stash_ai.recognition.merge_solver_checkpoint import Journal
+    from types import SimpleNamespace
+    config = SimpleNamespace(data={'test': 1})
+    directory = tmp_path/'worker'
+    directory.mkdir()
+    monkeypatch.setattr('stash_ai.recognition.solver_delta_transport.INLINE_ROWS', 2)
+    with worker_target(directory, 1024**2):
+        delta = collect(iter([('a', 'p'), ('b', None), ('c', 'q')]))
+    assert isinstance(delta, Delta)
+    journal = Journal(tmp_path/'state.json', {'test': 1})
+    journal.save_raw_result('trial-1', config, {'prediction_delta':delta}, delta_directory=directory)
+    journal.close()
+    (directory/delta.filename).unlink()
+    journal = Journal(tmp_path/'state.json', {'test': 1}, resume=True)
+    try:
+        result = journal.raw_result('trial-1')['prediction_delta']
+        assert result.journal
+        assert result.read(journal.directory) == {'a':'p','b':None,'c':'q'}
+    finally:
+        journal.close()
+
+
+def test_cpu_loans_leave_room_for_a_second_live_coordinator():
+    import multiprocessing
+    from stash_ai.recognition import solver_cpu_loans as loans
+    state = multiprocessing.get_context('spawn').Array('i', (12, 0, 0))
+    loans.initialize(state)
+    try:
+        with loans.active(), loans.active(), loans.borrow() as first, loans.borrow() as second:
+            assert first == second == 6
+            assert not loans.prefetch()
+        with loans.active(), loans.borrow() as lone:
+            assert lone == 12
+        assert state[:] == [12, 0, 0]
+    finally:
+        loans.initialize(None)

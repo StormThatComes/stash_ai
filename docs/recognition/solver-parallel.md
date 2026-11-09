@@ -51,6 +51,13 @@ finished results, cancels queued work and signals running workers cooperatively.
 Unexpected worker exceptions propagate. Resource-limited trials are reported as
 failed and never become winners. Only the coordinator writes the winning YAML.
 
+Spawned trials return small assignment changes directly. Larger changes travel
+in a checksummed file under the invocation's configured work directory. A trial
+checkpoint preserves a recoverable sidecar until the completed result has
+been applied. The coordinator verifies the checksum before using the delta.
+Dispatch transitions share one durable append. Journals created by earlier
+versions retain their individual event records.
+
 ## Resource profiles
 
 The repository provides two complete v2 configurations for a host allocating
@@ -69,9 +76,11 @@ The repository provides two complete v2 configurations for a host allocating
 
 The solver YAML does **not** set the number of trials or the total CPU/RAM
 budget. Pass all three flags from the example above. At 16 CPUs and four trials,
-the planner assigns four CPU slots to each trial: a coordinator and three inner
-slots. Parallel scene matching uses all three. The serial scene route lends one
-slot to an outstanding prefetch and reclaims it when the future completes. Baseline runs alone with the
+the planner reserves four coordinator slots and shares the twelve remaining
+CPU slots across active trials. With four active trials, each numerical window
+can normally use three helpers. With one active trial, a window can borrow up
+to twelve helpers. Windows release their slots after ordered retirement.
+Asynchronous scene prefetch reserves one helper until its read completes. Baseline runs alone with the
 larger CPU allocation but the same per-trial memory limit.
 
 The conservative maximum admission is **14.75 GiB per trial**: 10 GiB working,

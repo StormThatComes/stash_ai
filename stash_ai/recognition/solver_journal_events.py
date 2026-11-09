@@ -12,7 +12,10 @@ ZERO = '0'*64
 
 def apply(document, event):
     kind = event['kind']
-    if kind == 'schedule':
+    if kind == 'group':
+        for item in event['events']:
+            apply(document, item)
+    elif kind == 'schedule':
         document.setdefault('schedule', []).append(event['entry'])
     elif kind in ('task', 'raw'):
         document.setdefault('tasks' if kind == 'task' else 'raw_results', {})[event['name']] = event['entry']
@@ -81,8 +84,31 @@ class Events:
         journal.document.setdefault('journal_format', 1)
         journal.document.setdefault('journal_applied', 0)
 
+        self.buffer = None
+        self.snapshot_stamp = None
+
+    @contextmanager
+    def group(self):
+        if self.buffer is not None:
+            yield
+            return
+        self.buffer = []
+        try:
+            yield
+        finally:
+            events, self.buffer = self.buffer, None
+            if events:
+                self.append(events[0] if len(events) == 1 else dict(kind='group', events=events))
+
     def append(self, event):
-        self.journal.file.check()
+        if self.buffer is not None:
+            self.buffer.append(event)
+            return
+        stat = self.journal.file.path.stat()
+        stamp = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        if stamp != self.snapshot_stamp:
+            self.journal.file.check()
+            self.snapshot_stamp = stamp
         content = json.dumps(event, sort_keys=True, separators=(',', ':'), allow_nan=False)
         digest = hashlib.sha256((self.previous+content).encode()).hexdigest()
         raw = (json.dumps(dict(sequence=self.sequence+1, sha256=digest, event=event),

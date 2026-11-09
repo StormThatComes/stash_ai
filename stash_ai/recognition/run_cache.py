@@ -278,6 +278,8 @@ def product_input(left, right):
     if found is MISSING and shared is not None:
         signature = shared_key('hybrid-products-v1', (left, right))
         value = shared.get(signature)
+        if value is None and left.nbytes + right.nbytes >= 65536:
+            value = shared.claim(signature)
         if value is not None:
             found = value
             if cache is not None and key is not None:
@@ -291,7 +293,10 @@ def product_output(identity, value):
     key, signature = identity
     shared = shared_current()
     if shared is not None:
-        value = shared.put(signature, value)
+        try:
+            value = shared.put(signature, value)
+        finally:
+            shared.release(signature)
     value.flags.writeable = False
     cache = current()
     if cache is not None and key is not None:
