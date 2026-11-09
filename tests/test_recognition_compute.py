@@ -150,3 +150,19 @@ def test_live_native_work_keeps_owners_quarantined_until_it_exits(cpus, monkeypa
         shutdown._calls[id(owner)][3].join(5)
         shutdown.require_idle()
     assert owner.native is None and not owner.pending
+
+
+def test_independent_scenes_submit_by_cost_and_retire_in_scene_order(cpus):
+    prepared = []
+    def deferred(ordinal, size):
+        def prepare():
+            prepared.append(ordinal)
+            return compute.Work(ordinal, 'frozen', ordinal, size)
+        return compute.Work(ordinal, 'frozen', None, size, prepare=prepare)
+
+    with compute.compute_scope(configured(rebuild_workers=3, rebuild_queue_bytes=65536)) as owner:
+        work = [deferred(0, 1024), deferred(1, 8192), deferred(2, 4096)]
+        results = list(owner.independent_scenes(lambda value: value, work, backend='threads'))
+        assert prepared == [1, 2, 0]
+        assert [result.value for result in results] == [0, 1, 2]
+        assert owner.peak_bytes <= owner.limit

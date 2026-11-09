@@ -136,9 +136,6 @@ def planned(db, items, config, *, ids_only=False):
             return Work(ordinal,key,(scene_plan(db,scan,config),[]),size,ready=True)
         frozen = _load_scene(db,scan,config,prepare_vectors=False)
         rows = frozen[1]
-        if all(row['face_person'] is not None for row in rows):
-            _prepare_vectors(rows)
-            return Work(ordinal,key,(_plan(db,config,*frozen),[]),size,ready=True)
         faces, admitted = {}, 0
         if room:
             from .body_identity import anchor
@@ -177,7 +174,7 @@ def planned(db, items, config, *, ids_only=False):
             raw, needs_guard = db.execute(
                 'SELECT COALESCE(SUM(8*length(b.embedding)+8*(length(b.quality)+length(b.geometry))'
                 '+4*COALESCE(length(o.embedding),0)+8192),0), '
-                'MAX(m.person IS NULL AND o.embedding IS NOT NULL AND o.rejected IS NULL) '
+                'MAX(o.embedding IS NOT NULL AND o.rejected IS NULL) '
                 'FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
                 'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? '
                 'AND b.rejected IS NULL AND b.embedding IS NOT NULL',(scan,expected)).fetchone()
@@ -191,7 +188,7 @@ def planned(db, items, config, *, ids_only=False):
     if pool is None:
         results = ((work.generation, work.payload) for work in jobs())
     else:
-        results = ((result.generation,result.value) for result in pool.ordered(_worker,jobs(),backend=backend))
+        results = ((result.generation,result.value) for result in pool.independent_scenes(_worker,jobs(),backend=backend))
     with closing(results, name='finish body scene plans') as ordered:
         for key, (plan, hints) in ordered:
             record, rows, decisions = plan
