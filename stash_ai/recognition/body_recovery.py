@@ -18,7 +18,7 @@ def recover(database,selected,config):
                 "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons)))).fetchone():continue
         rows=[];decisions={};cost=0
         for raw in db.execute('SELECT b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
-                'o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
+                'o.quality AS face_quality,o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
                 'JOIN body_members m ON m.observation=b.id LEFT JOIN observations o ON o.id=b.face '
                 'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL AND m.policy=?',
                 (item['scan'],contract(config),policy(config))):

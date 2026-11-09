@@ -10,6 +10,7 @@ class FaceGuard:
         self.scores=scores if scores is not None else Scores(config)
         self.db = db
         self.floor = config.data['sapiensid']['matching']['face_floor']
+        self.grouping = config.data.get('clustering', {})
         from collections import OrderedDict
         self.banks = OrderedDict()
         self.bank_bytes = 0
@@ -47,7 +48,18 @@ class FaceGuard:
         face = row.get('_face_vector')
         if face is None:
             return True
-        others = (r['_face_vector'] for r in bank if r.get('_face_vector') is not None)
+        import json
+        from .pose_policy import anchor_visibility
+        raw = row.get('face_quality')
+        q = json.loads(raw) if isinstance(raw,str) else (raw or {})
+        gates = (('pose_deviation','max_anchor_pose_deviation',True),
+                 ('pixels','min_anchor_face_pixels',False),('sharpness','min_anchor_sharpness',False))
+        weak = any(self.grouping.get(key) is not None and type(q.get(metric)) in (float,int)
+                   and (q[metric]>self.grouping[key] if upper else q[metric]<self.grouping[key])
+                   for metric,key,upper in gates)
+        from .visibility import cached
+        weak |= bool(cached(q) and q['visible_face_fraction']<anchor_visibility(self.grouping))
+        others = (r for r in bank if r.get('_face_vector') is not None)
         if person is not None:
             # Stream complete face vetoes; a large owner must not allocate an
             # unbounded second reference bank outside the configured budget.
@@ -61,15 +73,19 @@ class FaceGuard:
         with tracking(others,'Check body face vetoes',unit='face') as witnesses:
             for witness in witnesses:
                 if token is not None:token.check()
-                other = witness.validated if person is not None else witness
+                other = witness.validated if person is not None else witness['_face_vector']
                 if len(face)!=len(other):
                     return False
                 if self.scores.face_similarity(face,other)>=self.floor:
                     continue
-                if person is None or witness.strict:
+                if not weak and (person is None or witness.strict):
                     return False
-                stamp = witness.scan,witness.seconds
-                pixel = unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality))
+                if person is None:
+                    record = dict(scan=witness['scan'],seconds=witness['seconds'],quality=witness.get('face_quality') or '{}')
+                else:
+                    record = dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality)
+                stamp = record['scan'],record['seconds']
+                pixel = unit(record)
                 if first is None:
                     first = stamp,pixel
                 distinct_time |= stamp!=first[0]

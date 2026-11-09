@@ -50,7 +50,7 @@ def _global_rivals(search, batch, *, plausible=None):
 def _rows(db, scan, stamp):
     return db.execute("""SELECT b.id,b.cue,b.seconds,b.scan,b.face,b.quality,b.geometry,b.embedding,
         m.person,m.status,m.role,m.proof,f.rejected AS face_rejection,f.embedding AS face_embedding,
-        f.dimensions AS face_dimensions,fm.person AS face_owner FROM body_observations b
+        f.quality AS face_quality,f.dimensions AS face_dimensions,fm.person AS face_owner FROM body_observations b
         LEFT JOIN observations f ON f.id=b.face LEFT JOIN members fm ON fm.observation=f.id JOIN body_members m
         ON m.observation=b.id WHERE b.scan=? AND m.policy=? AND b.rejected IS NULL
         ORDER BY b.cue,b.id""",(scan,stamp))
@@ -190,7 +190,14 @@ def _scene(db, scan, stamp, gallery, search, config):
         best = winner(ranked,settings,owner_bonuses=bonuses)
         endpoint = None
         if best is None and hasattr(search,'endpoints'):
-            endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked)
+            def reject_rival(rival,faces):
+                if rival in search.unavailable or rival not in search.bank or not search.bank[rival]['faces']:
+                    return False
+                if all(not guard.allows({'_face_vector':face},(),rival) for face,_ in faces):
+                    checked[row['id']].add(rival)
+                    return True
+                return False
+            endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked,reject_rival=reject_rival)
         if best is None and endpoint is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
@@ -207,7 +214,7 @@ def _scene(db, scan, stamp, gallery, search, config):
             continue
         if row['face_embedding'] is not None and row['face_rejection'] is None:
             measured = face_vector(dict(dimensions=row['face_dimensions'], embedding=row['face_embedding']))
-            if not guard.allows({'_face_vector':measured}, (), owner):
+            if not guard.allows({'_face_vector':measured,'face_quality':row['face_quality']}, (), owner):
                 continue
         bank = search.bank.get(owner)
         if (bank is None or owner in search.unavailable or old in search.unavailable
