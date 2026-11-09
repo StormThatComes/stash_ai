@@ -22,17 +22,18 @@ class Evidence:
         self.db=db;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
         self.stats=stats;self.cache=OrderedDict();self.used=0;self.cache_bytes=cache_bytes
         self.scores=OrderedDict()
+        self.prefetched = {}
 
     def feature(self,row,kind='body'):
         key=(kind,row['id'])
         if key in self.cache:
             self.cache.move_to_end(key);return self.cache[key]
         if kind=='body':
-            raw=self.db.execute('SELECT embedding FROM body_observations WHERE id=?',(row['id'],)).fetchone()
+            raw=self.prefetched.get(key) or self.db.execute('SELECT embedding FROM body_observations WHERE id=?',(row['id'],)).fetchone()
             value=vector(raw)
         else:
             from .clustering import vector as face_vector
-            raw=self.db.execute('SELECT embedding,dimensions FROM observations WHERE id=?',(row['id'],)).fetchone()
+            raw=self.prefetched.get(key) or self.db.execute('SELECT embedding,dimensions FROM observations WHERE id=?',(row['id'],)).fetchone()
             value=face_vector(raw)
         self.stats['embedding_reads']+=1
         charge=value.nbytes+512
@@ -42,6 +43,26 @@ class Evidence:
             self.cache[key]=value;self.used+=charge
         return value
 
+    def features(self, rows, kind):
+        from itertools import islice
+        import sqlite3
+        from .database import encoded
+        result = []
+        source = iter(rows)
+        table = 'body_observations' if kind == 'body' else 'observations'
+        fields = 'embedding' if kind == 'body' else 'embedding,dimensions'
+        while chunk := list(islice(source, 32)):
+            ids = list(dict.fromkeys(r['id'] for r in chunk if (kind, r['id']) not in self.cache))
+            try:
+                if len(ids) > 1 and isinstance(getattr(self.db, 'raw', self.db), sqlite3.Connection):
+                    sql = f'SELECT id,{fields} FROM {table} WHERE id IN (SELECT value FROM json_each(?))'
+                    for row in self.db.execute(sql, (encoded(ids),)):
+                        self.prefetched[kind, row['id']] = row
+                result.extend(self.feature(row, kind) for row in chunk)
+            finally:
+                self.prefetched.clear()
+        return tuple(result)
+
     def compare(self,left,right,kind='body'):
         key=(kind,tuple(r['id'] for r in left),tuple(r['id'] for r in right))
         if key in self.scores:
@@ -50,8 +71,8 @@ class Evidence:
         if len(left)+len(right)<=128 and (len(left)+len(right))*(4096*4+512)<=self.cache_bytes//2:
             from .body_numeric import lookup, publish
             from .body_parallel import _compare
-            first=tuple(self.feature(row,kind) for row in left)
-            second=tuple(self.feature(row,kind) for row in right)
+            first = self.features(left, kind)
+            second = self.features(right, kind)
             identity,found=lookup(first,second,kind)
             if found is None:
                 self.charge(count,kind)
