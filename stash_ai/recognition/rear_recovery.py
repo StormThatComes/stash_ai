@@ -63,7 +63,7 @@ def _rows(db, scan, stamp, blocks=None):
     return db.execute(sql+' ORDER BY b.cue,b.id',params)
 
 
-def _occupied_torsos(db, scan, stamp, config):
+def _occupied_torsos(db, scan, stamp, config, blocks=None):
     from .pose_policy import anchor_sql
     from .reference_roles import strict_sql
     # Only trusted face/body anchors can exclude a physically distinct rival.
@@ -73,7 +73,12 @@ def _occupied_torsos(db, scan, stamp, config):
         WHERE b.scan=? AND m.policy=? AND m.role='anchor' AND m.status='accepted'
         AND o.rejected IS NULL AND b.rejected IS NULL AND """ + strict_sql('o','f') + ' AND '+anchor_sql('o',config.data['clustering'])
     torsos = defaultdict(list)
-    for oid,cue,geometry,owner in db.execute(source,(scan,stamp)):
+    args = (scan, stamp)
+    if blocks is not None:
+        from .rear_fragments import WIDTH
+        source += ' AND b.cue IN (SELECT value FROM json_each(?))'
+        args += (encoded([cue for block in blocks for cue in range(block*WIDTH, (block+1)*WIDTH)]),)
+    for oid,cue,geometry,owner in db.execute(source, args):
         torsos[cue].append((oid,owner,json.loads(geometry)))
     return torsos
 
@@ -83,8 +88,20 @@ def impossible_owners(row,person,torsos):
     return {owner for oid,owner,other in torsos if oid!=row['id'] and pair([person,other]) is not None}
 
 
-def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=None):
+def query_perspective(row, decision):
     from .body_perspectives import orientation
+    if (row['face_owner'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
+            or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root','unresolved_partner')):
+        return None
+    person = json.loads(row['geometry'])
+    kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
+    kind = decision.get('query_perspective') or kind
+    if kind not in ('back','side'):
+        return None
+    return kind
+
+
+def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=None):
     settings = config.data['sapiensid']['identities']
     proposals = {}
     required = defaultdict(set)
@@ -98,7 +115,7 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
     from .rear_gallery import winner
     guard = FaceGuard(db, config)
     batch = []
-    torsos = _occupied_torsos(db,scan,stamp,config)
+    torsos = _occupied_torsos(db,scan,stamp,config,blocks)
     waiting = {}
     decisions = {}
     query_faces = {}
@@ -128,13 +145,8 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
 
     def request(row,decision):
         old = row['person']
-        if (row['face_owner'] or row['status']=='accepted' and decision.get('reason') not in ('body_scene_core','body_core_attachment')
-                or decision.get('track_blocker',{}).get('reason') in ('competing_transition','different_face_root','unresolved_partner')):
-            return None
-        person = json.loads(row['geometry'])
-        kind = orientation(person) if person.get('keypoints') else quality(row).get('orientation')
-        kind = decision.get('query_perspective') or kind
-        if kind not in ('back','side'):
+        kind = query_perspective(row, decision)
+        if kind is None:
             return None
         query = vector(row)
         context = decision.get('shot_context')

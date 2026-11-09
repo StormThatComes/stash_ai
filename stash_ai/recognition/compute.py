@@ -241,7 +241,7 @@ class Compute:
         self.worker_cpu_seconds += result.cpu_seconds
         return result
 
-    def ordered(self, function, jobs, *, backend='threads'):
+    def ordered(self, function, jobs, *, backend='threads', submission_order=True):
         """Consume a bounded ordered stream, retiring results before advancing.
 
         Exhaust or close the iterator before scheduling another stream. Sizes
@@ -259,7 +259,7 @@ class Compute:
             for job in jobs:
                 self._owned()
                 if (type(job.size) is not int or not (0 < job.size and (job.ready or job.size <= self.limit))
-                        or type(job.ordinal) is not int or job.ordinal <= previous):
+                        or type(job.ordinal) is not int or (submission_order and job.ordinal <= previous)):
                     raise ValueError('Invalid recognition CPU work size/order.')
                 previous = job.ordinal
                 if job.prepare is not None:
@@ -296,6 +296,8 @@ class Compute:
                 self.bytes += job.size
                 self.peak_bytes = max(self.peak_bytes, self.bytes)
                 self.submitted += 1
+            if not submission_order:
+                self.pending = deque(sorted(self.pending, key=lambda entry: entry[1].ordinal))
             while self.pending:
                 yield self._take()
         finally:
@@ -304,6 +306,32 @@ class Compute:
                 for future, _ in self.pending:
                     future.cancel()
             self.publish('stopping' if self.pending else 'coordinator')
+
+    def independent_scenes(self, function, jobs, *, backend):
+        """Cost-first dispatch within one admitted immutable window, ordered retirement."""
+        if self.solver_managed or self.workers == 1:
+            yield from self.ordered(function, jobs, backend=backend)
+            return
+
+        def run(window):
+            # All admitted descriptors fit simultaneously. ordered() submits the
+            # expensive jobs first and retires the futures by canonical ordinal.
+            by_cost = sorted(window, key=lambda job: (-job.size, job.ordinal))
+            yield from self.ordered(function, by_cost, backend=backend, submission_order=False)
+
+        window = []
+        size = 0
+        for job in jobs:
+            if window and (job.ready or size + job.size > self.limit or len(window) >= self.workers):
+                yield from run(window)
+                window, size = [], 0
+            if job.ready:
+                yield from run([job])
+            else:
+                window.append(job)
+                size += job.size
+        if window:
+            yield from run(window)
 
     def release_input(self, ordinal):
         segment = self.shared_inputs.pop(ordinal, None)

@@ -505,7 +505,7 @@ def rebuild(database,selected,config,result):
             # invoking the body stage directly, without the outer rebuild wrapper.
             if not db.in_transaction:db.execute('BEGIN')
             db.execute('CREATE TEMP TABLE desired_body_members(id TEXT PRIMARY KEY)')
-            db.executemany('INSERT INTO desired_body_members VALUES (?)',((r['id'],) for _,rows,_ in plans for r in rows))
+            db.executemany('INSERT INTO desired_body_members VALUES (?)',((oid,) for oid in plans.identifiers()))
             for item in selected:
                 scan=db.execute('SELECT * FROM scans WHERE id=?',(item['scan'],)).fetchone()
                 removed=db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
