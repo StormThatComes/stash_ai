@@ -246,7 +246,14 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             else:
                 # Direct evaluation without labelled training goals uses a fixed paired comparison.
                 order = ['paths-only-evidence', 'tracks-1-evidence']
-            selected = {name:strategies[name] for name in order[:2]}
+            from .config import digest
+            distinct = {}
+            for name in order:
+                key = digest(strategies[name].data)
+                distinct.setdefault(key,name)
+                if len(distinct)==2:
+                    break
+            selected = {name:strategies[name] for name in distinct.values()}
         if compare_strategies:
             from .scene_strategy_validation import holdout_ablations
             controls = holdout_ablations(winner)

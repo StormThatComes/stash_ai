@@ -104,7 +104,8 @@ def test_training_screens_and_tunes_two_families_within_solver_budget(tmp_path):
         result = solve(config,goals,db,maximum=20,compare_scene_strategies=True)
     # The face-first control reuses the existing tracks-with-evidence configuration.
     assert result['search']['scene_families_tested']==15
-    assert len(result['search']['scene_finalists'])==2
+    finalists = list(result['search']['scene_finalists'].values())
+    assert len(finalists)==2 and finalists[0]!=finalists[1]
     assert result['search']['attempted']<=20
     assert any(t.get('search_phase')=='scene_refinement' for t in result['simulation']['trials'].values())
 
