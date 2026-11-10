@@ -11,7 +11,7 @@ import time
 
 from .clustering import Group, _groups, co_presence_allows, matching_policy, vector
 from .database import encoded
-from .identity_merges import canonical
+from .identity_merges import canonical, redirect_candidates
 from .pose_policy import anchor_sql
 from .reference_roles import strict_sql
 from .reference_usage import ReferenceUsage
@@ -423,9 +423,7 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
             for source,proof in proofs:
                 db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
                 db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
-                db.execute("UPDATE candidates SET payload=json_set(payload,'$.first_merge_source',"
-                    "coalesce(json_extract(payload,'$.first_merge_source'),person),'$.merged_from',person,"
-                    "'$."+evidence_field+"',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
+                redirect_candidates(db,source,target,field=evidence_field,proof=proof)
     return tuple(replace(view,group=Group(canonical(db,view.group.identifier),view.group.samples,True,
         view.group.sample_ids)) for view in views)
 

@@ -24,6 +24,22 @@ def canonical(db, person):
     raise ValueError('Recognition identity aliases contain a cycle.')
 
 
+def redirect_candidates(db, source, target, *, field=None, proof=None):
+    """Charge expanding JSON updates per row, within the caller's transaction."""
+    if source == target:
+        raise ValueError('A merge must redirect to a different identity.')
+    fields = "'$.first_merge_source',coalesce(json_extract(payload,'$.first_merge_source'),person),'$.merged_from',person"
+    values = ()
+    if field is not None:
+        fields += ',?,json(?)'
+        values = ('$.'+field, encoded(proof))
+    sql = f'UPDATE candidates SET payload=json_set(payload,{fields}),person=? WHERE rowid=?'
+    # Moving the selected rows off the indexed source shrinks the next batch.
+    while batch := db.execute('SELECT rowid FROM candidates WHERE person=? ORDER BY rowid LIMIT 256',
+                              (source,)).fetchall():
+        db.executemany(sql, ((*values,target,oid) for oid, in batch))
+
+
 def _cross(first, second, config):
     return cross_scores(first, second, config.data['recognition']['match_threshold'],
                         config.data['clustering']['cohesion_threshold'])
@@ -304,16 +320,8 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                         db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
                                    (source, target, time.time(), encoded(evidence), 'pending'))
                         db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
-                        if local_state is None:
-                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.first_merge_source',coalesce(json_extract(payload,'$.first_merge_source'),person),'$.merged_from',person),person=? "
-                                       'WHERE person=?', (target, source))
-                        else:
-                            # Local mergers are ephemeral in the replay. Preserve
-                            # their complete proof on durable candidate rows.
-                            db.execute("UPDATE candidates SET payload=json_set(payload,"
-                                "'$.first_merge_source',coalesce(json_extract(payload,'$.first_merge_source'),person),"
-                                "'$.merged_from',person,'$.same_scene_merge',json(?)),person=? WHERE person=?",
-                                (encoded(evidence), target, source))
+                        redirect_candidates(db,source,target,field='same_scene_merge' if local_state is not None else None,
+                                            proof=evidence)
                         for group in components.pop(source):
                             roots[group.identifier] = target
                             components[target].append(group)

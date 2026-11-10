@@ -487,3 +487,24 @@ def test_legacy_merge_scope_follows_transitive_aliases(tmp_path):
         assert reads == ['unobserved']
         assert db.connection.execute("SELECT status FROM publications WHERE kind='merge'").fetchone()[0] == 'unknown'
 
+
+
+def test_large_proof_redirect_grows_replay_pages_per_candidate(tmp_path):
+    from contextlib import closing
+    import json
+    from tests.test_recognition_body_identity import configuration
+    from stash_ai.recognition.identity_merges import redirect_candidates
+    from stash_ai.recognition.scratch_space import scope, connect
+    cfg = configuration(tmp_path)
+    with scope(cfg), closing(connect()) as db:
+        db.execute('CREATE TABLE candidates(person TEXT, payload TEXT)')
+        db.execute('CREATE INDEX by_owner ON candidates(person)')
+        db.executemany('INSERT INTO candidates VALUES (?,?)', [('source','{"first_merge_source":"first"}')]*1024)
+        db.execute("INSERT INTO candidates VALUES ('peer','{}')")
+        proof = dict(witness='x'*8192)
+        with db:
+            redirect_candidates(db,'source','target',field='strict_partition',proof=proof)
+        assert db.execute("SELECT count(*) FROM candidates WHERE person='target'").fetchone()[0]==1024
+        assert db.execute("SELECT payload FROM candidates WHERE person='peer'").fetchone()[0]=='{}'
+        payload = json.loads(db.execute("SELECT payload FROM candidates WHERE person='target' LIMIT 1").fetchone()[0])
+        assert payload == dict(first_merge_source='first',merged_from='source',strict_partition=proof)
