@@ -177,12 +177,32 @@ def measure(db, goals, expected, decisions):
            'AND embedding IS NOT NULL ORDER BY scan,cue,id')
     for scan,items in groupby(db.execute(sql,(encoded(sorted(selected)),)),key=lambda r:r[1]):
         addresses = defaultdict(dict)
-        for ref,at,owner in db.execute("SELECT b.id,b.cue,m.person FROM body_observations b JOIN body_members m "
-                "ON m.observation=b.id WHERE b.scan=? AND m.status='accepted' AND m.role='anchor' "
-                "AND b.embedding IS NOT NULL ORDER BY b.cue,b.id",(scan,)):
-            bank = addresses[owner]
-            if ref not in labels and at not in bank and len(bank)<8:
-                bank[at] = ref
+        # Keep the embedding reads bounded. Rank by cue, then interleave
+        # shots within a perspective and perspectives within the owner's bank.
+        bank_sql = """
+            WITH inputs AS (
+              SELECT b.id,b.cue,m.person,
+                     json_extract(b.quality,'$.quality.view_shot') shot,
+                     json_extract(b.quality,'$.quality.orientation') view,
+                     json_extract(b.quality,'$.quality.sharpness') sharp
+              FROM body_observations b JOIN body_members m ON m.observation=b.id
+              WHERE b.scan=? AND m.status='accepted' AND m.role='anchor' AND b.embedding IS NOT NULL
+                AND b.id NOT IN (SELECT value FROM json_each(?))
+            ), cues AS (
+              SELECT *,row_number() OVER (PARTITION BY person,cue ORDER BY sharp DESC,id) slot FROM inputs
+            ), shots AS (
+              SELECT *,row_number() OVER (PARTITION BY person,view,shot ORDER BY sharp DESC,cue,id) within_shot
+              FROM cues WHERE slot=1
+            ), views AS (
+              SELECT *,row_number() OVER (PARTITION BY person,view ORDER BY within_shot,sharp DESC,shot,cue,id) within_view
+              FROM shots
+            ), ranked AS (
+              SELECT *,row_number() OVER (PARTITION BY person ORDER BY within_view,within_shot,sharp DESC,cue,id) priority
+              FROM views
+            ) SELECT id,cue,person FROM ranked WHERE priority<=8 ORDER BY person,priority
+        """
+        for ref,at,owner in db.execute(bank_sql,(scan,encoded(sorted(labels)))):
+            addresses[owner][at] = ref
         refs = [ref for bank in addresses.values() for ref in bank.values()]
         vectors = {oid:np.frombuffer(blob,dtype='<f4') for oid,blob in db.execute(
             'SELECT id,embedding FROM body_observations WHERE id IN (SELECT value FROM json_each(?))',(encoded(refs),))}
@@ -191,13 +211,16 @@ def measure(db, goals, expected, decisions):
                                    '(SELECT value FROM json_each(?))',(encoded(list(queries)),)):
             query = np.frombuffer(blob,dtype='<f4')
             cue = queries[oid]
-            scores = {owner:max(float(query @ vectors[ref]) for at,ref in bank.items() if at!=cue)
+            hits = {owner:max((float(query @ vectors[ref]),ref) for at,ref in bank.items() if at!=cue)
                       for owner,bank in addresses.items() if any(at!=cue for at in bank)}
+            scores = {owner:hit[0] for owner,hit in hits.items()}
             wanted = expected.get(oid)
             ranked = sorted(((score,p) for p,score in scores.items() if p!=wanted),reverse=True)
             row = selected[oid]
             row['label_probe'] = dict(expected=wanted,score=scores.get(wanted),rival=ranked[0][1] if ranked else None,
                                       runner=ranked[0][0] if ranked else None,
+                                      witness=hits[wanted][1] if wanted in hits else None,
+                                      rival_witness=hits[ranked[0][1]][1] if ranked else None,
                                       stage=(row.get('track_blocker') or {}).get('reason') or row['reason'],
                                       measurements=row.get('measurements',{}),**row.get('turn_evidence',{}))
 
@@ -218,7 +241,8 @@ def proposals(config, goals, decisions, membership):
         score,runner = probe['score'],probe['runner']
         if score is None or score<=0 or score-(runner if runner is not None else -1)<parameter(config.data,prefix+'ambiguity_margin'):
             continue
-        if probe['stage'] in ('different_face_root','unresolved_partner','weak_face_track_conflict','person_copresence'):
+        from .merge_solver_diagnostics import physical_veto
+        if physical_veto(probe['stage']) or physical_veto(row.get('reason')):
             continue
         # A nearest neighbour nominates the owner. Only measurements whose
         # witnesses actually belong to that owner define a bank threshold.

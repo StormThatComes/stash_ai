@@ -98,3 +98,25 @@ def test_positive_goal_uses_body_only_reference_quorum_and_manual_pair(tmp_path)
         assert goal['positive_observations'][0]['track']=='track'
         row, = latest_decisions(db,{body})
         assert row['source_tracks']==[bodies[0]] and set(row['witnesses'])==set(bodies[0])
+
+
+def test_physical_copresence_never_suggests_looser_matching(tmp_path):
+    from .test_recognition_body_identity import configuration
+    from stash_ai.recognition.positive_observations import proposals
+    cfg=configuration(tmp_path)
+    goals={'positive_observations':[dict(set=0,observation_ids=['q'])]}
+    row=dict(observation='q',reason='body_copresence_conflict',
+             label_probe=dict(stage='body_similarity',expected='A',score=.77,runner=.4))
+    assert proposals(cfg,goals,[row],{})==[]
+
+
+def test_label_topology_breaks_equal_coverage_ties():
+    from stash_ai.recognition.merge_goals import objective
+    group=dict(assigned_fraction=1,complete_fraction=1,largest_complete_performers=1,consolidation_fraction=1,fragments=1)
+    labels=[dict(set=0,scene='7',cue=i,track='track',requested_observation_ids=[str(i)],observation_ids=[str(i)]) for i in range(5)]
+    def score(sequence):
+        predicted=dict(ref='A',**dict(zip(map(str,range(5)),sequence)))
+        result=dict(groups=[group],admissible=True,fully_solved=True,disjoint=True,cross_set_observation_pairs=0)
+        assess(dict(positive_observations=labels,positive_reference_ids={0:['ref']}),result,predicted,predicted)
+        return objective(result)
+    assert score('AAABB')>score('ABABA')

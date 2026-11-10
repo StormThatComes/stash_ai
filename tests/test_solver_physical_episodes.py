@@ -85,3 +85,17 @@ def test_association_fault_counts_changed_owners_without_inflating_later_cues():
     assert report['changed_observations']==report['changed_cues']==1
     assert report['later_cues']==0 and report['other_scenes']==[]
     assert report['partition_changed_cues']>1
+
+
+def test_unbound_manual_people_remain_in_physical_denominator():
+    from stash_ai.recognition.contact_holdout import visible_scores
+    labels={'root':'A'}
+    samples={'root':dict(slices=[])}
+    decisions={'root':dict(accepted_identity='owner',evidence=dict(reason='known_identity'))}
+    omitted={('1',1,'B'):dict(binding='missing',slices=['back']),('1',2,'A'):dict(binding='ambiguous')}
+    physical=_metrics(labels,samples,{'root':('1',0)},decisions,unbound=omitted)['physical']
+    assert physical['coverage']==1/3 and physical['slices']['back']['withheld']==1
+    groups={key:[] for key in omitted}
+    groups['1',0,'A']=['root']
+    scores=visible_scores(groups,decisions,labels,bindings=omitted)
+    assert (scores['correct'],scores['missing'],scores['ambiguous'])==(1,1,1)

@@ -12,7 +12,7 @@ from .merge_report_policy import patched
 from .offline_evaluation import evaluate, _selection
 
 
-def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(), timing=None):
+def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(), timing=None, unbound=None):
     from .scene_strategy_validation import physical_owner
     records = [dict(observation=oid, scene=locations[oid][0], truth=truth,
                     predicted=decisions[oid]['accepted_identity']) for oid, truth in labels.items() if oid not in exclude]
@@ -28,6 +28,10 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
         projections.append(dict(observation=encoded([scene,cue,truth]),scene=scene,truth=truth,
             predicted=physical_owner(owners),
             slices={s for row in rows for s in samples[row['observation']]['slices']}))
+    for (scene,cue,truth),info in (unbound or {}).items():
+        if (scene,cue,truth) not in physical:
+            projections.append(dict(observation=encoded([scene,cue,truth]),scene=scene,truth=truth,
+                                    predicted=None,slices=set(info.get('slices',()))))
     provisional = [dict(row, predicted=decisions[row['observation']]['identity'])
                    for row in records if row['predicted'] is None
                    and decisions[row['observation']].get('status') == 'provisional']
@@ -139,7 +143,7 @@ def read_manifest(manifest_path):
     samples = document.get('observations')
     if (not isinstance(scenes,list) or not scenes or
             not all(isinstance(s,str) and s.isascii() and s.isdecimal() and int(s)>0 for s in scenes)
-            or not isinstance(samples,dict) or not samples):
+            or not isinstance(samples,dict) or (not samples and not (document.get('visible_people') or document.get('unbound_manual_labels')))):
         raise ValueError('Validation needs scene IDs and labelled observations.')
     labels = {}
     for oid, row in samples.items():
@@ -163,6 +167,13 @@ def read_manifest(manifest_path):
             raise ValueError('Each partner set needs two observations of one target and a different partner.')
     from .crowd_labels import validate
     visible = document.get('visible_people',{})
+    # Older pedestrian manifests recorded unbound people in a single-scene list.
+    if len(scenes)==1 and not visible and document.get('unbound_manual_labels'):
+        from collections import defaultdict
+        cues = defaultdict(list)
+        for cue,truth in document['unbound_manual_labels']:
+            cues[str(cue)].append(dict(truth=truth,binding='unbound'))
+        visible = {scenes[0]:dict(cues)}
     validate(visible,scenes)
     return (scenes, samples, labels, (path.parent/database).resolve() if database else None,
             document.get('series', []), triples, visible)
@@ -198,6 +209,8 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         timing = {}
         locations = _locations(source,scans,labels,timing=timing)
         groups,cases = physical_inputs(source,settings,scans,visible,labels,locations)
+        bindings = {(scene,int(cue),p['truth']):p for scene,cues in visible.items()
+                    for cue,people in cues.items() for p in people}
         from .body_identity import enabled as body_enabled
         replay_labels = dict(labels)
         if body_enabled(settings):
@@ -207,6 +220,16 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         else:
             groups = {k:[oid for oid in ids if oid in labels] for k,ids in groups.items()}
             cases = []
+        unbound = {key:bindings[key] for key,ids in groups.items() if not ids}
+        if not replay_labels:
+            from .crowd_labels import detection_counts
+            from .body_observations import contract
+            measured = _metrics({}, {}, {}, {}, unbound=unbound)
+            measured['visible'] = visible_scores(groups,{}, {},bindings=bindings)
+            return dict(verdict=dict(status='insufficient_coverage',measures={}),scenes=scenes,labelled=0,
+                        detection=detection_counts(source,scans,visible,contract(settings)),
+                        metrics={'baseline/joint':measured,'winner/joint':measured},omissions=[],incremental={},
+                        scene_strategies={},omission_status='no_bound_observations')
         from .scene_strategy_validation import variants, strategy_summary, omission_damage
         strategies = variants(winner) if compare_strategies else {}
         selected = {}
@@ -235,8 +258,8 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
         full = evaluate(settings,replay_labels,variants={'winner':winner,**strategies},variant_started=announce,**options)
         predicted = full['trials']['winner/joint']['decisions']
         references = [oid for oid,row in samples.items() if row.get('reference')]
-        metrics = {name:dict(_metrics(labels,samples,locations,trial['decisions'],partner_sets=triples,timing=timing),
-                             visible=visible_scores(groups,trial['decisions'],labels,references)) for name,trial in full['trials'].items()}
+        metrics = {name:dict(_metrics(labels,samples,locations,trial['decisions'],partner_sets=triples,timing=timing,unbound=unbound),
+                             visible=visible_scores(groups,trial['decisions'],labels,references,bindings)) for name,trial in full['trials'].items()}
         strategy_results = {name:strategy_summary(cfg,metrics.pop(name+'/joint'),labels,locations,
                             full['trials'][name+'/joint']['decisions']) for name,cfg in strategies.items()}
         contamination = dict(status='no_labelled_contact_pair')
@@ -252,7 +275,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                     key = name+'/joint'
                     decisions = stressed['trials'][key]['decisions']
                     before = full['trials'][key]['decisions']
-                    item[name] = dict(visible=visible_scores(groups,decisions,labels,references),
+                    item[name] = dict(visible=visible_scores(groups,decisions,labels,references,bindings),
                         **spread(before,decisions,all_locations,scene,case[1],replay_labels))
                 episodes.append(item)
             first = episodes[0]
@@ -283,7 +306,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                                              (replay[k]['accepted_identity'] is None) for k in labels))
                 decisions = staged['trials']['winner/batch-1']['decisions']
                 incremental[name] = dict(order=sequence, strategies={s:by_variant[s] for s in selected}, baseline=by_variant['baseline'], **by_variant['winner'],
-                    metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing))
+                    metrics=_metrics(labels,samples,locations,decisions,partner_sets=triples,timing=timing,unbound=unbound))
         if not windows:
             faceless = {r[0] for r in source.execute(
                 "SELECT b.id FROM body_observations b LEFT JOIN observations o ON o.id=b.face "
@@ -326,14 +349,15 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             scene,first,last = window
             excluded = {oid for oid,(s,c) in locations.items() if s==scene and first<=c<=last}
             group = sorted(labels.keys()-excluded)
-            before = _metrics(labels,samples,locations,predicted,excluded,triples,timing)
+            remaining = {key:p for key,p in unbound.items() if key[0]!=scene or not first<=key[1]<=last}
+            before = _metrics(labels,samples,locations,predicted,excluded,triples,timing,remaining)
             for mode in ('rejected','empty'):
                 omitted = evaluate(settings,labels,variants=stress_variants,omitted_cues=window,omission_mode=mode,**options)['trials']
                 trial = omitted['winner/joint']['decisions']
                 damage = {name:omission_damage(labels,locations,group,full['trials'][name+'/joint']['decisions'],
                                                omitted[name+'/joint']['decisions']) for name in tested}
                 delta = _partition_delta(predicted,trial,group)
-                after = _metrics(labels,samples,locations,trial,excluded,triples,timing)
+                after = _metrics(labels,samples,locations,trial,excluded,triples,timing,remaining)
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
     return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress, require_slices=compare_strategies or any(

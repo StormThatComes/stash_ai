@@ -330,7 +330,10 @@ def objective(status):
         goals = status['positive_observations']
         return (status['admissible'], sum(r['satisfied'] for r in goals),
                 sum(r.get('coverage',float(r['satisfied'])) for r in goals)/max(1,len(goals)),
-                -sum(r.get('wrong_owner_samples',0)/max(1,r.get('sample_count',1)) for r in goals)) + objective(rest)
+                -sum(r.get('wrong_owner_samples',0)/max(1,r.get('sample_count',1)) for r in goals)) + objective(rest) + (
+                -sum(r.get('owner_switches',0) for r in goals),
+                -max((r.get('longest_unmatched_run',0) for r in goals),default=0),
+                -max((r.get('longest_unmatched_cue_span',0) for r in goals),default=0))
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)

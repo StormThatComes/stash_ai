@@ -33,6 +33,15 @@ HARD = {'body_anchor_keypoint_rules_missing','missing_person_evidence','missing_
         'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness','body_anchor_pixels_missing'}
 
 
+PHYSICAL_VETOES = {'body_copresence_conflict','person_copresence','different_face_root',
+                   'unresolved_partner','weak_face_track_conflict','unconfirmed_contact_face'}
+HARD.update(PHYSICAL_VETOES)
+
+
+def physical_veto(reason):
+    return reason in PHYSICAL_VETOES
+
+
 def round_robin(groups):
     pending = deque(iter(v) for _,v in sorted(groups.items()))
     while pending:
