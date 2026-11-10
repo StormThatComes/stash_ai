@@ -6,6 +6,7 @@ from itertools import combinations
 def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timing=None, unbound=None):
     from .reference_roles import STRICT_REASONS
     face_roots = defaultdict(set)
+    certified = set()
     by_scene = defaultdict(lambda: defaultdict(dict))
     for oid,truth in labels.items():
         if oid in excluded:
@@ -17,6 +18,13 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
         if (owner and decision.get('evidence_kind') != 'person' and
                 (decision.get('evidence') or {}).get('reason') in STRICT_REASONS):
             face_roots[scene,truth].add((cue,owner))
+        proof = decision.get('evidence') or {}
+        while proof:
+            peer = proof.get('gap_predecessor')
+            if peer and peer not in excluded and labels.get(peer)==truth and locations[peer][0]==scene:
+                certified.add((scene,truth,locations[peer][1],cue))
+                break
+            proof = proof.get('previous')
         rows.append((owner, samples[oid]['slices']))
     for (scene, cue, truth), info in (unbound or {}).items():
         by_scene[scene][truth].setdefault(cue, [(None, info.get("slices", ()))])
@@ -26,15 +34,24 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     returned_people = []
     missing_boundaries = 0
 
-    def continuous(scene, a, b):
+    gap_states = {}
+    def continuous(scene, a, b, people=()):
         if b != a + 1:
-            return False
+            left = (timing or {}).get((scene,a),(None,None))[1]
+            right = (timing or {}).get((scene,b),(None,None))[1]
+            states = []
+            for truth in people:
+                state = ('cut' if None not in (left,right) and left!=right else
+                         'certified' if (scene,truth,a,b) in certified else 'unverified')
+                gap_states[scene,truth,a,b] = state
+                states.append(state)
+            return bool(states) and all(state=='certified' for state in states)
         if not timing:
             return True
         left, right = timing.get((scene,a),(None,None))[1], timing.get((scene,b),(None,None))[1]
         return left is None or right is None or left == right
 
-    def episodes(scene, cues, active):
+    def episodes(scene, cues, active, people):
         nonlocal missing_boundaries
         # Use the nearest labelled observation before and after one contiguous
         # run of hard cues. Missing boundary labels cannot establish a result.
@@ -46,7 +63,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
             elif first is not None:
                 if first>0:
                     window = cues[first-1:i+1]
-                    if all(continuous(scene,a,b) for a,b in zip(window,window[1:])):
+                    if all(continuous(scene,a,b,people) for a,b in zip(window,window[1:])):
                         yield window
                     else:
                         missing_boundaries += 1
@@ -97,7 +114,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                     if arriving and any(arriving == identity(other[cue-1]) for key,other in people.items()
                                         if key != person and cue-1 in other and cue not in other):
                         entrant_takeovers += 1
-            for window in episodes(scene,sorted(track),lambda cue:tagged(track[cue],'back')):
+            for window in episodes(scene,sorted(track),lambda cue:tagged(track[cue],'back'),(person,)):
                 ids = [identity(track[c]) for c in window]
                 counts[person]['turns'] += 1
                 counts[person]['one_id_turns'] += int(None not in ids and len(set(ids))==1)
@@ -127,7 +144,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                  for pair in combinations(sorted(owners),2)}
         for a,b in pairs:
             common = sorted(people[a].keys() & people[b].keys())
-            for window in episodes(scene,common,lambda c:any(tagged(people[p][c],'entangled') for p in (a,b))):
+            for window in episodes(scene,common,lambda c:any(tagged(people[p][c],'entangled') for p in (a,b)),(a,b)):
                 crossings += 1
                 expected = [identity(people[p][window[0]]) for p in (a,b)]
                 result = [identity(people[p][window[-1]]) for p in (a,b)]
@@ -160,7 +177,8 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     def macro(success,total):
         rates = [c.get(success,0)/c[total] for c in counts.values() if c.get(total)]
         return sum(rates)/len(rates) if rates else None
-    return dict(entrant_episodes=entrant_episodes, entrant_takeovers=entrant_takeovers,
+    from collections import Counter
+    return dict(sparse_transitions=dict(Counter(gap_states.values())),entrant_episodes=entrant_episodes, entrant_takeovers=entrant_takeovers,
                 scene_id_switches=sum(c['scene_id_switches'] for c in counts.values()),
                 unrecovered_at_end=censored, wrong_reacquisitions=wrong_returns, reacquired_episodes=len(reacquisition), reacquisition_cues=sum(reacquisition),
                 max_reacquisition_cues=max(reacquisition, default=0), returned_people=sorted(returned_people), rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),

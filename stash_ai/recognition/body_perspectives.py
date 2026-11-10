@@ -121,8 +121,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
         qa, ba, sa = geometry[a['id']]
         qb, bb, sb = geometry[b['id']]
         skipped = b['cue'] - a['cue'] > 1
+        from .track_geometry import rejection, translation
+        pair = a['cue'],b['cue']
+        if pair not in camera_offsets:
+            camera_offsets[pair] = translation(qa,qb,sa,sb)
         if skipped:
-            continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and np.abs(sa-sb).mean() <= 8)
+            continuous = (shot_ids[a['cue']] == shot_ids[b['cue']] and
+                          (np.abs(sa-sb).mean() <= 8 or camera_offsets[pair] is not None))
         else:
             continuous = shot_ids[a['cue']]==shot_ids[b['cue']] and boundary[b['cue']] == 'continuous'
         if not continuous:
@@ -137,10 +142,6 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             if colour>30:
                 return fail(1,'cut_colour',colour,30)
             return fail(1,'uncertain_shot',difference,8 if skipped else 20)
-        from .track_geometry import rejection, translation
-        pair = a['cue'],b['cue']
-        if pair not in camera_offsets:
-            camera_offsets[pair] = translation(qa,qb,sa,sb) if not skipped else None
         blocked = rejection(ba, bb, torsos.get(a['id'], {}), torsos.get(b['id'], {}),
                             translation=camera_offsets[pair])
         if blocked:

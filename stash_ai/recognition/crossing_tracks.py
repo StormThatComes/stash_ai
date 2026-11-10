@@ -67,15 +67,17 @@ def _window(pairs, owners, roots, decisions, transition, raw, margin, claims, *,
         if rival and rival[0]>=score-1e-12:
             return False
     before,after = layers[0][best[0]],layers[-1][best[-1]]
+    certified = {0:before,len(layers)-1:after}
     for i in range(1,len(layers)-1):
         rival = _path(layers,admissible,rival_at=i,best=best,margin=margin)
         if rival and (rival[0]>score+1e-12 or margin==0 and rival[0]>=score):
             continue
+        certified[i] = layers[i][best[i]]
         for owner,row,first,last in zip(owners,layers[i][best[i]],before,after):
             if row.get('face_person') or decisions[row['id']].get('track_blocker',{}).get('reason')=='different_face_root':
                 continue
             claims.setdefault(row['id'],{})[owner] = owner,first,last,score/len(edges)
-    return before,after
+    return certified
 
 
 def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=None, visible_single=None):
@@ -88,7 +90,7 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
         for cue in range(start+1,start+13):
             people = by_cue.get(cue,())
             if len(people)==1 and cue in occluded and len(hidden)<2:
-                hidden.append(people[0])
+                hidden.append((len(pairs)-1,people[0]))
                 continue
             if len(people)!=2:
                 break
@@ -104,8 +106,9 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
                 ends = _window(pairs,owners,roots,decisions,transition,raw,margin,claims,
                                complementary=complementary)
                 if ends:
-                    before,after = ends
-                    for row in hidden:
+                    for position,row in hidden:
+                        before = ends[max(i for i in ends if i<=position)]
+                        after = ends[min(i for i in ends if i>position)]
                         decision = decisions[row['id']]
                         if row.get('face_person') or decision.get('track_blocker',{}).get('reason')=='different_face_root':
                             continue
@@ -124,7 +127,8 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
                                     if None not in values:
                                         rivals.append(min(values))
                             if not rivals or score-max(rivals)>=margin:
-                                claims.setdefault(row['id'],{})[owner] = owner,left,right,score
+                                index = owners.index(owner)
+                                claims.setdefault(row['id'],{})[owner] = owner,ends[0][index],ends[len(pairs)-1][index],score
                                 continue
                         decision.update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
                                         track_blocker=dict(reason='unresolved_partner',cue=row.get('cue',cue)))
