@@ -16,7 +16,7 @@ def matching_settings(config):
     from .scanning import scan_identity
     from .models import namespace
     person = config.data['sapiensid']
-    return ['profile-recovery-v2',scan_identity(config, namespace(config)), plain(config.data['recognition']),
+    return ['profile-recovery-v3-global-fragments',scan_identity(config, namespace(config)), plain(config.data['recognition']),
             plain(config.data['clustering']), person['enabled'], plain(person['identities']),
             plain(person['matching']), plain(person['global_matching']), plain(person['execution'])]
 

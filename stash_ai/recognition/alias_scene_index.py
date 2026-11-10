@@ -71,3 +71,12 @@ def pending(db,scope,namespace,scene,limit):
             for p,s,policy,v in db.execute('SELECT people,scenes,policy,versions FROM pending_body_merges '
                 'WHERE scope=? AND namespace=? AND ? IN (SELECT value FROM json_each(scenes)) '
                 'ORDER BY people LIMIT ?', (scope,namespace,scene,limit))]
+
+
+def retained_components(db, scope, namespace, policy):
+    """Stream current nominations. Changed owners need a new frozen decision."""
+    from .dependencies import version
+    for scenes, clocks in db.execute('SELECT scenes,versions FROM pending_body_merges '
+            'WHERE scope=? AND namespace=? AND policy=? ORDER BY people', (scope,namespace,policy)):
+        if all(version(db,'owner',owner)==stamp for owner,stamp in json.loads(clocks).items()):
+            yield json.loads(scenes)

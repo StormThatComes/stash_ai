@@ -489,7 +489,11 @@ def rebuild_selected(database, selected, config, *, progress=None):
             if len(expanded)==len(selected):
                 from .body_identity import rebuild as rebuild_bodies
                 database.last_rebuild_selection = [dict(item) for item in selected]
-                return rebuild_bodies(database,selected,config,result)
+                result = rebuild_bodies(database,selected,config,result)
+                expanded = expand(database.connection,selected,config)
+                if len(expanded)==len(selected):
+                    return result
+                require_complete(database.connection,*first,selected=expanded)
             selected=expanded
 
 

@@ -17,7 +17,7 @@ def means_key(bank,config,versions):
     if versions is None:return None
     import hashlib
     from .rebuild_cache import _hash_row
-    h=hashlib.sha256(digest(['body-means-v2',bool(bank['faces']),
+    h=hashlib.sha256(digest(['body-means-v3',bool(bank['faces']),
                             config.data['sapiensid']['global_matching']]).encode())
     for group in [bank['refs'],*bank['cores']]:
         h.update(b'group')

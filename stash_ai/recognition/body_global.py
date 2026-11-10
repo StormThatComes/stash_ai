@@ -201,7 +201,7 @@ def reconcile(database,selected,config):
     from .solver_execution import current as solver
     from .stage_checkpoints import report as checkpoint_report
     result=(report(db,config,scope,namespace) if solver() is not None else
-            checkpoint_report(db,selected,config,'body-global',lambda:_report(db,config,scope,namespace,compact=True)))
+            checkpoint_report(db,selected,config,'body-global-fragments-v2',lambda:_report(db,config,scope,namespace,compact=True)))
     from .publication_queue import enqueue
     from .alias_scene_index import remember, expire
     indexed = db.execute('PRAGMA user_version').fetchone()[0]>=17

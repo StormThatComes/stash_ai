@@ -124,3 +124,21 @@ def test_incomplete_component_recovers_only_margin_separated_pair(tmp_path):
         state.connection.commit()
         rebuild(state, items, c, {i['scan']: [] for i in items})
         assert state.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 1
+
+
+def test_ambiguous_repeated_vector_does_not_spawn_duplicate_modes(tmp_path):
+    from types import SimpleNamespace
+    import numpy as np
+    from tests.test_recognition_body_identity import configuration
+    from stash_ai.recognition.body_global_modes import references
+    cfg = configuration(tmp_path)
+    angles = np.deg2rad([0,60]+[30]*100)
+    features = np.stack([np.cos(angles),np.sin(angles)],axis=1)
+    rows = [dict(id=str(i)) for i in range(len(angles))]
+    def feature(r):
+        return features[int(r['id'])]
+    def compare(a,b):
+        scores = [feature(x)@feature(y) for x in a for y in b]
+        return np.mean(scores), min(scores)
+    bank=dict(faces=[{}],cores=[rows],refs=rows[:2],witnesses=rows)
+    assert len(references(bank,cfg,SimpleNamespace(feature=feature,compare=compare)))==3

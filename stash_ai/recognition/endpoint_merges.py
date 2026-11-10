@@ -3,6 +3,7 @@ from functools import lru_cache
 import hashlib
 import heapq
 import json
+from itertools import combinations
 
 from .body_identity import policy
 from .fragment_endpoints import enabled
@@ -110,30 +111,54 @@ def verified(db, config, scope, namespace, bank, result):
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'])
     views = summary_views(_groups(db,scope,namespace,config.data['clustering'],usage=usage),usage)
     face_plan = consolidation_plan(db,views,config,focus=focus)
-    with Search(db,config,bank) as search:
-        for decision in face_plan:
-            pair = tuple(sorted(decision['people']))
-            if decision['outcome']!='merge' or len(pair)!=2 or not set(pair)<=eligible:
-                continue
-            a,b = pair
-            left, right = representatives(a), representatives(b)
-            for _,scan,kind,oid,roots in left:
-                for _,other,view,peer,ends in right:
-                    if scan==other:
+    def verified_pair(pair, search):
+        a,b = pair
+        left, right = representatives(a), representatives(b)
+        for _,scan,kind,oid,roots in left:
+            for _,other,view,peer,ends in right:
+                if scan==other:
+                    continue
+                if kind==view:
+                    # Same-angle duplicates cannot certify a distinct appearance.
+                    first,second = (body_vector(db.execute('SELECT embedding FROM body_observations WHERE id=?',
+                                                          (i,)).fetchone()) for i in (oid,peer))
+                    if scores.face_similarity(first,second)>=settings['match_threshold']:
                         continue
-                    if kind==view:
-                        # Same-angle duplicates cannot certify a distinct appearance.
-                        first,second = (body_vector(db.execute('SELECT embedding FROM body_observations WHERE id=?',
-                                                              (i,)).fetchone()) for i in (oid,peer))
-                        if scores.face_similarity(first,second)>=settings['match_threshold']:
-                            continue
-                    validate(pair,roots+ends,(scan,other))
-            if pair not in best:
+                validate(pair,roots+ends,(scan,other))
+        if pair not in best:
+            return None
+        evidence = exact_pair(*pair, bank, config, search.evidence)
+        if set(evidence['blockers']) - {'body_similarity', 'body_cohesion'} or evidence['face_minimum'] is None:
+            return None
+        return dict(best[pair][1], supporting_scans=len(scenes[pair]))
+
+    with Search(db, config, bank) as search:
+        for decision in face_plan:
+            people = sorted(decision['people'])
+            if decision['outcome'] != 'merge' or not set(people) <= eligible:
                 continue
-            evidence = exact_pair(a,b,bank,config,search.evidence)
-            if set(evidence['blockers'])-{'body_similarity','body_cohesion'} or evidence['face_minimum'] is None:
-                continue
-            proof = dict(best[pair][1], supporting_scans=len(scenes[pair]))
-            result['decisions'].append(dict(people=list(pair),outcome='merge',blockers=[],endpoint_pair=proof,
-                cores={p:[[r['id'] for r in core] for core in bank[p]['cores']] for p in pair},
-                face_witnesses={p:list(bank[p]['face_ids']) for p in pair}))
+            if len(people) * (len(people)-1) // 2 > config.data['sapiensid']['execution']['max_candidate_pairs']:
+                raise ResourceLimit('Too many pairs within a face endpoint nomination.')
+            edges = {}
+            neighbours = {owner: set() for owner in people}
+            for pair in combinations(people, 2):
+                proof = verified_pair(pair, search)
+                if proof is not None:
+                    edges[pair] = proof
+                    a, b = pair
+                    neighbours[a].add(b)
+                    neighbours[b].add(a)
+            # Only publish isolated complete components. A-B and B-C alone
+            # cannot prove A-C or authorize two overlapping alias writes.
+            for a in people:
+                group = sorted({a} | neighbours[a])
+                if len(group) < 2 or group[0] != a:
+                    continue
+                members = set(group)
+                if any(neighbours[p] != members - {p} for p in group):
+                    continue
+                proofs = [edges[pair] for pair in combinations(group, 2)]
+                result['decisions'].append(dict(people=group, outcome='merge', blockers=[],
+                    endpoint_pair=proofs[0], **({'endpoint_pairs': proofs} if len(proofs)>1 else {}),
+                    cores={p:list(dict.fromkeys(r['id'] for core in bank[p]['cores'] for r in core)) for p in group},
+                    face_witnesses={p:list(bank[p]['face_ids']) for p in group}))
