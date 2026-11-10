@@ -14,6 +14,11 @@ def prepare(source, target):
         from contextlib import closing
         from .dependencies import supported
         if not source.in_transaction or not supported(source):return False
+        # A rollback-journal writer may acquire EXCLUSIVE when its page cache
+        # spills before commit. An attached reader would then block on our own
+        # transaction. Copy selected vectors through the owning connection.
+        if source.execute('PRAGMA main.journal_mode').fetchone()[0].lower() != 'wal':
+            return False
         path=next((r[2] for r in source.execute('PRAGMA database_list') if r[1]=='main'),None)
         if not path:return False
         with closing(sqlite3.connect(Path(path).as_uri()+'?mode=ro',uri=True)) as committed:
