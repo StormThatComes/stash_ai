@@ -225,6 +225,55 @@ def measure(db, goals, expected, decisions):
                                       measurements=row.get('measurements',{}),**row.get('turn_evidence',{}))
 
 
+def external_probes(db, config, goals, expected, decisions):
+    """Expose the production gallery route without using labelled queries as witnesses."""
+    from contextlib import closing
+    from .body_identity import vector, quality
+    from .database import encoded
+    from .rear_gallery import load, winner
+    from .models import namespace
+    from .scratch_space import scope, connect
+    if not config.data['sapiensid']['global_matching']['enabled']:
+        return
+    selected = {r['observation']:r for r in decisions if r.get('label_probe') and
+                expected.get(r['observation']) and r.get('owner')!=expected[r['observation']]}
+    if not selected:
+        return
+    settings = config.data['sapiensid']['identities']
+    labels = {oid for item in goals['positive_observations'] for oid in item['observation_ids']}
+    # Include the linked physical projection when a user labelled only its face.
+    labels.update(r[0] for r in db.execute("SELECT id FROM body_observations WHERE face IN "
+                 "(SELECT value FROM json_each(?))",(encoded(sorted(labels)),)))
+    with scope(config), closing(connect()) as pages:
+        gallery = load(db,config,goals['scope'],namespace(config),pages=pages)
+        sql = "SELECT id,scan,embedding,quality FROM body_observations WHERE id IN (SELECT value FROM json_each(?))"
+        for raw in db.execute(sql,(encoded(sorted(selected)),)):
+            row = selected[raw['id']]
+            q = quality(raw)
+            angle = q.get('orientation')
+            if angle not in ('side','back'):
+                continue
+            ranked = gallery.rank(vector(raw),raw['scan'],settings,q.get('pixel_digest'),angle)
+            # A held-out label (including a face endpoint) cannot vote for itself.
+            independent = []
+            for hit in ranked:
+                if any(labels.intersection([w['id'],*w['roots']]) for w in hit[4]):
+                    # It cannot provide positive support, but its similarity still
+                    # challenges a different owner just as in Gallery.score_bank.
+                    independent.append((-1.,-1.,hit[2],hit[3],(),hit[5]))
+                else:
+                    independent.append(hit)
+            best = winner(independent,settings)
+            probe = row['label_probe']
+            probe['external_gallery'] = dict(owner=best[2],score=best[0],minimum=best[1],
+                witnesses=[w['id'] for w in best[4]],reason='verified_view') if best else dict(
+                reason='no_separated_view' if ranked else 'no_nominated_view')
+            from .merge_solver_diagnostics import physical_veto
+            if best and best[2]==expected[raw['id']] and not physical_veto(probe['stage']):
+                probe['local_stage'] = probe['stage']
+                probe['stage'] = 'external_view_requires_reconciliation'
+
+
 def proposals(config, goals, decisions, membership):
     """Propose measured boundaries for missing labels. Replay decides feasibility."""
     from .threshold_boundaries import at_or_below
@@ -236,7 +285,7 @@ def proposals(config, goals, decisions, membership):
     for row in decisions:
         oid = row['observation']
         probe = row.get('label_probe')
-        if not probe or not probe['expected'] or membership.get(oid)==probe['expected']:
+        if not probe or probe.get('stage')=='external_view_requires_reconciliation' or not probe['expected'] or membership.get(oid)==probe['expected']:
             continue
         score,runner = probe['score'],probe['runner']
         if score is None or score<=0 or score-(runner if runner is not None else -1)<parameter(config.data,prefix+'ambiguity_margin'):

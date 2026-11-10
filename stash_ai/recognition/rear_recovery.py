@@ -101,7 +101,7 @@ def query_perspective(row, decision):
     return kind
 
 
-def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=None):
+def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=None, spanning=None):
     settings = config.data['sapiensid']['identities']
     proposals = {}
     required = defaultdict(set)
@@ -120,7 +120,18 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
     decisions = {}
     query_faces = {}
     checked = defaultdict(set)
+    multi = set()
+    single = set()
+    deferred = defaultdict(set)
     def plausible(oid,owner,refs):
+        # Two anonymous cores may be mutual competitors for one established
+        # face-rooted owner. Only the complete-component pass can discharge this veto.
+        old = proposals[oid][2]
+        rival = search.bank.get(owner) if spanning is not None else None
+        if (rival is not None and old in search.bank and owner not in search.unavailable
+                and not rival['faces'] and not search.bank[old]['faces'] and len(deferred[oid])<8):
+            deferred[oid].add(owner)
+            return False
         faces = query_faces.get(oid)
         # Incomplete or historical banks stay conservative competitors.
         if not faces or owner in search.unavailable or not refs or len(checked[oid])>=8:
@@ -210,24 +221,21 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
             ranked = [candidate for candidate in ranked if candidate[2] not in occupied]
         from .body_perspectives import owner_bonus
         bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
-        best = winner(ranked,settings,owner_bonuses=bonuses)
         endpoint = None
-        if best is not None and hasattr(search,'endpoints'):
+        if ranked:
             measured = (face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
                         if row['face_embedding'] is not None and row['face_rejection'] is None else None)
-            while best is not None:
-                owner = best[2]
-                bank = search.bank.get(owner)
-                veto = bank is not None and (scan,row['cue']) in bank['cues']
-                if measured is not None and not guard.allows({'_face_vector':measured,'face_quality':row['face_quality']},(),owner):
-                    veto = True
-                if not veto:
-                    if owner!=decision.get('open_face_root',{}).get('owner',owner):
-                        best = None
-                    break
-                ranked = [candidate for candidate in ranked if candidate[2]!=owner]
-                occupied = set(occupied) | {owner}
-                best = winner(ranked,settings,owner_bonuses=bonuses)
+            for peer in {candidate[2] for candidate in ranked}:
+                bank = search.bank.get(peer)
+                if peer in search.unavailable or bank is None:
+                    continue
+                if ((scan,row['cue']) in bank['cues'] or measured is not None and not
+                        guard.allows({'_face_vector':measured,'face_quality':row['face_quality']},(),peer)):
+                    occupied.add(peer)
+            ranked = [candidate for candidate in ranked if candidate[2] not in occupied]
+        best = winner(ranked,settings,owner_bonuses=bonuses)
+        if best and best[2]!=decision.get('open_face_root',{}).get('owner',best[2]):
+            best = None
         if best is None and hasattr(search,'endpoints'):
             def reject_rival(rival,faces):
                 if rival in search.unavailable or rival not in search.bank or not search.bank[rival]['faces']:
@@ -263,7 +271,11 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
                 or (scan,row['cue']) in bank['cues']):
             continue
         if old and (old not in search.bank and decision.get('reason')!='anonymous_body_track' or
-                    old in search.bank and (search.bank[old]['faces'] or any(s!=scan for s,_ in search.bank[old]['cues']))):
+                    old in search.bank and search.bank[old]['faces']):
+            continue
+        if old in search.bank and old not in multi and old not in single:
+            (multi if any(s!=scan for s,_ in search.bank[old]['cues']) else single).add(old)
+        if old in multi and spanning is None:
             continue
         proof = dict(person=owner, status='accepted', role='auxiliary',
                      reason='external_rear_view', source_scan=source, perspective=kind, score=mean,
@@ -307,6 +319,11 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
     # Freeze competing simultaneous claims and move a pre-existing fragment atomically.
     simultaneous = Counter((owner,cue) for owner,cue,_,_ in proposals.values())
     viable = {oid for oid,(owner,cue,_,_) in proposals.items() if simultaneous[owner,cue]==1}
+    for oid in viable.copy():
+        target,_,old,proof = proposals[oid]
+        if spanning is not None and (old in multi or deferred[oid] or old in spanning.nominated):
+            spanning.stage(scan,proposals[oid][1],oid,old,target,proof,deferred[oid])
+            viable.remove(oid)
     targets = {}
     for old,ids in required.items():
         if old not in face_owners and ids <= viable:
@@ -406,10 +423,17 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
         settings = config.data['sapiensid']['identities']
         minimum = max(0.,settings['match_threshold'] - scene_bonus(config.data))
         pending = Pending(db,gallery,search,dict(settings,match_threshold=minimum))
+        from .spanning_rear import SpanningClaims
+        spanning = SpanningClaims(db)
+        search.rear_revision = gallery.revision
         for scan,scene in pending.candidates(scope,namespace,set(scans),stamp,active=active):
             from .rear_fragments import select
             blocks = select(db,scan,stamp,pending)
-            decisions = _scene(db,scan,stamp,gallery,search,config,blocks=blocks,pending=pending) if blocks!=[] else {}
+            spanning.nominated.update(r[0] for r in db.execute("""SELECT DISTINCT spanning_source
+                FROM rear_prior WHERE scan=? AND spanning_source IS NOT NULL""",(scan,)))
+            decisions = _scene(db,scan,stamp,gallery,search,config,blocks=blocks,pending=pending,spanning=spanning) if blocks!=[] else {}
             if apply(db,scan,decisions):
                 enqueue(db,scope,namespace,dict(scan=scan,scene=scene),config,True,'rear_view_attachment')
+        spanning.verify(search, lambda scan: _scene(db,scan,stamp,gallery,search,config,spanning=spanning),
+                        scope,namespace,config)
     return True

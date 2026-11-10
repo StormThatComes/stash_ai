@@ -39,6 +39,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             bank = roster[owner,angles[oid]]
             if len(bank)<8 and all(ref['cue']!=row['cue'] for ref in bank):
                 bank.append(row)
+    face_roots = {r['id']:owner for owner, bank in seeds.items() for r in bank}
     confirmed = {oid for oid in anchors if decisions[oid].get('role')=='anchor'}
     successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts,
                              confirmed=confirmed)
@@ -141,6 +142,12 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
                                       original_core=donor,witness_ids=list(roots),**proof,**corroboration)
                 occupied[target].add(row['cue'])
 
+                external = corroboration['view_roots']
+                if (len(set(external)) == 4 and set(roots).isdisjoint(external)
+                        and all(face_roots.get(k)==target for k in (*roots,*external))
+                        and not decisions[oid].get('view_exclusion')):
+                    decisions[oid]['rooted_track'] = dict(owner=target, perspective=angles[oid],
+                        roots=list(roots),scan=row['scan'],shot=['captured',metadata[oid]['view_shot']],boundary='continuous')
                 occupied[donor].discard(row['cue'])
                 certified.add(target,angles[oid],row,roots,metadata[oid].get('view_shot'))
 

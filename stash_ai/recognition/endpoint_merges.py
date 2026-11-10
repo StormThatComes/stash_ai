@@ -63,7 +63,7 @@ def verified(db, config, scope, namespace, bank, result):
 
     rows = db.execute("""SELECT b.scan,j.value FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan JOIN json_each(m.proof,'$.endpoint_pairs') j
-        WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND m.policy=? AND """+predicate(),(scope,namespace,stamp))
+        WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND m.policy=? AND json_extract(m.proof,'$.endpoint_pairs') IS NOT NULL AND """+predicate(),(scope,namespace,stamp))
     for scan,raw in rows:
         proof = json.loads(raw)
         pair = tuple(proof['people'])

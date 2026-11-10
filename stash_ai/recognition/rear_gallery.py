@@ -11,12 +11,30 @@ from .resource_errors import ResourceLimit
 from .scan_heads import predicate
 
 
+# Index original and replayed proofs. The frozen view exposes the previous
+# observation during recovery, so both physical addresses must be discoverable.
+def proof_key(field):
+    paths = (f"$.{prefix}{route}.{field}" for prefix in ('','previous.')
+             for route in ('rooted_view','rooted_track'))
+    return 'coalesce('+','.join(f"json_extract(proof,'{path}')" for path in paths)+')'
+
+
+def index_proofs(db):
+    kind = proof_key('perspective')
+    db.execute(f"""CREATE INDEX IF NOT EXISTS body_rooted_proofs ON body_members
+        (policy,{proof_key('owner')},{kind},{proof_key('scan')},observation)
+        WHERE {kind} IN ('back','side')""")
+    db.execute("""CREATE INDEX IF NOT EXISTS body_endpoint_pairs ON body_members(policy,observation)
+               WHERE json_extract(proof,'$.endpoint_pairs') IS NOT NULL""")
+
+
 def load(db, config, scope, namespace, *, pages=None):
     # Read proof addresses first. No general auxiliary membership trains this bank.
     sql = """WITH proofs AS MATERIALIZED (
         SELECT b.id,b.scan,m.person,json_extract(m.proof,'$.reason') AS reason,
             COALESCE(json_extract(m.proof,'$.rooted_view'),json_extract(m.proof,'$.rooted_track')) AS claim
-        FROM body_members m JOIN body_observations b ON b.id=m.observation
+        FROM (SELECT observation FROM main.body_members WHERE policy=? AND """+proof_key('perspective')+""" IN ('back','side')) proof_ids
+        CROSS JOIN body_members m ON m.observation=proof_ids.observation JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.status='complete'
         AND b.contract=? AND b.rejected IS NULL AND m.policy=? AND """ + predicate() + """
         AND COALESCE(json_extract(m.proof,'$.rooted_view.perspective'),
@@ -75,7 +93,8 @@ def load(db, config, scope, namespace, *, pages=None):
         validate_triggers(db,required=True)
 
     def banks():
-        cursor = db.execute(sql,(scope,namespace,contract(config),policy(config)))
+        stamp = policy(config)
+        cursor = db.execute(sql,(stamp,scope,namespace,contract(config),stamp))
         for (owner,kind), records in groupby(cursor,lambda raw:(raw['owner'],raw['perspective'])):
             if pages is not None:
                 from .paged_tracks import Tracks

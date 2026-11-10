@@ -64,7 +64,9 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     label_trials = []
     if goals.get('positive_observations'):
         from .positive_observations import measure, proposals
+        from .positive_observations import external_probes
         measure(target, goals, expected, result)
+        external_probes(target,settings,goals,expected,result)
         evidence_ids = {oid for row in result if 'label_probe' in row for oid in
                         [*row.get('witnesses',()),(row.get('track_blocker') or {}).get('peer')] if oid}
         evidence_owners = body_members(target,settings,ids=evidence_ids)
