@@ -206,10 +206,13 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
     if graph is not None:
         # Rooted views consume the same certified physical edges. Retain the
         # stricter perspective geometry gates and all independent root checks.
+        from bisect import bisect_right
+        cuts = sorted(cut_starts)
         shared = {}
         for chain,_ in graph:
             for a,b in zip(chain,chain[1:]):
-                if a['id'] in geometry and b['id'] in geometry and transition(a,b,raw=True) is not None:
+                if (bisect_right(cuts,a['cue'])==bisect_right(cuts,b['cue'])
+                        and a['id'] in geometry and b['id'] in geometry and transition(a,b,raw=True) is not None):
                     shared[a['id']] = b['id']
         next_row = shared
     # A side/uncertain cue can query a rear bank only when bracketed by two
@@ -269,7 +272,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             member = lookup[successor]
             skipped += member['cue']-previous['cue']-1
             previous = member
-            if skipped > 1 or (not settings.get('tracklet_matching') and member['cue'] - lookup[start]['cue'] > 12):
+            if (graph is None and skipped > 1) or (not settings.get('tracklet_matching') and member['cue'] - lookup[start]['cue'] > 12):
                 successor = None
                 break
             if member.get('face_person') is not None:
@@ -282,7 +285,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             continue
         last = path[-1]
         if successor in root and ((not settings.get('tracklet_matching') and lookup[successor]['cue'] - lookup[start]['cue'] > 12)
-                or skipped + lookup[successor]['cue'] - previous['cue'] - 1 > 1):
+                or (graph is None and skipped + lookup[successor]['cue'] - previous['cue'] - 1 > 1)):
             successor = None
         if root.get(successor) != owner:
             stop = stops.get(last['id'], dict(reason='no_returning_face', cue=last['cue']))
@@ -319,7 +322,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
         while before := previous_links.get(cursor):
             row = lookup[before]
             skipped += lookup[cursor]['cue']-row['cue']-1
-            if before in root or skipped > 1 or lookup[end]['cue']-row['cue']>12:
+            if before in root or (graph is None and skipped > 1) or lookup[end]['cue']-row['cue']>12:
                 break
             decision = decisions[before]
             if row.get('face_person') and decision.get('person') != owner:

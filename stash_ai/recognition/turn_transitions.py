@@ -63,9 +63,18 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
                         continue
                     if gap>1 and not any(edges.get((other_left[p]['id'],other_right[p]['id']),-1.)>=strict for p in partners):
                         continue
-                # All physical rivals participate, including possible third entrants.
-                rival,peer = max([(scores.face_similarity(a['_vector'],r['_vector']),r['id']) for r in right if r is not b]+
-                                 [(scores.face_similarity(l['_vector'],b['_vector']),l['id']) for l in left if l is not a],
+                # Exclude only a strongly rooted partner with a feasible continuation
+                # and reliable, separated torsos. Unmeasured entrants remain rivals.
+                proven = {p for p in partners if edges.get((other_left[p]['id'],other_right[p]['id']),-1.)>=strict
+                          and all(len(torso_points(geometry[k]))>=3 and not metadata[k].get('query_only')
+                                  for k in (x,y,other_left[p]['id'],other_right[p]['id']))
+                          and not any(metadata[k].get('overlap',0) for k in
+                                      (x,y,other_left[p]['id'],other_right[p]['id']))}
+
+                rival,peer = max([(scores.face_similarity(a['_vector'],r['_vector']),r['id']) for r in right if r is not b
+                                     and ((x,r['id']) in edges or anchors.get(r['id']) not in proven)]+
+                                 [(scores.face_similarity(l['_vector'],b['_vector']),l['id']) for l in left if l is not a
+                                  and ((l['id'],y) in edges or anchors.get(l['id']) not in proven)],
                                  default=(-1.,None))
                 turn = angles[x]!=angles[y] and {angles[x],angles[y]} <= {'front','side','back'}
                 floor = max(0.,strict-(settings.get('turn_similarity_discount',.06) if turn else 0.))

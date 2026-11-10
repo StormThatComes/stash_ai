@@ -283,13 +283,41 @@ def claim_fragments(rows,anonymous,decisions,frozen,guard,settings):
                               for r in votes)/len(votes) for p in peers), default=-1.)
             if mean>=settings['match_threshold'] and mean-runner>=settings['ambiguity_margin']:
                 options.append((owner,mean,runner))
+        segments = []
         if len(options)==1:
             owner,mean,runner = options[0]
-            for row in queries:
+            segments.append((queries,owner,mean,runner,len(votes)))
+        elif len(known)<=1:
+            from itertools import groupby
+            # A difficult observation is a boundary. Each side must have its own
+            # independently supported, separated bank at every cue it claims.
+            def winner(row):
+                if row['id'] not in anonymous:
+                    return None
+                ranking = rankings[row['id']]
+                valid = []
+                for p,v in ranking.items():
+                    rival = max((w[5] for k,w in ranking.items() if k!=p),default=-1.)
+                    if v[4] and (not known or p in known) and v[0]-rival>=settings['ambiguity_margin']:
+                        valid.append(p)
+                return valid[0] if len(valid)==1 else None
+            for owner,group in groupby(sorted(members,key=lambda r:(r['cue'],r['id'])),winner):
+                if owner is None:
+                    continue
+                part = list(group)
+                witnesses = independent(part,settings)
+                if len(witnesses)<max(2,settings['attach_min_support']):
+                    continue
+                mean = sum(rankings[r['id']][owner][0] for r in witnesses)/len(witnesses)
+                runner = sum(max((v[5] for p,v in rankings[r['id']].items() if p!=owner),default=-1.)
+                             for r in witnesses)/len(witnesses)
+                segments.append((part,owner,mean,runner,len(witnesses)))
+        for part,owner,mean,runner,support in segments:
+            for row in part:
                 decisions[row['id']] = dict(person=owner,status='accepted',role='auxiliary',
                     reason='fragment_body_attachment',fragment=fragment,score=mean,runner=runner,
                     witness_ids=[r['id'] for r in rankings[row['id']][owner][3][:8]],
-                    fragment_support=len(votes),threshold=settings['match_threshold'],
+                    fragment_support=support,threshold=settings['match_threshold'],
                     required_margin=settings['ambiguity_margin'])
 
 

@@ -64,3 +64,20 @@ def test_replacement_scan_does_not_protect_local_owner(tmp_path):
         db.execute("UPDATE scans SET scene='11',policy_sha='replacement' WHERE id=?",(new['scan'],))
         record,*_=_load_scene(db,new['scan'],c)
         assert owner not in record['protected_turn_owners']
+
+
+def test_best_independent_pair_survives_gallery_order():
+    from .test_contact_body_claims import body
+    from stash_ai.recognition.turn_witnesses import TurnWitnesses
+    roots = {str(i):body(str(i),i,50) for i in range(6)}
+    query = body('query',20,50)
+    settings = defaults()
+    for order in ((0,1,2),(2,1,0)):
+        bank = TurnWitnesses(roots,settings,SimpleNamespace(face_similarity=np.dot))
+        for i in order:
+            row = body(str(i+10),i+10,50)
+            a = math.radians([24,-12,10][i])
+            row['_vector'] = np.array([math.cos(a),math.sin(a)])
+            bank.add('A','back',row,(str(2*i),str(2*i+1)),i)
+        proof = bank.verify('A','back',query,())
+        assert set(proof['view_witnesses'])=={'11','12'} and proof['view_score']>.97
