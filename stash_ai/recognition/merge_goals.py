@@ -160,8 +160,8 @@ def execute(args, config):
                                  scene_exclusions=getattr(args, 'exclude_performer_scene', None) or (),
                                  observation_exclusions=getattr(args, 'exclude_performer_observation', None) or (),
                                  physical_pairs=getattr(args,'physical_pair',()),
-                                 observation_inclusions=getattr(args,'include_performer_observation',()),
-                                 track_inclusions=getattr(args,'include_performer_track',()))
+                                 observation_inclusions=getattr(args,'include_performer_observation',None) or (),
+                                 track_inclusions=getattr(args,'include_performer_track',None) or ())
             with report_phase('Fingerprint retained inputs'):
                 result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:

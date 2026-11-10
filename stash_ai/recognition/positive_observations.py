@@ -19,7 +19,7 @@ def freeze(db, config, goals, owners, observations, tracks):
             "WHERE b.scan=? AND (json_extract(m.proof,'$.anonymous_fragment')=? OR "
             "(json_extract(m.proof,'$.reason')='anonymous_body_track' AND m.person=?))", (row['scan'],fragment,fragment))
         pairs.extend((performer, member[0]) for member in members)
-    labels = resolve(db, config, pairs, goals['scope'], owners)
+    labels = resolve(db, config, pairs, goals['scope'], owners, positive=True)
     claimed = {}
     forbidden = {(e['set'],oid) for e in goals.get('observation_exclusions',()) for oid in e['observation_ids']}
     forbidden_scenes = {(e['set'],e['scene']) for e in goals.get('scene_exclusions',())}
