@@ -5,9 +5,9 @@ import json
 from .body_identity import available, policy
 
 
-def pairs(db,scan,config,limit):
+def ranked(db,scan,config,limit):
     if not available(db):
-        return []
+        return [],[]
     rows = {}
     cues = defaultdict(list)
     face_owners = set()
@@ -28,11 +28,20 @@ def pairs(db,scan,config,limit):
         rows[oid] = (cue,face,'accepted',{})
         cues[cue].append(oid)
     candidates = {}
+    positives,negatives = defaultdict(set),defaultdict(set)
+    opposed = {}
+    def oppose(oid,other,reason):
+        cue,fragment,_,_ = rows[oid]
+        if other and other!=fragment and other!='new_participant':
+            key = tuple(sorted((fragment,other)))
+            negatives[key].add(cue)
+            opposed.setdefault(key,dict(fragments=list(key),observation=oid,cue=cue,reason=reason))
     def add(oid,other,reason,explicit,peer=None):
         cue,fragment,status,_ = rows[oid]
         if not other or other==fragment or fragment in face_owners and other in face_owners:
             return
         key=tuple(sorted((fragment,other)))
+        positives[key].add(cue)
         item=dict(fragments=list(key),kind='face_body' if face_owners.intersection(key) else 'body_body',
                   cue=cue,observation=oid,peer=peer,status=status,reason=reason,recorded=explicit)
         if peer in rows:
@@ -48,11 +57,14 @@ def pairs(db,scan,config,limit):
     previous = dict(zip(ordered[1:],ordered))
     for oid,(cue,fragment,status,proof) in rows.items():
         blocker = proof.get('track_blocker') or {}
-        peer = blocker.get('peer') or blocker.get('rival')
+        peer = blocker.get('peer')
+        rival = blocker.get('rival')
+        oppose(oid,rows[rival][1] if rival in rows else rival,'competing_transition')
+        oppose(oid,proof.get('rival'),'competing_owner')
         reason = blocker.get('reason') or proof.get('reason')
         if peer in rows:
             add(oid,rows[peer][1],reason,True,peer)
-        for other in (proof.get('retry_owner'),proof.get('rival'),(proof.get('open_face_root') or {}).get('owner')):
+        for other in (proof.get('retry_owner'),(proof.get('open_face_root') or {}).get('owner')):
             if other!='new_participant':
                 add(oid,other,reason,True)
         # Adjacent solitary records nominate an inspection, not an asserted cause.
@@ -75,4 +87,22 @@ def pairs(db,scan,config,limit):
             query = right[dest]
             reason = rows[query][3].get('track_blocker', {}).get('reason', 'unverified_partner_continuity')
             add(query, source, reason, False, left[source])
-    return sorted(candidates.values(),key=lambda x:(not x['recorded'],x['cue'],x['fragments']))[:limit]
+    presence = defaultdict(set)
+    for cue,owner,_,_ in rows.values():
+        presence[owner].add(cue)
+    for key,item in candidates.items():
+        shared = presence[key[0]] & presence[key[1]]
+        if shared:
+            negatives[key].update(shared)
+            opposed[key] = dict(fragments=list(key),cue=min(shared),reason='co_present')
+        item.update(support_cues=len(positives[key]),opposing_cues=len(negatives[key]))
+    for key,item in opposed.items():
+        item.update(support_cues=len(positives[key]),opposing_cues=len(negatives[key]))
+    likely = [v for key,v in candidates.items() if not presence[key[0]].intersection(presence[key[1]])]
+    likely.sort(key=lambda v:(v['opposing_cues']-v['support_cues'],not v['recorded'],v['cue'],v['fragments']))
+    rivals = sorted(opposed.values(),key=lambda v:(-v['opposing_cues'],v['cue'],v['fragments']))
+    return likely[:limit],rivals[:limit]
+
+
+def pairs(db,scan,config,limit):
+    return ranked(db,scan,config,limit)[0]

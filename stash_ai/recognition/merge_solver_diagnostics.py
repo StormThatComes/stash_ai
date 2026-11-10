@@ -131,6 +131,7 @@ def latest_decisions(db, observation_ids):
                 witnesses=list(proof.get('source_tracks') or proof.get('witness_ids') or ())[:8], rival=proof.get('rival'),
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
+                turn_evidence={k:proof[k] for k in ('weakest_edge','rival_observation','view_witnesses','view_roots') if k in proof},
                 scene_probe=proof.get('scene_probe'), body_global=bool(proof.get('global_merge')), endpoint_body_gate=proof.get('endpoint_body_gate',False),
                 face_endpoints='fragment_face_endpoints' in (proof.get('route'),proof.get('reason')),
                 used_scene_bonus=bool(proof.get('roster_context') or proof.get('reason')=='external_rear_view' and proof.get('shot_context')),

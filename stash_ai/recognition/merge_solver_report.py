@@ -190,7 +190,7 @@ def compact_document(result, config):
     from .merge_goals import unmet_conditions
     simulation = result['simulation']
     output = {k:v for k,v in result.items() if k not in (
-        'simulation', 'explanation', 'measured_hybrid_evidence', 'measured_reference_pairs', 'physical_alternatives', 'positive_reference_ids')}
+        'simulation', 'explanation', 'measured_hybrid_evidence', 'measured_reference_pairs', 'physical_alternatives', 'positive_reference_ids', 'positive_reference_units')}
     output['solver_report_format'] = 'compact-v1'
     output['groups'] = [goal_input(group) for group in result['groups']]
     for kind in ('scene_exclusions', 'observation_exclusions'):
@@ -212,6 +212,15 @@ def compact_document(result, config):
                       'best_trial best_trial_number elapsed_seconds yaml_patch outside_impact')
         item['goal_result'] = dict(fields(status, 'fully_solved admissible disjoint strict_disjoint strict_fully_solved'),
                                    set_states=refs, unmet=unmet_summary(status), construction_status=construction.get('status'))
+        if status.get('positive_observations'):
+            goals = status['positive_observations']
+            item['goal_result']['positive_goals'] = dict(count=len(goals),satisfied=sum(g['satisfied'] for g in goals),
+                mean_coverage=sum(g['coverage'] for g in goals)/len(goals),
+                longest_unmatched_run=max(g['longest_unmatched_run'] for g in goals),
+                wrong_owner_samples=sum(g['wrong_owner_samples'] for g in goals),
+                lost_reference_units_by_set={g['set']:g['lost_reference_units'] for g in goals})
+            if name in highlights:
+                item['goal_result']['positive_goal_examples'] = goals[:16]
         if 'search_target' in trial:
             item['search_target'] = fields(trial['search_target'], 'set route performers blockers')
         if name in highlights or name in states.first_blocker_trials:

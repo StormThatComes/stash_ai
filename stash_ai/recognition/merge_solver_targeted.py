@@ -80,6 +80,15 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
         for oid in addresses:by_observation[oid] = index
         for destination in destinations:owners[destination].add(index)
 
+    for item in goals.get('positive_observations',()):
+        index = item['set']
+        target = groups[index]['target']
+        for oid in item['observation_ids']:
+            by_observation[oid] = index
+        assigned = {membership.get(oid) for oid in item['observation_ids']}-{None}
+        if not target or assigned!={target}:
+            groups[index]['satisfied'] = False
+
     # A measured temporal break on the target body is more actionable than
     # relaxing face thresholds elsewhere in the same merge set.
     body_first = {by_observation[r['observation']] for r in feedback.get('provenance',{}).get('blocker_trace',())
@@ -152,6 +161,11 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             gain=1+len(groups[index]['missing_target_scenes']))
 
     bridges = defaultdict(list)
+
+    for item in feedback.get('label_trials',()):
+        add(item['set'],'body_label_attachment',item['patch'],observations=[item['observation']],
+            blockers=[item['stage']])
+        body_first.add(item['set'])
 
     def bridge(index, route, patch, a, b, blockers=(), observations=()):
         if index is None:return

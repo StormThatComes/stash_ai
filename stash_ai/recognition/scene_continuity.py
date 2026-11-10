@@ -36,6 +36,13 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
     proposals, joins = {}, defaultdict(list)
     tails = {}
     certified = TurnWitnesses(lookup,settings,scores)
+    def evidence(path):
+        oid = min(path,key=lambda k:successors[k][2]-successors[k][4])
+        peer,_,score,rival,floor,other,turn = successors[oid]
+        return dict(track_floor=score,threshold=floor,runner=rival,rival_observation=other,
+                    weakest_edge=[oid,peer],required_margin=margin,
+                    turn_discount=settings.get('turn_similarity_discount',.06) if turn else 0.)
+
     for start in sorted(successors.keys()-incoming):
         lane = [start]
         while lane[-1] in successors:
@@ -50,7 +57,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
                 at,owner = end
                 for i in indices:
                     if abs(i-at)<=16:
-                        tails[lane[i]] = owner,lane[at]
+                        tails[lane[i]] = owner,lane[at],evidence(lane[min(i,at):max(i,at)])
         previous = None
         for at,oid in enumerate(lane):
             decision = decisions[oid]
@@ -70,10 +77,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
                                if decisions[key]['status']=='accepted'}-{target}
                     if not foreign or len(foreign)==1 and all(angles[key]=='back' for key in middle):
                         roots = first,oid
-                        edges = [successors[k][2:] for k in lane[previous:at]]
-                        weakest = min(edges,key=lambda edge:edge[0]-edge[2])
-                        proof = dict(track_floor=weakest[0],threshold=weakest[2],runner=weakest[1],
-                                     required_margin=margin,turn_discount=settings.get('turn_similarity_discount',.06))
+                        proof = evidence(lane[previous:at])
                         for key in middle:
                             if angles[key] not in ('front','back','side'):
                                 continue
@@ -150,8 +154,10 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
                 and row['cue'] not in occupied[other] for ref,_,_ in bank),default=-1.)
             if proof['view_score']-runner<margin:
                 continue
+            route = dict(tails[oid][2]) if roots else {}
+            route.update(view_runner=runner,required_margin=margin,**proof)
             decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='corroborated_rear_view',
-                witness_ids=list(roots),runner=runner,required_margin=margin,**proof)
+                                  witness_ids=list(roots),**route)
             occupied[target].add(row['cue'])
             if decision['status']=='accepted':
                 occupied[old].discard(row['cue'])

@@ -469,7 +469,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         from .hybrid_evidence import report as hybrid_report
         from .body_reports import report as body_report
-        from .fragment_pair_report import pairs as fragment_pairs
+        from .fragment_pair_report import ranked
+        fragment_pairs,fragment_rivals = ranked(db,scan['id'],config,limit)
         from .alias_scene_index import pending
         from .body_global import report as body_global_report
         from .publication_queue import inventory,plan
@@ -484,7 +485,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
             'independent_person': body_report(db,config,[scan['id']]),
-            'scene_fragment_pairs': fragment_pairs(db,scan['id'],config,limit),
+            'scene_fragment_pairs': fragment_pairs,
+            'scene_fragment_rivals': fragment_rivals,
             'pending_body_merges': pending(db,scan['scope'],scan['namespace'],scan['scene'],limit),
             'person_consolidation': body_global_report(db,config,scan['scope'],scan['namespace']),
             'hybrid': hybrid_report(
