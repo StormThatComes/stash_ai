@@ -27,7 +27,7 @@ BODY = tuple('sapiensid.'+section+'.'+key for section in ('identities', 'global_
              for key in ('match_threshold', 'cohesion_threshold', 'ambiguity_margin', 'min_support')) + (
              'sapiensid.identities.attach_min_support', 'sapiensid.identities.min_appearance_distance')
 TRACK = 'sapiensid.identities.track_similarity_threshold'
-MATCHING = frozenset(FACE+VIEW+AUXILIARY+CONTEXT+HYBRID+BODY+(TRACK,'sapiensid.identities.scene_match_bonus'))
+MATCHING = frozenset(FACE+VIEW+AUXILIARY+CONTEXT+HYBRID+BODY+(TRACK,'sapiensid.identities.scene_match_bonus','sapiensid.identities.turn_similarity_discount'))
 
 
 def body_supported(row):
@@ -56,6 +56,12 @@ def route_parameters(decisions):
                         keys.add(local+'attach_min_support')
             elif reason == 'local_body_track':
                 keys.add(local+'ambiguity_margin')
+            if reason in ('bracketed_body_turn','bracketed_scene_core','corroborated_rear_view'):
+                keys.update(local+k for k in ('match_threshold','cohesion_threshold','ambiguity_margin','min_appearance_distance'))
+                if 'track_floor' in row.get('measurements',{}):
+                    keys.add(TRACK)
+                    if row['measurements'].get('turn_discount',0)>0:
+                        keys.add(local+'turn_similarity_discount')
             if row.get('face_endpoints'):
                 keys.add('recognition.match_threshold')
                 if reason!='external_rear_view':

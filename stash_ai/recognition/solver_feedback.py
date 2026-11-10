@@ -60,9 +60,14 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
             forbidden_by_observation.setdefault(oid,set()).update(forbidden)
             if membership.get(oid) in forbidden:
                 wrong[oid] = dict(expected=None, constraint='exclusion')
+    label_trials = []
     if goals.get('positive_observations'):
-        from .positive_observations import measure
+        from .positive_observations import measure, proposals
         measure(target, goals, expected, result)
+        evidence_ids = {oid for row in result if 'label_probe' in row for oid in
+                        [*row.get('witnesses',()),(row.get('track_blocker') or {}).get('peer')] if oid}
+        evidence_owners = body_members(target,settings,ids=evidence_ids)
+        label_trials = proposals(settings,goals,result,{**membership,**evidence_owners})
     # A fragmented positive set alone does not establish which branch was wrong.
     from .threshold_boundaries import strictly_above
     tighter = []
@@ -92,7 +97,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
         queries['face_proposals'].extend(face_fallbacks(target, settings, goals, targets,
             evidence=queries['face_routes'] if targeted else None))
     separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
-    directed = tighter + list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
+    directed = [item['patch'] for item in label_trials] + tighter + list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
     # Clear simultaneous query and reference blockers under one configuration.
     if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
         joint = dict(hybrid_changes[0])
@@ -107,6 +112,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
                        if r.get('goal_role') == 'reference' and r.get('evidence_kind', 'face') == 'face'}
     from .scene_strategy_validation import measured_context
     if goals.get('positive_observations'):
+        latest_feedback['label_trials'] = label_trials
         latest_feedback['label_probes'] = {r['observation']:r['label_probe'] for r in result if 'label_probe' in r}
     latest_feedback['scene_boundaries'] = measured_context(settings.data['sapiensid']['identities'],
         result,expected,forbidden_by_observation)

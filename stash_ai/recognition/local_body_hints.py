@@ -16,6 +16,10 @@ class Budget:
                     addresses = [row['id'], *goals.get('physical_alternatives', {}).get(row['id'], ())]
                     self.buckets.setdefault(key, set()).update(addresses)
                     self.owners.update((oid,key) for oid in addresses)
+        for item in goals.get('positive_observations',()):
+            key = item['set'],item['scene']
+            self.buckets.setdefault(key,set()).update(item['observation_ids'])
+            self.owners.update((oid,key) for oid in item['observation_ids'])
         self.allocations = None
         self.spare_hints = self.spare_comparisons = 0
 

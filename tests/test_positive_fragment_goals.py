@@ -36,3 +36,36 @@ def test_positive_cli_label_freezes_current_cue_and_scores_linked_projections(tm
         label, = goals['positive_observations']
         assert label['cue']==0 and set(label['observation_ids'])=={faces[0],bodies[0][0]}
         assert not set(goals['positive_reference_ids'][0]).intersection(label['observation_ids'])
+
+
+def test_reference_abstention_cannot_certify_positive():
+    label = dict(set=0,scene='7',requested_observation_ids=['q'],observation_ids=['q'])
+    goals = dict(positive_observations=[label], positive_reference_ids={0:['a','b']})
+    for second in ('B',None):
+        membership = dict(q='A',a='A',b=second)
+        status = {}
+        assess(goals,status,membership,membership)
+        record, = status['positive_observations']
+        assert not record['satisfied']
+        assert record['lost_reference_units']==int(second is None)
+
+
+def test_one_goal_per_track_counts_swaps_and_missing_runs():
+    labels = [dict(set=0,scene='7',cue=i,track='fragment',requested_observation_ids=[str(i)],
+                   observation_ids=[str(i)]) for i in range(5)]
+    goals = dict(positive_observations=labels,positive_reference_ids={0:['ref']})
+    membership = {'ref':'A','0':'A','1':None,'2':None,'3':'B','4':'A'}
+    status = {}
+    assess(goals,status,membership,membership)
+    record, = status['positive_observations']
+    assert record['coverage']==.4 and record['longest_unmatched_run']==3
+    assert record['owner_switches']==2 and record['wrong_owner_samples']==1
+
+
+def test_turn_routes_report_gates_that_were_used():
+    from stash_ai.recognition.merge_solver_tighten import route_parameters
+    for reason in ('bracketed_scene_core','bracketed_body_turn','corroborated_rear_view'):
+        used=route_parameters([dict(status='accepted',reason=reason,evidence_kind='person',
+                                     measurements=dict(track_floor=.75,turn_discount=.06))])
+        assert used['sapiensid.identities.turn_similarity_discount']==1
+        assert used['sapiensid.identities.track_similarity_threshold']==1

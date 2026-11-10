@@ -327,7 +327,10 @@ def objective(status):
     """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
     if 'positive_observations' in status:
         rest = {k:v for k,v in status.items() if k != 'positive_observations'}
-        return (status['admissible'], sum(r['satisfied'] for r in status['positive_observations'])) + objective(rest)
+        goals = status['positive_observations']
+        return (status['admissible'], sum(r['satisfied'] for r in goals),
+                sum(r.get('coverage',float(r['satisfied'])) for r in goals)/max(1,len(goals)),
+                -sum(r.get('wrong_owner_samples',0)/max(1,r.get('sample_count',1)) for r in goals)) + objective(rest)
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)

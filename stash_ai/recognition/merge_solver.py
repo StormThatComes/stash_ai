@@ -137,7 +137,7 @@ def rebuilt_goals(db, goals):
     owners = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                             '(SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),)))
     from .body_reports import members as body_members
-    owners.update((k,v) for k,v in body_members(db).items() if k in ids)
+    owners.update(body_members(db,ids=ids))
     destinations = destination_owners(goals, owners)
     groups = []
     for index, group in enumerate(goals['groups']):

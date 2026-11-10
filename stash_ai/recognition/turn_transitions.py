@@ -64,10 +64,11 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
                     if gap>1 and not any(edges.get((other_left[p]['id'],other_right[p]['id']),-1.)>=strict for p in partners):
                         continue
                 # All physical rivals participate, including possible third entrants.
-                rival = max([scores.face_similarity(a['_vector'],r['_vector']) for r in right if r is not b]+
-                            [scores.face_similarity(l['_vector'],b['_vector']) for l in left if l is not a],default=-1.)
+                rival,peer = max([(scores.face_similarity(a['_vector'],r['_vector']),r['id']) for r in right if r is not b]+
+                                 [(scores.face_similarity(l['_vector'],b['_vector']),l['id']) for l in left if l is not a],
+                                 default=(-1.,None))
                 turn = angles[x]!=angles[y] and {angles[x],angles[y]} <= {'front','side','back'}
                 floor = max(0.,strict-(settings.get('turn_similarity_discount',.06) if turn else 0.))
                 if score>=floor and score-rival>=margin:
-                    links[x] = (y,tuple(partners),score,rival,floor)
+                    links[x] = (y,tuple(partners),score,rival,floor,peer,turn)
     return links
