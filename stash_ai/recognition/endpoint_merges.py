@@ -91,25 +91,9 @@ def verified(db, config, scope, namespace, bank, result):
         def strata():
             for (scan,kind),group in groupby(rows,key=lambda r:(r[0],r[3])):
                 priority = hashlib.sha256(f'{scan}:{kind}'.encode()).digest()
-                first = novel = None
-                distance = 0.
-                for _,oid,raw,_,_ in group:
-                    roots = tuple(json.loads(raw))
-                    if len(roots)!=2 or len(set(roots))!=2 or not all(face(scan,r,owner) for r in roots):
-                        continue
-                    stored = db.execute('SELECT embedding FROM body_observations WHERE id=?',(oid,)).fetchone()
-                    if stored['embedding'] is None:
-                        continue
-                    vector = body_vector(stored)
-                    if first is None:
-                        first = vector
-                        yield (0,priority),scan,kind,oid,roots
-                    else:
-                        difference = 1.-scores.face_similarity(first,vector)
-                        if difference>distance:
-                            novel,distance = (oid,roots),difference
-                if novel and distance>1.-settings['match_threshold']:
-                    yield (1,priority),scan,kind,*novel
+                from .endpoint_references import representatives_for_view
+                for order,oid,roots in representatives_for_view(db,group,owner,scan,kind,stamp,settings,face,scores):
+                    yield (order,priority),scan,kind,oid,tuple(roots)
         # Keep a complementary look even when many scans fill the ordinary
         # reference budget. Both heaps store identifiers, never embeddings.
         main, alternate = [], []

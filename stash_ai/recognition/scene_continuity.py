@@ -6,14 +6,10 @@ import numpy as np
 
 from .body_identity import quality, independent
 from .body_perspectives import orientation
-from .crowd_context import pair
-from .perspective_shots import change
-from .track_geometry import rejection, torso_points
+from .turn_transitions import transitions
 
 
-def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
-    strict = settings.get('track_similarity_threshold')
-    strict = settings['cohesion_threshold'] if strict is None else strict
+def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, occupied_cues=(), cuts=()):
     margin = max(.025, settings['ambiguity_margin'])
     allowed = {'body_scene_core','measured_face_association','local_body_track'}
     by_cue, owners, anchors = defaultdict(list), defaultdict(list), {}
@@ -33,55 +29,28 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
         if q.get('frame_signature'):
             signals[oid] = np.frombuffer(bytes.fromhex(q['frame_signature']),np.uint8).astype(float).reshape(-1,3)
     lookup = {r['id']:r for r in rows}
-    # Build independent lanes. Every step needs an already recognised partner
-    # in both cues, uniquely separated torsos, an unchanged shot and a rival margin.
-    successors, incoming = {}, set()
-    measurements = {}
-    for cue,left in by_cue.items():
-        right = by_cue.get(cue+1,())
-        if not all(pair([geometry[r['id']] for r in side]) for side in (left,right)):
-            continue
-        if any(metadata[r['id']].get('query_only') or r['id'] not in signals or
-               max(metadata[r['id']].get('detected_people',2),metadata[r['id']].get('expected_people',0))!=2
-               for r in (*left,*right)):
-            continue
-        for i,a in enumerate(left):
-            partner = anchors.get(left[1-i]['id'])
-            matches = [j for j,b in enumerate(right) if partner and anchors.get(right[1-j]['id'])==partner]
-            if len(matches)!=1:
-                continue
-            j = matches[0]
-            b, rival = right[j], right[1-j]
-            x,y = a['id'],b['id']
-            if (anchors.get(x)==partner or anchors.get(y)==partner or y in incoming or
-                    metadata[x].get('view_shot') is None or metadata[x]['view_shot']!=metadata[y].get('view_shot') or
-                    change(signals[x],signals[y],True)!='continuous'):
-                continue
-            ga,gb = geometry[x],geometry[y]
-            if rejection(ga['bounds'],gb['bounds'],torso_points(ga),torso_points(gb)):
-                continue
-            score = scores.face_similarity(a['_vector'],b['_vector'])
-            alternate = max(scores.face_similarity(a['_vector'],rival['_vector']),
-                            scores.face_similarity(left[1-i]['_vector'],b['_vector']))
-            turn = angles[x]!=angles[y] and {angles[x],angles[y]} <= {'front','side','back'}
-            floor = max(0.,strict-(settings.get('turn_similarity_discount',.06) if turn else 0.))
-            if score>=floor and score-alternate>=margin:
-                measurements[x] = score,alternate,floor
-                successors[x] = y,partner
-                incoming.add(y)
-
+    successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts)
+    incoming = {edge[0] for edge in successors.values()}
     from .turn_witnesses import TurnWitnesses
     witnesses = TurnWitnesses(lookup,settings,scores)
     proposals, joins = {}, defaultdict(list)
+    tails = {}
+    certified = TurnWitnesses(lookup,settings,scores)
     for start in sorted(successors.keys()-incoming):
         lane = [start]
         while lane[-1] in successors:
-            nxt,partner = successors[lane[-1]]
-            if len(lane)>1 and partner!=successors[lane[-2]][1]:
-                break
+            nxt = successors[lane[-1]][0]
             lane.append(nxt)
         # Visible ends must independently identify the same performer. Rear cores
         # only affiliate after two disjoint, bracketed episodes and a scene-wide veto.
+        visible = [(i,anchors[k]) for i,k in enumerate(lane) if k in anchors
+                   and angles[k] in ('front','side') and decisions[k]['reason']!='local_body_track']
+        if visible:
+            for end,indices in ((visible[0],range(visible[0][0])),(visible[-1],range(visible[-1][0]+1,len(lane)))):
+                at,owner = end
+                for i in indices:
+                    if abs(i-at)<=16:
+                        tails[lane[i]] = owner,lane[at]
         previous = None
         for at,oid in enumerate(lane):
             decision = decisions[oid]
@@ -101,7 +70,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
                                if decisions[key]['status']=='accepted'}-{target}
                     if not foreign or len(foreign)==1 and all(angles[key]=='back' for key in middle):
                         roots = first,oid
-                        edges = [measurements[k] for k in lane[previous:at]]
+                        edges = [successors[k][2:] for k in lane[previous:at]]
                         weakest = min(edges,key=lambda edge:edge[0]-edge[2])
                         proof = dict(track_floor=weakest[0],threshold=weakest[2],runner=weakest[1],
                                      required_margin=margin,turn_discount=settings.get('turn_similarity_discount',.06))
@@ -126,6 +95,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
             decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='bracketed_body_turn',
                                   witness_ids=list(roots),**proof,**corroboration)
             occupied[target].add(row['cue'])
+            certified.add(target,angles[oid],row,roots,metadata[oid].get('view_shot'))
 
     targets = defaultdict(set)
     for donor,target in joins:
@@ -144,3 +114,43 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
                 decisions[oid].update(person=target,role='auxiliary',reason='bracketed_scene_core',
                                       original_core=donor,witness_ids=list(roots),**proof,**corroboration)
                 occupied[target].add(row['cue'])
+
+                occupied[donor].discard(row['cue'])
+                certified.add(target,angles[oid],row,roots,metadata[oid].get('view_shot'))
+
+    # Query one frozen generation. Recovered tails never become witnesses.
+    for row in rows:
+        oid = row['id']
+        shot = metadata[oid].get('view_shot')
+        decision = decisions[oid]
+        if (angles[oid]!='back' or shot is None or metadata[oid].get('query_only') or row.get('face_person')
+                or decision.get('view_exclusion') or decision['reason'] in ('different_face_root','weak_face_track_conflict',
+                    'unconfirmed_contact_face','unresolved_partner','bracketed_scene_core','bracketed_body_turn')):
+            continue
+        old = decision.get('person')
+        candidates = set()
+        if oid in tails:
+            candidates.add(tails[oid][0])
+        if old in targets and old not in retained and old not in seeds and len(targets[old])==1:
+            candidates.update(targets[old])
+        if len(candidates)!=1:
+            continue
+        if decision['status']=='accepted' and old not in targets:
+            continue
+        for target in sorted(candidates):
+            if (row['cue'] in occupied[target] or not guard.allows(row,owners[target],target)
+                    or decision['status']=='accepted' and (occupied[old] & occupied[target] or old in retained or old in seeds)):
+                continue
+            roots = (tails[oid][1],) if oid in tails else ()
+            proof = certified.verify(target,'back',row,roots,outside_shot=shot,distinct_shots=True)
+            if not proof:
+                continue
+            runner = max((scores.face_similarity(row['_vector'],ref['_vector'])
+                for (other,angle),bank in certified.by_view.items() if angle=='back' and other!=target
+                and row['cue'] not in occupied[other] for ref,_,_ in bank),default=-1.)
+            if proof['view_score']-runner<margin:
+                continue
+            decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='corroborated_rear_view',
+                witness_ids=list(roots),runner=runner,required_margin=margin,**proof)
+            occupied[target].add(row['cue'])
+            break
