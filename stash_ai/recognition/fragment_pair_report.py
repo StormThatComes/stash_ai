@@ -63,7 +63,10 @@ def ranked(db,scan,config,limit):
         oppose(oid,proof.get('rival'),'competing_owner')
         reason = blocker.get('reason') or proof.get('reason')
         if peer in rows:
-            add(oid,rows[peer][1],reason,True,peer)
+            if reason in ('different_face_root','competing_transition','unresolved_partner','weak_face_track_conflict'):
+                oppose(oid,rows[peer][1],reason)
+            else:
+                add(oid,rows[peer][1],reason,True,peer)
         for other in (proof.get('retry_owner'),(proof.get('open_face_root') or {}).get('owner')):
             if other!='new_participant':
                 add(oid,other,reason,True)

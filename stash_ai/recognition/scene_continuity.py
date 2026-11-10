@@ -29,6 +29,16 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
         if q.get('frame_signature'):
             signals[oid] = np.frombuffer(bytes.fromhex(q['frame_signature']),np.uint8).astype(float).reshape(-1,3)
     lookup = {r['id']:r for r in rows}
+    # A previous, independently established performer can be the entrant
+    # even when their lane has no assigned ID at the disputed cue.
+    roster = defaultdict(list)
+    for row in rows:
+        oid = row['id']
+        owner = anchors.get(oid)
+        if owner is not None and decisions[oid].get('role')=='anchor':
+            bank = roster[owner,angles[oid]]
+            if len(bank)<8 and all(ref['cue']!=row['cue'] for ref in bank):
+                bank.append(row)
     successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts)
     incoming = {edge[0] for edge in successors.values()}
     from .turn_witnesses import TurnWitnesses
@@ -90,12 +100,20 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             previous = at
 
     occupied = {owner:{r['cue'] for r in members} for owner,members in owners.items()}
+    def rival_proof(row, target, allowed_donor=None):
+        rivals = [(scores.face_similarity(row['_vector'],ref['_vector']),other,ref['id'])
+                  for (other,view),bank in roster.items() if view==angles[row['id']]
+                  and other not in (target,allowed_donor) and row['cue'] not in occupied[other] for ref in bank]
+        return max(rivals,default=(-1.,None,None))
+
     for oid,(target,roots,proof) in proposals.items():
         row = lookup[oid]
         if row['cue'] in occupied[target] or not guard.allows(row,owners[target],target):
             continue
         corroboration = witnesses.verify(target,angles[oid],row,roots)
-        if corroboration:
+        runner,rival,peer = rival_proof(row,target)
+        if corroboration and corroboration['view_score']-runner>=margin:
+            corroboration.update(view_runner=runner,view_rival=rival,view_rival_observation=peer)
             decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='bracketed_body_turn',
                                   witness_ids=list(roots),**proof,**corroboration)
             occupied[target].add(row['cue'])
@@ -114,7 +132,9 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             if row['cue'] in occupied[target] or not guard.allows(row,owners[target],target):
                 continue
             corroboration = witnesses.verify(target,angles[oid],row,roots,confirmed_core=True)
-            if corroboration:
+            runner,rival,peer = rival_proof(row,target,donor)
+            if corroboration and corroboration['view_score']-runner>=margin:
+                corroboration.update(view_runner=runner,view_rival=rival,view_rival_observation=peer)
                 decisions[oid].update(person=target,role='auxiliary',reason='bracketed_scene_core',
                                       original_core=donor,witness_ids=list(roots),**proof,**corroboration)
                 occupied[target].add(row['cue'])
@@ -149,9 +169,12 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             proof = certified.verify(target,'back',row,roots,outside_shot=shot,distinct_shots=True)
             if not proof:
                 continue
-            runner = max((scores.face_similarity(row['_vector'],ref['_vector'])
+            alternatives = ((scores.face_similarity(row['_vector'],ref['_vector']),other,ref['id'])
                 for (other,angle),bank in certified.by_view.items() if angle=='back' and other!=target
-                and row['cue'] not in occupied[other] for ref,_,_ in bank),default=-1.)
+                and row['cue'] not in occupied[other] for ref,_,_ in bank)
+            known = rival_proof(row,target,old if decision['status']=='accepted' else None)
+            runner,rival,peer = max(known,max(alternatives,default=(-1.,None,None)),key=lambda item:item[0])
+            proof.update(view_rival=rival,view_rival_observation=peer)
             if proof['view_score']-runner<margin:
                 continue
             route = dict(tails[oid][2]) if roots else {}
