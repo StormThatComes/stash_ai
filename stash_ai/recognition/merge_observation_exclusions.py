@@ -1,7 +1,7 @@
 """Resolve explicit negative samples against the current retained replay inputs."""
 
 
-def resolve(db, config, pairs, scope, owners):
+def resolve(db, config, pairs, scope, owners, *, positive=False):
     if not pairs:
         return []
     from .identity_report import _select
@@ -11,6 +11,7 @@ def resolve(db, config, pairs, scope, owners):
     from .body_observations import available, contract
 
     constraints, selected, performers = {}, {}, {}
+    label = 'Positive' if positive else 'Excluded'
     bodies = available(db)
     body_enabled = enabled(config) and bodies and identities_available(db)
     expected = contract(config)
@@ -24,17 +25,17 @@ def resolve(db, config, pairs, scope, owners):
                 'SELECT b.id,b.scan,b.cue,b.face,b.contract,s.scene,s.scope,s.namespace '
                 'FROM body_observations b JOIN scans s ON s.id=b.scan WHERE b.id=?', (oid,)))
         if len(rows) != 1:
-            raise ValueError(f'Excluded observation {oid} is unknown or ambiguous; use a current report-identity manifest.')
+            raise ValueError(f'{label} observation {oid} is unknown or ambiguous; use a current report-identity manifest.')
         row = rows[0]
         if row['scope'] != scope or row['namespace'] != namespace(config):
-            raise ValueError(f'Excluded observation {oid} belongs to another scope or recognizer namespace.')
+            raise ValueError(f'{label} observation {oid} belongs to another scope or recognizer namespace.')
         if row['evidence_kind'] == 'person' and (not body_enabled or row['contract'] != expected):
-            raise ValueError(f'Excluded observation {oid} requires enabled body identities with a compatible contract.')
+            raise ValueError(f'{label} observation {oid} requires enabled body identities with a compatible contract.')
         if row['scene'] not in selected:
             _, scans = _selection(db, config, [row['scene']], scope)
             selected[row['scene']] = scans[0]['id']
         if row['scan'] != selected[row['scene']]:
-            raise ValueError(f'Excluded observation {oid} is not in the current scan; regenerate report-identity.')
+            raise ValueError(f'{label} observation {oid} is not in the current scan; regenerate report-identity.')
         return row
 
     for performer, oid in pairs:
@@ -47,14 +48,14 @@ def resolve(db, config, pairs, scope, owners):
             _, performers[performer] = _select(db, namespace(config), None, performer, scope)
         person = performers[performer]
         if person['id'] not in owners:
-            raise ValueError(f'Excluded performer {performer} must belong to a merge goal set.')
+            raise ValueError(f'{label} performer {performer} must belong to a merge goal set.')
         row = sample(oid)
         ids = {oid}
         face = row['id'] if row['evidence_kind'] == 'face' else row['face']
         if face:
             linked = sample(face)
             if linked['evidence_kind'] != 'face' or (linked['scan'], linked['cue']) != (row['scan'], row['cue']):
-                raise ValueError(f'Excluded observation {oid} has an incompatible linked face.')
+                raise ValueError(f'{label} observation {oid} has an incompatible linked face.')
             ids.add(face)
             if body_enabled:
                 # The retained association defines this physical sample. Do not
@@ -64,7 +65,7 @@ def resolve(db, config, pairs, scope, owners):
                     (face, row['scan'], row['cue'], expected)))
         group = owners[person['id']]
         key = group, tuple(sorted(ids))
-        item = constraints.setdefault(key, dict(set=group, scene=row['scene'], scan=row['scan'],
+        item = constraints.setdefault(key, dict(set=group, scene=row['scene'], scan=row['scan'], **({'cue':row['cue']} if positive else {}),
             performer_ids=[], resolved_identity_ids=[], requested_observation_ids=[], observation_ids=sorted(ids)))
         item['performer_ids'] = sorted(set(item['performer_ids']) | {performer})
         item['resolved_identity_ids'] = sorted(set(item['resolved_identity_ids']) | {person['id']})
