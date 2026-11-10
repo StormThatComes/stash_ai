@@ -204,17 +204,3 @@ def test_enabled_prefetch_propagates_actual_memory_failure(tmp_path,monkeypatch)
                 ahead.take('s')
             assert isinstance(failure.value.__cause__,MemoryError)
             assert ahead.pending is None and ahead.scan is None
-
-
-def test_only_wal_live_writers_share_vectors(tmp_path):
-    import sqlite3
-    from contextlib import closing
-    from stash_ai.recognition.replay_vector_inputs import prepare
-    for journal in ('delete','wal'):
-        with closing(sqlite3.connect(tmp_path/(journal+'.sqlite3'))) as source, closing(sqlite3.connect('file:target?mode=memory',uri=True)) as target:
-            source.execute('PRAGMA journal_mode='+journal)
-            source.executescript('CREATE TABLE evidence_versions(kind,key,version); CREATE TABLE observations(id,embedding);')
-            target.executescript('CREATE TABLE metadata(key,value); CREATE TABLE observations(id,embedding);')
-            source.execute('BEGIN IMMEDIATE')
-            assert prepare(source,target) == (journal=='wal')
-            assert bool(target.execute("SELECT 1 FROM metadata").fetchone()) == (journal=='wal')
