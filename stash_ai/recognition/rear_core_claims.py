@@ -128,10 +128,22 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
         if proofs:
             proposals[source] = target,proofs
     # Two cores cannot simultaneously claim a target in the same physical cue.
-    claims = Counter((target,r['cue']) for target,proofs in proposals.values() for r in (lookup[k] for k in proofs))
+    claims = Counter((target,lookup[k]['cue']) for target,proofs in proposals.values() for k in proofs)
     for source,(target,proofs) in proposals.items():
         if any(claims[target,lookup[k]['cue']]!=1 for k in proofs):
             continue
         for oid,proof in proofs.items():
             decisions[oid].update(person=target,status='accepted',role='auxiliary',
                                   reason='corroborated_rear_view',**proof)
+
+        remaining = [r for r in donors[source] if decisions[r['id']]['person']==source]
+        if remaining:
+            anchors_left = [r for r in remaining if decisions[r['id']].get('role')=='anchor'
+                            and not metadata[r['id']].get('query_only') and not decisions[r['id']].get('view_exclusion')]
+            support = len(independent(anchors_left,settings))
+            for row in remaining:
+                d = decisions[row['id']]
+                if d.get('reason')=='body_scene_core':
+                    d['independent_support'] = support
+                if support<settings['min_support']:
+                    d.update(status='provisional',remaining_core_support=support)

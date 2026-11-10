@@ -136,3 +136,15 @@ def test_negative_constraint_precedes_partial_positive_coverage():
                     observation_exclusions_satisfied=not violated,
                     observation_exclusions=[dict(satisfied=not violated,matching_count=int(violated))])
     assert objective(trial(.8,False))>objective(trial(.9,True))
+
+
+def test_turn_exclusion_uses_current_owned_witnesses_and_both_margins():
+    from types import SimpleNamespace
+    from stash_ai.recognition.solver_feedback import turn_exclusion_proposals
+    config = SimpleNamespace(data={'sapiensid':{'identities':{'match_threshold':.85,'ambiguity_margin':.1}}})
+    row = dict(owner='A',turn_evidence=dict(view_roots=['r1','r2'],view_witnesses=['w']),
+               measurements=dict(view_score=.92,view_runner=.7,edge_margin=.12))
+    owners = dict.fromkeys(('r1','r2','w'),'A')
+    patches = list(turn_exclusion_proposals(config,row,owners))
+    assert {next(iter(p.values())) for p in patches}=={.920001,.220001,.120001}
+    assert not list(turn_exclusion_proposals(config,row,dict(owners,w='B')))

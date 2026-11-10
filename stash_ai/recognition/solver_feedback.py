@@ -10,6 +10,31 @@ from .merge_solver_constraints import component_proposals
 from .parallel_numeric import diagnostic_scope
 from .dependencies import read_only
 
+def turn_exclusion_proposals(config, row, owners):
+    """Tighten the measured gate only when the original sources still name this owner."""
+    from .threshold_boundaries import strictly_above
+    evidence = row['turn_evidence']
+    roots = evidence.get('view_roots',())
+    witnesses = evidence.get('view_witnesses',())
+    if not roots or not witnesses or any(owners.get(k)!=row['owner'] for k in (*roots,*witnesses)):
+        return
+    measured = row['measurements']
+    score = measured.get('view_score')
+    if score is None:
+        return
+    runner = measured.get('view_runner',-1.)
+    seen = set()
+    for key,value in (('match_threshold',score),('ambiguity_margin',score-runner),
+                      ('ambiguity_margin',measured.get('edge_margin'))):
+        if value is None:
+            continue
+        path = 'sapiensid.identities.'+key
+        bound = strictly_above(value)
+        if parameter(config.data,path)<bound<=1 and (path,bound) not in seen:
+            seen.add((path,bound))
+            yield {path:bound}
+
+
 @diagnostic_scope
 @read_only()
 def collect(target, settings, goals, feasibility, query_feedback, initial_changes, excluded, targeted):
@@ -77,30 +102,11 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     turn_rows = [r for r in result if wrong.get(r['observation'],{}).get('constraint')=='exclusion'
                  and r.get('status')=='accepted' and r['reason'] in
                  ('bracketed_scene_core','bracketed_body_turn','corroborated_rear_view')]
-    from .body_reports import members as owners_of
     sources = {oid for row in turn_rows for key in ('view_witnesses','view_roots')
                for oid in row['turn_evidence'].get(key,())}
-    turn_owners = owners_of(target,settings,ids=sources) if sources else {}
+    turn_owners = body_members(target,settings,ids=sources) if sources else {}
     for row in turn_rows:
-        evidence = row['turn_evidence']
-        roots = evidence.get('view_roots',())
-        if not roots or not evidence.get('view_witnesses'):
-            continue
-        if any(turn_owners.get(oid)!=row['owner'] for oid in roots):
-            continue
-        measured = row['measurements']
-        score = measured.get('view_score')
-        if score is None:
-            continue
-        runner = measured.get('view_runner',-1.)
-        for key,value in (('match_threshold',score),('ambiguity_margin',score-runner),
-                          ('ambiguity_margin',measured.get('edge_margin'))):
-            if value is None:
-                continue
-            path = 'sapiensid.identities.'+key
-            bound = strictly_above(value)
-            if parameter(settings.data,path)<bound<=1:
-                tighter.append({path:bound})
+        tighter.extend(turn_exclusion_proposals(settings,row,turn_owners))
     for row in result:
         if wrong.get(row['observation'], {}).get('constraint') != 'exclusion':
             continue
