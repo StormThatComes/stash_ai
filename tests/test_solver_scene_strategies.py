@@ -15,7 +15,7 @@ def test_damage_counts_each_physical_person_once():
     labels={'face':'A','body':'A','turn':'A','partner':'B'}
     coords={'face':('s',0),'body':('s',0),'turn':('s',1),'partner':('s',1)}
     def result(values):return {k:dict(accepted_identity=v) for k,v in zip(labels,values)}
-    assert omission_damage(labels,coords,labels,result('AAAB'),result('AABB'))==dict(lost_correct_pairs=1,new_false_joins=1)
+    assert omission_damage(labels,coords,labels,result('AAAB'),result('AABB'))==dict(lost_correct_pairs=1,new_false_joins=1, new_projection_conflicts=0, new_partner_claims=1)
 
 
 def test_all_strategy_families_share_retained_observations(tmp_path):
@@ -98,3 +98,12 @@ def test_training_screens_and_tunes_two_families_within_solver_budget(tmp_path):
     assert len(result['search']['scene_finalists'])==2
     assert result['search']['attempted']<=16
     assert any(t.get('search_phase')=='scene_refinement' for t in result['simulation']['trials'].values())
+
+
+def test_omission_detects_shared_partner_with_conflicting_projections():
+    labels = dict(face='A', body='A', partner='B')
+    locations = dict.fromkeys(labels, ('s', 7))
+    before = {k: dict(accepted_identity=v) for k, v in labels.items()}
+    after = dict(before, body=dict(accepted_identity='B'))
+    damage = omission_damage(labels, locations, labels, before, after)
+    assert damage['new_projection_conflicts'] == damage['new_partner_claims'] == 1

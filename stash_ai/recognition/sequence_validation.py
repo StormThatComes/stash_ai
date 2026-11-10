@@ -64,8 +64,15 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     middle_outcomes = dict(correct=0, withheld=0, partner=0, foreign=0, unknown_reference=0)
     crossings = correct_pairs = 0
     endpoint_returns = foreign_ids = abstentions = 0
+    entrant_episodes = 0
     for scene,people in by_scene.items():
         for person,track in people.items():
+            # A labelled arrival needs a previously visible partner and continuation.
+            for cue, observations in track.items():
+                if (tagged(observations, 'entrant') and cue-1 not in track and cue+1 in track
+                        and any(cue-1 in other and cue in other for other in people.values())
+                        and continuous(scene, cue, cue+1)):
+                    entrant_episodes += 1
             for window in episodes(scene,sorted(track),lambda cue:tagged(track[cue],'back')):
                 ids = [identity(track[c]) for c in window]
                 counts[person]['turns'] += 1
@@ -129,7 +136,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     def macro(success,total):
         rates = [c.get(success,0)/c[total] for c in counts.values() if c.get(total)]
         return sum(rates)/len(rates) if rates else None
-    return dict(returned_people=sorted(returned_people), rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
+    return dict(entrant_episodes=entrant_episodes, returned_people=sorted(returned_people), rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),
                 crossings=crossings,contact_interior=middle_outcomes,both_recovered=correct_pairs,endpoint_returns=endpoint_returns,

@@ -35,6 +35,13 @@ def pairs(db,scan,config,limit):
         key=tuple(sorted((fragment,other)))
         item=dict(fragments=list(key),kind='face_body' if face_owners.intersection(key) else 'body_body',
                   cue=cue,observation=oid,peer=peer,status=status,reason=reason,recorded=explicit)
+        if peer in rows:
+            peer_cue = rows[peer][0]
+            item.update(previous_cue=min(cue, peer_cue), next_cue=max(cue, peer_cue))
+        blocker = rows[oid][3].get('track_blocker') or {}
+        for field in ('measured', 'limit', 'rival', 'partner_score'):
+            if field in blocker:
+                item[field] = blocker[field]
         if key not in candidates or explicit and not candidates[key]['recorded']:
             candidates[key] = item
     ordered = sorted(cues)
@@ -55,4 +62,17 @@ def pairs(db,scan,config,limit):
             adjacent = cue==before+1
             add(oid,rows[peer][1],blocker.get('reason') or (
                 'unverified_adjacent_fragments' if adjacent else 'cue_gap'),False,peer)
+    # When one owner persists across a two-person transition, only the other
+    # trajectory can explain the split. Two simultaneous changes stay ambiguous.
+    for cue, before in previous.items():
+        if cue != before+1 or len(cues[cue]) != 2 or len(cues[before]) != 2:
+            continue
+        left = {rows[i][1]: i for i in cues[before]}
+        right = {rows[i][1]: i for i in cues[cue]}
+        if len(left) == len(right) == 2 and len(left.keys() & right.keys()) == 1:
+            source, = left.keys()-right.keys()
+            dest, = right.keys()-left.keys()
+            query = right[dest]
+            reason = rows[query][3].get('track_blocker', {}).get('reason', 'unverified_partner_continuity')
+            add(query, source, reason, False, left[source])
     return sorted(candidates.values(),key=lambda x:(not x['recorded'],x['cue'],x['fragments']))[:limit]
