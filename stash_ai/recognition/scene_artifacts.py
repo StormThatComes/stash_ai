@@ -143,4 +143,6 @@ def body_key(db, scan, config):
             'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
             "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))],'owner',owner))
     local=signed('body-scene-input',digest([scan,expected]),queries,'scene',scene_key(db,scan))
-    return digest([scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks])
+    shot_map = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
+    return digest([scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,
+                   shot_map[0] if shot_map else None])

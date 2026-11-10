@@ -131,7 +131,7 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
                              fragment_support=len(votes))
 
 
-def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, guard):
+def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, guard, *, cut_starts=(), entrants=None):
     """Use other shots of accepted body-born cores as a frozen scene roster."""
     settings = config.data['sapiensid']['identities']
     bonus = scene_bonus(config.data)
@@ -208,7 +208,7 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
                 weight = 1.
                 if settings.get('scene_bonus_mode')=='evidence':
                     if key not in presence:
-                        presence[key] = Presence(witnesses,shots)
+                        presence[key] = Presence(witnesses,shots,cut_starts)
                     weight,_ = presence[key].weight(row)
                 # An entrant may have independent body evidence of its own.
                 # Same-shot members of this query fragment cannot vote for themselves.
@@ -217,7 +217,13 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
                     entrant_banks[own] = independent((r for r in fragment_rows.get(own[0],())
                                                      if shots[r['cue']] not in (None,shot)),settings)
                 entrant = entrant_score(scores,row,entrant_banks[own],settings,bonus)
+                if entrants:
+                    entrant = entrants.challenge(row,witnesses,scores,entrant)
                 runner = max(entrant,max((item[5] for item in rank if item[2] not in (p,decision['person'])),default=-1.))
+                if weight and low>=settings['cohesion_threshold']:
+                    probe = decision.get('scene_probe')
+                    if probe is None or mean>probe['score']:
+                        decision['scene_probe'] = dict(owner=p,score=mean,runner=runner,weight=weight)
                 if mean>=settings['match_threshold']-bonus*weight and low>=settings['cohesion_threshold']:
                     option = (mean,p,runner,weight,[r['id'] for r in witnesses[:minimum]],entrant)
                     previous = joint_options[row['id']].get(p)
