@@ -459,7 +459,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
            (selected[0]['scan'],)).fetchone() if selected else None)
     if first is not None and config.data['sapiensid']['enabled']:
         from .incomplete_rivals import require_complete
-        require_complete(database.connection,*first)
+        require_complete(database.connection,*first,selected=selected)
     from .rebuild_transaction import atomic
     from . import derived_cache
     from .paged_references import scope as reference_pages

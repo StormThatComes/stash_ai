@@ -81,20 +81,47 @@ def verified(db, config, scope, namespace, bank, result):
     if len(focus)<2:
         return
     cap = config.data['sapiensid']['global_matching']['max_references']
+    @lru_cache(maxsize=64)
     def representatives(owner):
         rows = db.execute("""SELECT b.scan,b.id,json_extract(m.proof,'$.rooted_track.roots') AS roots,
-            json_extract(m.proof,'$.rooted_track.perspective') AS kind """+tracks_sql+
-            ' AND m.person=? ORDER BY b.scan,kind,b.cue,b.id',(scope,namespace,stamp,owner))
+            json_extract(m.proof,'$.rooted_track.perspective') AS kind,
+            CAST(json_extract(b.quality,'$.quality.sharpness') AS REAL) AS sharpness """+tracks_sql+
+            ' AND m.person=? ORDER BY b.scan,kind,sharpness DESC,b.cue,b.id',(scope,namespace,stamp,owner))
         from itertools import groupby
         def strata():
             for (scan,kind),group in groupby(rows,key=lambda r:(r[0],r[3])):
-                for _,oid,raw,_ in group:
+                priority = hashlib.sha256(f'{scan}:{kind}'.encode()).digest()
+                first = novel = None
+                distance = 0.
+                for _,oid,raw,_,_ in group:
                     roots = tuple(json.loads(raw))
-                    if len(roots)==2 and len(set(roots))==2 and all(face(scan,r,owner) for r in roots):
-                        priority = hashlib.sha256(f'{scan}:{kind}'.encode()).digest()
-                        yield priority,scan,kind,oid,roots
-                        break
-        return heapq.nsmallest(cap,strata())
+                    if len(roots)!=2 or len(set(roots))!=2 or not all(face(scan,r,owner) for r in roots):
+                        continue
+                    stored = db.execute('SELECT embedding FROM body_observations WHERE id=?',(oid,)).fetchone()
+                    if stored['embedding'] is None:
+                        continue
+                    vector = body_vector(stored)
+                    if first is None:
+                        first = vector
+                        yield (0,priority),scan,kind,oid,roots
+                    else:
+                        difference = 1.-scores.face_similarity(first,vector)
+                        if difference>distance:
+                            novel,distance = (oid,roots),difference
+                if novel and distance>1.-settings['match_threshold']:
+                    yield (1,priority),scan,kind,*novel
+        # Keep a complementary look even when many scans fill the ordinary
+        # reference budget. Both heaps store identifiers, never embeddings.
+        main, alternate = [], []
+        for entry in strata():
+            pool = main if entry[0][0]==0 else alternate
+            pool.append(entry)
+            if len(pool)>2*cap:
+                pool[:] = heapq.nsmallest(cap,pool)
+        main, alternate = sorted(main),sorted(alternate)
+        reserved = min(len(alternate), cap//3 or int(cap>1))
+        primaries = main[:cap-reserved]
+        return primaries + alternate[:cap-len(primaries)]
 
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'])
     views = summary_views(_groups(db,scope,namespace,config.data['clustering'],usage=usage),usage)
