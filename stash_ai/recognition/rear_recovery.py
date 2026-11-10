@@ -222,7 +222,7 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
         from .body_perspectives import owner_bonus
         bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
         endpoint = None
-        if ranked and hasattr(search,'endpoints'):
+        if ranked:
             measured = (face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
                         if row['face_embedding'] is not None and row['face_rejection'] is None else None)
             for peer in {candidate[2] for candidate in ranked}:
