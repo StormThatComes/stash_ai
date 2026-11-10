@@ -14,8 +14,24 @@ def scenes(db,scope,namespace):
         (scope,namespace))]
 
 
-def require_complete(db,scope,namespace):
+def require_complete(db,scope,namespace,selected=()):
     pending=scenes(db,scope,namespace)
+    if pending and selected:
+        from .database import encoded
+        from .reference_gap_scope import MissingReferences
+        scans = [item['scan'] for item in selected]
+        # The preflight can narrow the affected set only when every usable
+        # selected address already has a measured owner. Unknown inputs defer.
+        owners = set()
+        for table,members,gate in (('observations','members',''),('body_observations','body_members'," AND m.status='accepted'")):
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (members,)).fetchone():
+                continue
+            owners.update(row[0] for row in db.execute(f'SELECT DISTINCT m.person FROM {table} o '
+                f'LEFT JOIN {members} m ON m.observation=o.id'+gate+
+                ' WHERE o.rejected IS NULL AND o.embedding IS NOT NULL AND o.scan IN (SELECT value FROM json_each(?))',
+                (encoded(scans),)))
+        if owners and None not in owners:
+            pending = MissingReferences(db,scope,namespace,pending,exclude_scans=scans).affected(owners)
     if pending:
         raise ValueError('Historical recognition rivals have incomplete replacement scans; finish recognition for scenes: '+', '.join(pending)+'.')
 
@@ -24,7 +40,6 @@ def protect(db,scope,namespace,result):
     pending=scenes(db,scope,namespace)
     if pending:
         result['incomplete_reference_scenes']=pending
-        for decision in result['decisions']:
-            if decision['outcome']=='merge':
-                decision.update(outcome='blocked',blockers=['incomplete_reference_scans'])
+        from .reference_gap_scope import MissingReferences
+        MissingReferences(db,scope,namespace,pending).protect(result,'incomplete_reference_scans')
     return result

@@ -212,6 +212,21 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
         bonuses = {owner:owner_bonus(decision,owner,bonus) for owner in roster}
         best = winner(ranked,settings,owner_bonuses=bonuses)
         endpoint = None
+        if best is not None and hasattr(search,'endpoints'):
+            owner = best[2]
+            bank = search.bank.get(owner)
+            measured = (face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
+                        if row['face_embedding'] is not None and row['face_rejection'] is None else None)
+            veto = bank is not None and (scan,row['cue']) in bank['cues']
+            if measured is not None and not guard.allows({'_face_vector':measured,'face_quality':row['face_quality']},(),owner):
+                veto = True
+            if veto:
+                ranked = [candidate for candidate in ranked if candidate[2]!=owner]
+                occupied = set(occupied) | {owner}
+                best = None
+            elif owner!=decision.get('open_face_root',{}).get('owner',owner):
+                # A contradictory hint does not remove the body rival.
+                best = None
         if best is None and hasattr(search,'endpoints'):
             def reject_rival(rival,faces):
                 if rival in search.unavailable or rival not in search.bank or not search.bank[rival]['faces']:
@@ -256,7 +271,8 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
                      source_scans=sorted({w['scan'] for w in witnesses}))
         if endpoint:
             proof.pop('score')
-            proof.update(route='fragment_face_endpoints',face_score=face_score,face_threshold=search.endpoints.minimum,
+            proof.update(route='fragment_face_endpoints',endpoint_body_gate=not bool(decision.get('rooted_track',{}).get('roots')),
+                         face_score=face_score,face_threshold=search.endpoints.minimum,
                          local_roots=(decision.get('rooted_track') or {}).get('roots') or [decision['open_face_root']['observation']])
         else:
             proof.update(minimum=low, threshold=settings['match_threshold']-bonuses.get(owner,0.),

@@ -34,8 +34,7 @@ def nominations(looks, lookup, roots, shots, scores, settings):
         fragments = sorted(tracks.items())
         for i,((kind,a,b,shot),members) in enumerate(fragments):
             for (other,c,d,other_shot),peers in fragments[i+1:]:
-                if shot==other_shot or not distinct_view(kind,other,lookup.get(members[0],{}).get('_vector'),
-                        lookup.get(peers[0],{}).get('_vector'),scores,settings):
+                if shot==other_shot:
                     continue
                 ids = a,b,c,d
                 if len(set(ids))!=4:
@@ -53,12 +52,18 @@ def nominations(looks, lookup, roots, shots, scores, settings):
                 rival = max((scores.face_similarity(x,y) for x in vectors for y in rivals),default=-1.)
                 if minimum-rival<face_margin:
                     continue
-                for oid in members:
-                    if oid not in eligible or minimum>eligible[oid][2]:
-                        eligible[oid] = owner,[(a,b,oid),(c,d,peers[0])],minimum
-                for oid in peers:
-                    if oid not in eligible or minimum>eligible[oid][2]:
-                        eligible[oid] = owner,[(a,b,members[0]),(c,d,oid)],minimum
+                # Certify the actual member. Equal-score witnesses have stable addresses.
+                for src,dest,ends,other_ends in ((members,peers,(a,b),(c,d)),(peers,members,(c,d),(a,b))):
+                    ordered = sorted(dest)
+                    for oid in sorted(src):
+                        peer = next((k for k in ordered if distinct_view(kind,other,lookup.get(oid,{}).get('_vector'),
+                                     lookup.get(k,{}).get('_vector'),scores,settings)), None)
+                        if peer is None:
+                            continue
+                        proof = [(*ends,oid),(*other_ends,peer)]
+                        prior = eligible.get(oid)
+                        if prior is None or (-minimum,proof)<(-prior[2],prior[1]):
+                            eligible[oid] = owner,proof,minimum
     return eligible
 
 
@@ -71,6 +76,11 @@ def open_nominations(looks, rows, decisions, roots, shots, scores, settings, gua
     with_faces = {oid: rows[oid] for oid in roots if rows[oid].get('_face_vector') is not None}
     units = {oid:unit(dict(scan=r['scan'],seconds=r['seconds'],quality=r.get('face_quality') or '{}'))
              for oid,r in with_faces.items()}
+    body_cores = defaultdict(list)
+    for oid,d in decisions.items():
+        if (oid in rows and d.get('status')=='accepted' and d.get('role')=='anchor'
+                and d.get('reason')=='body_scene_core' and d.get('person') and not d.get('view_exclusion')):
+            body_cores[d['person']].append(rows[oid])
     output = {}
     for oid,d in decisions.items():
         hint = d.get('open_face_root') or {}
@@ -89,6 +99,9 @@ def open_nominations(looks, rows, decisions, roots, shots, scores, settings, gua
             continue
         foreign = [v for key,v in with_faces.items() if roots[key]!=owner]
         rivals = [scores.face_similarity(row['_vector'],v['_vector']) for v in foreign]
+        for other,core in body_cores.items():
+            if other!=owner and not copresent([row],core):
+                rivals.extend(scores.face_similarity(row['_vector'],r['_vector']) for r in core)
         face_rival = max((scores.face_similarity(with_faces[source]['_face_vector'],v['_face_vector'])
                           for v in foreign),default=-1.)
         for (p,kind), witnesses in looks.items():
@@ -176,7 +189,9 @@ class ExternalEndpoints:
                     if query is None:
                         continue
                     body_score = float(query @ w['_vector'])
-                    if same_kind and body_score>=self.body_match or single and body_score<self.body_match:
+                    if not np.isfinite(body_score):
+                        continue
+                    if single and body_score<self.body_match or same_kind and not single and body_score>=self.body_match:
                         continue
                 external = [self.face(root,owner) for root in w['roots']]
                 if (len(external)!=2 or any(f is None for f in external) or

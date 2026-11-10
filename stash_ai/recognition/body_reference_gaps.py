@@ -13,7 +13,7 @@ def protect(db,config,scope,namespace,result):
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene',(scope,namespace,encoded(compatible_contracts(config))))]
     if pending:
         result['incompatible_body_reference_scenes']=pending
-        for decision in result['decisions']:
-            if decision['outcome']=='merge':
-                decision.update(outcome='blocked',blockers=['incompatible_body_reference_contract'],required_scenes=pending)
+        from .reference_gap_scope import MissingReferences
+        MissingReferences(db,scope,namespace,pending,incompatible=compatible_contracts(config)).protect(
+            result,'incompatible_body_reference_contract')
     return result
