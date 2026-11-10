@@ -215,6 +215,7 @@ def compact_document(result, config):
         if status.get('positive_observations'):
             goals = status['positive_observations']
             item['goal_result']['positive_goals'] = dict(count=len(goals),satisfied=sum(g['satisfied'] for g in goals),
+                owner_switches=sum(g.get('owner_switches',0) for g in goals),
                 mean_coverage=sum(g['coverage'] for g in goals)/len(goals),
                 longest_unmatched_run=max(g['longest_unmatched_run'] for g in goals),
                 wrong_owner_samples=sum(g['wrong_owner_samples'] for g in goals),

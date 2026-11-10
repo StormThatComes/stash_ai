@@ -18,6 +18,7 @@ def physical_inputs(db, config, scans, visible, labels, locations):
         for number,people in sorted(visible.get(scan['scene'],{}).items(),key=lambda x:int(x[0])):
             cue = int(number)
             pairs = []
+            manual = {p['truth'] for p in people if p.get('binding') is not None}
             for label in people:
                 key = scan['scene'],cue,label['truth']
                 groups[key] = list(annotations[key])
@@ -27,7 +28,7 @@ def physical_inputs(db, config, scans, visible, labels, locations):
                     'SELECT id,geometry,face,rejected,embedding IS NOT NULL FROM body_observations '
                     'WHERE scan=? AND cue=? AND contract=? ORDER BY id',(scan['id'],cue,contract(config))):
                 truth = labels.get(oid) or torso_owner(json.loads(geometry),people)
-                if (scan['scene'],cue,truth) not in groups:
+                if (scan['scene'],cue,truth) not in groups or (truth in manual and oid not in labels):
                     continue
                 group = groups[scan['scene'],cue,truth]
                 if oid not in group:
@@ -85,7 +86,7 @@ def stress_cases(candidates, visible, scans, samples, locations):
     return chosen
 
 
-def visible_scores(groups, decisions, labels, references=()):
+def visible_scores(groups, decisions, labels, references=(), bindings=None):
     counts = Counter(dict.fromkeys(('correct','partner','fragment','withheld','missing','unknown_reference','split_reference'),0))
     roots = defaultdict(set)
     for oid,truth in labels.items():
@@ -104,10 +105,13 @@ def visible_scores(groups, decisions, labels, references=()):
     for truth,ids in roots.items():
         for owner in ids:
             owners[owner].add(truth)
-    for (_,_,truth),addresses in groups.items():
+    for location,addresses in groups.items():
+        truth = location[2]
         ids = {decisions[oid]['accepted_identity'] for oid in addresses} - {None}
         if not addresses:
-            result = 'missing'
+            result = (bindings or {}).get(location,{}).get('binding','missing')
+            if result=='bound':
+                result = 'missing'
         elif not ids:
             result = 'withheld'
         elif any(owners[p]-{truth} for p in ids):

@@ -664,4 +664,9 @@ OpenCV sample video and generate the exact sprite and timestamps with
 `python -m benchmarks.pedestrian_vtt prepare vtest.avi sample`.
 Scan the scene with that VTT and use
 `python -m benchmarks.pedestrian_vtt bind --config facial_recognition.yml --scope SCOPE --scene ID --signatures sample/signatures.json --output holdout.json`.
-The binder checks measured frame signatures and reports missing or ambiguous boxes separately.
+The binder checks measured frame signatures and records each annotated person in
+`visible_people`, including missing detections, ambiguous associations and detections
+without usable embeddings. All three count towards physical coverage. A scene with
+no bound addresses has insufficient identity evidence for a holdout verdict.
+Positive track goals use owner switches and longest unmatched runs to break ties
+after evaluating existing goal and safety criteria.

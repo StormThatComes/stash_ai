@@ -110,6 +110,9 @@ def holdout_summary(report):
         parts.append(f"visible people {physical['correct']}/{physical['total']} correct, {physical['partner']} partner, "
                      f"{physical['fragment']} fragments, {physical['withheld']} withheld, {physical['missing']} missing, "
                      f"{physical['unknown_reference']} without unique reference")
+        for key in ('ambiguous','unavailable','unbound'):
+            if physical.get(key):
+                parts.append(f"{key} manual labels {physical[key]}")
     fault = report.get('association_stress',{})
     if fault.get('status')=='tested':
         parts.append(f"association swap: {fault['later_cues']} later cues changed, {len(fault['other_scenes'])} other scenes")

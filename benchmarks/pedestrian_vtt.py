@@ -50,7 +50,7 @@ def bind(config, scope, scene, signatures, output, data):
     from stash_ai.recognition.body_observations import contract
     from stash_ai.recognition.fragmentation_report import _open_readonly
     from stash_ai.recognition.offline_evaluation import _selection
-    labels,missing = {},[]
+    labels,missing,visible = {},[],{}
     with closing(_open_readonly(config.database)) as db:
         _,scans = _selection(db,config,[scene],scope)
         if scans[0]['total']!=len(data['cues']):
@@ -58,28 +58,38 @@ def bind(config, scope, scene, signatures, output, data):
         for cue in data['cues']:
             index = cue['cue']
             rows = []
-            for oid,raw,q in db.execute('SELECT id,geometry,quality FROM body_observations '
-                    'WHERE scan=? AND cue=? AND contract=? AND rejected IS NULL AND embedding IS NOT NULL',
+            visible[str(index)] = []
+            for oid,raw,q,ready in db.execute('SELECT id,geometry,quality,(rejected IS NULL AND embedding IS NOT NULL) FROM body_observations '
+                    'WHERE scan=? AND cue=? AND contract=?',
                     (scans[0]['id'],index,contract(config))):
-                if json.loads(q)['quality'].get('frame_signature')!=signatures[index]:
+                if ready and json.loads(q)['quality'].get('frame_signature')!=signatures[index]:
                     raise ValueError(f'Cue {index} does not match the prepared sprite.')
-                rows.append((oid,json.loads(raw)['bounds']))
+                bounds = json.loads(raw).get('bounds')
+                if bounds:
+                    rows.append((oid,bounds,ready))
             proposals = []
             for label in cue['labels']:
-                ranked = sorted(((overlap(label['box'],box),oid) for oid,box in rows),reverse=True)
-                if ranked and ranked[0][0]>=.35 and (len(ranked)==1 or ranked[0][0]-ranked[1][0]>=.12):
-                    proposals.append((label,ranked[0][1]))
+                x,y,r,b = label['box']
+                person = dict(truth=label['truth'], point=[(x+r)/2,(y+b)/2], slices=label['slices'])
+                visible[str(index)].append(person)
+                ranked = sorted(((overlap(label['box'],box),oid,ready) for oid,box,ready in rows),reverse=True)
+                if not ranked or ranked[0][0]<.35:
+                    person['binding'] = 'missing'
+                elif len(ranked)>1 and ranked[0][0]-ranked[1][0]<.12:
+                    person['binding'] = 'ambiguous'
+                elif not ranked[0][2]:
+                    person['binding'] = 'unavailable'
                 else:
-                    missing.append([index,label['truth']])
-            for label,oid in proposals:
-                if sum(other==oid for _,other in proposals)!=1:
-                    missing.append([index,label['truth']])
+                    proposals.append((person,ranked[0][1]))
+            for person,oid in proposals:
+                if sum(peer==oid for _,peer in proposals)!=1:
+                    person['binding'] = 'ambiguous'
                 else:
-                    labels[oid] = dict(truth=label['truth'],slices=label['slices'])
-    if not labels:
-        raise ValueError('No unambiguous measured observations overlap the annotations.')
+                    person['binding'] = 'bound'
+                    labels[oid] = dict(truth=person['truth'],slices=person['slices'])
+            missing.extend([index,p['truth']] for p in visible[str(index)] if p['binding']!='bound')
     manifest = dict(scenes=[scene],database=str(config.database.resolve()),observations=labels,
-                    unbound_manual_labels=missing)
+                    visible_people={scene:visible},unbound_manual_labels=missing)
     with output.open('x') as stream:
         json.dump(manifest,stream,indent=2)
     print(f'{len(labels)} bound, {len(missing)} missing or ambiguous')

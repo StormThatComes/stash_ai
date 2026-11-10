@@ -24,6 +24,12 @@ def validate(labels,scenes):
                 truth,point = person.get('truth'),person.get('point')
                 if not isinstance(truth,str) or not truth.strip() or truth in seen:
                     raise ValueError('Each visible person needs a distinct truth label per cue.')
+                binding = person.get('binding')
+                if binding not in (None,'bound','missing','ambiguous','unavailable','unbound'):
+                    raise ValueError('Unknown manual detection binding.')
+                if binding=='unbound' and point is None:
+                    seen.add(truth)
+                    continue
                 if (not isinstance(point,(tuple,list)) or len(point)!=2 or
                         any(type(v) not in (int,float) or not math.isfinite(v) or v<0 for v in point)):
                     raise ValueError('Expected torso point [x,y] in source VTT pixels.')
@@ -36,7 +42,9 @@ def torso_owner(pose,people):
         return None
     left,top,right,bottom = pose['bounds']
     scale = max(1.,math.hypot(right-left,bottom-top))
-    ranked = sorted((math.dist(center,p['point'])/scale,p['truth']) for p in people)
+    ranked = sorted((math.dist(center,p['point'])/scale,p['truth']) for p in people if p.get('point') is not None)
+    if not ranked:
+        return None
     if ranked[0][0]>.25 or len(ranked)>1 and ranked[1][0]-ranked[0][0]<.05:
         return None
     return ranked[0][1]
@@ -61,6 +69,12 @@ def detection_counts(db,scans,labels,contract=None):
                 else:
                     detected[truth] += 1
                     counts['poses_without_face'] += face is None
-            counts['missing_poses'] += sum(not detected[p['truth']] for p in people)
+            for person in people:
+                binding = person.get('binding')
+                if binding in ('ambiguous','unavailable','unbound'):
+                    key = binding+'_manual_labels'
+                    counts[key] = counts.get(key,0)+1
+                else:
+                    counts['missing_poses'] += binding=='missing' if binding else not detected[person['truth']]
             counts['duplicate_poses'] += sum(max(0,n-1) for n in detected.values())
     return counts

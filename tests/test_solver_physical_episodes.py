@@ -85,3 +85,42 @@ def test_association_fault_counts_changed_owners_without_inflating_later_cues():
     assert report['changed_observations']==report['changed_cues']==1
     assert report['later_cues']==0 and report['other_scenes']==[]
     assert report['partition_changed_cues']>1
+
+
+def test_unbound_manual_people_remain_in_physical_denominator():
+    from stash_ai.recognition.contact_holdout import visible_scores
+    labels={'root':'A'}
+    samples={'root':dict(slices=[])}
+    decisions={'root':dict(accepted_identity='owner',evidence=dict(reason='known_identity'))}
+    omitted={('1',1,'B'):dict(binding='missing',slices=['back']),('1',2,'A'):dict(binding='ambiguous')}
+    physical=_metrics(labels,samples,{'root':('1',0)},decisions,unbound=omitted)['physical']
+    assert physical['coverage']==1/3 and physical['slices']['back']['withheld']==1
+    groups={key:[] for key in omitted}
+    groups['1',0,'A']=['root']
+    scores=visible_scores(groups,decisions,labels,bindings=omitted)
+    assert (scores['correct'],scores['missing'],scores['ambiguous'])==(1,1,1)
+
+
+def test_manual_binder_retains_people_when_every_binding_is_missing(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from benchmarks.pedestrian_vtt import bind
+    from .test_recognition_body_integration import seeded
+    from stash_ai.recognition.solver_validation import validate_winner,read_manifest
+    from stash_ai.recognition.models import namespace
+    cfg,scans,_,_=seeded(tmp_path,vectors=[[1,0]])
+    from stash_ai.recognition.database import FaceDatabase
+    with FaceDatabase(cfg.database) as state:
+        state.connection.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.frame_signature','signature')")
+        state.connection.commit()
+    labels=dict(cues=[dict(cue=cue,labels=[dict(truth='B',box=[90,90,110,150],slices=['back'])]) for cue in range(3)])
+    path=tmp_path/'manual.json'
+    bind(cfg,'scope',scans[0]['scene'],['signature']*3,path,labels)
+    manifest=read_manifest(path)
+    with closing(sqlite3.connect(':memory:')) as training:
+        training.execute('CREATE TABLE scans(scope,namespace,scene)')
+        report=validate_winner(cfg,training,dict(scope='scope',namespace=namespace(cfg),best_result=dict(changes=[])),
+                               path,manifest=manifest)
+    assert report['metrics']['winner/joint']['physical']['observations']==3
+    assert report['metrics']['winner/joint']['visible']['missing']==3
+    assert report['verdict']['status']=='insufficient_coverage'
