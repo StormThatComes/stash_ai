@@ -58,3 +58,4 @@ def test_verified_rear_segments_survive_one_unusable_member(monkeypatch):
                              (),(),defaults(),SimpleNamespace(face_similarity=np.dot),SimpleNamespace(allows=lambda *a:True),0.)
     assert all(decisions[str(i)]['person']=='A' for i in (1,2,11,12,21,22))
     assert decisions['bad']['person']=='donor' and decisions['bad']['status']=='provisional'
+    assert decisions['bad']['role']=='auxiliary'
