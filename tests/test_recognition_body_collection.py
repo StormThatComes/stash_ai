@@ -154,3 +154,12 @@ def test_legacy_completed_body_cues_are_recollected_with_partial_face_match(tmp_
             assert model.calls == model.embedded == 3
     finally:
         collector.close()
+
+
+def test_query_only_torso_requires_separate_visible_cores():
+    from stash_ai.recognition.body_collection import isolated_torso
+    from tests.test_recognition_crowded_tracks import pose
+    first, far, close = pose(30), pose(150), pose(33)
+    assert isolated_torso(first, [first, far])
+    assert not isolated_torso(first, [first, close])
+    assert not isolated_torso(first, [first])

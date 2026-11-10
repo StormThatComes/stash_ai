@@ -38,7 +38,7 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,
 
 
 def contract(config):
-    return _contract(config,'independent-person-v3-perspective')
+    return _contract(config,'independent-person-v4-independent-torso')
 
 
 def compatible_contracts(config):
@@ -51,7 +51,8 @@ def _previous_contracts(config):
     old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [_contract(config,'independent-person-v3-perspective',legacy_association='v6'),
+    return [_contract(config,'independent-person-v3-perspective'),
+            _contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, old_mask, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
         for association,boundaries in ((False,False),('v4',False),('joint',False),('partial',False),(True,False),(True,True))

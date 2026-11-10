@@ -88,7 +88,7 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
     ordered = sorted(rows, key=lambda r:r['id'])
     for row,peer in plausible_pairs(ordered,max(settings['match_threshold'],settings['cohesion_threshold'])):
         a, b = row['id'], peer['id']
-        if copresent([row],groups[b]) or not guard.allows(row,groups[b]):
+        if copresent([row],groups[b]) or not guard.allows(row,groups[b]) or not guard.allows(peer,groups[a]):
             continue
         score, minimum = scores.compare([row],groups[b])
         if score < settings['match_threshold'] or minimum < settings['cohesion_threshold']:
@@ -102,7 +102,8 @@ def preserve_fragments(record, rows, decisions, settings, scores, guard):
         if first == second:
             continue
         left, right = groups[first], groups[second]
-        if copresent(left,right) or not all(guard.allows(r,right) for r in left):
+        if (copresent(left,right) or not all(guard.allows(r,right) for r in left)
+                or not all(guard.allows(r,left) for r in right)):
             continue
         mean, low = scores.compare(left,right)
         if mean >= settings['match_threshold'] and low >= settings['cohesion_threshold']:

@@ -66,6 +66,26 @@ def public_person(person):
     return dict(person, pose_refinement=details)
 
 
+def isolated_torso(person, people):
+    from .track_geometry import torso_points
+    points = torso_points(person)
+    if len(people)<2 or len(points)<3:
+        return False
+    def inside(point, box):
+        x,y = point
+        return box[0]<=x<=box[2] and box[1]<=y<=box[3]
+    if not all(inside(point, person['bounds']) for point in points.values()):
+        return False
+    for peer in people:
+        if peer is person:
+            continue
+        foreign = torso_points(peer)
+        if (len(foreign)<3 or any(inside(p, peer['bounds']) for p in points.values())
+                or any(inside(p, person['bounds']) for p in foreign.values())):
+            return False
+    return True
+
+
 def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expected=None, captured=None):
     expected=expected or contract(config)
     if captured is None:
@@ -116,7 +136,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
         if separated and (ambiguous or reason == 'person_overlap'):
             measured['query_only_reason'] = 'unassigned_face' if ambiguous else 'separated_overlap'
         if ambiguous and not separated:
-            reason = 'person_face_association_ambiguous'
+            if reason is None and not merged_pair and isolated_torso(person,people):
+                measured.update(query_only=True,query_only_reason='independent_torso_unassigned_face')
+            else:
+                reason = reason or 'person_face_association_ambiguous'
         if reason == 'person_overlap' and separated:
             reason = None
             measured['query_only'] = True
