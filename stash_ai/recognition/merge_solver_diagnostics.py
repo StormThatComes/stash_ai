@@ -126,9 +126,11 @@ def latest_decisions(db, observation_ids):
             'JOIN body_observations b ON b.id=m.observation WHERE b.id IN (SELECT value FROM json_each(?)) ORDER BY b.id',
             (encoded(sorted(observation_ids)),)):
             proof=json.loads(row['proof'])
+            tracks = (proof.get('source_tracks') or [])[:8]
+            witnesses = list(dict.fromkeys(oid for track in tracks for oid in track)) if tracks else (proof.get('witness_ids') or [])[:8]
             result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
                 reason=proof.get('reason'),evidence_kind='person',owner=row['person'],
-                witnesses=list(proof.get('source_tracks') or proof.get('witness_ids') or ())[:8], rival=proof.get('rival'),
+                witnesses=witnesses, **({'source_tracks':tracks} if tracks else {}), rival=proof.get('rival'),
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
                 turn_evidence={k:proof[k] for k in ('weakest_edge','rival_observation','view_rival','view_rival_observation','view_witnesses','view_roots') if k in proof},
@@ -155,6 +157,7 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality, *, wrong=No
             measured = row.get('measurements', {})
             add('assignment', 'accepted_wrong_owner', row['observation'],
                 route=row['reason'], witnesses=row.get('witnesses', []),
+                **({'source_tracks':row['source_tracks']} if row.get('source_tracks') else {}),
                 owner=row.get('owner'), rival=row.get('rival'), **conflict,
                 score=measured.get('score',measured.get('track_floor')), runner=measured.get('runner'),
                 threshold=measured.get('threshold'), required_margin=measured.get('required_margin'),

@@ -69,3 +69,32 @@ def test_turn_routes_report_gates_that_were_used():
                                      measurements=dict(track_floor=.75,turn_discount=.06))])
         assert used['sapiensid.identities.turn_similarity_discount']==1
         assert used['sapiensid.identities.track_similarity_threshold']==1
+
+
+def test_positive_goal_uses_body_only_reference_quorum_and_manual_pair(tmp_path):
+    from tests.test_recognition_observation_exclusions import linked_fixture
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.merge_goals import resolve
+    from stash_ai.recognition.merge_solver_diagnostics import latest_decisions
+    import json
+    cfg, faces, bodies, _ = linked_fixture(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db = state.connection
+        body = bodies[0][0]
+        cols = [r[1] for r in db.execute('PRAGMA table_info(body_observations)')]
+        fields = {'id':"'corrected-body'", 'face':'NULL'}
+        db.execute('INSERT INTO body_observations SELECT '+','.join(fields.get(c,c) for c in cols)+
+                   ' FROM body_observations WHERE id=?',(body,))
+        goals = resolve(db,cfg,[['900']],policy='identity-physical',physical_pairs=[faces[0]+':corrected-body'],
+                        observation_inclusions=[('900',faces[0])])
+        assert set(goals['positive_observations'][0]['observation_ids'])=={faces[0],'corrected-body'}
+        predicted = {oid:'performer' for oid in [*bodies[0][1:],'corrected-body']}
+        status = {}
+        assess(goals,status,predicted,predicted)
+        assert status['positive_observations'][0]['satisfied']
+        db.execute('UPDATE body_members SET proof=? WHERE observation=?',(json.dumps(dict(
+            reason='fragment_body_attachment',fragment='track',source_tracks=[bodies[0]])),body))
+        goal = resolve(db,cfg,[['900']],track_inclusions=[('900',body)])
+        assert goal['positive_observations'][0]['track']=='track'
+        row, = latest_decisions(db,{body})
+        assert row['source_tracks']==[bodies[0]] and set(row['witnesses'])==set(bodies[0])

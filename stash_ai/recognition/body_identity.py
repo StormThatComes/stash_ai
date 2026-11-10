@@ -44,7 +44,7 @@ def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
     return digest(['body-local-v42-scene-rear-reference',contract(config),matching_policy(config),
-                   config.data['sapiensid']['identities'],VIEW_POLICY])
+                   config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
 def vector(row):
@@ -346,10 +346,12 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         from .body_tracklets import paths
         graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True))
     anonymous = {}
+    track_lineage = {}
     if settings.get('tracklet_matching') and (queries or review_faces):
         from .body_tracklets import plan, claim_fragments
         anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen,graph=graph)
         claim_fragments(rows,anonymous,decisions,frozen,guard,settings)
+        track_lineage = {**{oid:d['anonymous_fragment'] for oid,d in decisions.items() if d.get('anonymous_fragment')}, **anonymous}
         queries = [r for r in queries if r['id'] not in decisions]
     remaining=[]
     borderline=[]
@@ -507,6 +509,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         observe(rows, groups, seeds, scores, guard, config, frozen=frozen)
     else:
         capture_hints(groups, seeds, frozen)
+    for oid,fragment in track_lineage.items():
+        decisions[oid]['anonymous_fragment'] = fragment
     resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
