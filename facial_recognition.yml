@@ -298,10 +298,10 @@ matching:
       # Scene-local body identities and attachments.
       enabled: true
       # Create body identities within scenes. Requires body.collection.enabled.
-      tracklet_matching: false
+      tracklet_matching: true
       # Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained
       # VTT evidence.
-      endpoint_matching: null
+      endpoint_matching: false
       # Compare independent face endpoints across views. Null follows tracklet_matching.
       match_threshold: 0.85
       # Minimum mean body similarity for a scene-local match. Range: 0..1.

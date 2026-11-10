@@ -25,7 +25,7 @@ def paths(rows, settings, scores, occupied=()):
     threshold = settings['cohesion_threshold'] if threshold is None else threshold
     margin = max(.025,settings['ambiguity_margin'])
     def complete(members):
-        return 0<len(members)<=4 and all(r['id'] in geometry and
+        return bool(members) and all(r['id'] in geometry and
             not geometry[r['id']][0].get('query_only') and
             max(geometry[r['id']][0].get('detected_people',len(members)),
                 geometry[r['id']][0].get('expected_people',0))==len(members) for r in members)
@@ -33,7 +33,7 @@ def paths(rows, settings, scores, occupied=()):
     for cue,left in sorted(cues.items()):
         skipped = cue+1 not in cues and cue+1 not in occupied
         right = cues.get(cue+(2 if skipped else 1),())
-        if not right or max(len(left),len(right))>4:
+        if not right:
             continue
         partial = not (complete(left) and complete(right))
         left_valid = [r for r in left if r['id'] in geometry]
@@ -56,6 +56,13 @@ def paths(rows, settings, scores, occupied=()):
                 _,bb,tb,_ = geometry[b['id']]
                 if not rejection(ba,bb,ta,tb,translation=offset):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
+        if not partial:
+            from .track_assignment import joint_links
+            for a,b,value in joint_links(edges, physical, threshold, margin):
+                links[a] = b,value
+                incoming.add(b)
+        if max(len(left),len(right)) > 4:
+            continue
         for (a,b),value in edges.items():
             rival = max((s for (i,j),s in edges.items() if (i==a)!=(j==b)),default=-1.)
             if partial:
@@ -83,7 +90,7 @@ def paths(rows, settings, scores, occupied=()):
                         max(left_q.get('expected_people',0),right_q.get('expected_people',0),
                             left_q.get('detected_people',0),right_q.get('detected_people',0))>max(len(left),len(right))):
                     continue
-            if value>=threshold and value-rival>=margin:
+            if a not in links and b not in incoming and value>=threshold and value-rival>=margin:
                 links[a] = b,value
                 incoming.add(b)
     lookup = {r['id']:r for r in rows}
@@ -98,7 +105,7 @@ def paths(rows, settings, scores, occupied=()):
         yield chain,strengths
 
 
-def compatible_segments(chain, strengths, decisions):
+def compatible_segments(chain, strengths, decisions, *, side=None):
     """Only the interval between contradictory measured owners is ambiguous."""
     start = 0
     previous = None
@@ -112,11 +119,17 @@ def compatible_segments(chain, strengths, decisions):
             start,previous = i+1,None
         elif previous is not None and previous[1]!=owner:
             j = previous[0]
-            yield chain[start:j+1],strengths[start:j]
-            for member in chain[j+1:i]:
+            left, right = j+1, i
+            if side:
+                while left < right and side(chain[left], chain[j], chain[i]):
+                    left += 1
+                while right > left and side(chain[right-1], chain[i], chain[j]):
+                    right -= 1
+            yield chain[start:left],strengths[start:left-1]
+            for member in chain[left:right]:
                 decisions[member['id']] = dict(person=None,status='withheld',role='auxiliary',
                     reason='different_face_root',track_blocker=dict(reason='different_face_root',cue=row['cue']))
-            start,previous = i,(i,owner)
+            start,previous = right,(i,owner)
         else:
             previous = i,owner
     if start<len(chain):
@@ -129,8 +142,18 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     from .body_origins import physical_key
     roots = {r['id']:owner for owner,bank in seeds.items() for r in bank}
     anonymous = {}
+    split_sides = {}
+    def side(row, own, other):
+        if own['id'] not in roots or other['id'] not in roots:
+            return False
+        score = scores.face_similarity(row['_vector'], own['_vector'])
+        rival = scores.face_similarity(row['_vector'], other['_vector'])
+        if score >= settings['match_threshold'] and score-rival >= max(.025,settings['ambiguity_margin']):
+            split_sides[row['id']] = (own['id'], other['id'])
+            return True
+        return False
     segments = (part for chain,strengths in paths(rows,settings,scores,record.get('occupied_cues',()))
-                for part in compatible_segments(chain,strengths,decisions))
+                for part in compatible_segments(chain,strengths,decisions,side=side))
     for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}
         if not known:
@@ -144,14 +167,23 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
                         prior['anonymous_fragment'] = str(key)
             continue
         owner = next(iter(known))
-        anchors = [(i,r) for i,r in enumerate(chain) if r['id'] in roots]
+        # Nearest roots on either side dominate more distant roots on that side.
+        left_routes, right_routes = {}, {}
+        for indices, routes, step in ((range(len(chain)),left_routes,1),
+                                      (range(len(chain)-1,-1,-1),right_routes,-1)):
+            root_id = None
+            for i in indices:
+                if chain[i]['id'] in roots:
+                    root_id, position, floor = chain[i]['id'], i, 1.
+                elif root_id is not None:
+                    floor = min(floor, strengths[i-1 if step==1 else i])
+                    routes[i] = (floor, -abs(i-position), root_id)
         for i,row in enumerate(chain):
             if row['id'] in decisions or copresent([row],seeds[owner]) or not guard.allows(row,seeds[owner],owner):
                 continue
-            # Both ends can establish ownership. Challenge the strongest
-            # admissible path against exactly the same frozen rivals.
-            routes = [(min(strengths[min(i,j):max(i,j)]), -abs(i-j), root['id'])
-                      for j,root in anchors if abs(i-j)<=12]
+            bracketed = i in left_routes and i in right_routes
+            routes = [bank[i] for bank in (left_routes,right_routes)
+                      if i in bank and (bank[i][1]>=-12 or bracketed)]
             if not routes:
                 continue
             floor, _, root_id = max(routes)
@@ -163,6 +195,8 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
                 reason='local_body_track',root=root_id,track_floor=floor,runner=rival,rival=rival_owner,
                 threshold=settings.get('track_similarity_threshold') if settings.get('track_similarity_threshold') is not None else settings['cohesion_threshold'],
                 required_margin=max(.025,settings['ambiguity_margin']))
+            if row['id'] in split_sides:
+                decisions[row['id']]['conflict_endpoints'] = split_sides[row['id']]
     return anonymous
 
 
@@ -197,7 +231,11 @@ def claim_fragments(rows,anonymous,decisions,frozen,guard,settings):
             if any(rival(r['id'])>=v[0]+settings['ambiguity_margin'] for r,v in zip(queries,matches)):
                 continue
             mean = sum(rankings[r['id']][owner][0] for r in votes)/len(votes)
-            runner = sum(rival(r['id']) for r in votes)/len(votes)
+            # A rival identity must explain the same physical votes. An
+            # ineligible owner cannot explain that cue; keep the per-cue veto above.
+            peers = set().union(*(rankings[r['id']] for r in votes)) - {owner}
+            runner = max((sum(rankings[r['id']][p][5] if p in rankings[r['id']] else -1.
+                              for r in votes)/len(votes) for p in peers), default=-1.)
             if mean>=settings['match_threshold'] and mean-runner>=settings['ambiguity_margin']:
                 options.append((owner,mean,runner))
         if len(options)==1:
