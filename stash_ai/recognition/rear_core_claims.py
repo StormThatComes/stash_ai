@@ -13,6 +13,8 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
     if not roots:
         return
     donors = {p:bank for p,bank in owners.items() if p not in seeds and p not in retained
+              and len({metadata[r['id']].get('view_shot') for r in bank} - {None}) >= 2
+              and any(decisions[r['id']]['reason']=='body_scene_core' for r in bank)
               and all(angles[r['id']]=='back' and not r.get('face_person') and
                       not metadata[r['id']].get('query_only') and not decisions[r['id']].get('view_exclusion')
                       and decisions[r['id']]['reason'] in ('body_scene_core','bracketed_scene_core','corroborated_rear_view')
@@ -24,7 +26,8 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
     # A scene discount only nominates brackets. Acceptance below still requires
     # ordinary same-view similarities and independent roots in distinct shots.
     relaxed = dict(settings,turn_similarity_discount=settings.get('turn_similarity_discount',.06)+scene_bonus)
-    edges = transitions(by_cue,geometry,metadata,signals,anchors,angles,relaxed,scores,occupied,cuts)
+    confirmed = {oid for oid in anchors if decisions[oid].get('role')=='anchor'}
+    edges = transitions(by_cue,geometry,metadata,signals,anchors,angles,relaxed,scores,occupied,cuts,confirmed=confirmed)
     gallery = TurnWitnesses(lookup,settings,scores)
     targets = defaultdict(set)
     for start in sorted(edges.keys()-{edge[0] for edge in edges.values()}):
@@ -91,7 +94,7 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
                                        for r in external):
                     continue
                 low = min(scores.face_similarity(row['_vector'],r['_vector']) for r in external)
-                ids = tuple(r['id'] for r,_,_ in pair)
+                ids = tuple(r['id'] for r in external)
                 record = (low, ids, tuple(k for _,ends,_ in pair for k in ends))
                 if best is None or record>best:
                     best = record
