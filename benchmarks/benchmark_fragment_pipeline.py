@@ -168,6 +168,39 @@ def freeze_challenge(db, config, scan):
                    policy='identity-physical', observation_exclusions=[('900001', sample(0,1))])
 
 
+def natural_goals(db, config, case):
+    """Label fixed synthetic observations against their independently face-rooted owner."""
+    if case == 'contact':
+        selection = "s.scene IN ('1','2') AND b.cue BETWEEN 27 AND 29"
+        truth = "((s.scene='1' AND actor=24) OR (s.scene='2' AND actor=39))"
+    else:
+        selection = "s.scene IN ('9','10')"
+        truth = 'actor=0'
+    rows = list(db.execute(f"""SELECT b.id,b.scan,b.cue,s.scene,
+        json_extract(b.quality,'$.benchmark_truth') actor FROM body_observations b
+        JOIN scans s ON s.id=b.scan WHERE {selection} AND {truth}
+        AND json_extract(b.quality,'$.quality.orientation')='back' ORDER BY actor,s.scene,b.cue"""))
+    if not rows:
+        raise ValueError('No benchmark labels for the selected natural challenge.')
+    groups, positives, negatives = [], [], []
+    for actor in sorted({row['actor'] for row in rows}):
+        owner = db.execute("""SELECT f.person FROM body_observations b JOIN members f ON f.observation=b.face
+            WHERE json_extract(b.quality,'$.benchmark_truth')=? GROUP BY f.person
+            ORDER BY count(*) DESC,f.person LIMIT 1""",(actor,)).fetchone()[0]
+        performer = str(910000+actor)
+        db.execute('UPDATE people SET performer=? WHERE id=?',(performer,owner))
+        groups.append([owner])
+        for row in rows:
+            if row['actor'] != actor:
+                continue
+            positives.append((performer,row['id']))
+            partners = db.execute("""SELECT id FROM body_observations WHERE scan=? AND cue=?
+                AND json_extract(quality,'$.benchmark_truth')<>?""",(row['scan'],row['cue'],actor))
+            negatives.extend((performer,other) for other, in partners)
+    return resolve(db,config,groups,by_performer=False,policy='identity-physical',
+                   observation_inclusions=positives,observation_exclusions=negatives)
+
+
 def measure(state,items,config):
     before = process_io()
     with sampled_rss() as rss:
@@ -183,7 +216,7 @@ def measure(state,items,config):
                 process_io={k:v-before[k] for k,v in process_io().items() if k in before})
 
 
-def run(config,size,cues,batch,trials,*,occupancy='periodic',varied_crops=False):
+def run(config,size,cues,batch,trials,*,occupancy='periodic',varied_crops=False,natural=None):
     if min(size,cues,batch,trials)<1:
         raise ValueError('Scene, cue, batch and trial counts must be positive.')
     data = plain(config.data)
@@ -202,7 +235,8 @@ def run(config,size,cues,batch,trials,*,occupancy='periodic',varied_crops=False)
                     selected=[]
                     timings=[]
                     for n in range(1,size+1):
-                        selected.append(seed_scene(state.connection,cfg,n,cues,faces,bodies,occupancy=occupancy,varied_crops=varied_crops))
+                        number = n+6 if natural=='rear' else n
+                        selected.append(seed_scene(state.connection,cfg,number,cues,faces,bodies,occupancy=occupancy,varied_crops=varied_crops))
                         if mode=='incremental' and (n%batch==0 or n==size):
                             first=((n-1)//batch)*batch
                             timings.append(measure(state,selected[first:n],cfg))
@@ -213,7 +247,8 @@ def run(config,size,cues,batch,trials,*,occupancy='periodic',varied_crops=False)
                         report['complete_selection']=measure(state,selected,cfg)
                         report['reconciled']=partition(state.connection)
                     else:
-                        goals = freeze_challenge(state.connection, cfg, selected[0]['scan'])
+                        goals = (natural_goals(state.connection,cfg,natural) if natural else
+                                 freeze_challenge(state.connection, cfg, selected[0]['scan']))
                         state.connection.commit()
                 if mode=='cold':
                     if goals is None:
@@ -249,6 +284,7 @@ def main():
     parser.add_argument('--varied-crops',action='store_true',help='Vary appearance, clothing and retained crop fingerprints.')
     parser.add_argument('--real-holdout',type=Path,help='Evaluate a manually labelled VTT manifest and its retained database.')
     parser.add_argument('--scope',help='Stash scope for the real holdout.')
+    parser.add_argument('--natural',choices=('contact','rear'),help='Replay frozen natural splits on two or four 300-cue random scenes.')
     args=parser.parse_args()
     config=load(args.config)
     if args.real_holdout:
@@ -261,6 +297,11 @@ def main():
             result = validate_winner(config,training,dict(scope=args.scope,namespace=namespace(config),
                 best_result=dict(changes=[])),args.real_holdout,compare_strategies=True)
         print(json.dumps(result),flush=True)
+        return
+    if args.natural:
+        size = 2 if args.natural=='contact' else 4
+        print(json.dumps(run(config,size,300,args.batch,args.solver_trials,occupancy='random',
+                             varied_crops=True,natural=args.natural)),flush=True)
         return
     for size in args.scenes:
         print(json.dumps(run(config,size,args.cues,args.batch,args.solver_trials,occupancy=args.occupancy,varied_crops=args.varied_crops)),flush=True)
