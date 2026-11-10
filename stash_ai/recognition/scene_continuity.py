@@ -36,6 +36,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
     # Build independent lanes. Every step needs an already recognised partner
     # in both cues, uniquely separated torsos, an unchanged shot and a rival margin.
     successors, incoming = {}, set()
+    measurements = {}
     for cue,left in by_cue.items():
         right = by_cue.get(cue+1,())
         if not all(pair([geometry[r['id']] for r in side]) for side in (left,right)):
@@ -63,10 +64,14 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
             alternate = max(scores.face_similarity(a['_vector'],rival['_vector']),
                             scores.face_similarity(left[1-i]['_vector'],b['_vector']))
             turn = angles[x]!=angles[y] and {angles[x],angles[y]} <= {'front','side','back'}
-            if score>=strict-(min(.06,margin/2+.01) if turn else 0) and score-alternate>=margin:
+            floor = max(0.,strict-(settings.get('turn_similarity_discount',.06) if turn else 0.))
+            if score>=floor and score-alternate>=margin:
+                measurements[x] = score,alternate,floor
                 successors[x] = y,partner
                 incoming.add(y)
 
+    from .turn_witnesses import TurnWitnesses
+    witnesses = TurnWitnesses(lookup,settings,scores)
     proposals, joins = {}, defaultdict(list)
     for start in sorted(successors.keys()-incoming):
         lane = [start]
@@ -94,37 +99,48 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained):
                             for key in middle)):
                     foreign = {decisions[key]['person'] for key in middle
                                if decisions[key]['status']=='accepted'}-{target}
-                    if not foreign:
+                    if not foreign or len(foreign)==1 and all(angles[key]=='back' for key in middle):
+                        roots = first,oid
+                        edges = [measurements[k] for k in lane[previous:at]]
+                        weakest = min(edges,key=lambda edge:edge[0]-edge[2])
+                        proof = dict(track_floor=weakest[0],threshold=weakest[2],runner=weakest[1],
+                                     required_margin=margin,turn_discount=settings.get('turn_similarity_discount',.06))
                         for key in middle:
-                            if decisions[key]['status']!='accepted':
-                                proposals[key] = target,first,oid
-                    elif len(foreign)==1 and all(angles[key]=='back' for key in middle):
-                        joins[next(iter(foreign)),target].append((first,oid))
+                            if angles[key] not in ('front','back','side'):
+                                continue
+                            # Pick one middle observation per episode as a potential witness.
+                            witnesses.add(target,angles[key],lookup[key],roots,metadata[key].get('view_shot'))
+                            if not foreign and decisions[key]['status']!='accepted':
+                                proposals[key] = target,roots,proof
+                            elif decisions[key]['person'] in foreign:
+                                joins[decisions[key]['person'],target].append((key,roots,proof))
             previous = at
 
     occupied = {owner:{r['cue'] for r in members} for owner,members in owners.items()}
-    for oid,(target,first,last) in proposals.items():
+    for oid,(target,roots,proof) in proposals.items():
         row = lookup[oid]
-        if row['cue'] not in occupied[target] and guard.allows(row,owners[target],target):
+        if row['cue'] in occupied[target] or not guard.allows(row,owners[target],target):
+            continue
+        corroboration = witnesses.verify(target,angles[oid],row,roots)
+        if corroboration:
             decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='bracketed_body_turn',
-                                  witness_ids=[first,last])
+                                  witness_ids=list(roots),**proof,**corroboration)
             occupied[target].add(row['cue'])
+
     targets = defaultdict(set)
     for donor,target in joins:
         targets[donor].add(target)
-    for (donor,target),episodes in sorted(joins.items()):
+    for (donor,target),members in sorted(joins.items()):
         if (len(targets[donor])!=1 or donor in seeds or donor in retained or target in targets or
                 occupied[donor] & occupied[target] or any(r.get('face_person') for r in owners[donor])):
             continue
-        endpoints = []
-        for a,b in episodes:
-            if a not in endpoints and b not in endpoints:
-                endpoints.extend((a,b))
-        if len(independent([lookup[k] for k in endpoints],settings))<4:
-            continue
-        if not all(guard.allows(r,owners[target],target) for r in owners[donor]):
-            continue
-        for row in owners[donor]:
-            decisions[row['id']].update(person=target,role='auxiliary',reason='bracketed_scene_core',
-                                        original_core=donor,witness_ids=endpoints[:4])
-        occupied[target].update(occupied[donor])
+        # Transfer only observations supported by an actual turn episode.
+        for oid,roots,proof in members:
+            row = lookup[oid]
+            if row['cue'] in occupied[target] or not guard.allows(row,owners[target],target):
+                continue
+            corroboration = witnesses.verify(target,angles[oid],row,roots,confirmed_core=True)
+            if corroboration:
+                decisions[oid].update(person=target,role='auxiliary',reason='bracketed_scene_core',
+                                      original_core=donor,witness_ids=list(roots),**proof,**corroboration)
+                occupied[target].add(row['cue'])

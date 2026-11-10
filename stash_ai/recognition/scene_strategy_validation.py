@@ -50,6 +50,18 @@ STRATEGY_KEYS = tuple('sapiensid.identities.'+key for key in (
     'tracklet_matching','endpoint_matching','scene_bonus_mode','body_first_matching','scene_match_bonus')) + ('clustering.same_scene_match_bonus',)
 
 
+def holdout_ablations(config):
+    """Hold the input evidence and thresholds fixed for all eight combinations."""
+    from itertools import product
+    base = variants(config)['tracks-1-evidence']
+    result = {}
+    for first,extended,turns in product((False,True),repeat=3):
+        data = plain(base.data)
+        data['sapiensid']['identities'].update(body_first_matching=first,extended_track_graph=extended,turn_recovery=turns)
+        result[f'order-{int(first)}-extended-{int(extended)}-turns-{int(turns)}'] = replace(base,data=data)
+    return result
+
+
 def training_profiles(config):
     from .merge_report_policy import parameter
     for name,variant in variants(config).items():
@@ -161,7 +173,9 @@ def strategy_summary(config,metrics,labels,locations,decisions):
         if owner is not None:
             identities[truth].add(owner)
     seq = metrics['sequences']
-    return dict(body_first_matching=settings.get('body_first_matching',False),tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
+    from .body_identity import turn_feature
+    return dict(extended_track_graph=turn_feature(settings,'extended_track_graph'), turn_recovery=turn_feature(settings,'turn_recovery'),
+                body_first_matching=settings.get('body_first_matching',False),tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
                 face_scene_bonus=config.data['clustering']['same_scene_match_bonus'],
                 physical_false_joins=metrics['physical']['false_merge_pairs'],scene_match_bonus=settings['scene_match_bonus'],
                 scene_bonus_mode=settings['scene_bonus_mode'],physical_coverage=metrics['physical']['coverage'],

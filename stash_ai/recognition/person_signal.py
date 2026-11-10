@@ -84,6 +84,10 @@ def validate(settings):
     validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
+    for key in ('extended_track_graph','turn_recovery'):
+        if identity.get(key) is not None and type(identity[key]) is not bool:
+            raise ValueError(f'sapiensid.identities.{key} must be boolean or null.')
+    _number(identity.get('turn_similarity_discount',.06),'sapiensid.identities.turn_similarity_discount',0,1)
     if type(identity.get('body_first_matching',False)) is not bool:
         raise ValueError('sapiensid.identities.body_first_matching must be boolean.')
     if type(identity.get('tracklet_matching',False)) is not bool:

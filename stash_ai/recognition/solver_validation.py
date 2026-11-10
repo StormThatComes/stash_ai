@@ -224,6 +224,12 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 # Direct evaluation without labelled training goals uses a fixed paired comparison.
                 order = ['paths-only-evidence', 'tracks-1-evidence']
             selected = {name:strategies[name] for name in order[:2]}
+        if compare_strategies:
+            from .scene_strategy_validation import holdout_ablations
+            controls = holdout_ablations(winner)
+            strategies.update(controls)
+            for name in ('order-0-extended-1-turns-1','order-1-extended-1-turns-1'):
+                selected[name] = controls[name]
         stress_variants = {'winner':winner, **selected}
         tested = ('baseline', *stress_variants)
         full = evaluate(settings,replay_labels,variants={'winner':winner,**strategies},variant_started=announce,**options)
@@ -367,9 +373,9 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=(),
     for field in ('withheld', 'extra_fragments', 'false_merge_pairs', 'projection_conflicts'):
         risk('physical_' + field, physical[0].get(field, 0), physical[1].get(field, 0), covered)
     sequences = [trial['sequences'] for trial in (base,final)]
-    for key in ('scene_id_switches', 'entrant_takeovers'):
+    for key in ('scene_id_switches','unrecovered_at_end','wrong_reacquisitions','entrant_takeovers'):
         risk(key, sequences[0].get(key,0), sequences[1].get(key,0),
-             all(key in seq for seq in sequences) and (covered if key=='scene_id_switches' else all(seq.get('entrant_episodes') for seq in sequences)))
+             all(key in seq for seq in sequences) and (covered if key!='entrant_takeovers' else all(seq.get('entrant_episodes') for seq in sequences)))
     first,last = (set(map(tuple,row.get('rooted_turns',()))) for row in sequences)
     risk('lost_turn_references',0,len(first-last),bool(first))
     before,after = (set(map(tuple,row.get('returned_people',()))) for row in sequences)

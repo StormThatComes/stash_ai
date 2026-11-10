@@ -36,7 +36,7 @@ def features(actors,dimensions):
     return (vectors/np.linalg.norm(vectors,axis=-1,keepdims=True)).astype('<f4')
 
 
-def seed_scene(db,config,number,cues,faces,bodies):
+def seed_scene(db,config,number,cues,faces,bodies, *, occupancy='periodic', varied_crops=False):
     scan = str(uuid.uuid5(uuid.NAMESPACE_URL,'fragment-benchmark-'+str(number)))
     ns = namespace(config)
     rng = np.random.default_rng(number)
@@ -48,11 +48,19 @@ def seed_scene(db,config,number,cues,faces,bodies):
     body_contract = contract(config)
     db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',(scan,'benchmark',str(number),ns,scan,
                scan_identity(config,ns),'{}','{}',cues,cues,'complete'))
+    crop_rng = np.random.default_rng(number+813)
+    occupied = {i for i in range(cues) if i%10<7}
+    if occupancy=='spread':
+        occupied = {i for i in range(cues) if i%10 not in (2,5,8)}
+    elif occupancy=='burst':
+        occupied = {i for i in range(cues) if i%30<21}
+    elif occupancy=='random':
+        occupied = set(np.random.default_rng(number+413).choice(cues,len(occupied),replace=False))
     seconds = 0.
     for cue in range(cues):
         seconds += int(rng.integers(1,26))
         records = [('',{'_body_cue':(scan,body_contract,cue)},None,None)]
-        if cue%10<7:
+        if cue in occupied:
             for side,actor in enumerate(actors):
                 actor = entrant if side == 0 and 52 <= cue%100 < 71 else int(actor)
                 view = (cue//3+side)%4
@@ -85,7 +93,16 @@ def seed_scene(db,config,number,cues,faces,bodies):
                        orientation=('front','side','back','side')[view])
                 body=dict(scan=scan,cue=cue,seconds=seconds,contract=body_contract,
                           face=None if rear else face,face_accepted=not rear,rejected=None)
-                feature = bodies[actor, clothes[side], view]
+                outfit = (clothes[side]+cue//100)%3 if varied_crops else clothes[side]
+                feature = bodies[actor, outfit, view]
+                if varied_crops:
+                    # Shared garment component for the pair plus independent crop noise.
+                    garment = bodies[0,outfit,0]
+                    noise = crop_rng.normal(size=feature.shape).astype('<f4')
+                    feature = feature + .35*garment + .14*noise/np.linalg.norm(noise)
+                    feature = feature/np.linalg.norm(feature)
+                    q.update(appearance_hash=np.packbits(feature[:64]>0).tobytes().hex(),
+                             pixel_digest=hashlib.sha256(feature.tobytes()).hexdigest())
                 if rear and side == 0:
                     # A change of pose leaves a near-threshold positive for the solver.
                     feature = .77*feature + .64*np.roll(feature, 41)
@@ -166,7 +183,7 @@ def measure(state,items,config):
                 process_io={k:v-before[k] for k,v in process_io().items() if k in before})
 
 
-def run(config,size,cues,batch,trials):
+def run(config,size,cues,batch,trials,*,occupancy='periodic',varied_crops=False):
     if min(size,cues,batch,trials)<1:
         raise ValueError('Scene, cue, batch and trial counts must be positive.')
     data = plain(config.data)
@@ -176,7 +193,7 @@ def run(config,size,cues,batch,trials):
     data['execution']['profile_rebuild'] = True
     validate(data)
     faces,bodies = (features(48,n) for n in (512,4096))
-    result = dict(scenes=size,cues_per_scene=cues,scenarios={})
+    result = dict(scenes=size,cues_per_scene=cues,occupancy=occupancy,varied_crops=varied_crops,scenarios={})
     with scope(config):
         for mode in ('cold','incremental'):
             with directory(prefix='fragment-pipeline-') as folder:
@@ -185,7 +202,7 @@ def run(config,size,cues,batch,trials):
                     selected=[]
                     timings=[]
                     for n in range(1,size+1):
-                        selected.append(seed_scene(state.connection,cfg,n,cues,faces,bodies))
+                        selected.append(seed_scene(state.connection,cfg,n,cues,faces,bodies,occupancy=occupancy,varied_crops=varied_crops))
                         if mode=='incremental' and (n%batch==0 or n==size):
                             first=((n-1)//batch)*batch
                             timings.append(measure(state,selected[first:n],cfg))
@@ -228,10 +245,25 @@ def main():
     parser.add_argument('--cues',type=int,default=300)
     parser.add_argument('--batch',type=int,default=32)
     parser.add_argument('--solver-trials',type=int,default=4)
+    parser.add_argument('--occupancy',choices=('periodic','spread','burst','random'),default='periodic')
+    parser.add_argument('--varied-crops',action='store_true',help='Vary appearance, clothing and retained crop fingerprints.')
+    parser.add_argument('--real-holdout',type=Path,help='Evaluate a manually labelled VTT manifest and its retained database.')
+    parser.add_argument('--scope',help='Stash scope for the real holdout.')
     args=parser.parse_args()
     config=load(args.config)
+    if args.real_holdout:
+        import sqlite3
+        from stash_ai.recognition.solver_validation import validate_winner
+        if not args.scope:
+            parser.error('--scope is required with --real-holdout')
+        with closing(sqlite3.connect(':memory:')) as training:
+            training.execute('CREATE TABLE scans(scope,namespace,scene)')
+            result = validate_winner(config,training,dict(scope=args.scope,namespace=namespace(config),
+                best_result=dict(changes=[])),args.real_holdout,compare_strategies=True)
+        print(json.dumps(result),flush=True)
+        return
     for size in args.scenes:
-        print(json.dumps(run(config,size,args.cues,args.batch,args.solver_trials)),flush=True)
+        print(json.dumps(run(config,size,args.cues,args.batch,args.solver_trials,occupancy=args.occupancy,varied_crops=args.varied_crops)),flush=True)
 
 
 if __name__=='__main__':
