@@ -74,6 +74,33 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     # A fragmented positive set alone does not establish which branch was wrong.
     from .threshold_boundaries import strictly_above
     tighter = []
+    turn_rows = [r for r in result if wrong.get(r['observation'],{}).get('constraint')=='exclusion'
+                 and r.get('status')=='accepted' and r['reason'] in
+                 ('bracketed_scene_core','bracketed_body_turn','corroborated_rear_view')]
+    from .body_reports import members as owners_of
+    sources = {oid for row in turn_rows for key in ('view_witnesses','view_roots')
+               for oid in row['turn_evidence'].get(key,())}
+    turn_owners = owners_of(target,settings,ids=sources) if sources else {}
+    for row in turn_rows:
+        evidence = row['turn_evidence']
+        roots = evidence.get('view_roots',())
+        if not roots or not evidence.get('view_witnesses'):
+            continue
+        if any(turn_owners.get(oid)!=row['owner'] for oid in roots):
+            continue
+        measured = row['measurements']
+        score = measured.get('view_score')
+        if score is None:
+            continue
+        runner = measured.get('view_runner',-1.)
+        for key,value in (('match_threshold',score),('ambiguity_margin',score-runner),
+                          ('ambiguity_margin',measured.get('edge_margin'))):
+            if value is None:
+                continue
+            path = 'sapiensid.identities.'+key
+            bound = strictly_above(value)
+            if parameter(settings.data,path)<bound<=1:
+                tighter.append({path:bound})
     for row in result:
         if wrong.get(row['observation'], {}).get('constraint') != 'exclusion':
             continue

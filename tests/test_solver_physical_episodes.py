@@ -124,3 +124,15 @@ def test_manual_binder_retains_people_when_every_binding_is_missing(tmp_path):
     assert report['metrics']['winner/joint']['physical']['observations']==3
     assert report['metrics']['winner/joint']['visible']['missing']==3
     assert report['verdict']['status']=='insufficient_coverage'
+
+
+def test_negative_constraint_precedes_partial_positive_coverage():
+    from stash_ai.recognition.merge_goals import objective
+    def trial(coverage, violated):
+        group = dict(assigned_fraction=1.,complete_fraction=1.,largest_complete_performers=1,
+                     consolidation_fraction=1.,fragments=1)
+        return dict(admissible=False,fully_solved=False,disjoint=True,cross_set_observation_pairs=0,
+                    groups=[group],positive_observations=[dict(satisfied=False,coverage=coverage)],
+                    observation_exclusions_satisfied=not violated,
+                    observation_exclusions=[dict(satisfied=not violated,matching_count=int(violated))])
+    assert objective(trial(.8,False))>objective(trial(.9,True))

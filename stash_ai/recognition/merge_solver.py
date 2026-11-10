@@ -487,7 +487,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             while any(n not in summaries and n not in failures for runs in scene_trials.values() for n in runs):
                 yield None
             qualified = [(label,runs[0]) for label,runs in scene_trials.items() if runs[0] in ranks]
-            leaders = sorted(qualified,key=lambda item:ranking(item[1]),reverse=True)[:2]
+            unique = {}
+            for label,name in qualified:
+                unique.setdefault(name,label)
+            leaders = [(unique[name],name) for name in sorted(unique,key=ranking,reverse=True)[:2]]
             finalists.extend(label for label,_ in leaders)
             boundaries = {n: feedback.get(n,{}).get('scene_boundaries',()) for _,n in leaders}
             for label,parent,changes in tuning_profiles(config,[(k,n,changes_for(n)) for k,n in leaders],boundaries):

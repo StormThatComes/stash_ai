@@ -325,15 +325,6 @@ def evaluate(config, goals, db, variants=None):
 
 def objective(status):
     """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
-    if 'positive_observations' in status:
-        rest = {k:v for k,v in status.items() if k != 'positive_observations'}
-        goals = status['positive_observations']
-        return (status['admissible'], sum(r['satisfied'] for r in goals),
-                sum(r.get('coverage',float(r['satisfied'])) for r in goals)/max(1,len(goals)),
-                -sum(r.get('wrong_owner_samples',0)/max(1,r.get('sample_count',1)) for r in goals)) + objective(rest) + (
-                -sum(r.get('owner_switches',0) for r in goals),
-                -max((r.get('longest_unmatched_run',0) for r in goals),default=0),
-                -max((r.get('longest_unmatched_cue_span',0) for r in goals),default=0))
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)
@@ -347,6 +338,16 @@ def objective(status):
         return (status['admissible'], satisfied(status),
                 -sum(not r['satisfied'] for r in results),
                 -sum(r['matching_count'] for r in results)) + objective(unguarded)
+    if 'positive_observations' in status:
+        rest = {k:v for k,v in status.items() if k != 'positive_observations'}
+        goals = status['positive_observations']
+        return (status['admissible'], status.get('disjoint', True),
+                -status.get('cross_set_evidence_pairs',status.get('cross_set_observation_pairs',0)), sum(r['satisfied'] for r in goals),
+                sum(r.get('coverage',float(r['satisfied'])) for r in goals)/max(1,len(goals)),
+                -sum(r.get('wrong_owner_samples',0)/max(1,r.get('sample_count',1)) for r in goals)) + objective(rest) + (
+                -sum(r.get('owner_switches',0) for r in goals),
+                -max((r.get('longest_unmatched_run',0) for r in goals),default=0),
+                -max((r.get('longest_unmatched_cue_span',0) for r in goals),default=0))
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import objective as identity_objective
         return identity_objective(status)
