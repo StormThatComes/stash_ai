@@ -39,7 +39,9 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             bank = roster[owner,angles[oid]]
             if len(bank)<8 and all(ref['cue']!=row['cue'] for ref in bank):
                 bank.append(row)
-    successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts)
+    confirmed = {oid for oid in anchors if decisions[oid].get('role')=='anchor'}
+    successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts,
+                             confirmed=confirmed)
     incoming = {edge[0] for edge in successors.values()}
     from .turn_witnesses import TurnWitnesses
     witnesses = TurnWitnesses(lookup,settings,scores)

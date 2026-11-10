@@ -1,6 +1,5 @@
 """Frozen, independently rooted appearance evidence for scene-local turns."""
 from collections import defaultdict
-from itertools import combinations
 
 from .body_identity import independent
 
@@ -36,11 +35,14 @@ class TurnWitnesses:
             score = self.scores.face_similarity(row['_vector'], member['_vector'])
             if score>=self.settings['match_threshold']:
                 eligible.append((member,ends,shot,score))
+        eligible.sort(key=lambda item:(-item[3],item[0]['id'],tuple(item[1])))
         if confirmed_core and len(roots)==2:
             for member,ends,_,score in eligible:
                 if score>=.9999 and len(independent([self.lookup[k] for k in (*roots,*ends)],self.settings))==4:
                     return dict(view_score=score,view_floor=.9999,view_witnesses=[member['id']],view_roots=list(ends))
-        for a,b in combinations(eligible,2):
+        # Visit pairs in descending order of their weaker score, with stable ties.
+        pairs = ((a,b) for i,b in enumerate(eligible) for a in eligible[:i])
+        for a,b in pairs:
             if set(a[1]).intersection(b[1]) or distinct_shots and a[2]==b[2]:
                 continue
             if distinct_shots and len(independent([a[0],b[0]],self.settings))<2:
