@@ -9,7 +9,7 @@ from .scan_heads import predicate
 @contextmanager
 def frozen(db, scope, namespace):
     db.execute("""CREATE TEMP TABLE rear_prior AS SELECT m.observation,b.scan,s.scene,
-        json_extract(m.proof,'$.previous') AS original FROM main.body_members m
+        json_extract(m.proof,'$.previous') AS original,json_extract(m.proof,'$.spanning_source') AS spanning_source FROM main.body_members m
         JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan
         WHERE s.scope=? AND s.namespace=? AND json_extract(m.proof,'$.reason')
         IN ('external_rear_view','external_rear_satellite') AND """+predicate(),(scope,namespace))
@@ -36,8 +36,10 @@ def apply(db, scan, decisions):
             decisions[oid] = json.loads(original)
     changed = False
     for oid,proof in decisions.items():
-        values = proof['person'],proof['role'],proof['status'],encoded(proof)
-        count = db.execute("""UPDATE main.body_members SET person=?,role=?,status=?,proof=? WHERE observation=?
-            AND (person IS NOT ? OR role<>? OR status<>? OR proof<>?)""",(*values,oid,*values)).rowcount
-        changed |= bool(count)
+        changed |= bool(write(db,oid,proof))
     return changed
+
+def write(db, oid, proof):
+    values = proof['person'],proof['role'],proof['status'],encoded(proof)
+    return db.execute("""UPDATE main.body_members SET person=?,role=?,status=?,proof=? WHERE observation=?
+        AND (person IS NOT ? OR role<>? OR status<>? OR proof<>?)""",(*values,oid,*values)).rowcount

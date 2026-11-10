@@ -338,6 +338,8 @@ class FaceDatabase(AbstractContextManager):
             # scene; avoid rescanning the entire identity catalog every time.
             db.execute('CREATE INDEX IF NOT EXISTS person_shared_embedding ON person_evidence(embedding) WHERE length(embedding)<256')
             db.execute('CREATE INDEX IF NOT EXISTS person_shared_crop ON person_evidence(crop) WHERE length(crop)<256')
+            from .rear_gallery import index_proofs
+            index_proofs(db)
             db.execute('CREATE INDEX IF NOT EXISTS people_scope_performer ON people(scope,performer)')
             db.execute("CREATE INDEX IF NOT EXISTS portraits_observation ON portraits(scope,person,"
                        "json_extract(metadata,'$.observation')) WHERE json_valid(metadata)")
