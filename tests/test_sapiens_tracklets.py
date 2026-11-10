@@ -135,3 +135,40 @@ def test_visual_track_uses_strongest_root_and_ignores_vtt_spacing():
     assert replay([0,1,2,3])==replay([0,15,40,110])
     rows[1]['quality'] = json.dumps({'quality':dict(view_shot=1,frame_signature='ee'*48)})
     assert all('0' not in [r['id'] for r in chain] for chain,_ in paths(rows,defaults(),scores))
+
+
+def test_joint_tracks_keep_both_people_and_disjoint_large_frames():
+    from stash_ai.recognition.body_tracklets import paths
+    from tests.test_contact_body_claims import body
+    for count in (2,5):
+        rows = []
+        for cue, angles in enumerate(((0,40),(12,31))):
+            for side in range(count):
+                row = body(f'{cue}-{side}',cue,40+side*20 if side<2 else 140*side)
+                q = json.loads(row['quality'])
+                q['quality']['detected_people'] = count
+                row['quality'] = json.dumps(q)
+                angle = math.radians(angles[side] if side<2 else 0)
+                row['_vector'] = np.array([math.cos(angle), math.sin(angle)])
+                rows.append(row)
+        found = list(paths(rows,defaults(),SimpleNamespace(face_similarity=np.dot)))
+        assert {tuple(r['id'] for r in chain) for chain,_ in found} == {
+            (f'0-{i}', f'1-{i}') for i in range(count)}
+
+
+def test_long_turn_needs_two_roots_and_conflict_preserves_supported_ends():
+    from tests.test_contact_body_claims import body
+    guard = SimpleNamespace(allows=lambda *args: True)
+    bank = SimpleNamespace(rank=lambda *args: [])
+    scores = SimpleNamespace(face_similarity=np.dot)
+    rows = [body(str(i),i,40) for i in range(31)]
+    for ends, expected in [([0],False),([0,30],True)]:
+        decisions = {str(i):dict(person='A') for i in ends}
+        plan({},rows,{'A':[rows[i] for i in ends]},decisions,defaults(),scores,guard,bank)
+        assert ('15' in decisions) == expected
+    rows = rows[:5]
+    for row, angle in zip(rows,(0,15,45,75,90)):
+        row['_vector'] = np.array([math.cos(math.radians(angle)),math.sin(math.radians(angle))])
+    decisions = {'0':dict(person='A'),'4':dict(person='B')}
+    plan({},rows,{'A':[rows[0]],'B':[rows[4]]},decisions,defaults(),scores,guard,bank)
+    assert [decisions[str(i)]['person'] for i in range(5)] == ['A','A',None,'B','B']

@@ -260,7 +260,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
             member = lookup[successor]
             skipped += member['cue']-previous['cue']-1
             previous = member
-            if skipped > 1 or member['cue'] - lookup[start]['cue'] > 12:
+            if skipped > 1 or (not settings.get('tracklet_matching') and member['cue'] - lookup[start]['cue'] > 12):
                 successor = None
                 break
             if member.get('face_person') is not None:
@@ -272,7 +272,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
         if not path:
             continue
         last = path[-1]
-        if successor in root and (lookup[successor]['cue'] - lookup[start]['cue'] > 12
+        if successor in root and ((not settings.get('tracklet_matching') and lookup[successor]['cue'] - lookup[start]['cue'] > 12)
                 or skipped + lookup[successor]['cue'] - previous['cue'] - 1 > 1):
             successor = None
         if root.get(successor) != owner:
@@ -281,6 +281,10 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                 stop = dict(reason='different_face_root', cue=lookup[successor]['cue'])
             for member in path:
                 decision = decisions[member['id']]
+                if decision.get('conflict_endpoints') and stop['reason'] == 'different_face_root':
+                    continue
+                if member['cue']-lookup[start]['cue'] > 12 and stop['reason'] != 'different_face_root':
+                    continue
                 decision['track_blocker'] = stop
                 if stop['reason'] == 'different_face_root':
                     decision.update(person=None, role='auxiliary', status='withheld', reason='different_face_root')
