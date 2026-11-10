@@ -17,10 +17,9 @@ def expand(db,selected,config):
     if first is None:raise ValueError('Consolidation requires an existing selected scan.')
     scope,namespace=first
     row=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-pending:'+digest([scope,namespace]),)).fetchone()
-    if row is None:return selected
-    if len(row[0].encode())>settings['execution']['plan_bytes']:
+    if row is not None and len(row[0].encode())>settings['execution']['plan_bytes']:
         raise ValueError('Consolidation queue exceeds plan_bytes.')
-    request=json.loads(row[0])
+    request=json.loads(row[0]) if row is not None else dict(format=1,scope=scope,namespace=namespace,pending=[])
     if (request.get('format')!=1 or request.get('scope')!=scope or request.get('namespace')!=namespace
             or not isinstance(request.get('pending'),list)):
         raise ValueError('Invalid recognition consolidation queue.')
@@ -49,4 +48,24 @@ def expand(db,selected,config):
             if compatible is None:eligible=False;break
             additions[scene]=dict(scene=scene,scan=current['id'])
         if eligible and len(chosen)+len(additions)<=policy['max_scenes']:chosen.update(additions)
+    if (len(chosen) < policy['max_scenes'] and settings['global_matching']['enabled']
+            and db.execute('PRAGMA user_version').fetchone()[0] >= 17):
+        from .alias_scene_index import retained_components
+        from .body_observations import contract
+        from .body_identity import policy as body_policy
+        stamp = digest([body_policy(config),settings['global_matching']])
+        for scenes in retained_components(db,scope,namespace,stamp):
+            missing = set(scenes) - chosen.keys()
+            if not missing or (allowed and not missing <= allowed) or len(missing)+len(chosen)>policy['max_scenes']:
+                continue
+            from .database import encoded
+            rows = db.execute("SELECT s.scene,s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND "
+                "s.scene IN (SELECT value FROM json_each(?)) AND s.status='complete' AND s.policy_sha=? AND "
+                +current_scan()+" AND s.total=(SELECT count(*) FROM body_cues b WHERE b.scan=s.id AND b.contract=?)",
+                (scope,namespace,encoded(sorted(missing)),scan_policy,contract(config)))
+            additions = {scene:dict(scene=scene,scan=scan) for scene,scan in rows}
+            if additions.keys()==missing:
+                chosen.update(additions)
+            if len(chosen)>=policy['max_scenes']:
+                break
     return sorted(chosen.values(),key=lambda item:(int(item['scene']),item['scan']))

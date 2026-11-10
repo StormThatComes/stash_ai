@@ -137,9 +137,13 @@ def _banks(db,config,scope,namespace):
                                 (encoded(proofs.get(person,[])),)):
             proof=json.loads(merge[0])
             if proof.get('route') not in ROUTES:continue
+            # Early endpoint merges persisted lists of cores rather than flat addresses.
+            cores = {owner:list(dict.fromkeys(oid for value in ids
+                     for oid in (value if isinstance(value,list) else [value])))
+                     for owner,ids in proof.get('cores',{}).items()}
             if proof.get('provisional_confirmation'):
-                confirmation.update(i for ids in proof.get('confirmation_witnesses',proof.get('cores',{})).values() for i in ids)
-            for owner,ids in proof.get('cores',{}).items():
+                confirmation.update(i for ids in proof.get('confirmation_witnesses',cores).values() for i in ids)
+            for owner,ids in cores.items():
                 if proof.get('body_witness_format',0)<2:
                     extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b JOIN body_members m ON m.observation=b.id '
                         'WHERE b.contract IN (SELECT value FROM json_each(?)) AND json_extract(m.proof,\'$.global_merge.source\')=? '

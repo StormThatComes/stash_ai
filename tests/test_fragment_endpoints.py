@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import pytest
 from types import SimpleNamespace
 
 from stash_ai.recognition.body_origins import origins_for_scene, physical_key
@@ -171,7 +172,8 @@ def test_different_side_appearances_and_open_fragment_keep_independent_faces():
     assert not open_nominations(looks,rows,d,roots,shots,scores,cfg,SimpleNamespace(allows=lambda *args: True))
 
 
-def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path):
+@pytest.mark.parametrize('owners', ['AB','ABC'])
+def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path, owners):
     from stash_ai.recognition.body_identity import policy
     from stash_ai.recognition.body_global import report
     from stash_ai.recognition.database import encoded
@@ -180,8 +182,8 @@ def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path):
     c.data['sapiensid']['global_matching']['enabled'] = True
     with FaceDatabase(c.database) as state:
         db = state.connection
-        for n, owner in enumerate(('A','B'),1):
-            direction = [1,0] if owner=='A' else [0,1]
+        for n, owner in enumerate(owners,1):
+            direction = np.eye(len(owners))[n-1].tolist()
             item, ids = scene(db,c,str(n),vectors=[direction]*5)
             db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',(owner,'scope','ns',n,None,owner))
             for cue,oid in enumerate(ids):
@@ -203,11 +205,23 @@ def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path):
         def proposal():
             merges = [d for d in report(db,c,'scope','ns')['decisions'] if 'endpoint_pair' in d]
             assert len(merges)==1
-            return merges[0]['endpoint_pair']
+            return merges[0]
         expected = proposal()
-        assert expected['people']==['A','B'] and expected['supporting_scans']==2
+        assert expected['people']==list(owners) and expected['endpoint_pair']['supporting_scans']==2
         db.execute('PRAGMA reverse_unordered_selects=ON')
         assert proposal()==expected
+        from stash_ai.recognition.body_global import reconcile
+        reconcile(state,[dict(scan=i,scene=s) for i,s in db.execute('SELECT id,scene FROM scans')],c)
+        db.commit()
+    with FaceDatabase(c.database) as state:
+        from stash_ai.recognition.body_global_banks import banks
+        db = state.connection
+        assert not banks(db,c,'scope','ns')['A']['missing_original']
+        for source,raw in list(db.execute('SELECT source,evidence FROM identity_merges')):
+            proof = json.loads(raw)
+            proof['cores'] = {owner:[ids] for owner,ids in proof['cores'].items()}
+            db.execute('UPDATE identity_merges SET evidence=? WHERE source=?',(encoded(proof),source))
+        assert not banks(db,c,'scope','ns')['A']['missing_original']
 
 
 def test_external_open_endpoint_needs_independent_faces_and_matching_body():
