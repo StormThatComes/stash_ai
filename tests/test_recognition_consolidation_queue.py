@@ -50,3 +50,23 @@ def test_stale_queue_never_executes_the_stored_merge(tmp_path):
             '(SELECT observation FROM members WHERE person=?)',(people[1],));db.commit()
         rebuild_selected(state,selected[:1],config)
         assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==0
+
+
+def test_body_queue_rebuilds_eligible_current_scans_within_retained_budget(tmp_path):
+    from tests.test_recognition_body_integration import seeded
+    from stash_ai.recognition.config import digest
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.alias_scene_index import remember
+    cfg,scans,_,people = seeded(tmp_path)
+    with FaceDatabase(cfg.database) as state:
+        db=state.connection
+        scope,ns=db.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
+        stamp=digest([policy(cfg),cfg.data['sapiensid']['global_matching']])
+        remember(db,scope,ns,stamp,people[:2],{'1','2'})
+        settings=cfg.data['sapiensid']['consolidation']
+        settings.update(scope='retained',max_scenes=1)
+        assert expand(db,scans[:1],cfg)==scans[:1]
+        settings['max_scenes']=2
+        assert expand(db,scans[:1],cfg)==scans[:2]
+        db.execute("UPDATE scans SET status='partial' WHERE id=?",(scans[1]['scan'],))
+        assert expand(db,scans[:1],cfg)==scans[:1]

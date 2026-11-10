@@ -11,7 +11,7 @@ def references(bank,config,evidence):
     threshold=config.data['sapiensid']['global_matching']['cohesion_threshold']
     maximum=config.data['sapiensid']['global_matching']['max_references']
     from .body_numeric import vector_digest
-    seen = {}
+    ambiguous_modes = {}
     independent = {r['id'] for r in bank['witnesses']}
     modes=[];radii=[];metadata=0
     for row in bank['cores'][0]:
@@ -20,8 +20,9 @@ def references(bank,config,evidence):
             raise ResourceLimit('Global body appearances exceed sapiensid.execution.reference_bytes.')
         query=evidence.feature(row);compatible=[]
         fingerprint = vector_digest(query)
-        if fingerprint in seen:
-            mode, offset = seen[fingerprint]
+        if fingerprint in ambiguous_modes:
+            mode = ambiguous_modes[fingerprint]
+            offset = 0
             if row['id'] in independent and modes[mode][offset]['id'] not in independent:
                 modes[mode][offset] = row
             continue
@@ -35,12 +36,13 @@ def references(bank,config,evidence):
             if lower>=threshold or evidence.compare([row],mode)[1]>=threshold:
                 compatible.append(index)
         if len(compatible)==1:
-            index=compatible[0];seen[fingerprint] = index,len(modes[index])
+            index=compatible[0]
             modes[index].append(row)
             pivot=evidence.feature(modes[index][0])
             radii[index]=max(radii[index],float(np.linalg.norm(query.astype('float64')-pivot))+1e-12)
         else:
-            seen[fingerprint] = len(modes),0
+            if compatible:
+                ambiguous_modes[fingerprint] = len(modes)
             modes.append([row]);radii.append(0.)
     # Weak appearances remain conservative competitors. They get no extra
     # support and cannot bypass the full original-core acceptance checks.
