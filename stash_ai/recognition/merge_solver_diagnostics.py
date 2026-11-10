@@ -131,7 +131,8 @@ def latest_decisions(db, observation_ids):
                 witnesses=list(proof.get('source_tracks') or proof.get('witness_ids') or ())[:8], rival=proof.get('rival'),
                 measurements={k:v for k,v in proof.items()
                     if type(v) in (int,float,bool)},
-                scene_probe=proof.get('scene_probe'), body_global=bool(proof.get('global_merge')), face_endpoints=proof.get('route')=='fragment_face_endpoints',
+                scene_probe=proof.get('scene_probe'), body_global=bool(proof.get('global_merge')), endpoint_body_gate=proof.get('endpoint_body_gate',False),
+                face_endpoints='fragment_face_endpoints' in (proof.get('route'),proof.get('reason')),
                 used_scene_bonus=bool(proof.get('roster_context') or proof.get('reason')=='external_rear_view' and proof.get('shot_context')),
                 **({'track_blocker':proof['track_blocker']} if proof.get('track_blocker') else {}),
                 **({'keypoint_rules':proof['anchor_keypoint_rules']} if 'anchor_keypoint_rules' in proof else {})))

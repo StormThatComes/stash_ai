@@ -16,6 +16,7 @@ class GoalIndex:
             oid for ids in goals.get('physical_alternatives', {}).values() for oid in ids)
         from .physical_goal import addresses
         self.observation_ids = frozenset(addresses(goals))
+        self.assessed_ids |= self.observation_ids
         self.observation_ids |= frozenset(r['id'] for g in goals['groups']
             for m in g['members'] + g.get('excluded_members', []) for r in m.get('excluded_observations', ()))
         from .merge_scene_exclusions import constraints

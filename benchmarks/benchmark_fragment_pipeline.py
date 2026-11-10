@@ -54,7 +54,7 @@ def seed_scene(db,config,number,cues,faces,bodies):
         records = [('',{'_body_cue':(scan,body_contract,cue)},None,None)]
         if cue%10<7:
             for side,actor in enumerate(actors):
-                actor = entrant if side == 0 and cue//25 % 4 == 2 else int(actor)
+                actor = entrant if side == 0 and 52 <= cue%100 < 71 else int(actor)
                 view = (cue//3+side)%4
                 position = side if cue//25 % 2 == 0 else 1-side
                 x = 20 + position*(28 if cue%25 in (4,5) else 130)
@@ -62,7 +62,7 @@ def seed_scene(db,config,number,cues,faces,bodies):
                 oid = str(uuid.uuid5(uuid.UUID(scan),f'body-{cue}-{side}'))
                 # Keep detected face rows on rear views, with no usable embedding.
                 rear = view==2
-                quality = encoded(dict(pixels=96,sharpness=120,pose_deviation=.05,view_shot=cue//25,
+                quality = encoded(dict(pixels=96,sharpness=120,pose_deviation=.05,view_shot=cue-cue%25,
                                        visible_face_fraction=.96,visibility=dict(contract=CONTRACT_ID)))
                 rect = [x,12,48,48]
                 geometry = rect+[x+14,28,x+34,28,x+24,37,x+16,48,x+32,48,.99]
@@ -73,12 +73,15 @@ def seed_scene(db,config,number,cues,faces,bodies):
                 points = [[x+27,25]]*17
                 points = list(points)
                 for joint,dx,y in ((5,10,44),(6,42,44),(11,15,93),(12,38,93)):
-                    points[joint]=[x+(52-dx if rear else dx),y]
+                    width = dx if rear else 52-dx
+                    if view in (1,3):
+                        width = 26 + (width-26)*.25
+                    points[joint]=[x+width,y]
                 if rear:
                     points[1:3]=[[-1,-1],[-1,-1]]
                 person=dict(bounds=[x,8,x+54,125],keypoints=points,score=.99)
                 q=dict(keypoints=15,width=54,height=117,sharpness=120.,overlap=.48 if cue%25 in (4,5) else 0.,detected_people=2,
-                       pixel_digest=oid,view_shot=cue//25,frame_signature=('11' if cue//25%2==0 else 'ee')*48,
+                       pixel_digest=oid,view_shot=cue-cue%25,frame_signature=('112233' if cue//25%2==0 else '8833bb')*16,
                        orientation=('front','side','back','side')[view])
                 body=dict(scan=scan,cue=cue,seconds=seconds,contract=body_contract,
                           face=None if rear else face,face_accepted=not rear,rejected=None)
@@ -89,6 +92,8 @@ def seed_scene(db,config,number,cues,faces,bodies):
                     feature = feature/np.linalg.norm(feature)
                 records.append((oid,dict(_body=body,person=person,quality=q,benchmark_truth=actor),feature,None))
         save_records(db,config,records)
+    db.execute('INSERT INTO metadata(key,value) VALUES (?,?)',
+               ('cue-view-shots:'+scan, encoded([[cue,cue] for cue in range(0,cues,25)])))
     db.commit()
     return dict(scene=str(number),scan=scan)
 

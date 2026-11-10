@@ -5,7 +5,7 @@ from .merge_goal_index import evaluation_scope
 
 
 def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity', scene_exclusions=(),
-            observation_exclusions=(), physical_pairs=()):
+            observation_exclusions=(), physical_pairs=(), observation_inclusions=(), track_inclusions=()):
     from .merge_goal_identity import POLICY, freeze
     from .merge_goal_sets import freeze_set
     from .reference_roles import strict_sql
@@ -100,6 +100,9 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
         result['scene_exclusions'] = exclusions
     if samples:
         result['observation_exclusions'] = samples
+    if observation_inclusions or track_inclusions:
+        from .positive_observations import freeze
+        freeze(db, config, result, owners, observation_inclusions, track_inclusions)
     if exclusions or samples:
         freeze_targets(db, config, result)
     return result
@@ -156,7 +159,9 @@ def execute(args, config):
                                  policy=getattr(args, 'goal_policy', 'identity'),
                                  scene_exclusions=getattr(args, 'exclude_performer_scene', None) or (),
                                  observation_exclusions=getattr(args, 'exclude_performer_observation', None) or (),
-                                 physical_pairs=getattr(args,'physical_pair',()))
+                                 physical_pairs=getattr(args,'physical_pair',()),
+                                 observation_inclusions=getattr(args,'include_performer_observation',()),
+                                 track_inclusions=getattr(args,'include_performer_track',()))
             with report_phase('Fingerprint retained inputs'):
                 result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
@@ -306,6 +311,8 @@ def assess(goals, observations, retained, predicted):
         apply(goals, result, observations, predicted)
     from .merge_goal_samples import attach
     from .merge_scene_exclusions import apply as apply_exclusions
+    from .positive_observations import assess as assess_positive
+    assess_positive(goals, result, observations, predicted)
     return apply_exclusions(goals, attach(goals, result, observations, predicted), observations, predicted)
 
 
@@ -318,6 +325,9 @@ def evaluate(config, goals, db, variants=None):
 
 def objective(status):
     """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
+    if 'positive_observations' in status:
+        rest = {k:v for k,v in status.items() if k != 'positive_observations'}
+        return (status['admissible'], sum(r['satisfied'] for r in status['positive_observations'])) + objective(rest)
     if 'outside_preserved' in status:
         unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
         return (status['outside_preserved'],) + objective(unguarded)
@@ -353,6 +363,7 @@ def unmet_conditions(status):
     """Every unsatisfied goal, including empty members and cross-set merges."""
     from .merge_scene_exclusions import KINDS
     violations = list(status.get('outside_violations', []))
+    violations.extend(dict(r, reason='positive_observation_unmatched') for r in status.get('positive_observations', ()) if not r['satisfied'])
     violations.extend(r for kind in KINDS for r in status.get(kind + '_exclusion_violations', ()))
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import unmet

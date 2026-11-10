@@ -5,6 +5,7 @@ from .database import encoded
 
 def addresses(goals):
     ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    ids.update(oid for item in goals.get('positive_observations', ()) for oid in item['observation_ids'])
     return ids | {oid for source in ids for oid in goals.get('physical_alternatives', {}).get(source, ())}
 
 

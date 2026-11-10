@@ -563,7 +563,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
         if angle == 'endpoint_faces' and oid in opened and proof == opened[oid][1]:
             decisions[oid]['local_face_root'] = previous['open_face_root']['observation']
         if angle == 'endpoint_faces':
-            decisions[oid].update(reason='fragment_face_endpoints',perspective=geometry[oid][0].get('orientation'))
+            decisions[oid].update(reason='fragment_face_endpoints',route='fragment_face_endpoints',
+                                  face_threshold=settings['face_threshold'], face_margin=settings['face_margin'],
+                                  face_score=score, endpoint_body_gate=oid in opened and proof==opened[oid][1], perspective=geometry[oid][0].get('orientation'))
         if angle not in ('crossing','endpoint_faces'):
             decisions[oid].update(rival_evidence.get((oid,owner,score),{}))
         if angle not in ('crossing','endpoint_faces') and score<settings['match_threshold']:
