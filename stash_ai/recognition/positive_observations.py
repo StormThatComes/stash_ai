@@ -241,6 +241,9 @@ def external_probes(db, config, goals, expected, decisions):
         return
     settings = config.data['sapiensid']['identities']
     labels = {oid for item in goals['positive_observations'] for oid in item['observation_ids']}
+    # Include the linked physical projection when a user labelled only its face.
+    labels.update(r[0] for r in db.execute("SELECT id FROM body_observations WHERE face IN "
+                 "(SELECT value FROM json_each(?))",(encoded(sorted(labels)),)))
     with scope(config), closing(connect()) as pages:
         gallery = load(db,config,goals['scope'],namespace(config),pages=pages)
         sql = "SELECT id,scan,embedding,quality FROM body_observations WHERE id IN (SELECT value FROM json_each(?))"
@@ -252,14 +255,22 @@ def external_probes(db, config, goals, expected, decisions):
                 continue
             ranked = gallery.rank(vector(raw),raw['scan'],settings,q.get('pixel_digest'),angle)
             # A held-out label (including a face endpoint) cannot vote for itself.
-            independent = [hit for hit in ranked if not any(
-                labels.intersection([w['id'],*w['roots']]) for w in hit[4])]
+            independent = []
+            for hit in ranked:
+                if any(labels.intersection([w['id'],*w['roots']]) for w in hit[4]):
+                    # It cannot provide positive support, but its similarity still
+                    # challenges a different owner just as in Gallery.score_bank.
+                    independent.append((-1.,-1.,hit[2],hit[3],(),hit[5]))
+                else:
+                    independent.append(hit)
             best = winner(independent,settings)
             probe = row['label_probe']
             probe['external_gallery'] = dict(owner=best[2],score=best[0],minimum=best[1],
                 witnesses=[w['id'] for w in best[4]],reason='verified_view') if best else dict(
                 reason='no_separated_view' if ranked else 'no_nominated_view')
-            if best and best[2]==expected[raw['id']]:
+            from .merge_solver_diagnostics import physical_veto
+            if best and best[2]==expected[raw['id']] and not physical_veto(probe['stage']):
+                probe['local_stage'] = probe['stage']
                 probe['stage'] = 'external_view_requires_reconciliation'
 
 
