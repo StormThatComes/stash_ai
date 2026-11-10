@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v36-physical-face-conflicts',contract(config),matching_policy(config),
+    return digest(['body-local-v37-evidence-scene-presence',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -265,6 +265,10 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
     origins=origins_for_scene(db,record,rows)
     record = dict(record)
+    shot_map = db.execute('SELECT value FROM metadata WHERE key=?',('cue-view-shots:'+scan,)).fetchone()
+    record['cut_starts'] = tuple(start for start,shot in json.loads(shot_map[0]) if shot is not None) if shot_map else ()
+    if not record['cut_starts']:
+        record['cut_starts'] = tuple(sorted({q for r in rows if isinstance(q:=quality(r).get('view_shot'),int)}))
     record['occupied_cues'] = [r[0] for r in db.execute(
         'SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION SELECT cue FROM observations WHERE scan=?',
         (scan,expected,scan))]
@@ -449,12 +453,16 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             d.update(person=track,role='auxiliary',status='provisional',reason='anonymous_body_track')
     from .scene_fragments import preserve_fragments, attach_with_scene_support
     preserve_fragments(record,borderline,decisions,settings,scores,guard)
-    attach_with_scene_support(rows,groups,seeds,decisions,config,scores,guard)
+    from .roster_presence import EntrantPaths
+    starts = record.get('cut_starts',())
+    entrants = EntrantPaths(rows,anonymous,settings,starts) if settings.get('scene_bonus_mode')=='evidence' and anonymous else None
+    attach_with_scene_support(rows,groups,seeds,decisions,config,scores,guard,cut_starts=starts,entrants=entrants)
     from .body_perspectives import recover
     track_settings = dict(settings,face_threshold=config.data['recognition']['match_threshold'],
                           face_margin=config.data['recognition']['ambiguity_margin'],scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))
-    recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()))
+    recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()),
+            cut_starts=starts, entrants=entrants)
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:

@@ -609,9 +609,10 @@ in consecutive cues of the same measured shot. The proposal is validated by the 
 ### Comparing body recognition strategies
 
 Add `--compare-scene-strategies` to a run with `--solve --solver-validation holdout.json`.
-It replays nine strategies on the same retained embeddings. The routes are tracklets off, local paths only, and paths with independent face endpoints,
-each with the body scene bonus disabled, fixed or evidence-weighted. The positive
-bonus uses the finalist's effective value, then the face scene bonus, then 0.03.
+It screens fourteen strategies. Four matched controls toggle face and body scene support independently
+with paths and face endpoints enabled. The other families compare local paths, endpoints and fixed
+or evidence-weighted context. Use at least 20 trials for finalist refinement; labelled roster returns
+and partner exclusions supply bonus and margin boundaries on training scenes.
 The `holdout_validation.scene_strategies` rows give the effective settings,
 physical coverage, accepted fragments per labelled performer, own-ID turns,
 contact exits and partner swaps. Training merge goals select two strategies for the same held-out omission, contact and import-order replays. The `entrant` slice labels newly appearing performers. Ordinary labelled cues contribute physical coverage, false joins and fragmentation to the verdict.

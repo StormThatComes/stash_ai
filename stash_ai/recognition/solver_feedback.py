@@ -28,6 +28,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     targets = deficits(goals, membership, membership)
     set_targets = {item['set']:item['target'] for item in targets['sets']}
     wrong = {}
+    expected, forbidden_by_observation = {}, {}
     destination_sets = {}
     for group in goals['groups']:
         for member in group['members']:
@@ -40,6 +41,8 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
         for member in group['members']:
             for row in member['observations']:
                 owner = membership.get(row['id'])
+                if wanted and destination_sets.get(wanted)=={group['index']}:
+                    expected[row['id']] = wanted
                 if owner and len(destination_sets[owner])>1:
                     wrong[row['id']] = dict(expected=wanted,constraint='between_sets')
                 elif owner and wanted and owner != wanted:
@@ -47,6 +50,7 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     for item in negatives:
         forbidden = {membership.get(oid) for oid in item['target_observation_ids']} - {None}
         for oid in item['observation_ids']:
+            forbidden_by_observation.setdefault(oid,set()).update(forbidden)
             if membership.get(oid) in forbidden:
                 wrong[oid] = dict(expected=None, constraint='exclusion')
     # A fragmented positive set alone does not establish which branch was wrong.
@@ -91,6 +95,9 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     from .merge_solver_tighten import route_parameters, body_supported
     face_references = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']
                        if r.get('goal_role') == 'reference' and r.get('evidence_kind', 'face') == 'face'}
+    from .scene_strategy_validation import measured_context
+    latest_feedback['scene_boundaries'] = measured_context(settings.data['sapiensid']['identities'],
+        result,expected,forbidden_by_observation)
     latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
         matching_parameters=route_parameters(r for r in result if r['observation'] in target_ids),
         fallback_references=sum(r['status'] == 'accepted' and r['observation'] in face_references and body_supported(r)

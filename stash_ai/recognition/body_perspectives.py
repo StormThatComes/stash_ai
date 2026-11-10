@@ -58,7 +58,7 @@ def orientation(person):
     return orientation_measurement(person)['label']
 
 
-def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
+def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut_starts=(), entrants=None):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
     from .body_identity import quality
     if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
@@ -339,7 +339,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                                             bonus=settings['scene_context_bonus'])
     if settings.get('scene_context_bonus',0.)>0:
         record_scene_roster(by_cue,root,shot_ids,partial,decisions,settings.get('roster_support',3),
-                            weighted=settings.get('scene_bonus_mode')=='evidence',settings=settings)
+                            weighted=settings.get('scene_bonus_mode')=='evidence',settings=settings,cut_starts=cut_starts)
     for cue in partial:
         for row in by_cue[cue]:
             decision = decisions[row['id']]
@@ -489,6 +489,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=()):
                     entrant_banks[own] = independent((r for r in owner_rows.get(own[0],())
                         if r['cue'] in shot_ids and shot_ids[r['cue']]!=own[1]),settings)
                 entrant = entrant_score(scores,row,entrant_banks[own],settings,settings['scene_context_bonus'])
+                if entrants:
+                    entrant = entrants.challenge(row,[w for w,_ in external],scores,entrant)
                 if entrant>runner:
                     runner,rival = entrant,'new_participant'
             measurements = dict(minimum=low, threshold=settings['match_threshold']-bonus,
@@ -598,7 +600,7 @@ def separated_proposals(candidates,decisions,lookup,margin):
     return output
 
 
-def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False, settings=None):
+def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, weighted=False, settings=None, cut_starts=()):
     from .body_identity import independent, defaults
     settings = settings or defaults()
     sources = defaultdict(list)
@@ -626,7 +628,7 @@ def record_scene_roster(by_cue, roots, shots, partial, decisions, minimum, *, we
                 witnesses = [r['id'] for r in other_shots[:minimum]]
             if weighted:
                 from .roster_presence import Presence
-                presence = Presence(other_shots,shots)
+                presence = Presence(other_shots,shots,cut_starts)
             for row in ids:
                 oid = row['id']
                 proof_ids = witnesses

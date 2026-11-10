@@ -97,13 +97,13 @@ def test_weak_face_preserves_the_anonymous_neighbours_without_naming_them():
     assert decisions['1']['person']=='A'
 
 
-def test_presence_is_independent_of_thumbnail_sampling_rate():
+def test_presence_uses_actual_missing_cue_count():
     from stash_ai.recognition.roster_presence import Presence
     def weight(step):
         shots={i*step:i for i in range(5)}
         roots=[dict(id=str(i),seconds=i*10,cue=i*step) for i in (0,2,4)]
         return Presence(roots,shots).weight(dict(cue=step,seconds=10))
-    assert weight(1)==weight(5)
+    assert weight(1)[0]>weight(5)[0]
 
 
 def test_visual_track_uses_strongest_root_and_ignores_vtt_spacing():
@@ -191,3 +191,13 @@ def test_weak_face_conflict_requires_two_independent_roots():
     plan({}, rows, {'A':[rows[0],rows[2]]}, decisions, defaults(),
          SimpleNamespace(face_similarity=np.dot), guard, bank)
     assert decisions['1']['person'] == 'B'
+
+
+def test_independent_entrant_after_cut_challenges_only_a_mismatching_bank():
+    from tests.test_contact_body_claims import body
+    from stash_ai.recognition.roster_presence import EntrantPaths
+    rows = [body(str(i),i,30,view_shot=5) for i in (5,6,7)]
+    tracks = EntrantPaths(rows,dict.fromkeys(('5','6','7'),'local'),defaults(),(0,5))
+    scores = SimpleNamespace(compare=lambda a,b:(1. if b[0] in rows else .60,1.))
+    assert tracks.challenge(rows[0],[{'id':'other'}],scores,.7)==1.
+    assert tracks.challenge(rows[0],rows[1:],scores,.7)==.7

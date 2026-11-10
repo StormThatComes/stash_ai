@@ -489,7 +489,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             qualified = [(label,runs[0]) for label,runs in scene_trials.items() if runs[0] in ranks]
             leaders = sorted(qualified,key=lambda item:ranking(item[1]),reverse=True)[:2]
             finalists.extend(label for label,_ in leaders)
-            for label,parent,changes in tuning_profiles(config,[(k,n,changes_for(n)) for k,n in leaders]):
+            boundaries = {n: feedback.get(n,{}).get('scene_boundaries',()) for _,n in leaders}
+            for label,parent,changes in tuning_profiles(config,[(k,n,changes_for(n)) for k,n in leaders],boundaries):
                 if trials>=search_limit:
                     break
                 name = scene_trial(label,parent,changes,'scene_refinement')

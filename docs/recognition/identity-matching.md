@@ -902,5 +902,5 @@ The fragmentation report includes recorded face/body and body/body split
 examples and pending global merges with their required scene selections.
 Replaying that selection revalidates current evidence. The optional solver
 comparison `--compare-scene-strategies` tests families on training goals
-within `--max-trials`; provide a budget above 12 for independent finalist
+within `--max-trials`; provide a budget above 14 for independent finalist
 tuning. The holdout reports back, contact and entrant coverage separately.

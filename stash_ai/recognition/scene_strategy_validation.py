@@ -27,11 +27,22 @@ def variants(config):
         data = plain(off.data)
         data['sapiensid']['identities']['endpoint_matching'] = True
         result[f'endpoints-only-{mode}'] = replace(config,data=data)
-    return result
+    # Keep paths/endpoints identical in the four modality controls. Screen
+    # them first even when the remaining trial budget is small.
+    controls = {}
+    for body in ('off', 'evidence'):
+        name = f'tracks-1-{body}'
+        for face in (False, True):
+            data = plain(result[name].data)
+            data['clustering']['same_scene_match_bonus'] = (
+                config.data['clustering']['same_scene_match_bonus'] or .03) if face else 0.
+            label = name if face else name+'-noface'
+            controls[label] = replace(config,data=data)
+    return {**controls, **{name:v for name,v in result.items() if name not in controls}}
 
 
 STRATEGY_KEYS = tuple('sapiensid.identities.'+key for key in (
-    'tracklet_matching','endpoint_matching','scene_bonus_mode','scene_match_bonus'))
+    'tracklet_matching','endpoint_matching','scene_bonus_mode','scene_match_bonus')) + ('clustering.same_scene_match_bonus',)
 
 
 def training_profiles(config):
@@ -40,8 +51,37 @@ def training_profiles(config):
         yield name,{k:parameter(variant.data,k) for k in STRATEGY_KEYS}
 
 
-def tuning_profiles(config, families):
+def measured_context(settings, decisions, expected, forbidden):
+    """Return strict feasible boundaries for labelled roster returns and exclusions."""
+    from .threshold_boundaries import at_or_above, at_or_below
+    positive, negative = [], []
+    for row in decisions:
+        probe = row.get('scene_probe')
+        if not probe or probe['weight']<=0:
+            continue
+        owner, oid = probe['owner'], row['observation']
+        need = (settings['match_threshold']-probe['score'])/probe['weight']
+        gap = probe['score']-probe['runner']
+        if owner in forbidden.get(oid,()):
+            negative.append((need,gap))
+        elif owner == expected.get(oid):
+            positive.append((need,gap))
+    if not positive:
+        return []
+    bonus = at_or_above(max(0., max(need for need,_ in positive)))
+    margin = at_or_below(min(1., min(gap for _,gap in positive)))
+    if bonus>.1 or margin<0 or any(need<=bonus and gap>=margin for need,gap in negative):
+        return []
+    strict = {'sapiensid.identities.scene_match_bonus':bonus,
+              'sapiensid.identities.ambiguity_margin':margin}
+    return [strict]
+
+
+def tuning_profiles(config, families, boundaries=None):
     from .merge_report_policy import parameter
+    for name,trial,patch in families:
+        for update in (boundaries or {}).get(trial,()):
+            yield name,trial,dict(patch,**update)
     # Alternate families so a short remaining trial budget is shared fairly.
     for key in ('sapiensid.identities.match_threshold','sapiensid.identities.track_similarity_threshold',
                 'recognition.match_threshold'):
@@ -117,6 +157,7 @@ def strategy_summary(config,metrics,labels,locations,decisions):
             identities[truth].add(owner)
     seq = metrics['sequences']
     return dict(tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
+                face_scene_bonus=config.data['clustering']['same_scene_match_bonus'],
                 physical_false_joins=metrics['physical']['false_merge_pairs'],scene_match_bonus=settings['scene_match_bonus'],
                 scene_bonus_mode=settings['scene_bonus_mode'],physical_coverage=metrics['physical']['coverage'],
                 slices={name:{k:values[k] for k in ('observations','coverage','extra_fragments','false_merge_pairs')}

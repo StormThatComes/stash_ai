@@ -33,7 +33,7 @@ def test_all_strategy_families_share_retained_observations(tmp_path):
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
         result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
                                manifest,compare_strategies=True)
-    assert len(result['scene_strategies'])==12
+    assert len(result['scene_strategies'])==14
     assert result["verdict"]["status"]=="insufficient_coverage"
     assert result["verdict"]["slice_coverage"]["entrant"]==dict(observations=0,performers=0)
     assert all(r['fragments_per_performer']=={'A':1} for r in result['scene_strategies'].values())
@@ -93,10 +93,10 @@ def test_training_screens_and_tunes_two_families_within_solver_budget(tmp_path):
     config,_,_ = body_handoff(tmp_path)
     with closing(_open_readonly(config.database)) as db:
         goals = resolve(db,config,[['900']],policy='identity-physical')
-        result = solve(config,goals,db,maximum=16,compare_scene_strategies=True)
-    assert result['search']['scene_families_tested']==12
+        result = solve(config,goals,db,maximum=20,compare_scene_strategies=True)
+    assert result['search']['scene_families_tested']==14
     assert len(result['search']['scene_finalists'])==2
-    assert result['search']['attempted']<=16
+    assert result['search']['attempted']<=20
     assert any(t.get('search_phase')=='scene_refinement' for t in result['simulation']['trials'].values())
 
 
@@ -107,3 +107,31 @@ def test_omission_detects_shared_partner_with_conflicting_projections():
     after = dict(before, body=dict(accepted_identity='B'))
     damage = omission_damage(labels, locations, labels, before, after)
     assert damage['new_projection_conflicts'] == damage['new_partner_claims'] == 1
+
+def test_context_controls_and_labelled_threshold_boundaries(tmp_path):
+    from stash_ai.recognition.scene_strategy_validation import variants, measured_context
+    cfg = configuration(tmp_path)
+    rows = list(variants(cfg).values())[:4]
+    assert {(v.data['clustering']['same_scene_match_bonus']>0,
+             v.data['sapiensid']['identities']['scene_match_bonus']>0) for v in rows} == {
+                 (a,b) for a in (False,True) for b in (False,True)}
+    probes = [dict(observation=k,scene_probe=dict(owner='A',score=v,runner=r,weight=1.))
+              for k,v,r in [('return',.82,.65),('entrant',.83,.75)]]
+    result, = measured_context({'match_threshold':.85},probes,{'return':'A'},{'entrant':{'A'}})
+    assert abs(result['sapiensid.identities.scene_match_bonus']-.03)<.000002
+    assert result['sapiensid.identities.ambiguity_margin']>.16
+
+def test_all_four_control_settings_survive_normalization_and_yaml_diff(tmp_path):
+    from stash_ai.recognition.scene_strategy_validation import training_profiles
+    from stash_ai.recognition.merge_report_policy import patched, proposal, parameter
+    from stash_ai.recognition.merge_solver_domains import normalize
+    cfg = configuration(tmp_path)
+    cfg.data['clustering']['same_scene_match_bonus'] = .03
+    cfg.data['sapiensid']['identities']['scene_match_bonus'] = None
+    controls = set()
+    for name, settings in list(training_profiles(cfg))[:4]:
+        patch = proposal(cfg,normalize(cfg,settings))
+        replay = patched(cfg,{row['parameter']:row['proposed'] for row in patch['changes']})
+        controls.add((replay.data['clustering']['same_scene_match_bonus'],
+                      parameter(replay.data,'sapiensid.identities.scene_match_bonus')))
+    assert controls == {(a,b) for a in (0.,.03) for b in (0.,.03)}
