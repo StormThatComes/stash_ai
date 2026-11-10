@@ -16,8 +16,7 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
               and len({metadata[r['id']].get('view_shot') for r in bank} - {None}) >= 2
               and any(decisions[r['id']]['reason']=='body_scene_core' for r in bank)
               and all(angles[r['id']]=='back' and not r.get('face_person') and
-                      not metadata[r['id']].get('query_only') and not decisions[r['id']].get('view_exclusion')
-                      and decisions[r['id']]['reason'] in ('body_scene_core','bracketed_scene_core','corroborated_rear_view')
+                      decisions[r['id']]['reason'] in ('body_scene_core','bracketed_scene_core','corroborated_rear_view')
                       for r in bank)}
     if not donors:
         return
@@ -30,6 +29,7 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
     edges = transitions(by_cue,geometry,metadata,signals,anchors,angles,relaxed,scores,occupied,cuts,confirmed=confirmed)
     gallery = TurnWitnesses(lookup,settings,scores)
     targets = defaultdict(set)
+    bracketed = defaultdict(set)
     for start in sorted(edges.keys()-{edge[0] for edge in edges.values()}):
         lane = [start]
         while lane[-1] in edges:
@@ -44,7 +44,10 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
             source = donor_at.get(middle[0])
             if source is None or any(donor_at.get(oid)!=source for oid in middle):
                 continue
+            if any(metadata[k].get('query_only') or decisions[k].get('view_exclusion') for k in middle):
+                continue
             targets[source].add(target)
+            bracketed[source,target].update(middle)
             for oid in middle:
                 gallery.add(source,target,lookup[oid],(a,b),metadata[oid]['view_shot'])
 
@@ -78,12 +81,13 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
         proofs = {}
         for row in donors[source]:
             oid = row['id']
-            if (decisions[oid]['person'] not in (source,target) or assignments[target,row['cue']]-{oid}
+            if (metadata[oid].get('query_only') or decisions[oid].get('view_exclusion')
+                    or decisions[oid]['person'] not in (source,target) or assignments[target,row['cue']]-{oid}
                     or not guard.allows(row,owners[target],target)):
-                break
+                continue
             shot = metadata[oid].get('view_shot')
             if shot is None:
-                break
+                continue
             best = None
             for pair in pairs:
                 external = [r for r,_,s in pair if s!=shot]
@@ -99,21 +103,34 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
                 if best is None or record>best:
                     best = record
             if best is None or best[0]<settings['match_threshold']:
-                break
+                continue
             rival = max((scores.face_similarity(row['_vector'],peer['_vector'])
                          for other,refs in owners.items() if other not in (source,target)
                          and row['cue'] not in occupied_by[other] for peer in refs
                          if anchors.get(peer['id'])==other),default=-1.)
             if best[0]-rival<margin:
-                break
+                continue
             proofs[oid] = dict(view_score=best[0],view_witnesses=list(best[1]),view_roots=list(best[2]),
                                view_runner=rival,required_margin=margin,original_core=source)
-        else:
+        if len(proofs)<len(donors[source]):
+            # Partial moves require their own bracket as well as the external
+            # appearance checks above. Never move unsupported satellites.
+            verified = {}
+            starts = set(proofs)-{edge[0] for oid,edge in edges.items() if oid in proofs}
+            for first in starts:
+                part = [first]
+                while part[-1] in edges and edges[part[-1]][0] in proofs:
+                    part.append(edges[part[-1]][0])
+                if (set(part)<=bracketed[source,target] and
+                        len(independent([lookup[k] for k in part],settings))>=max(2,settings['attach_min_support'])):
+                    verified.update((k,proofs[k]) for k in part)
+            proofs = verified
+        if proofs:
             proposals[source] = target,proofs
     # Two cores cannot simultaneously claim a target in the same physical cue.
-    claims = Counter((target,r['cue']) for source,(target,_) in proposals.items() for r in donors[source])
+    claims = Counter((target,r['cue']) for target,proofs in proposals.values() for r in (lookup[k] for k in proofs))
     for source,(target,proofs) in proposals.items():
-        if any(claims[target,r['cue']]!=1 for r in donors[source]):
+        if any(claims[target,lookup[k]['cue']]!=1 for k in proofs):
             continue
         for oid,proof in proofs.items():
             decisions[oid].update(person=target,status='accepted',role='auxiliary',
