@@ -23,11 +23,14 @@ def scene(case):
         ds[oid]=dict(person=assigned,status='accepted' if assigned else 'provisional',role='anchor' if assigned else 'auxiliary',
                      reason=('body_scene_core' if view=='back' else 'measured_face_association') if assigned else 'anonymous_body_track')
         truths[oid]=who
-    for cue in (range(3) if case=='guest' else range(7)):
-        middle=cue in (1,4)
+    length = 3 if case=='guest' else 12 if case=='known_entrant' else 7
+    for cue in range(length):
+        middle=cue in (1,4,7,10)
         vec=[.76, math.sqrt(1-.76**2),0] if middle else [1,0,0]
-        row(cue,0,'C' if middle and case=='guest' else 'A',('D' if case!='guest' else None) if middle else 'A','back' if middle else 'front',vec)
+        row(cue,0,'C' if middle and case=='guest' else 'A',('D' if case=='donor' else None) if middle else 'A','back' if middle else 'front',vec)
         row(cue,1,'B','B','front',[0,0,1])
+    if case=='known_entrant':
+        row(30,0,'C','C','back',[.76,math.sqrt(1-.76**2),0])
     if case=='donor':
         row(30,0,'C','D','back',[-1,0,0])
     guard=FaceGuard.__new__(FaceGuard)
@@ -40,6 +43,11 @@ def test_single_guest_and_disconnected_donor():
     decisions = scene('donor')
     assert decisions['1-0']['person']==decisions['4-0']['person']=='A'
     assert decisions['30-0']['person']=='D'
+
+
+def test_independently_known_rear_rival_vetoes_a_repeated_turn():
+    decisions = scene('known_entrant')
+    assert decisions['7-0']['person'] is None
 
 
 def test_replacement_scan_does_not_protect_local_owner(tmp_path):

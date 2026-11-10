@@ -43,6 +43,8 @@ class TurnWitnesses:
         for a,b in combinations(eligible,2):
             if set(a[1]).intersection(b[1]) or distinct_shots and a[2]==b[2]:
                 continue
+            if distinct_shots and len(independent([a[0],b[0]],self.settings))<2:
+                continue
             if len(independent([self.lookup[k] for k in (*a[1],*b[1])],self.settings))<4:
                 continue
             similarity = self.scores.face_similarity(a[0]['_vector'],b[0]['_vector'])

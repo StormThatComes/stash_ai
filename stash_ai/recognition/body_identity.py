@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v41-independent-turn-evidence',contract(config),matching_policy(config),
+    return digest(['body-local-v42-scene-rear-reference',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -486,7 +486,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             cut_starts=starts, entrants=entrants, graph=graph if turn_feature(settings,'extended_track_graph') else None)
     if turn_feature(settings,'turn_recovery'):
         from .scene_continuity import recover_turns
-        recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()))
+        recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()),
+                      occupied_cues=record.get('occupied_cues',()),cuts=starts)
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:
