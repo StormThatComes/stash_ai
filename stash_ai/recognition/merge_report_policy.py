@@ -26,6 +26,15 @@ def parameter(data, path):
     return data
 
 
+def pins_inherited_value(data, path, value, changes):
+    """An explicit equal value can decouple a child from a changing parent."""
+    parents = {'sapiensid.identities.scene_match_bonus':'clustering.same_scene_match_bonus',
+               'sapiensid.identities.track_similarity_threshold':'sapiensid.identities.cohesion_threshold'}
+    parent = parents.get(path)
+    return (parent in changes and data['sapiensid']['identities'].get(path.rsplit('.',1)[-1]) is None
+            and value is not None and value != changes[parent])
+
+
 def assign(data, path, value):
     keys = path.split('.')
     for key in keys[:-1]:
@@ -47,10 +56,11 @@ def proposal(config, changes):
     import yaml
     from .pose_anchor_rules import PARAMETER as regional
     patch, details = {}, []
+    changes = {internal_path(path):value for path,value in changes.items()}
     for path, value in sorted(changes.items()):
-        path = internal_path(path)
         current = plain(parameter(config.data, path))
-        if current == value:
+        pin = pins_inherited_value(config.data,path,value,changes)
+        if current == value and not pin:
             continue
         if path.startswith(regional+'.') and not any(row['parameter'].startswith(regional+'.') for row in details):
             # A YAML list is replaced as a whole. Preserve every selector and
@@ -58,7 +68,7 @@ def proposal(config, changes):
             assign(patch, regional, plain(parameter(config.data, regional)))
         assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
-                            direction='replace' if path == regional or path.endswith(('tracklet_matching','endpoint_matching','scene_bonus_mode')) else
+                            direction='replace' if pin or path == regional or path.endswith(('tracklet_matching','endpoint_matching','scene_bonus_mode')) else
                             'disable' if value is None else 'enable' if type(value) is bool or current is None else
                             'decrease' if value < current else 'increase'))
     if config.document_version == 2:

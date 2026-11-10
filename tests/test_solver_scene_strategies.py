@@ -120,3 +120,18 @@ def test_context_controls_and_labelled_threshold_boundaries(tmp_path):
     result, = measured_context({'match_threshold':.85},probes,{'return':'A'},{'entrant':{'A'}})
     assert abs(result['sapiensid.identities.scene_match_bonus']-.03)<.000002
     assert result['sapiensid.identities.ambiguity_margin']>.16
+
+def test_all_four_control_settings_survive_normalization_and_yaml_diff(tmp_path):
+    from stash_ai.recognition.scene_strategy_validation import training_profiles
+    from stash_ai.recognition.merge_report_policy import patched, proposal, parameter
+    from stash_ai.recognition.merge_solver_domains import normalize
+    cfg = configuration(tmp_path)
+    cfg.data['clustering']['same_scene_match_bonus'] = .03
+    cfg.data['sapiensid']['identities']['scene_match_bonus'] = None
+    controls = set()
+    for name, settings in list(training_profiles(cfg))[:4]:
+        patch = proposal(cfg,normalize(cfg,settings))
+        replay = patched(cfg,{row['parameter']:row['proposed'] for row in patch['changes']})
+        controls.add((replay.data['clustering']['same_scene_match_bonus'],
+                      parameter(replay.data,'sapiensid.identities.scene_match_bonus')))
+    assert controls == {(a,b) for a in (0.,.03) for b in (0.,.03)}

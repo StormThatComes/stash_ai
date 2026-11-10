@@ -110,7 +110,9 @@ def normalize(config, changes):
         elif not patch[key] and any(grouping[k] for k in (
                 'anchor_outlier_quarantine', 'strict_appearance_matching', 'context_view_enrichment')):
             patch[key] = True
-    return {k: v for k, v in patch.items() if v != parameter(config.data, k)}
+    from .merge_report_policy import pins_inherited_value
+    return {k: v for k, v in patch.items()
+            if v != parameter(config.data, k) or pins_inherited_value(config.data,k,v,patch)}
 
 
 def dimensions(config, options, active, sequence, width=8):
