@@ -145,5 +145,7 @@ def recover(rows, decisions, seeds, retained, by_cue, geometry, metadata, signal
                 d = decisions[row['id']]
                 if d.get('reason')=='body_scene_core':
                     d['independent_support'] = support
+                if metadata[row['id']].get('query_only') or d.get('view_exclusion'):
+                    d['role'] = 'auxiliary'
                 if support<settings['min_support']:
                     d.update(status='provisional',remaining_core_support=support)
