@@ -18,7 +18,7 @@ WIDTH = 16
 def _bounds(db, scan, stamp, budget):
     fragments = {}
     retained = 0
-    rows = db.execute("""SELECT b.cue,b.embedding,b.geometry,b.quality,m.person,m.status,m.proof,f.person AS face_owner,json_extract(m.proof,'$.rooted_track.owner') AS root
+    rows = db.execute("""SELECT b.cue,b.embedding,b.geometry,b.quality,m.person,m.status,m.proof,f.person AS face_owner,COALESCE(json_extract(m.proof,'$.rooted_track.owner'),json_extract(m.proof,'$.open_face_root.owner')) AS root
         FROM body_observations b JOIN body_members m ON m.observation=b.id
         LEFT JOIN members f ON f.observation=b.face
         WHERE b.scan=? AND m.policy=? AND b.rejected IS NULL ORDER BY b.cue,b.id""",(scan,stamp))
@@ -55,7 +55,7 @@ def select(db,scan,stamp,pending):
     if maximum is None or maximum<WIDTH:
         return None
     scene_key = db.execute('SELECT json_array(scope,namespace,scene) FROM scans WHERE id=?',(scan,)).fetchone()[0]
-    key = digest(['rear-fragments-query-v2',scan,stamp,version(db,'raw-body',scan),
+    key = digest(['rear-fragments-query-v3',scan,stamp,version(db,'raw-body',scan),
                   version(db,'scene',scene_key),version(db,'raw-observations',scan)])
     kind = 'rear-fragment-bounds'
     fragments = store.get(kind,key)

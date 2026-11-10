@@ -1,5 +1,6 @@
 from pathlib import Path
 import numpy as np
+import pytest
 from stash_ai.recognition.config import defaults
 from types import SimpleNamespace
 
@@ -40,18 +41,26 @@ def test_paged_references_keep_every_vector_and_witness():
         b.add(('s',1));assert not a.isdisjoint(b)
 
 
-def test_live_replay_shares_committed_vectors_but_copies_uncommitted_changes(tmp_path):
+@pytest.mark.parametrize('journal', ['wal','delete'])
+def test_live_replay_keeps_committed_vectors_readable_during_writer_spill(tmp_path,journal):
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.rebuild import _copy_selection
     from stash_ai.recognition.replay_memory import memory_replay
     from tests.test_recognition_clustering import setup,scan
     c=setup(tmp_path)
     with FaceDatabase(c.database) as state:
-        sid,_=scan(state,c,'1');state.connection.commit();state.connection.execute('BEGIN IMMEDIATE')
+        sid,_=scan(state,c,'1')
+        state.connection.commit()
+        assert state.connection.execute('PRAGMA journal_mode='+journal).fetchone()[0]==journal
+        state.connection.execute('PRAGMA cache_size=4')
+        state.connection.execute('BEGIN IMMEDIATE')
         selected=[dict(scan=sid,scene='1')]
         with memory_replay(c) as (target,_):
             _copy_selection(state,target,selected,'scope','ns')
-            assert target.execute('SELECT SUM(length(embedding)) FROM main.observations').fetchone()[0] is None
+            private_bytes = target.execute('SELECT SUM(length(embedding)) FROM main.observations').fetchone()[0]
+            assert (private_bytes is None) == (journal=='wal')
+            state.connection.executemany('INSERT INTO metadata(key,value) VALUES (?,?)',
+                                         ((f'pressure-{n}','x'*4096) for n in range(128)))
             assert target.execute('SELECT SUM(length(embedding)) FROM observations').fetchone()[0]>0
         state.connection.execute("UPDATE observations SET quality=json_set(quality,'$.edited',1)")
         with memory_replay(c) as (target,_):

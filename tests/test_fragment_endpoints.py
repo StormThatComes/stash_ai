@@ -149,3 +149,79 @@ def test_local_attachment_keeps_split_faces_for_global_revalidation():
     recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *args:True))
     assert decisions['1']['reason']=='face_rooted_body_view'
     assert decisions['1']['endpoint_pairs']==[dict(people=['A','B'],roots=['0','2','10','12'],minimum=1.)]
+
+
+def test_different_side_appearances_and_open_fragment_keep_independent_faces():
+    from stash_ai.recognition.fragment_endpoints import open_nominations
+    scores = SimpleNamespace(face_similarity=np.dot)
+    cfg = dict(tracklet_matching=True, face_threshold=.85,face_margin=.1,match_threshold=.85,ambiguity_margin=.1)
+    roots = {i:'A' for i in 'abcd'}
+    rows = {i:dict(id=i,cue=n,seconds=n,scan='s',quality='{}',_face_vector=np.array([1.,0.]),
+                   _vector=np.array([1.,0.])) for n,i in enumerate('abcd')}
+    for oid,cue,body in [('x',4,[1.,0.]),('y',5,[0.,1.]),('q',6,[1.,0.])]:
+        rows[oid] = dict(id=oid,cue=cue,seconds=cue,scan='s',quality='{}',_vector=np.array(body))
+    looks = {('A','side'):[('a','b',rows['x']),('c','d',rows['y'])]}
+    shots = {0:0,1:0,2:2,3:2,4:0,5:2,6:2}
+    assert nominations(looks,rows,roots,shots,scores,cfg).keys()=={'x','y'}
+    d = {k:{} for k in rows}
+    d['q'] = dict(open_face_root=dict(owner='A',observation='c'))
+    assert open_nominations(looks, rows, d, roots, shots, scores, cfg,
+                            SimpleNamespace(allows=lambda *args: True))['q'][1]==[('a','b','x')]
+    rows['q']['_vector'] = np.array([-1.,0.])
+    assert not open_nominations(looks,rows,d,roots,shots,scores,cfg,SimpleNamespace(allows=lambda *args: True))
+
+
+def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path):
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.body_global import report
+    from stash_ai.recognition.database import encoded
+    c = configuration(tmp_path)
+    c.data['sapiensid']['identities']['endpoint_matching'] = True
+    c.data['sapiensid']['global_matching']['enabled'] = True
+    with FaceDatabase(c.database) as state:
+        db = state.connection
+        for n, owner in enumerate(('A','B'),1):
+            direction = [1,0] if owner=='A' else [0,1]
+            item, ids = scene(db,c,str(n),vectors=[direction]*5)
+            db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',(owner,'scope','ns',n,None,owner))
+            for cue,oid in enumerate(ids):
+                proof = {'reason':'body_scene_core'}
+                role = 'anchor'
+                if cue==2:
+                    role = 'auxiliary'
+                    proof.update(rooted_track=dict(owner=owner,roots=[ids[0],ids[-1]],perspective='side'))
+                db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
+                           (oid,owner,role,'accepted',policy(c),encoded(proof)))
+                if cue in (0,4):
+                    fid = owner+str(cue)
+                    db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (fid,item['scan'],cue,float(cue),'','[]','[]','{}',None,2,
+                         np.array([1.,0.],dtype='<f4').tobytes(),None))
+                    db.execute('INSERT INTO members VALUES (?,?)',(fid,owner))
+                    db.execute('UPDATE body_observations SET face=? WHERE id=?',(fid,oid))
+        db.commit()
+        def proposal():
+            merges = [d for d in report(db,c,'scope','ns')['decisions'] if 'endpoint_pair' in d]
+            assert len(merges)==1
+            return merges[0]['endpoint_pair']
+        expected = proposal()
+        assert expected['people']==['A','B'] and expected['supporting_scans']==2
+        db.execute('PRAGMA reverse_unordered_selects=ON')
+        assert proposal()==expected
+
+
+def test_external_open_endpoint_needs_independent_faces_and_matching_body():
+    from stash_ai.recognition.fragment_endpoints import ExternalEndpoints
+    index = ExternalEndpoints.__new__(ExternalEndpoints)
+    index.minimum, index.body_floor, index.body_match = .85,.75,.85
+    index.banks = {'A':[0]}
+    w = dict(id='y',scan='other',perspective='side',roots=['b','c'],_vector=np.array([1.,0.]))
+    index.gallery = SimpleNamespace(banks=[('A','other',[w])])
+    index.face = lambda root,owner:(np.array([1.,0.]),root)
+    source = dict(open_face_root=dict(owner='A',observation='a'))
+    def match(v):
+        return index.match('s','back',source,set(),[],query=np.asarray(v),allow_open=True)
+    assert match([1.,0.])[:2]==('A',1.)
+    assert not match([0.,1.])
+    w['roots']=['a','c']
+    assert not match([1.,0.])

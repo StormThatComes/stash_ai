@@ -185,7 +185,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
     from .solver_progress import heartbeat
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':2} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
+        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks

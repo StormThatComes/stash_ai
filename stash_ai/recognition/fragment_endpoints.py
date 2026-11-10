@@ -7,6 +7,16 @@ def enabled(settings):
     return settings.get('tracklet_matching', False) if value is None else value
 
 
+def distinct_view(first, second, left, right, scores, settings):
+    if first != second:
+        return True
+    # A categorical "side" can represent both profiles. Require measured
+    # appearance separation before admitting another view of the same kind.
+    if left is None or right is None:
+        return False
+    return scores.face_similarity(left,right) < settings.get('match_threshold',.85)
+
+
 def nominations(looks, lookup, roots, shots, scores, settings):
     if not enabled(settings) or not looks:
         return {}
@@ -24,7 +34,8 @@ def nominations(looks, lookup, roots, shots, scores, settings):
         fragments = sorted(tracks.items())
         for i,((kind,a,b,shot),members) in enumerate(fragments):
             for (other,c,d,other_shot),peers in fragments[i+1:]:
-                if kind==other or shot==other_shot:
+                if shot==other_shot or not distinct_view(kind,other,lookup.get(members[0],{}).get('_vector'),
+                        lookup.get(peers[0],{}).get('_vector'),scores,settings):
                     continue
                 ids = a,b,c,d
                 if len(set(ids))!=4:
@@ -51,6 +62,55 @@ def nominations(looks, lookup, roots, shots, scores, settings):
     return eligible
 
 
+def open_nominations(looks, rows, decisions, roots, shots, scores, settings, guard):
+    """An open path can attach to a two-ended look, but never trains that look."""
+    if not looks or not enabled(settings):
+        return {}
+    from .body_identity import copresent, quality
+    from .independent_evidence import unit
+    with_faces = {oid: rows[oid] for oid in roots if rows[oid].get('_face_vector') is not None}
+    units = {oid:unit(dict(scan=r['scan'],seconds=r['seconds'],quality=r.get('face_quality') or '{}'))
+             for oid,r in with_faces.items()}
+    output = {}
+    for oid,d in decisions.items():
+        hint = d.get('open_face_root') or {}
+        source, owner = hint.get('observation'), hint.get('owner')
+        if (source not in with_faces or roots[source]!=owner or hint.get('returning') or oid not in rows or
+                d.get('status')=='accepted' or d.get('track_blocker',{}).get('reason') in
+                ('different_face_root','competing_transition','unresolved_partner')):
+            continue
+        row = rows[oid]
+        q = quality(row)
+        if (q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1) or
+                row.get('face_person') or shots.get(row['cue'])!=shots.get(rows[source]['cue'])):
+            continue
+        own = [v for key,v in with_faces.items() if roots[key]==owner]
+        if copresent([row],own) or not guard.allows(row,own,owner):
+            continue
+        foreign = [v for key,v in with_faces.items() if roots[key]!=owner]
+        rivals = [scores.face_similarity(row['_vector'],v['_vector']) for v in foreign]
+        face_rival = max((scores.face_similarity(with_faces[source]['_face_vector'],v['_face_vector'])
+                          for v in foreign),default=-1.)
+        for (p,kind), witnesses in looks.items():
+            if p!=owner:
+                continue
+            for a,b,w in witnesses:
+                if a not in units or b not in units or len({units[source],units[a],units[b]})!=3:
+                    continue
+                if shots[row['cue']]==shots[w['cue']] or decisions[w['id']].get('view_exclusion'):
+                    continue
+                body = scores.face_similarity(row['_vector'],w['_vector'])
+                if body<settings['match_threshold'] or body-max(rivals,default=-1.)<settings['ambiguity_margin']:
+                    continue
+                minimum = min(scores.face_similarity(with_faces[source]['_face_vector'],with_faces[k]['_face_vector'])
+                              for k in (a,b))
+                if minimum>=settings['face_threshold'] and minimum-face_rival>=settings['face_margin']:
+                    option = owner,[(a,b,w['id'])],minimum
+                    if oid not in output or (-minimum,a,b,w['id']) < (-output[oid][2],*output[oid][1][0]):
+                        output[oid] = option
+    return output
+
+
 class ExternalEndpoints:
     """Owner-keyed nomination of separately face-rooted views in another scan."""
     def __init__(self,db,gallery,config):
@@ -66,6 +126,7 @@ class ExternalEndpoints:
             self.banks[gallery.owner_at(index)].append(index)
         self.minimum = config.data['recognition']['match_threshold']
         self.body_floor = config.data['sapiensid']['identities']['match_threshold']-config.data['sapiensid']['identities']['ambiguity_margin']
+        self.body_match = config.data['sapiensid']['identities']['match_threshold']
         self.revisions = {}
         sql = ('SELECT o.* FROM body_observations b JOIN observations o ON o.id=b.face AND o.scan=b.scan '
                'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=b.scan '
@@ -83,14 +144,20 @@ class ExternalEndpoints:
             self.revisions[owner] = digest(sorted(versions[i] for i in self.banks.get(owner,())))
         return self.revisions[owner]
 
-    def match(self,scan,kind,decision,occupied,ranked,*,reject_rival=None):
+    def match(self,scan,kind,decision,occupied,ranked,*,reject_rival=None,query=None,allow_open=False):
         import numpy as np
         proof = decision.get('rooted_track') or {}
+        roots = proof.get('roots',())
         owner = proof.get('owner')
-        if not owner or owner in occupied or len(proof.get('roots',()))!=2:
+        single = False
+        if not roots and allow_open and query is not None:
+            hint = decision.get('open_face_root') or {}
+            if not hint.get('returning') and hint.get('observation'):
+                owner, roots, single = hint.get('owner'), [hint['observation']], True
+        if not owner or owner in occupied or len(roots)!=(1 if single else 2):
             return None
-        local = [self.face(root,owner) for root in proof['roots']]
-        if any(f is None for f in local) or local[0][1]==local[1][1]:
+        local = [self.face(root,owner) for root in roots]
+        if any(f is None for f in local) or len({f[1] for f in local})!=len(local):
             return None
         for candidate in ranked:
             rival = candidate[2]
@@ -102,11 +169,18 @@ class ExternalEndpoints:
         for index in self.banks.get(owner,()):
             _,_,bank = self.gallery.banks[index]
             for w in bank:
-                if w['scan']==scan or w.get('perspective','back')==kind:
+                if w['scan']==scan:
                     continue
+                same_kind = w.get('perspective','back')==kind
+                if same_kind or single:
+                    if query is None:
+                        continue
+                    body_score = float(query @ w['_vector'])
+                    if same_kind and body_score>=self.body_match or single and body_score<self.body_match:
+                        continue
                 external = [self.face(root,owner) for root in w['roots']]
                 if (len(external)!=2 or any(f is None for f in external) or
-                        len({f[1] for f in [*external,*local]})!=4):
+                        len({f[1] for f in [*external,*local]})!=len(local)+2):
                     continue
                 score = min(float(a[0] @ b[0]) for a in local for b in external)
                 if np.isfinite(score) and score>=self.minimum:
@@ -144,8 +218,9 @@ def split_owner_nominations(looks, lookup, roots, shots, scores, settings):
             continue
         best = None
         for kind,shot,left,pixels,member in by_owner[a]:
-            for other,view,right,units,_ in by_owner[b]:
-                if kind==other or shot==view or pixels & units:
+            for other,view,right,units,peer in by_owner[b]:
+                if shot==view or pixels & units or not distinct_view(kind,other,lookup.get(member,{}).get('_vector'),
+                        lookup.get(peer,{}).get('_vector'),scores,settings):
                     continue
                 score = min(scores.face_similarity(lookup[i]['_face_vector'],lookup[j]['_face_vector'])
                             for i in left for j in right)

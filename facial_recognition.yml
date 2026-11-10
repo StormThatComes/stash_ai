@@ -105,7 +105,7 @@ pose:
     # Minimum probability that a PMPose point is visible. Range: 0..1.
   refinement:
     # Optional SAM-pose2seg mask and second PMPose pass.
-    enabled: false
+    enabled: true
     # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
     directory: ''
     # Optional asset folder; empty uses execution.models.directory/sam_pose2seg/<pinned revision>.
@@ -137,11 +137,11 @@ pose:
     # Reject masks whose union box exceeds this multiple of the original area. Range: 1..10.
     max_side_expansion: 0.5
     # Maximum extension on any side, relative to original width or height. Range: 0..2.
-    masked_identity_crop: false
+    masked_identity_crop: true
     # Mask the identity encoder crop when refinement separates overlapping bodies. Requires refinement.enabled.
   deduplication:
     # Optional suppression of duplicate PMPose predictions.
-    enabled: false
+    enabled: true
     # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
     min_keypoint_score: null
     # Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range:
@@ -301,7 +301,7 @@ matching:
       tracklet_matching: true
       # Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained
       # VTT evidence.
-      endpoint_matching: false
+      endpoint_matching: true
       # Compare independent face endpoints across views. Null follows tracklet_matching.
       match_threshold: 0.85
       # Minimum mean body similarity for a scene-local match. Range: 0..1.
@@ -483,7 +483,7 @@ execution:
     vitpose_precision: fp32
     # ViTPose++ forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decoding uses float32. Changing
     # this invalidates body evidence; validate keypoint quality.
-    vitpose_device_decode: false
+    vitpose_device_decode: true
     # Use optional compact CUDA DARK decoding for ViTPose; ambiguous heatmaps use the reference processor.
   scan:
     # VTT input, scan workers, queues, caches and checkpoints.
@@ -547,7 +547,7 @@ execution:
     # Scene-local CPU worker backend: threads or processes (spawn).
     nomination_device: auto
     # Hybrid centroid nomination device: cpu, or auto to benchmark CUDA including transfers.
-    prefetch_scenes: false
+    prefetch_scenes: true
     # Experimental preloading of the next scene's immutable rebuild inputs.
     profile: true
     # Record rebuild SQL, fetch and pipeline timings in run history.
@@ -591,6 +591,10 @@ execution:
       # integer.
       plan_bytes: 2147483648
       # Byte budget for retained body/hybrid matching plans and decision proofs. Range: positive integer.
+  solver:
+    # Solver strategy comparison on labelled validation scenes.
+    compare_scene_strategies: true
+    # Compare scene matching strategies when solving with a validation manifest and body identities enabled.
   portraits:
     # Portrait CPU workers, inference batches and ranking cache.
     cpu_threads: 16

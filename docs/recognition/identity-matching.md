@@ -904,3 +904,12 @@ Replaying that selection revalidates current evidence. The optional solver
 comparison `--compare-scene-strategies` tests families on training goals
 within `--max-trials`; provide a budget above 14 for independent finalist
 tuning. The holdout reports back, contact and entrant coverage separately.
+
+
+The shipped run and solver profiles enable local SapiensID tracks, independent face endpoints,
+evidence-weighted scene membership, face deduplication and adaptive face views. Their RF-DETR/PMPose
+pipeline also enables duplicate-pose suppression and SAM-pose2seg refinement with masked identity
+crops. The updated body collection contract recollects selected cues on the first run. A one-ended
+body path can query an independently face-rooted look as auxiliary evidence. Global joins require
+current independent face endpoints, bounded face nominations and revalidation of co-presence and
+original body witnesses. The merge proof records its source scans and a deterministic example.

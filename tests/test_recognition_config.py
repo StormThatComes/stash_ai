@@ -116,6 +116,11 @@ def test_shipped_template_matches_default_schema(filename):
     body = config.data['sapiensid']
     assert body['pose']['detector'] == 'rfdetr_xl'
     assert body['pose']['backend'] == 'pmpose'
+    assert body['identities']['tracklet_matching'] and body['identities']['endpoint_matching']
+    assert body['identities']['scene_bonus_mode']=='evidence'
+    assert config.data['execution']['solver_compare_scene_strategies']
+    assert body['pose']['refinement']['enabled'] and body['pose']['refinement']['masked_identity_crop']
+    assert body['pose']['deduplication']['enabled']
     assert body['identities']['enabled'] is True
     assert body['global_matching']['enabled'] is True
     run_profile = filename == 'facial_recognition.yml'

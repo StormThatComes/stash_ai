@@ -220,7 +220,10 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
                     checked[row['id']].add(rival)
                     return True
                 return False
-            endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked,reject_rival=reject_rival)
+            metadata = quality(row)
+            endpoint = search.endpoints.match(scan,kind,decision,occupied,ranked,reject_rival=reject_rival,
+                query=query, allow_open=not metadata.get('query_only') and
+                metadata.get('expected_people',0)<=metadata.get('detected_people',1))
         if best is None and endpoint is None:
             if ranked:
                 waiting[row['id']] = (decision, ranked[0][2], 'no_separated_view')
@@ -254,7 +257,7 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
         if endpoint:
             proof.pop('score')
             proof.update(route='fragment_face_endpoints',face_score=face_score,face_threshold=search.endpoints.minimum,
-                         local_roots=decision['rooted_track']['roots'])
+                         local_roots=(decision.get('rooted_track') or {}).get('roots') or [decision['open_face_root']['observation']])
         else:
             proof.update(minimum=low, threshold=settings['match_threshold']-bonuses.get(owner,0.),
                          cohesion_threshold=settings['cohesion_threshold'], required_margin=settings['ambiguity_margin'])

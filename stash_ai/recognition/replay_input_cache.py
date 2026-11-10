@@ -55,7 +55,8 @@ class InputCache:
                      version(database.connection,'pixel-scan',item['scan'])) for item in selected]
             self.schema_stamp=digest([ENGINE,expected_schema()])
             self.stamps={scan:(raw,pixel) for scan,raw,pixel in stamps}
-            self.key=digest(['raw-input-v2-no-bindings',ENGINE,self.owner,selected,scope,namespace,stamps,
+            journal = database.connection.execute('PRAGMA main.journal_mode').fetchone()[0]
+            self.key=digest(['raw-input-v3-live-vector-locks',journal,ENGINE,self.owner,selected,scope,namespace,stamps,
                 digest(expected_schema()),config.data['clustering']['max_anchor_pose_deviation'] is not None])
             self.directory=database.path.with_name(database.path.name+'.rebuild-input')
             self.directory.mkdir(mode=0o700,exist_ok=True)
