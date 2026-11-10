@@ -634,3 +634,11 @@ Run `python -m benchmarks.benchmark_recognition_retained --config facial_recogni
 The manifest selects current scans and labels in the solver validation format. Cold and cached private copies report physical coverage, fragments per performer, false joins, partner swaps, elapsed time, sampled peak RSS, SELECT count and fetched rows. Source images and model inference are outside the measurement. The synthetic 10,000-scene index control runs with `python -m benchmarks.benchmark_rear_index --profile library --scenes 10000`.
 
 Rear recovery narrows candidate scenes to 16-cue blocks with conservative gallery bounds. Blocks connected by an original owner are re-evaluated together. Eligible face endpoints keep their block active even when body similarity is low. The counters `rear_fragments_examined`, `rear_fragments_skipped` and `rear_fragment_queries_reused` are available with rebuild profiling.
+
+Use `--include-performer-observation PERFORMER_ID:OBSERVATION_ID` to require
+a retained physical observation (including provisional rear views) to follow a
+goal performer during replay. Use `--include-performer-track PERFORMER_ID:BODY_ID`
+to freeze the current anonymous track containing that body. Both options are
+repeatable. Labels require independent retained observations of the performer.
+The report records the scene and exact frozen addresses. Regenerate labels
+after replacing the source scan.

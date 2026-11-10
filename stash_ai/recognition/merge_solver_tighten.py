@@ -57,7 +57,11 @@ def route_parameters(decisions):
             elif reason == 'local_body_track':
                 keys.add(local+'ambiguity_margin')
             if row.get('face_endpoints'):
-                keys.update(('recognition.match_threshold','sapiensid.matching.face_floor'))
+                keys.update(('recognition.match_threshold','recognition.ambiguity_margin'))
+                if reason == 'external_rear_view':
+                    keys.add('sapiensid.matching.face_floor')
+                if row.get('endpoint_body_gate'):
+                    keys.update((local+'match_threshold', local+'ambiguity_margin'))
             if reason in ('local_body_track','face_rooted_body_view','face_rooted_crossing','external_rear_view'):
                 keys.add(TRACK)
             if row.get('used_scene_bonus'):

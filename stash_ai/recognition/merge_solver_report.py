@@ -69,7 +69,10 @@ def feedback_summary(feedback, hybrid, config, changes, locations):
             example['failed_rules'] = [fields(rule, 'parameter label measured minimum') for mode in ('all', 'any')
                 for rule in rules.get(mode, ()) if rule['parameter'] in rules.get('failed_parameters', ())][:3]
         examples[key] = dict(example, source='observed_blocker', set=index, performer=performer, scene=scene)
-    return dict(query=fields(query, 'truncated truncation_reasons skipped_query_visits comparisons'),
+    samples = sorted(feedback.get('label_probes', {}).items())
+    return dict(**({'label_probe_count':len(samples),
+                    'label_probes':[dict(observation=oid,**row) for oid,row in samples[:16]]} if samples else {}),
+                query=fields(query, 'truncated truncation_reasons skipped_query_visits comparisons'),
                 targeted_truncated=targeted.get('truncated', False), examples=list(examples.values()),
                 fallback_references=feedback.get('fallback_references', 0))
 
@@ -111,7 +114,7 @@ def condition_examples(conditions):
         if counts[key] > 2:
             continue
         example = {k:v for k,v in row.items() if not isinstance(v, (list, tuple, dict))}
-        for k in ('sets', 'scenes', 'performer_ids', 'requested_observation_ids', 'identities'):
+        for k in ('sets', 'scenes', 'performer_ids', 'requested_observation_ids', 'observations', 'identities'):
             if k in row:
                 example[k] = row[k][:4]
                 if len(row[k]) > 4:
@@ -187,7 +190,7 @@ def compact_document(result, config):
     from .merge_goals import unmet_conditions
     simulation = result['simulation']
     output = {k:v for k,v in result.items() if k not in (
-        'simulation', 'explanation', 'measured_hybrid_evidence', 'measured_reference_pairs', 'physical_alternatives')}
+        'simulation', 'explanation', 'measured_hybrid_evidence', 'measured_reference_pairs', 'physical_alternatives', 'positive_reference_ids')}
     output['solver_report_format'] = 'compact-v1'
     output['groups'] = [goal_input(group) for group in result['groups']]
     for kind in ('scene_exclusions', 'observation_exclusions'):

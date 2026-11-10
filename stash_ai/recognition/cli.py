@@ -280,6 +280,10 @@ def parser():
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--compare-scene-strategies',action='store_true',
         help='Screen tracklet, endpoint and scene-support families on training goals and compare them on the labelled holdout.')
+    merge_report.add_argument('--include-performer-observation', action='append', type=performer_observation,
+        metavar='PERFORMER_ID:OBSERVATION_ID', help='Require this retained physical observation to join a goal performer. Repeatable.')
+    merge_report.add_argument('--include-performer-track', action='append', type=performer_observation,
+        metavar='PERFORMER_ID:BODY_ID', help='Freeze all observations of this retained anonymous body track as positive goals.')
     merge_report.add_argument('--physical-pair',action='append',default=[],metavar='FACE:BODY',
         help='Label two retained observations of one physical person in one cue for identity-physical training goals. Repeatable.')
     merge_report.add_argument('--goal-policy', choices=('identity','identity-physical','strict'), default='identity',
@@ -401,6 +405,7 @@ def _execute(args, config, services):
         return execute(args, config)
     if args.command == 'report-merge':
         if (args.solve or args.performer_set or args.exclude_performer_scene or args.exclude_performer_observation
+                or args.include_performer_observation or args.include_performer_track
                 or len(args.performer_id or args.identity_id) > 2):
             from .merge_goals import execute
             return execute(args, config)

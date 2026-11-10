@@ -367,6 +367,9 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=(),
     for field in ('withheld', 'extra_fragments', 'false_merge_pairs', 'projection_conflicts'):
         risk('physical_' + field, physical[0].get(field, 0), physical[1].get(field, 0), covered)
     sequences = [trial['sequences'] for trial in (base,final)]
+    for key in ('scene_id_switches', 'entrant_takeovers'):
+        risk(key, sequences[0].get(key,0), sequences[1].get(key,0),
+             all(key in seq for seq in sequences) and (covered if key=='scene_id_switches' else all(seq.get('entrant_episodes') for seq in sequences)))
     first,last = (set(map(tuple,row.get('rooted_turns',()))) for row in sequences)
     risk('lost_turn_references',0,len(first-last),bool(first))
     before,after = (set(map(tuple,row.get('returned_people',()))) for row in sequences)
