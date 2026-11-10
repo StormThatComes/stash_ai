@@ -66,6 +66,26 @@ def physical_predictions(labels,locations,ids,decisions):
     return {key:physical_owner(owners) for key,owners in seen.items()}
 
 
+def projection_errors(labels, locations, ids, decisions):
+    """Count physical conflicts and shared ownership of distinct people in a cue."""
+    by_cue = defaultdict(lambda: defaultdict(set))
+    for oid in ids:
+        owner = decisions[oid]['accepted_identity']
+        if owner is not None:
+            by_cue[locations[oid]][labels[oid]].add(owner)
+    conflicts, swaps = set(), set()
+    for cue, people in by_cue.items():
+        by_owner = defaultdict(list)
+        for truth, owners in people.items():
+            if len(owners) > 1:
+                conflicts.add((cue, truth))
+            for owner in owners:
+                for peer in by_owner[owner]:
+                    swaps.add((cue, *sorted((truth, peer))))
+                by_owner[owner].append(truth)
+    return conflicts, swaps
+
+
 def omission_damage(labels,locations,ids,before,after):
     left = physical_predictions(labels,locations,ids,before)
     right = physical_predictions(labels,locations,ids,after)
@@ -82,7 +102,10 @@ def omission_damage(labels,locations,ids,before,after):
             common_owner[a,b] += 1
     def pairs(counts):
         return sum(n*(n-1)//2 for n in counts.values())
-    return dict(lost_correct_pairs=pairs(by_truth)-pairs(common_truth),
+    conflicts, swaps = projection_errors(labels, locations, ids, before)
+    new_conflicts, new_swaps = projection_errors(labels, locations, ids, after)
+    return dict(new_projection_conflicts=len(new_conflicts-conflicts), new_partner_claims=len(new_swaps-swaps),
+                lost_correct_pairs=pairs(by_truth)-pairs(common_truth),
                 new_false_joins=pairs(by_owner)-pairs(common_owner)-pairs(right_truth)+pairs(common_truth))
 
 

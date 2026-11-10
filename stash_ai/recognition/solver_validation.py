@@ -331,7 +331,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
     return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress, require_slices=compare_strategies or any(
-                k.startswith('sapiensid.identities.scene_') for k in changes)),
+                k.startswith('sapiensid.identities.scene_') or k.endswith(('tracklet_matching','endpoint_matching')) for k in changes)),
                 scene_strategies=strategy_results, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
@@ -388,7 +388,7 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=(),
     if not incremental:
         risk('import_order',0,0,False)
     for row in omissions:
-        for field in ('lost_correct_pairs','new_false_joins'):
+        for field in ('lost_correct_pairs','new_false_joins','new_projection_conflicts','new_partner_claims'):
             damage = row['damage']
             name = f"omission_{row['scene']}_{row['first_cue']}_{row['last_cue']}_{row['mode']}_{field}"
             risk(name,damage['baseline'][field],damage['winner'][field],row['scored']>=2)
@@ -401,6 +401,9 @@ def holdout_verdict(metrics, contamination=None, incremental=None, omissions=(),
             risk(f'{name}_{field}',slices[0].get(field,0),slices[1].get(field,0),count>0)
     states = {r['status'] for r in results.values()}
     status = next(s for s in ('regressed','improved','unchanged','no_coverage') if s in states)
-    if require_slices and status!='regressed' and any(not c['observations'] for c in coverage.values()):
+    episodes = {key: min(row.get(key, 0) for row in sequences)
+                for key in ('turns', 'crossings', 'entrant_episodes')}
+    if require_slices and status!='regressed' and (not all(episodes.values()) or
+            any(not c['observations'] for c in coverage.values())):
         status = 'insufficient_coverage'
-    return dict(status=status,measures=results,slice_coverage=coverage)
+    return dict(status=status,measures=results,slice_coverage=coverage,episode_coverage=episodes)

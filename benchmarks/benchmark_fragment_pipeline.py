@@ -44,6 +44,7 @@ def seed_scene(db,config,number,cues,faces,bodies):
     clothes = rng.integers(0,3,size=2)
     if number%4==0:
         actors[1]=int(actors[0])^1
+    entrant = next(i for i in range(len(faces)) if i not in actors)
     body_contract = contract(config)
     db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',(scan,'benchmark',str(number),ns,scan,
                scan_identity(config,ns),'{}','{}',cues,cues,'complete'))
@@ -53,9 +54,10 @@ def seed_scene(db,config,number,cues,faces,bodies):
         records = [('',{'_body_cue':(scan,body_contract,cue)},None,None)]
         if cue%10<7:
             for side,actor in enumerate(actors):
-                actor = int(actor)
+                actor = entrant if side == 0 and cue//25 % 4 == 2 else int(actor)
                 view = (cue//3+side)%4
-                x = 20+side*130
+                position = side if cue//25 % 2 == 0 else 1-side
+                x = 20 + position*(28 if cue%25 in (4,5) else 130)
                 face = str(uuid.uuid5(uuid.UUID(scan),f'face-{cue}-{side}'))
                 oid = str(uuid.uuid5(uuid.UUID(scan),f'body-{cue}-{side}'))
                 # Keep detected face rows on rear views, with no usable embedding.
@@ -75,13 +77,17 @@ def seed_scene(db,config,number,cues,faces,bodies):
                 if rear:
                     points[1:3]=[[-1,-1],[-1,-1]]
                 person=dict(bounds=[x,8,x+54,125],keypoints=points,score=.99)
-                q=dict(keypoints=15,width=54,height=117,sharpness=120.,overlap=0.,detected_people=2,
+                q=dict(keypoints=15,width=54,height=117,sharpness=120.,overlap=.48 if cue%25 in (4,5) else 0.,detected_people=2,
                        pixel_digest=oid,view_shot=cue//25,frame_signature=('11' if cue//25%2==0 else 'ee')*48,
                        orientation=('front','side','back','side')[view])
                 body=dict(scan=scan,cue=cue,seconds=seconds,contract=body_contract,
                           face=None if rear else face,face_accepted=not rear,rejected=None)
-                records.append((oid,dict(_body=body,person=person,quality=q,benchmark_truth=actor),
-                                bodies[actor,clothes[side],view],None))
+                feature = bodies[actor, clothes[side], view]
+                if rear and side == 0:
+                    # A change of pose leaves a near-threshold positive for the solver.
+                    feature = .77*feature + .64*np.roll(feature, 41)
+                    feature = feature/np.linalg.norm(feature)
+                records.append((oid,dict(_body=body,person=person,quality=q,benchmark_truth=actor),feature,None))
         save_records(db,config,records)
     db.commit()
     return dict(scene=str(number),scan=scan)
@@ -112,6 +118,32 @@ def partition(db):
     return dict(sha256=h.hexdigest(),physical_observations=n,withheld=missing,projection_conflicts=conflicts,
                 extra_fragments=sum(max(0,len(people)-1) for people in assigned.values()),
                 false_merge_pairs=sum(v*(v-1)//2 for v in by_owner.values())-true_pairs)
+
+
+def freeze_challenge(db, config, scan):
+    """Freeze manually labelled front/rear fragments in this benchmark database."""
+    members = ['benchmark-front', 'benchmark-rear', 'benchmark-partner']
+    sample = lambda cue, side: str(uuid.uuid5(uuid.UUID(scan), f'body-{cue}-{side}'))
+    truth_sql = "SELECT json_extract(quality,'$.benchmark_truth') FROM body_observations WHERE id=?"
+    truth, partner = (db.execute(truth_sql, (sample(0, side),)).fetchone()[0] for side in (0, 1))
+    for name, performer in zip(members, ('900001', None, '900002')):
+        db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',
+                   (name, 'benchmark', namespace(config), 0, performer, name))
+    rows = list(db.execute("""SELECT id,face,json_extract(quality,'$.benchmark_truth'),
+        json_extract(quality,'$.quality.orientation') FROM body_observations WHERE scan=?""",(scan,)))
+    count = Counter()
+    for oid,face,actor,orientation in rows:
+        if actor not in (truth, partner):
+            continue
+        owner = members[2] if actor == partner else members[int(orientation == 'back')]
+        count[owner] += 1
+        db.execute("UPDATE body_members SET person=?,status='accepted' WHERE observation=?", (owner,oid))
+        if face:
+            db.execute('UPDATE members SET person=? WHERE observation=?',(owner,face))
+    if not all(count[p] for p in members):
+        return None
+    return resolve(db, config, [members[:2], members[2:]], by_performer=False,
+                   policy='identity-physical', observation_exclusions=[('900001', sample(0,1))])
 
 
 def measure(state,items,config):
@@ -159,20 +191,22 @@ def run(config,size,cues,batch,trials):
                         report['complete_selection']=measure(state,selected,cfg)
                         report['reconciled']=partition(state.connection)
                     else:
-                        owners = [p for p, in state.connection.execute('SELECT person FROM members GROUP BY person '
-                                                                        'ORDER BY COUNT(*),person LIMIT 2')]
+                        goals = freeze_challenge(state.connection, cfg, selected[0]['scan'])
+                        state.connection.commit()
                 if mode=='cold':
-                    if len(owners)<2:
-                        raise ValueError('The benchmark needs two accepted face identities for solver goals.')
+                    if goals is None:
+                        report['solver'] = dict(status='insufficient_front_rear_coverage')
+                        continue
                     with closing(_open_readonly(cfg.database)) as db, sampled_rss() as memory:
                         selects = Counter()
                         db.set_trace_callback(lambda sql: selects.update(['select']) if sql.lstrip().lower().startswith('select') else None)
                         before=process_io()
-                        goals=resolve(db,cfg,[[p] for p in owners],by_performer=False,policy='identity-physical')
                         start=time.perf_counter()
                         solved=solve(cfg,goals,db,maximum=trials,compact_report=True)
                         report['solver']=dict(seconds=time.perf_counter()-start,peak_rss_bytes=memory['sampled_peak_bytes'],
                                               attempted=solved['search']['attempted'],selected=solved['selected_trial'],
+                                              baseline=solved['simulation']['trials']['baseline']['goal_result']['fully_solved'],
+                                              fully_solved=solved['best_result']['fully_solved'],
                                               source_selects=selects['select'],process_io={k:v-before[k] for k,v in
                                                   process_io().items() if k in before})
     cold=result['scenarios']['cold']['partition']['sha256']
