@@ -6,25 +6,45 @@ import json
 from .merge_observation_exclusions import resolve
 
 
+def track_origin(proof, owner):
+    """Read track lineage from local, recovered and historical membership proofs."""
+    while proof:
+        fragment = proof.get('anonymous_fragment') or proof.get('fragment')
+        if fragment:
+            return fragment
+        if proof.get('reason')=='anonymous_body_track':
+            return proof.get('person') or owner
+        proof = proof.get('previous')
+    return None
+
+
 def freeze(db, config, goals, owners, observations, tracks):
     pairs = list(observations)
     track_labels = {}
+    track_scenes = {}
     for performer, oid in tracks:
         row = db.execute("SELECT b.scan,m.proof,m.person,m.status FROM body_members m "
                          "JOIN body_observations b ON b.id=m.observation WHERE b.id=?", (oid,)).fetchone()
         if not row:
             raise ValueError(f'Unknown retained body observation {oid}.')
         proof = json.loads(row['proof'])
-        fragment = proof.get('anonymous_fragment') or (row['person'] if proof.get('reason')=='anonymous_body_track' else None)
+        fragment = track_origin(proof,row['person'])
         if not fragment:
             raise ValueError(f'Observation {oid} has no frozen anonymous track.')
-        members = db.execute("SELECT b.id FROM body_observations b JOIN body_members m ON m.observation=b.id "
-            "WHERE b.scan=? AND (json_extract(m.proof,'$.anonymous_fragment')=? OR "
-            "(json_extract(m.proof,'$.reason')='anonymous_body_track' AND m.person=?))", (row['scan'],fragment,fragment))
-        for member, in members:
+        if row['scan'] not in track_scenes:
+            fragments = defaultdict(list)
+            for member,raw,owner in db.execute(
+                    'SELECT b.id,m.proof,m.person FROM body_observations b JOIN body_members m ON m.observation=b.id WHERE b.scan=?',
+                    (row['scan'],)):
+                origin = track_origin(json.loads(raw),owner)
+                if origin:
+                    fragments[origin].append(member)
+            track_scenes[row['scan']] = fragments
+        for member in track_scenes[row['scan']][fragment]:
             pairs.append((performer,member))
             track_labels[member] = fragment
-    labels = resolve(db, config, pairs, goals['scope'], owners, positive=True)
+    labels = resolve(db, config, pairs, goals['scope'], owners, positive=True,
+                     physical_pairs=goals.get('explicit_physical_pairs'))
     claimed = {}
     forbidden = {(e['set'],oid) for e in goals.get('observation_exclusions',()) for oid in e['observation_ids']}
     forbidden_scenes = {(e['set'],e['scene']) for e in goals.get('scene_exclusions',())}
@@ -55,7 +75,10 @@ def freeze(db, config, goals, owners, observations, tracks):
         if index not in targets:
             continue
         evidence = group.get('identity_evidence') or group.get('construction_evidence',{})
+        alternatives = goals.get('physical_alternatives',{})
         allowed = set(targets[index])
+        allowed.update(oid for source in targets[index] for oid in alternatives.get(source,()))
+        allowed.difference_update(claimed)
         frozen = []
         for unit in evidence.get('core_units',()):
             addresses = {r['id'] for r in unit['observations']}
@@ -69,16 +92,17 @@ def freeze(db, config, goals, owners, observations, tracks):
             for member in group['members']:
                 for row in member['observations']:
                     if row['id'] in allowed:
-                        by_cue[row['scan'],row['cue']].append(row['id'])
+                        physical = {row['id'],*alternatives.get(row['id'],())}
+                        if physical.isdisjoint(claimed):
+                            by_cue[row['scan'],row['cue']].extend(sorted(physical))
             frozen = list(by_cue.values())
+        if not frozen:
+            raise ValueError('Positive labels require independent observations of the target performer.')
         units[index] = frozen
     goals['positive_reference_units'] = units
 
 
-def assess(goals, status, observations, predicted):
-    labels = goals.get('positive_observations')
-    if not labels:
-        return
+def reference_targets(goals, observations, predicted):
     from .merge_goal_identity import required
     units_by_set = goals.get('positive_reference_units')
     if units_by_set is None:
@@ -99,6 +123,14 @@ def assess(goals, status, observations, predicted):
         winners = [owner for owner,count in votes.items() if count>=quorum]
         targets[int(index)] = (winners[0] if len(winners)==1 else None,
             dict(reference_units=len(units),reference_quorum=quorum,lost_reference_units=lost,mixed_reference_units=mixed))
+    return targets
+
+
+def assess(goals, status, observations, predicted):
+    labels = goals.get('positive_observations')
+    if not labels:
+        return
+    targets = reference_targets(goals, observations, predicted)
     buckets = defaultdict(list)
     for item in labels:
         key = item['set'],item['scene'],item.get('track') or tuple(item['requested_observation_ids'])

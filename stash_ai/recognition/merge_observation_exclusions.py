@@ -1,7 +1,7 @@
 """Resolve explicit negative samples against the current retained replay inputs."""
 
 
-def resolve(db, config, pairs, scope, owners, *, positive=False):
+def resolve(db, config, pairs, scope, owners, *, positive=False, physical_pairs=None):
     if not pairs:
         return []
     from .identity_report import _select
@@ -15,6 +15,8 @@ def resolve(db, config, pairs, scope, owners, *, positive=False):
     bodies = available(db)
     body_enabled = enabled(config) and bodies and identities_available(db)
     expected = contract(config)
+    physical_pairs = physical_pairs or {}
+    manual_faces = {body:face for face,body in physical_pairs.items()}
 
     def sample(oid):
         rows = [dict(r, evidence_kind='face') for r in db.execute(
@@ -52,17 +54,24 @@ def resolve(db, config, pairs, scope, owners, *, positive=False):
         row = sample(oid)
         ids = {oid}
         face = row['id'] if row['evidence_kind'] == 'face' else row['face']
+        if row['evidence_kind']=='person':
+            if oid in manual_faces:
+                face = manual_faces[oid]
+            elif face in physical_pairs:
+                face = None  # The retained body was displaced by a manual correction.
         if face:
             linked = sample(face)
             if linked['evidence_kind'] != 'face' or (linked['scan'], linked['cue']) != (row['scan'], row['cue']):
                 raise ValueError(f'{label} observation {oid} has an incompatible linked face.')
             ids.add(face)
-            if body_enabled:
+            if face in physical_pairs:
+                ids.add(physical_pairs[face])
+            elif body_enabled:
                 # The retained association defines this physical sample. Do not
                 # propagate a label to other people in the cue or to other cues.
                 ids.update(r[0] for r in db.execute('SELECT id FROM body_observations '
                     'WHERE face=? AND scan=? AND cue=? AND contract=?',
-                    (face, row['scan'], row['cue'], expected)))
+                    (face, row['scan'], row['cue'], expected)) if r[0] not in manual_faces)
         group = owners[person['id']]
         key = group, tuple(sorted(ids))
         item = constraints.setdefault(key, dict(set=group, scene=row['scene'], scan=row['scan'], **({'cue':row['cue']} if positive else {}),

@@ -47,11 +47,12 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
                     wrong[row['id']] = dict(expected=wanted,constraint='between_sets')
                 elif owner and wanted and owner != wanted:
                     wrong[row['id']] = dict(expected=wanted, constraint='positive_set')
+    from .positive_observations import reference_targets
+    label_targets = reference_targets(goals,membership,membership) if goals.get('positive_observations') else {}
     for item in goals.get('positive_observations', ()):
-        wanted = set_targets.get(item['set'])
+        wanted,_ = label_targets[item['set']]
         for oid in item['observation_ids']:
-            if wanted:
-                expected[oid] = wanted
+            expected[oid] = wanted
             if membership.get(oid) != wanted or not wanted:
                 wrong[oid] = dict(expected=wanted, constraint='positive_observation')
     for item in negatives:

@@ -42,11 +42,11 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     from .merge_scene_exclusions import resolve as resolve_exclusions, freeze_targets
     exclusions = resolve_exclusions(db, config, scene_exclusions, scope, owners)
     from .merge_observation_exclusions import resolve as resolve_observations
-    samples = resolve_observations(db, config, observation_exclusions, scope, owners)
     from .physical_goal import explicit_pairs
     pairs = explicit_pairs(db,config,scope,physical_pairs) if physical_pairs else {}
     if pairs and not physical:
         raise ValueError('Explicit physical pairs require the identity-physical goal policy.')
+    samples = resolve_observations(db, config, observation_exclusions, scope, owners, physical_pairs=pairs)
     labelled_bodies = set(pairs.values())
     for group in groups:
         forbidden = {e['scene'] for e in exclusions if e['set'] == group['index']}
