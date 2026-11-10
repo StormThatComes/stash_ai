@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v35-joint-cue-tracks',contract(config),matching_policy(config),
+    return digest(['body-local-v36-physical-face-conflicts',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -317,9 +317,11 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 reason='unresolved_partner',track_blocker=dict(reason='unresolved_partner',cue=row['cue']))
     queries=[r for r in rows if r['id'] not in decisions]
     from .body_seed_modes import FrozenSeeds
-    frozen=FrozenSeeds(seeds,scores,settings) if queries else None
+    review_faces = settings.get('tracklet_matching') and seeds and any(
+        r.get('face_person') and not r.get('face_anchor') for r in rows)
+    frozen=FrozenSeeds(seeds,scores,settings) if queries or review_faces else None
     anonymous = {}
-    if settings.get('tracklet_matching') and queries:
+    if settings.get('tracklet_matching') and (queries or review_faces):
         from .body_tracklets import plan, claim_fragments
         anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen)
         claim_fragments(rows,anonymous,decisions,frozen,guard,settings)

@@ -105,12 +105,12 @@ def paths(rows, settings, scores, occupied=()):
         yield chain,strengths
 
 
-def compatible_segments(chain, strengths, decisions, *, side=None):
+def compatible_segments(chain, strengths, decisions, *, side=None, soft=()):
     """Only the interval between contradictory measured owners is ambiguous."""
     start = 0
     previous = None
     for i,row in enumerate(chain):
-        if row['id'] not in decisions:
+        if row['id'] not in decisions or row['id'] in soft:
             continue
         owner = decisions[row['id']].get('person')
         if owner is None:
@@ -152,8 +152,11 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
             split_sides[row['id']] = (own['id'], other['id'])
             return True
         return False
+    soft = {r['id'] for r in rows if not r.get('face_anchor') and
+            decisions.get(r['id'],{}).get('reason') == 'measured_face_association'}
+    root_rows = {r['id']: r for bank in seeds.values() for r in bank}
     segments = (part for chain,strengths in paths(rows,settings,scores,record.get('occupied_cues',()))
-                for part in compatible_segments(chain,strengths,decisions,side=side))
+                for part in compatible_segments(chain,strengths,decisions,side=side,soft=soft))
     for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}
         if not known:
@@ -179,7 +182,9 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
                     floor = min(floor, strengths[i-1 if step==1 else i])
                     routes[i] = (floor, -abs(i-position), root_id)
         for i,row in enumerate(chain):
-            if row['id'] in decisions or copresent([row],seeds[owner]) or not guard.allows(row,seeds[owner],owner):
+            weak = decisions.get(row['id']) if row['id'] in soft else None
+            if (row['id'] in decisions and not weak or weak and weak['person']==owner or
+                    copresent([row],seeds[owner]) or not guard.allows(row,seeds[owner],owner)):
                 continue
             bracketed = i in left_routes and i in right_routes
             routes = [bank[i] for bank in (left_routes,right_routes)
@@ -191,10 +196,23 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
             rival, rival_owner = max(((v[5],v[2]) for v in ranked if v[2]!=owner),default=(-1.,None))
             if floor-rival < max(.025,settings['ambiguity_margin']):
                 continue
+            if weak:
+                measured_owner = weak['person']
+                proof = dict(face_owner=measured_owner, track_owner=owner, track_root=root_id)
+                from .independent_evidence import unit
+                endpoints = [root_rows[route[i][2]] for route in (left_routes,right_routes) if i in route]
+                units = {unit(dict(scan=r['scan'],seconds=r['seconds'],quality=r.get('face_quality') or '{}'))
+                         for r in endpoints}
+                if len(units)<2 or min(route[i][0] for route in (left_routes,right_routes) if i in route)-rival < max(.025,settings['ambiguity_margin']):
+                    weak.update(person=None,status='withheld',reason='weak_face_track_conflict',face_track=proof)
+                    continue
+                proof['witness_ids'] = [r['id'] for r in endpoints]
             decisions[row['id']] = dict(person=owner,status='accepted',role='auxiliary',
                 reason='local_body_track',root=root_id,track_floor=floor,runner=rival,rival=rival_owner,
                 threshold=settings.get('track_similarity_threshold') if settings.get('track_similarity_threshold') is not None else settings['cohesion_threshold'],
                 required_margin=max(.025,settings['ambiguity_margin']))
+            if weak:
+                decisions[row['id']]['face_track'] = proof
             if row['id'] in split_sides:
                 decisions[row['id']]['conflict_endpoints'] = split_sides[row['id']]
     return anonymous

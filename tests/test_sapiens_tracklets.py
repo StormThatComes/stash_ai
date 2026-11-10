@@ -172,3 +172,22 @@ def test_long_turn_needs_two_roots_and_conflict_preserves_supported_ends():
     decisions = {'0':dict(person='A'),'4':dict(person='B')}
     plan({},rows,{'A':[rows[0]],'B':[rows[4]]},decisions,defaults(),scores,guard,bank)
     assert [decisions[str(i)]['person'] for i in range(5)] == ['A','A',None,'B','B']
+
+
+def test_weak_face_conflict_requires_two_independent_roots():
+    from tests.test_contact_body_claims import body
+    rows = [body(str(i),i,40) for i in range(3)]
+    guard = SimpleNamespace(allows=lambda *args: True)
+    bank = SimpleNamespace(rank=lambda *args: [])
+    for ends, expected in [([0],None),([0,2],'A')]:
+        decisions = {str(i):dict(person='A') for i in ends}
+        decisions['1'] = dict(person='B',role='auxiliary',reason='measured_face_association')
+        plan({}, rows, {'A':[rows[i] for i in ends]}, decisions, defaults(),
+             SimpleNamespace(face_similarity=np.dot), guard, bank)
+        assert decisions['1']['person'] == expected
+        assert decisions['1']['face_track']['face_owner'] == 'B'
+    rows[1]['face_anchor'] = True
+    decisions = {'0':dict(person='A'),'1':dict(person='B',reason='measured_face_association'),'2':dict(person='A')}
+    plan({}, rows, {'A':[rows[0],rows[2]]}, decisions, defaults(),
+         SimpleNamespace(face_similarity=np.dot), guard, bank)
+    assert decisions['1']['person'] == 'B'

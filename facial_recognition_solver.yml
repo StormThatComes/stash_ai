@@ -200,7 +200,7 @@ matching:
     # Minimum score lead over a competing identity. Range: 0..1.
     cohesion_threshold: 0.6
     # Minimum similarity to every retained reference when matching or merging. Range: 0..1.
-    deduplicate_detections: false
+    deduplicate_detections: true
     # Detect same-cue duplicates using box overlap, landmarks and face embeddings.
     samples:
       # Query quality and reference bank limits.
@@ -256,13 +256,13 @@ matching:
       strict_appearance_matching: true
       # Match supported strict looks at ordinary thresholds; recovered faces stay attachments; needs
       # anchor_view_matching.
-      anchor_outlier_quarantine: false
+      anchor_outlier_quarantine: true
       # Experimental clean-core attachment matching; original anchors still veto; needs anchor_view_matching.
       context_view_enrichment: true
       # Add views after 2+ contextual cues pass strict-core checks; needs anchor_view_matching.
       corroborated_view_enrichment: true
       # Recover alternate views corroborated by independent scenes and rooted views; one generation only.
-      adaptive_view_witnesses: false
+      adaptive_view_witnesses: true
       # Grow each view's supporting reference set as independent evidence increases.
       match_threshold: 0.82
       # Minimum similarity for matching through a confirmed face view. Range: 0..1.
