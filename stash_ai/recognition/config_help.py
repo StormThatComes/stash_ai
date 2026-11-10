@@ -266,6 +266,8 @@ HELP = {
     'execution.rebuild.body.max_witness_comparisons': 'Maximum exact vector comparisons per body scene/global pass, including face vetoes. Range: positive integer.',
     'execution.rebuild.body.reference_bytes': 'Byte budget for body/hybrid reference banks, metadata and lookup working arrays. Range: positive integer.',
     'execution.rebuild.body.plan_bytes': 'Byte budget for retained body/hybrid matching plans and decision proofs. Range: positive integer.',
+    'execution.solver': 'Solver strategy comparison on labelled validation scenes.',
+    'execution.solver.compare_scene_strategies': 'Compare scene matching strategies when solving with a validation manifest and body identities enabled.',
     'execution.portraits': 'Portrait CPU workers, inference batches and ranking cache.',
     'execution.portraits.cpu_threads': 'Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.',
     'execution.portraits.faceocc_batch_size': 'Faces per portrait visibility inference batch (1..8); 1 disables batching.',

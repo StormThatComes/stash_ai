@@ -412,12 +412,15 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             if geometry[row['id']][0].get('query_only_reason')=='unresolved_partner':
                 decisions[row['id']].update(person=None,status='withheld',role='auxiliary',
                                             reason='unresolved_partner')
-    from .fragment_endpoints import nominations
+    from .fragment_endpoints import nominations, open_nominations
     from .fragment_endpoints import split_owner_nominations
     endpoint_pairs = defaultdict(list)
     for member,proof in split_owner_nominations(looks,lookup,root,shot_ids,scores,settings):
         endpoint_pairs[member].append(proof)
     bridges = nominations(looks,lookup,root,shot_ids,scores,settings)
+    opened = open_nominations(looks,lookup,decisions,root,shot_ids,scores,settings,guard)
+    for oid, proposal in opened.items():
+        bridges.setdefault(oid,proposal)
     if not banks and not crossed and not bridges:
         for oid,proofs in endpoint_pairs.items():
             decisions[oid]['endpoint_pairs'] = proofs
@@ -557,6 +560,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                               source_tracks=proof, score=score)
         if angle == 'crossing':
             decisions[oid].update(reason='face_rooted_crossing', perspective=geometry[oid][0].get('orientation'))
+        if angle == 'endpoint_faces' and oid in opened and proof == opened[oid][1]:
+            decisions[oid]['local_face_root'] = previous['open_face_root']['observation']
         if angle == 'endpoint_faces':
             decisions[oid].update(reason='fragment_face_endpoints',perspective=geometry[oid][0].get('orientation'))
         if angle not in ('crossing','endpoint_faces'):

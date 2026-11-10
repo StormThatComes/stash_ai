@@ -135,6 +135,9 @@ def execute(args, config):
             print('Merge solver execution: request ' + request_text(execution, maximum=args.max_trials),
                   file=sys.stderr, flush=True)
     validation_path = getattr(args, 'solver_validation', None)
+    from .body_identity import enabled as body_enabled
+    compare_strategies = getattr(args,'compare_scene_strategies',False) or bool(
+        validation_path and body_enabled(config) and config.data['execution']['solver_compare_scene_strategies'])
     validation_manifest = None
     excluded_scenes = ()
     if validation_path:
@@ -175,7 +178,7 @@ def execute(args, config):
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                      compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
                                      compact_report=compact_report,
-                                    compare_scene_strategies=getattr(args,'compare_scene_strategies',False),
+                                    compare_scene_strategies=compare_strategies,
                                     yaml_mode=yaml_mode, feasibility_trials=getattr(args, 'feasibility_trials', 6),
                                     targeted_trials=getattr(args, 'targeted_trials', 8), execution=execution, outside_limits={
                                         key: getattr(args, attr, None) for key, attr in (
@@ -192,7 +195,7 @@ def execute(args, config):
                         console.message(label, decorative=True)
                     validation = validate_winner(config, db, result, validation_path, manifest=validation_manifest,
                                                  progress=validation_step if console else None,
-                                                 compare_strategies=getattr(args,'compare_scene_strategies',False))
+                                                 compare_strategies=compare_strategies)
                     result['holdout_validation'] = validation
                     if console:
                         from .solver_explanation import holdout_summary

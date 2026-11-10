@@ -103,6 +103,7 @@ _GROUPS = (
      'checkpoint_bytes=rebuild_checkpoint_bytes replay_snapshot_bytes pixel_index_bytes derived_cache_bytes'),
     ('execution.rebuild.body', 'sapiensid.execution',
      'max_candidate_pairs max_witness_comparisons reference_bytes plan_bytes'),
+    ('execution.solver', 'execution', 'compare_scene_strategies=solver_compare_scene_strategies'),
     ('execution.portraits', 'execution',
      'cpu_threads=portrait_cpu_threads faceocc_batch_size=portrait_faceocc_batch_size '
      'ranking_cache_bytes=portrait_ranking_cache_bytes prefetch=prefetch_portraits'),

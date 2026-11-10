@@ -608,7 +608,7 @@ in consecutive cues of the same measured shot. The proposal is validated by the 
 
 ### Comparing body recognition strategies
 
-Add `--compare-scene-strategies` to a run with `--solve --solver-validation holdout.json`.
+Both bundled profiles enable `execution.solver.compare_scene_strategies`. Pass `--solve --solver-validation holdout.json` to compare strategies. Use `--compare-scene-strategies` to request the comparison with another profile.
 It screens fourteen strategies. Four matched controls toggle face and body scene support independently
 with paths and face endpoints enabled. The other families compare local paths, endpoints and fixed
 or evidence-weighted context. Use at least 20 trials for finalist refinement; labelled roster returns
