@@ -41,7 +41,7 @@ def _metrics(labels, samples, locations, decisions, exclude=(), partner_sets=(),
     metrics['physical'] = dict(evaluate_identities(projections),projection_conflicts=conflicts,
         slices={name:evaluate_identities([row for row in projections if name in row['slices']])
                 for name in ('back','entangled','entrant')})
-    metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude,timing=timing)
+    metrics['sequences'] = sequence_metrics(labels,samples,locations,decisions,exclude,timing=timing,unbound=unbound)
     for category in ('back','entangled'):
         within = [r for r in records if category in samples[r['observation']]['slices']]
         outside = [r for r in records if category not in samples[r['observation']]['slices']]

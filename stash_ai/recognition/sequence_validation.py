@@ -3,7 +3,7 @@ from collections import defaultdict
 from itertools import combinations
 
 
-def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timing=None):
+def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timing=None, unbound=None):
     from .reference_roles import STRICT_REASONS
     face_roots = defaultdict(set)
     by_scene = defaultdict(lambda: defaultdict(dict))
@@ -18,6 +18,8 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                 (decision.get('evidence') or {}).get('reason') in STRICT_REASONS):
             face_roots[scene,truth].add((cue,owner))
         rows.append((owner, samples[oid]['slices']))
+    for (scene, cue, truth), info in (unbound or {}).items():
+        by_scene[scene][truth].setdefault(cue, [(None, info.get("slices", ()))])
     counts = defaultdict(lambda: defaultdict(int))
 
     turn_roots = []
@@ -29,7 +31,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
             return False
         if not timing:
             return True
-        left, right = timing[scene,a][1], timing[scene,b][1]
+        left, right = timing.get((scene,a),(None,None))[1], timing.get((scene,b),(None,None))[1]
         return left is None or right is None or left == right
 
     def episodes(scene, cues, active):

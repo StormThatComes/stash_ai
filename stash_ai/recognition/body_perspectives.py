@@ -277,6 +277,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                 break
             if member.get('face_person') is not None:
                 if decisions[successor].get('person') != owner:
+                    if decisions[successor].get('person') is None and decisions[successor].get('reason') == 'unconfirmed_contact_face':
+                        successor = None
                     break
             else:
                 path.append(member)
