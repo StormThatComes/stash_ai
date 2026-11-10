@@ -1,5 +1,5 @@
 """Bounded complete-link alternatives for face-rooted tracks."""
-VIEW_POLICY = 'independent-held-out-perspectives-v7'
+VIEW_POLICY = 'independent-held-out-perspectives-v8'
 
 
 def select(tracks, settings, scores, rank, shot_of):

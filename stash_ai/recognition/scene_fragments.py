@@ -50,19 +50,21 @@ def reconcile_neighbours(groups,settings,scores,guard):
     bounds = {k:ball(np.stack([r['_vector'] for r in groups[k]])) for k in keys}
     error = 2*len(groups[keys[0]][0]['_vector'])*np.finfo(np.float32).eps
     rival_floor = settings['match_threshold']-settings['ambiguity_margin']
-    for i,a in enumerate(keys):
-        for b in keys[i+1:]:
-            if upper(bounds[a],bounds[b])+error<rival_floor:
-                continue
-            left,right = groups[a],groups[b]
-            if copresent(left,right) or not all(guard.allows(r,right) for r in left) or not all(
-                    guard.allows(r,left) for r in right):
-                continue
-            mean,low = scores.compare(left,right)
-            for own,peer in ((a,b),(b,a)):
-                best[own].append((mean,peer,low))
-                best[own].sort(key=lambda item:(-item[0],item[1]))
-                del best[own][2:]
+    def consider(a,b):
+        if upper(bounds[a],bounds[b])+error<rival_floor:
+            return
+        left,right = groups[a],groups[b]
+        if copresent(left,right) or not all(guard.allows(r,right) for r in left) or not all(
+                guard.allows(r,left) for r in right):
+            return
+        mean,low = scores.compare(left,right)
+        for own,peer in ((a,b),(b,a)):
+            options = best[own]
+            options[:] = [item for item in options if item[1]!=peer]
+            options.append((mean,peer,low))
+            options.sort(key=lambda item:(-item[0],item[1]))
+            del options[2:]
+
     def winner(key):
         options = best[key]
         if not options:
@@ -72,10 +74,26 @@ def reconcile_neighbours(groups,settings,scores,guard):
         if (mean>=settings['match_threshold'] and low>=settings['cohesion_threshold']
                 and mean-rival>=settings['ambiguity_margin']):
             return peer
-    for a in keys:
-        b = winner(a)
-        if b and a<b and winner(b)==a:
+    dirty = set(keys)
+    while dirty:
+        # Only a changed bank or one whose stored top two disappeared needs a rescan.
+        for a in sorted(dirty):
+            for b in groups:
+                if a!=b and (b not in dirty or a<b):
+                    consider(a,b)
+        winners = {a:winner(a) for a in groups}
+        pairs = [(a,b) for a,b in winners.items() if b is not None and a<b and winners[b]==a]
+        if not pairs:
+            break
+        changed = {key for pair in pairs for key in pair}
+        for a,b in pairs:
             groups[a].extend(groups.pop(b))
+            bounds[a] = ball(np.stack([r['_vector'] for r in groups[a]]))
+            del bounds[b],best[b]
+        dirty = {a for a in groups if a in changed or any(peer in changed for _,peer,_ in best[a])}
+        for a in dirty:
+            best[a].clear()
+
 
 
 def preserve_fragments(record, rows, decisions, settings, scores, guard):

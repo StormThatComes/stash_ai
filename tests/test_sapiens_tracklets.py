@@ -240,3 +240,18 @@ def test_certified_sparse_edges_form_a_view_until_a_measured_cut(tmp_path):
                     reason='measured_face_association' if row['face_person'] else 'body_anchor_quality') for row in rows}
         recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *a:True),graph=graph,cut_starts=cuts)
         assert any('rooted_track' in d for d in decisions.values())==expected
+
+
+def test_neighbour_reconciliation_reaches_a_complete_link_fixed_point(tmp_path):
+    from .test_recognition_body_identity import configuration
+    from .test_contact_body_claims import body
+    from stash_ai.recognition.scene_fragments import reconcile_neighbours
+    from stash_ai.recognition.body_identity import Scores
+    groups={}
+    for i,(key,degrees) in enumerate(zip('aabccd',(0,0,1,29,29,30))):
+        row=body(str(i),i,50)
+        rad=math.radians(degrees)
+        row['_vector']=np.array([math.cos(rad),math.sin(rad)],dtype='float32')
+        groups.setdefault(key,[]).append(row)
+    reconcile_neighbours(groups,defaults(),Scores(configuration(tmp_path)),SimpleNamespace(allows=lambda *args:True))
+    assert sorted(map(len,groups.values()))==[6]

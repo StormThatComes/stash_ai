@@ -9,7 +9,7 @@ from .body_perspectives import orientation
 from .turn_transitions import transitions
 
 
-def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, occupied_cues=(), cuts=()):
+def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, occupied_cues=(), cuts=(), scene_bonus=0.):
     margin = max(.025, settings['ambiguity_margin'])
     allowed = {'body_scene_core','measured_face_association','local_body_track'}
     by_cue, owners, anchors = defaultdict(list), defaultdict(list), {}
@@ -187,3 +187,7 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             if decision['status']=='accepted':
                 occupied[old].discard(row['cue'])
             break
+
+    from .rear_core_claims import recover as recover_cores
+    recover_cores(rows,decisions,seeds,retained,by_cue,geometry,metadata,signals,anchors,
+                  angles,owners,occupied_cues,cuts,settings,scores,guard,scene_bonus)
