@@ -44,11 +44,20 @@ class EntrantPaths:
             key = anonymous.get(row['id'])
             if key and not row.get('face_person') and not quality(row).get('query_only'):
                 groups[key].append(row)
+        by_cue = defaultdict(list)
+        for row in rows:
+            by_cue[row['cue']].append(row)
         for group in groups.values():
             first = min(row['cue'] for row in group)
             shot = quality(group[0]).get('view_shot')
-            if (not isinstance(shot,int) or not cut_starts or bisect_right(cut_starts,first)<2
-                    or not 0<=first-shot<=2):
+            if not isinstance(shot,int):
+                continue
+            after_cut = bool(cut_starts and bisect_right(cut_starts,first)>=2 and 0<=first-shot<=2)
+            previous = by_cue.get(first-1, ())
+            current = by_cue[first]
+            partners = {r.get('face_person') for r in current} & {r.get('face_person') for r in previous} - {None}
+            birth = len(current)>len(previous) or bool(partners)
+            if not after_cut and not (birth and len({r['cue'] for r in group if quality(r).get('view_shot')==shot})>=3):
                 continue
             votes = independent(group,settings)
             if len(votes)>=3:

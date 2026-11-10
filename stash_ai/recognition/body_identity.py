@@ -16,7 +16,7 @@ from .person_anchor import pixel_gate,anchor_gate
 
 
 def defaults():
-    return dict(enabled=False,tracklet_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+    return dict(enabled=False,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
@@ -38,7 +38,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v38-independent-cross-scene-endpoints',contract(config),matching_policy(config),
+    return digest(['body-local-v39-cue-continuity',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY])
 
 
@@ -265,6 +265,13 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     roots={p:canonical(db,p) for p in {r['face_person'] for r in rows if r['face_person'] is not None}}
     origins=origins_for_scene(db,record,rows)
     record = dict(record)
+    if settings.get('body_first_matching') and origins:
+        ids = {p for values in origins.values() for p in values}
+        record['protected_turn_owners'] = [r[0] for r in db.execute(
+            "SELECT p.id FROM people p WHERE p.id IN (SELECT value FROM json_each(?)) AND "
+            "(p.performer IS NOT NULL OR EXISTS (SELECT 1 FROM body_members m JOIN body_observations b "
+            "ON b.id=m.observation WHERE m.person=p.id AND m.status='accepted' AND b.scan<>?))",
+            (encoded(sorted(ids)),scan))]
     shot_map = db.execute('SELECT value FROM metadata WHERE key=?',('cue-view-shots:'+scan,)).fetchone()
     record['cut_starts'] = tuple(start for start,shot in json.loads(shot_map[0]) if shot is not None) if shot_map else ()
     if not record['cut_starts']:
@@ -300,6 +307,10 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     settings=config.data['sapiensid']['identities']
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
+    graph = None
+    if settings.get('tracklet_matching') and settings.get('body_first_matching'):
+        from .body_tracklets import paths
+        graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=True))
     seeds={};decisions={}
     from .contact_anchors import questionable_links
     uncertain = questionable_links(rows,settings,scores)
@@ -327,7 +338,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     anonymous = {}
     if settings.get('tracklet_matching') and (queries or review_faces):
         from .body_tracklets import plan, claim_fragments
-        anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen)
+        anonymous = plan(record,rows,seeds,decisions,settings,scores,guard,frozen,graph=graph)
         claim_fragments(rows,anonymous,decisions,frozen,guard,settings)
         queries = [r for r in queries if r['id'] not in decisions]
     remaining=[]
@@ -462,7 +473,10 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                           face_margin=config.data['recognition']['ambiguity_margin'],scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))
     recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()),
-            cut_starts=starts, entrants=entrants)
+            cut_starts=starts, entrants=entrants, graph=graph)
+    if graph is not None:
+        from .scene_continuity import recover_turns
+        recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()))
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:

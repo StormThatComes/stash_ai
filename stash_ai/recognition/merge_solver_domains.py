@@ -76,8 +76,8 @@ def support_baseline_changes(config):
 def normalize(config, changes):
     domains = registry(config)
     from .scene_strategy_validation import STRATEGY_KEYS
-    categories = {k:v for k,v in changes.items() if k in STRATEGY_KEYS[:3] and config.data['sapiensid']['enabled']}
-    if any(type(v) is not bool for k,v in categories.items() if k.endswith('tracklet_matching')) or any(
+    categories = {k:v for k,v in changes.items() if k in STRATEGY_KEYS[:4] and config.data['sapiensid']['enabled']}
+    if any(type(v) is not bool for k,v in categories.items() if k.endswith(('tracklet_matching','body_first_matching'))) or any(
             v is not None and type(v) is not bool for k,v in categories.items() if k.endswith('endpoint_matching')) or any(
             v not in ('fixed','evidence') for k,v in categories.items() if k.endswith('scene_bonus_mode')):
         raise ValueError('Invalid scene strategy.')

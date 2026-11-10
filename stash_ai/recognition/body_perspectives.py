@@ -58,7 +58,7 @@ def orientation(person):
     return orientation_measurement(person)['label']
 
 
-def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut_starts=(), entrants=None):
+def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut_starts=(), entrants=None, graph=None):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
     from .body_identity import quality
     if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
@@ -203,6 +203,15 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             else:
                 stops[a['id']] = dict(reason='competing_transition', cue=target, rival=rivals[0][1],
                                           measured=edges[0][0]-max((v for v,i in rivals if i!=a['id']),default=-1.), limit=margin)
+    if graph is not None:
+        # Rooted views consume the same certified physical edges. Retain the
+        # stricter perspective geometry gates and all independent root checks.
+        shared = {}
+        for chain,_ in graph:
+            for a,b in zip(chain,chain[1:]):
+                if a['id'] in geometry and b['id'] in geometry and transition(a,b,raw=True) is not None:
+                    shared[a['id']] = b['id']
+        next_row = shared
     # A side/uncertain cue can query a rear bank only when bracketed by two
     # back observations on unique links. It never trains the rear bank.
     previous_links = {end:start for start,end in next_row.items()}

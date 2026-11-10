@@ -8,7 +8,7 @@ from .perspective_shots import change
 from .track_geometry import rejection, torso_points, translation
 
 
-def paths(rows, settings, scores, occupied=()):
+def paths(rows, settings, scores, occupied=(), *, extended=False):
     cues = defaultdict(list)
     geometry = {}
     physical = {}
@@ -30,9 +30,15 @@ def paths(rows, settings, scores, occupied=()):
             max(geometry[r['id']][0].get('detected_people',len(members)),
                 geometry[r['id']][0].get('expected_people',0))==len(members) for r in members)
     links, incoming = {},set()
-    for cue,left in sorted(cues.items()):
-        skipped = cue+1 not in cues and cue+1 not in occupied
-        right = cues.get(cue+(2 if skipped else 1),())
+    ordered = sorted(cues)
+    from bisect import bisect_right
+    occupied = sorted(occupied)
+    for cue,target in zip(ordered,ordered[1:]):
+        gap = target-cue
+        skipped = gap>1
+        if gap>(5 if extended else 2) or bisect_right(occupied,cue)!=bisect_right(occupied,target-1):
+            continue
+        left,right = cues[cue],cues[target]
         if not right:
             continue
         partial = not (complete(left) and complete(right))
@@ -56,6 +62,18 @@ def paths(rows, settings, scores, occupied=()):
                 _,bb,tb,_ = geometry[b['id']]
                 if not rejection(ba,bb,ta,tb,translation=offset):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
+        if gap>2:
+            # Long empty intervals only nominate two independently plausible
+            # paths in a visually continuous shot with the same complete roster.
+            from .crowd_context import pair
+            if (len(left)!=2 or len(right)!=2 or not pair([physical[r['id']] for r in left])
+                    or not pair([physical[r['id']] for r in right])):
+                continue
+            strong = [(a,b) for (a,b),s in edges.items() if s>=max(threshold,settings['match_threshold'])
+                      and s-max((v for (x,y),v in edges.items() if (a==x)!=(b==y)),default=-1)>=margin]
+            if len(strong)!=2 or len({a for a,b in strong})!=2 or len({b for a,b in strong})!=2:
+                continue
+            edges = {key:edges[key] for key in strong}
         if not partial:
             from .track_assignment import joint_links
             for a,b,value in joint_links(edges, physical, threshold, margin):
@@ -114,6 +132,8 @@ def compatible_segments(chain, strengths, decisions, *, side=None, soft=()):
             continue
         owner = decisions[row['id']].get('person')
         if owner is None:
+            if decisions[row['id']].get('reason')=='unconfirmed_contact_face':
+                continue
             if i>start:
                 yield chain[start:i],strengths[start:i-1]
             start,previous = i+1,None
@@ -136,7 +156,7 @@ def compatible_segments(chain, strengths, decisions, *, side=None, soft=()):
         yield chain[start:],strengths[start:len(chain)-1]
 
 
-def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
+def plan(record, rows, seeds, decisions, settings, scores, guard, frozen, *, graph=None):
     """Name paths only from strict roots. Anonymous paths stay scene-local."""
     from .body_identity import copresent, independent
     from .body_origins import physical_key
@@ -155,7 +175,9 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
     soft = {r['id'] for r in rows if not r.get('face_anchor') and
             decisions.get(r['id'],{}).get('reason') == 'measured_face_association'}
     root_rows = {r['id']: r for bank in seeds.values() for r in bank}
-    segments = (part for chain,strengths in paths(rows,settings,scores,record.get('occupied_cues',()))
+    if graph is None:
+        graph = paths(rows,settings,scores,record.get('occupied_cues',()))
+    segments = (part for chain,strengths in graph
                 for part in compatible_segments(chain,strengths,decisions,side=side,soft=soft))
     for chain,strengths in segments:
         known = {roots[r['id']] for r in chain if r['id'] in roots}
@@ -181,6 +203,8 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
                 elif root_id is not None:
                     floor = min(floor, strengths[i-1 if step==1 else i])
                     routes[i] = (floor, -abs(i-position), root_id)
+        contact = {j for j,r in enumerate(chain) if decisions.get(r['id'],{}).get('reason')=='unconfirmed_contact_face'}
+        indices = {r['id']:j for j,r in enumerate(chain)}
         for i,row in enumerate(chain):
             weak = decisions.get(row['id']) if row['id'] in soft else None
             if (row['id'] in decisions and not weak or weak and weak['person']==owner or
@@ -189,6 +213,9 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen):
             bracketed = i in left_routes and i in right_routes
             routes = [bank[i] for bank in (left_routes,right_routes)
                       if i in bank and (bank[i][1]>=-12 or bracketed)]
+            if contact and not bracketed:
+                routes = [route for route in routes if not any(
+                    min(i,indices[route[2]])<j<max(i,indices[route[2]]) for j in contact)]
             if not routes:
                 continue
             floor, _, root_id = max(routes)

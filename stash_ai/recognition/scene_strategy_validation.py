@@ -38,11 +38,16 @@ def variants(config):
                 config.data['clustering']['same_scene_match_bonus'] or .03) if face else 0.
             label = name if face else name+'-noface'
             controls[label] = replace(config,data=data)
+    for body_first in (False,True):
+        original = result['tracks-1-evidence']
+        data = plain(original.data)
+        data['sapiensid']['identities']['body_first_matching'] = body_first
+        controls['body-first' if body_first else 'face-first'] = replace(original,data=data)
     return {**controls, **{name:v for name,v in result.items() if name not in controls}}
 
 
 STRATEGY_KEYS = tuple('sapiensid.identities.'+key for key in (
-    'tracklet_matching','endpoint_matching','scene_bonus_mode','scene_match_bonus')) + ('clustering.same_scene_match_bonus',)
+    'tracklet_matching','endpoint_matching','scene_bonus_mode','body_first_matching','scene_match_bonus')) + ('clustering.same_scene_match_bonus',)
 
 
 def training_profiles(config):
@@ -156,7 +161,7 @@ def strategy_summary(config,metrics,labels,locations,decisions):
         if owner is not None:
             identities[truth].add(owner)
     seq = metrics['sequences']
-    return dict(tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
+    return dict(body_first_matching=settings.get('body_first_matching',False),tracklet_matching=settings['tracklet_matching'],endpoint_matching=settings.get('endpoint_matching'),
                 face_scene_bonus=config.data['clustering']['same_scene_match_bonus'],
                 physical_false_joins=metrics['physical']['false_merge_pairs'],scene_match_bonus=settings['scene_match_bonus'],
                 scene_bonus_mode=settings['scene_bonus_mode'],physical_coverage=metrics['physical']['coverage'],

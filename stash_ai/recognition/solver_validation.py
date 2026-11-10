@@ -331,7 +331,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 stress.append(dict(scene=scene, first_cue=first, last_cue=last, mode=mode,scored=len(group),
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
     return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress, require_slices=compare_strategies or any(
-                k.startswith('sapiensid.identities.scene_') or k.endswith(('tracklet_matching','endpoint_matching')) for k in changes)),
+                k.startswith('sapiensid.identities.scene_') or k.endswith(('tracklet_matching','endpoint_matching','body_first_matching')) for k in changes)),
                 scene_strategies=strategy_results, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
