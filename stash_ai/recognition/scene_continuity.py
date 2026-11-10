@@ -153,4 +153,6 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
             decisions[oid] = dict(person=target,status='accepted',role='auxiliary',reason='corroborated_rear_view',
                 witness_ids=list(roots),runner=runner,required_margin=margin,**proof)
             occupied[target].add(row['cue'])
+            if decision['status']=='accepted':
+                occupied[old].discard(row['cue'])
             break

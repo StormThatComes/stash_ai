@@ -1,0 +1,261 @@
+{
+  "source": "https://github.com/opencv/opencv/blob/4.12.0/samples/data/vtest.avi",
+  "sha256": "45cddc9490be69345cbdab64ca583be65987e864ca408038e648db99e10516cf",
+  "size": [
+    400,
+    300
+  ],
+  "fps": 10,
+  "cues": [
+    {
+      "cue": 0,
+      "frame": 0,
+      "labels": [
+        {
+          "truth": "A",
+          "box": [
+            130,
+            114,
+            150,
+            161
+          ],
+          "slices": []
+        },
+        {
+          "truth": "B",
+          "box": [
+            333,
+            123,
+            358,
+            169
+          ],
+          "slices": []
+        },
+        {
+          "truth": "D",
+          "box": [
+            260,
+            80,
+            276,
+            122
+          ],
+          "slices": []
+        }
+      ]
+    },
+    {
+      "cue": 1,
+      "frame": 5,
+      "labels": [
+        {
+          "truth": "A",
+          "box": [
+            148,
+            108,
+            168,
+            158
+          ],
+          "slices": []
+        },
+        {
+          "truth": "B",
+          "box": [
+            309,
+            125,
+            336,
+            170
+          ],
+          "slices": []
+        },
+        {
+          "truth": "D",
+          "box": [
+            252,
+            82,
+            271,
+            126
+          ],
+          "slices": []
+        }
+      ]
+    },
+    {
+      "cue": 2,
+      "frame": 10,
+      "labels": [
+        {
+          "truth": "A",
+          "box": [
+            162,
+            105,
+            185,
+            155
+          ],
+          "slices": []
+        },
+        {
+          "truth": "B",
+          "box": [
+            285,
+            122,
+            306,
+            169
+          ],
+          "slices": []
+        },
+        {
+          "truth": "D",
+          "box": [
+            242,
+            86,
+            263,
+            130
+          ],
+          "slices": []
+        }
+      ]
+    },
+    {
+      "cue": 3,
+      "frame": 15,
+      "labels": [
+        {
+          "truth": "A",
+          "box": [
+            177,
+            102,
+            197,
+            151
+          ],
+          "slices": []
+        },
+        {
+          "truth": "B",
+          "box": [
+            257,
+            119,
+            278,
+            168
+          ],
+          "slices": []
+        },
+        {
+          "truth": "C",
+          "box": [
+            373,
+            148,
+            399,
+            210
+          ],
+          "slices": [
+            "entrant"
+          ]
+        }
+      ]
+    },
+    {
+      "cue": 4,
+      "frame": 20,
+      "labels": [
+        {
+          "truth": "A",
+          "box": [
+            186,
+            98,
+            211,
+            145
+          ],
+          "slices": [
+            "back"
+          ]
+        },
+        {
+          "truth": "B",
+          "box": [
+            227,
+            119,
+            251,
+            165
+          ],
+          "slices": []
+        },
+        {
+          "truth": "C",
+          "box": [
+            353,
+            138,
+            380,
+            201
+          ],
+          "slices": [
+            "back"
+          ]
+        }
+      ]
+    },
+    {
+      "cue": 5,
+      "frame": 25,
+      "labels": [
+        {
+          "truth": "B",
+          "box": [
+            211,
+            119,
+            232,
+            160
+          ],
+          "slices": []
+        },
+        {
+          "truth": "C",
+          "box": [
+            342,
+            134,
+            365,
+            197
+          ],
+          "slices": [
+            "back"
+          ]
+        }
+      ]
+    },
+    {
+      "cue": 6,
+      "frame": 30,
+      "labels": [
+        {
+          "truth": "C",
+          "box": [
+            326,
+            128,
+            348,
+            188
+          ],
+          "slices": [
+            "back"
+          ]
+        }
+      ]
+    },
+    {
+      "cue": 7,
+      "frame": 35,
+      "labels": [
+        {
+          "truth": "C",
+          "box": [
+            311,
+            123,
+            335,
+            183
+          ],
+          "slices": [
+            "back"
+          ]
+        }
+      ]
+    }
+  ]
+}
