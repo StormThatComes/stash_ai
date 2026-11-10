@@ -8,10 +8,11 @@ from .perspective_shots import change
 from .track_geometry import rejection, torso_points, translation
 
 
-def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, scores, occupied, cuts):
+def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, scores, occupied, cuts, *, confirmed=None):
     strict = settings.get('track_similarity_threshold')
     strict = settings['cohesion_threshold'] if strict is None else strict
     margin = max(.025,settings['ambiguity_margin'])
+    confirmed = anchors.keys() if confirmed is None else confirmed
     occupied,cuts = sorted(occupied),sorted(cuts)
     links = {}
     for cue,target in pairwise(sorted(by_cue)):
@@ -65,7 +66,8 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
                         continue
                 # Exclude only a strongly rooted partner with a feasible continuation
                 # and reliable, separated torsos. Unmeasured entrants remain rivals.
-                proven = {p for p in partners if edges.get((other_left[p]['id'],other_right[p]['id']),-1.)>=strict
+                proven = {p for p in partners if other_left[p]['id'] in confirmed and other_right[p]['id'] in confirmed
+                          and edges.get((other_left[p]['id'],other_right[p]['id']),-1.)>=strict
                           and all(len(torso_points(geometry[k]))>=3 and not metadata[k].get('query_only')
                                   for k in (x,y,other_left[p]['id'],other_right[p]['id']))
                           and not any(metadata[k].get('overlap',0) for k in

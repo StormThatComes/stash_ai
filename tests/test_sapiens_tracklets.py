@@ -201,3 +201,42 @@ def test_independent_entrant_after_cut_challenges_only_a_mismatching_bank():
     scores = SimpleNamespace(compare=lambda a,b:(1. if b[0] in rows else .60,1.))
     assert tracks.challenge(rows[0],[{'id':'other'}],scores,.7)==1.
     assert tracks.challenge(rows[0],rows[1:],scores,.7)==.7
+
+
+def test_contact_crop_splits_a_track_into_independently_supported_claims():
+    from tests.test_contact_body_claims import body
+    from stash_ai.recognition.body_tracklets import claim_fragments
+    rows=[body(str(i),i,50) for i in range(5)]
+    bank=[body('root1',10,50),body('root2',11,50)]
+    def rank(row,_guard):
+        if row['cue']==2:
+            return []
+        return [(.95,.94,'A',bank,True,.95)]
+    frozen=SimpleNamespace(seeds={'A':bank},support={id(bank):2},rank=rank)
+    decisions={}
+    claim_fragments(rows,{r['id']:'fragment' for r in rows},decisions,frozen,None,defaults())
+    assert set(decisions)=={'0','1','3','4'}
+    assert all(d['person']=='A' and d['fragment_support']==2 for d in decisions.values())
+
+
+def test_certified_sparse_edges_form_a_view_until_a_measured_cut(tmp_path):
+    from stash_ai.recognition.body_tracklets import paths
+    from stash_ai.recognition.body_perspectives import recover
+    from stash_ai.recognition.body_identity import Scores
+    from .test_recognition_body_identity import configuration
+    from .test_contact_body_claims import body
+    settings=dict(defaults(),tracklet_matching=True,endpoint_matching=False)
+    scores=Scores(configuration(tmp_path))
+    rows=[body(str(i),i,50,'A' if i in (0,6) else None,orientation='front' if i in (0,6) else 'back')
+          for i in (0,2,4,6)]
+    for row in rows:
+        row['geometry']='{"bounds":[0,0,40,100]}'
+        row['_face_vector']=row['_vector'] if row['face_person'] else None
+    seeds={'A':[rows[0],rows[-1]]}
+    graph=list(paths(rows,settings,scores,extended=True))
+    for cuts,expected in (((),True),((3,),False)):
+        decisions={row['id']:dict(person=row['face_person'],role='anchor' if row['face_person'] else 'auxiliary',
+                    status='accepted' if row['face_person'] else 'withheld',
+                    reason='measured_face_association' if row['face_person'] else 'body_anchor_quality') for row in rows}
+        recover(rows,decisions,seeds,settings,scores,SimpleNamespace(allows=lambda *a:True),graph=graph,cut_starts=cuts)
+        assert any('rooted_track' in d for d in decisions.values())==expected
