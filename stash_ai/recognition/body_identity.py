@@ -487,7 +487,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     if turn_feature(settings,'turn_recovery'):
         from .scene_continuity import recover_turns
         recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()),
-                      occupied_cues=record.get('occupied_cues',()),cuts=starts)
+                      occupied_cues=record.get('occupied_cues',()),cuts=starts,scene_bonus=scene_bonus(config.data))
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:

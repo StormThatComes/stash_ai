@@ -33,8 +33,20 @@ def scene(case):
         row(30,0,'C','C','back',[.76,math.sqrt(1-.76**2),0])
     if case=='donor':
         row(30,0,'C','D','back',[-1,0,0])
+    seeds = {}
+    if case in ('rear-core','rear-entrant'):
+        for r in rows:
+            q = json.loads(r['quality'])
+            q['quality']['view_shot'] = r['cue']//3*3
+            r['quality'] = json.dumps(q)
+            if r['id'] in ('1-0','4-0'):
+                ds[r['id']].update(person='D',role='anchor',status='accepted',reason='body_scene_core')
+            if r['face_person']:
+                seeds.setdefault(r['face_person'],[]).append(r)
+        if case=='rear-entrant':
+            row(40,0,'C','C','back',[.76,math.sqrt(1-.76**2),0])
     guard=FaceGuard.__new__(FaceGuard)
-    recover_turns(rows,ds,{},defaults(),SimpleNamespace(face_similarity=np.dot),guard,[])
+    recover_turns(rows,ds,seeds,defaults(),SimpleNamespace(face_similarity=np.dot),guard,[])
     return ds
 
 
@@ -81,3 +93,8 @@ def test_best_independent_pair_survives_gallery_order():
             bank.add('A','back',row,(str(2*i),str(2*i+1)),i)
         proof = bank.verify('A','back',query,())
         assert set(proof['view_witnesses'])=={'11','12'} and proof['view_score']>.97
+
+
+def test_two_independent_shots_can_recover_a_core_but_known_entrant_vetoes():
+    assert scene('rear-core')['1-0']['person']=='A'
+    assert scene('rear-entrant')['1-0']['person']=='D'
