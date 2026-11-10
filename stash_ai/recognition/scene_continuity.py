@@ -9,6 +9,30 @@ from .body_perspectives import orientation
 from .turn_transitions import transitions
 
 
+def scene_references(rows, metadata):
+    """Cover shots first, then choose the cue furthest from any retained reference."""
+    by_cue = {}
+    for row in rows:
+        q = metadata[row['id']]
+        priority = (-q.get('overlap',0),q.get('sharpness',0),row['id'])
+        cue = row['cue']
+        if cue not in by_cue or priority>by_cue[cue][0]:
+            by_cue[cue] = priority,row
+    if len(by_cue)<=8:
+        return [v[1] for _,v in sorted(by_cue.items())]
+    selected, shots = [], set()
+    while len(selected)<8:
+        def priority(cue):
+            shot = metadata[by_cue[cue][1]['id']].get('view_shot')
+            distance = min((abs(cue-r['cue']) for r in selected),default=0)
+            return (shot not in shots,distance,by_cue[cue][0])
+        cue = max(by_cue,key=priority)
+        _,row = by_cue.pop(cue)
+        selected.append(row)
+        shots.add(metadata[row['id']].get('view_shot'))
+    return selected
+
+
 def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, occupied_cues=(), cuts=(), scene_bonus=0.):
     margin = max(.025, settings['ambiguity_margin'])
     allowed = {'body_scene_core','measured_face_association','local_body_track'}
@@ -36,9 +60,9 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
         oid = row['id']
         owner = anchors.get(oid)
         if owner is not None and decisions[oid].get('role')=='anchor':
-            bank = roster[owner,angles[oid]]
-            if len(bank)<8 and all(ref['cue']!=row['cue'] for ref in bank):
-                bank.append(row)
+            roster[owner,angles[oid]].append(row)
+    for key,bank in roster.items():
+        roster[key] = scene_references(bank,metadata)
     face_roots = {r['id']:owner for owner, bank in seeds.items() for r in bank}
     confirmed = {oid for oid in anchors if decisions[oid].get('role')=='anchor'}
     successors = transitions(by_cue,geometry,metadata,signals,anchors,angles,settings,scores,occupied_cues,cuts,
@@ -52,8 +76,11 @@ def recover_turns(rows, decisions, seeds, settings, scores, guard, retained, *, 
     def evidence(path):
         oid = min(path,key=lambda k:successors[k][2]-successors[k][4])
         peer,_,score,rival,floor,other,turn = successors[oid]
+        tight = min(path,key=lambda k:successors[k][2]-successors[k][3])
+        dest,_,value,runner,_,rival_id,_ = successors[tight]
         return dict(track_floor=score,threshold=floor,runner=rival,rival_observation=other,
                     weakest_edge=[oid,peer],required_margin=margin,
+                    margin_edge=[tight,dest],edge_margin=value-runner,margin_rival=rival_id,
                     turn_discount=settings.get('turn_similarity_discount',.06) if turn else 0.)
 
     for start in sorted(successors.keys()-incoming):

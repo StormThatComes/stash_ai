@@ -1,7 +1,8 @@
 """Frozen, independently rooted appearance evidence for scene-local turns."""
 from collections import defaultdict
 
-from .body_identity import independent
+from .body_identity import independent, quality
+import numpy as np
 
 
 class TurnWitnesses:
@@ -10,10 +11,23 @@ class TurnWitnesses:
         self.settings = settings
         self.scores = scores
         self.by_view = defaultdict(list)
+        self.episodes = {}
 
     def add(self, owner, angle, member, roots, shot):
         bank = self.by_view[owner,angle]
-        if any(item[1]==roots for item in bank):
+        address = owner,angle,tuple(roots)
+        for i, (_, ends, _) in enumerate(bank):
+            if ends != roots:
+                continue
+            episode = self.episodes[address]
+            if all(row['id']!=member['id'] for row in episode):
+                episode.append(member)
+                center = np.mean([row['_vector'] for row in episode],axis=0)
+                def priority(row):
+                    meta = quality(row) if 'quality' in row else {}
+                    return (-meta.get('overlap',0), meta.get('keypoints',0),
+                            meta.get('sharpness',0), float(row['_vector'] @ center),row['id'])
+                bank[i] = (max(episode,key=priority),roots,shot)
             return
         # Keep bounded examples from different shots before retaining repeated episodes.
         if len(bank)>=16:
@@ -22,8 +36,10 @@ class TurnWitnesses:
             duplicate = next((i for i,item in enumerate(bank) if sum(w[2]==item[2] for w in bank)>1),None)
             if duplicate is None:
                 return
+            self.episodes.pop((owner,angle,tuple(bank[duplicate][1])))
             del bank[duplicate]
         bank.append((member,roots,shot))
+        self.episodes[address] = [member]
 
     def verify(self, owner, angle, row, roots, *, outside_shot=None, distinct_shots=False, confirmed_core=False):
         bank = self.by_view.get((owner,angle),())
