@@ -169,7 +169,7 @@ class Scores:
         token=current()
         if token is not None:token.check()
         from .body_numeric import vector_digest
-        key=('face',vector_digest(first),vector_digest(second))
+        key=('face', *sorted((vector_digest(first),vector_digest(second))))
         score=self.cache.get(key)
         if score is None:
             from .body_numeric import dot
@@ -217,7 +217,7 @@ class Scores:
             feature=row.get('_score_key')
             if feature is None:feature=row['_score_key']=value.tobytes()
             for other,(sample,weight) in bank.items():
-                key=(feature,other)
+                key=(feature,other) if feature<=other else (other,feature)
                 score=self.cache.get(key)
                 if score is None:
                     from .body_numeric import dot
@@ -490,6 +490,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         from .scene_continuity import recover_turns
         recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()),
                       occupied_cues=record.get('occupied_cues',()),cuts=starts,scene_bonus=scene_bonus(config.data))
+    if graph is not None:
+        from bisect import bisect_right
+        for chain,_ in graph:
+            for first,last in zip(chain,chain[1:]):
+                if (last['cue']>first['cue']+1 and
+                        bisect_right(starts,first['cue'])==bisect_right(starts,last['cue'])):
+                    decisions[last['id']]['gap_predecessor'] = first['id']
     for row in rows:
         blocker = decisions[row['id']].get('track_blocker')
         if blocker:

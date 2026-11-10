@@ -31,9 +31,9 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
         sa,sb = signals[first],signals[last]
         if qa.get('view_shot') is None or qa['view_shot']!=qb.get('view_shot') or change(sa,sb,True)!='continuous':
             continue
-        if gap>1 and (np.abs(sa-sb).mean()>8 or len(left)!=len(right)):
-            continue
         offset = translation(qa,qb,sa,sb)
+        if gap>1 and ((np.abs(sa-sb).mean()>8 and offset is None) or len(left)!=len(right)):
+            continue
         def separated(member,side):
             return all(peer is member or pair([geometry[member['id']],geometry[peer['id']]]) for peer in side)
         edges = {}

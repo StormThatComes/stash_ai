@@ -35,6 +35,32 @@ def solve(domains, compatible, margin, *, maximum=4096):
     return best[1]
 
 
+def partial(domains, compatible, threshold, margin, maximum=4096):
+    """Certify each face against the best entire assignment choosing another owner."""
+    options = [(*domain,(None,threshold-margin,0.)) for domain in domains]
+    # Include abstention in the bound before enumerating. A truncated search
+    # cannot establish that the omitted assignment was worse.
+    from math import prod
+    if prod(map(len,options))>maximum:
+        return []
+    maxima = [{} for _ in domains]
+    for choices in product(*options):
+        if not all(compatible(i,a,j,choices[j]) for i,a in enumerate(choices) for j in range(i+1,len(choices))):
+            continue
+        score = sum(option[1] for option in choices)
+        for table,option in zip(maxima,choices):
+            table[option] = max(table.get(option,float('-inf')),score)
+    selected = []
+    for i,table in enumerate(maxima):
+        if not table:
+            continue
+        option = max(table,key=table.get)
+        rival = max((value for other,value in table.items() if other[0]!=option[0]),default=float('-inf'))
+        if option[0] is not None and table[option]>rival and table[option]-rival+1e-12>=margin:
+            selected.append((i,option))
+    return selected
+
+
 def recover(db, policy, history, config):
     import numpy as np
     settings, grouping = config.data['recognition'], config.data['clustering']
@@ -72,10 +98,10 @@ def recover(db, policy, history, config):
             same = duplicate(cue[i],cue[j],grouping.get('deduplicate_detections',False))
             if same:
                 return a[0] == b[0]
-            return a[0] != b[0] or min(a[2],b[2],float(np.dot(samples[i],samples[j]))) >= threshold
+            return a[0] is None or b[0] is None or a[0] != b[0] or min(a[2],b[2],float(np.dot(samples[i],samples[j]))) >= threshold
         solution = solve(domains, compatible, settings['ambiguity_margin'])
         signal='face'
-        if solution is None and config.data['sapiensid']['enabled']:
+        if solution is None and all(domains) and config.data['sapiensid']['enabled']:
             from .person_signal import contract
             from .hybrid_evidence import catalogue,scores
             if body_catalogue is None:
@@ -106,7 +132,13 @@ def recover(db, policy, history, config):
                     solution=tuple(next(o for o in options if o[0]==chosen[0]) for options,chosen in zip(domains,candidate))
                     signal='face_and_body'
         if solution is None:
-            continue
+            resolved = partial(domains,compatible,settings['match_threshold'],settings['ambiguity_margin'])
+            if not resolved:
+                continue
+            cue = [cue[i] for i,_ in resolved]
+            samples = [samples[i] for i,_ in resolved]
+            solution = [option for _,option in resolved]
+            signal = 'partial_face'
         # Raw rivals are exempt only when another distinct query independently
         # explains that rival in this unique joint assignment.
         from .anchor_views import _competing_anchor

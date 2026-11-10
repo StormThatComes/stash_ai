@@ -51,10 +51,10 @@ def paths(rows, settings, scores, occupied=(), *, extended=False):
             continue
         qa,_,_,sa = geometry[left_valid[0]['id']]
         qb,_,_,sb = geometry[right_valid[0]['id']]
-        continuous = np.abs(sa-sb).mean()<=8 if skipped else change(sa,sb,True)=='continuous'
+        offset = translation(qa,qb,sa,sb)
+        continuous = (np.abs(sa-sb).mean()<=8 or offset is not None) if skipped else change(sa,sb,True)=='continuous'
         if qa['view_shot']!=qb['view_shot'] or not continuous:
             continue
-        offset = None if skipped else translation(qa,qb,sa,sb)
         edges = {}
         for a in left_valid:
             _,ba,ta,_ = geometry[a['id']]
