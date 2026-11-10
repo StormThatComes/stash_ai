@@ -33,7 +33,14 @@ def test_all_strategy_families_share_retained_observations(tmp_path):
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
         result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
                                manifest,compare_strategies=True)
-    assert len(result['scene_strategies'])==14
+    strategies = result['scene_strategies']
+    assert len(strategies)==16
+    assert strategies['body-first']['body_first_matching']
+    assert not strategies['face-first']['body_first_matching']
+    from stash_ai.recognition.scene_strategy_validation import training_profiles
+    profiles = dict(training_profiles(config))
+    differing = {k for k,v in profiles['body-first'].items() if v!=profiles['face-first'][k]}
+    assert differing=={'sapiensid.identities.body_first_matching'}
     assert result["verdict"]["status"]=="insufficient_coverage"
     assert result["verdict"]["slice_coverage"]["entrant"]==dict(observations=0,performers=0)
     assert all(r['fragments_per_performer']=={'A':1} for r in result['scene_strategies'].values())
@@ -94,7 +101,8 @@ def test_training_screens_and_tunes_two_families_within_solver_budget(tmp_path):
     with closing(_open_readonly(config.database)) as db:
         goals = resolve(db,config,[['900']],policy='identity-physical')
         result = solve(config,goals,db,maximum=20,compare_scene_strategies=True)
-    assert result['search']['scene_families_tested']==14
+    # The face-first control reuses the existing tracks-with-evidence configuration.
+    assert result['search']['scene_families_tested']==15
     assert len(result['search']['scene_finalists'])==2
     assert result['search']['attempted']<=20
     assert any(t.get('search_phase')=='scene_refinement' for t in result['simulation']['trials'].values())

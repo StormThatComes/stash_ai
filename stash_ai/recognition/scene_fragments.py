@@ -135,11 +135,17 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
     """Use other shots of accepted body-born cores as a frozen scene roster."""
     settings = config.data['sapiensid']['identities']
     bonus = scene_bonus(config.data)
-    if not groups:
+    if not groups and not seeds:
         return
     from .body_seed_modes import FrozenSeeds
     banks = {decisions[g[0]['id']]['person']:g for g in groups}
     confirmed = {p for p,g in banks.items() if decisions[g[0]['id']]['status']=='accepted'}
+    if settings.get('tracklet_matching'):
+        for person, witnesses in seeds.items():
+            existing = {r['id']:r for r in banks.get(person,())}
+            existing.update((r['id'],r) for r in witnesses)
+            banks[person] = list(existing.values())
+        confirmed.update(seeds)
     if not confirmed:
         return
     from .contact_anchors import body_pair_queries, joint_body_claims

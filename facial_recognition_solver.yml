@@ -301,6 +301,8 @@ matching:
       tracklet_matching: true
       # Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained
       # VTT evidence.
+      body_first_matching: false
+      # Form anonymous SapiensID paths before binding face roots. Compare on labelled holdout scenes.
       endpoint_matching: true
       # Compare independent face endpoints across views. Null follows tracklet_matching.
       match_threshold: 0.85

@@ -84,6 +84,8 @@ def validate(settings):
     validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
+    if type(identity.get('body_first_matching',False)) is not bool:
+        raise ValueError('sapiensid.identities.body_first_matching must be boolean.')
     if type(identity.get('tracklet_matching',False)) is not bool:
         raise ValueError('sapiensid.identities.tracklet_matching must be boolean.')
     if identity.get('endpoint_matching') is not None and type(identity['endpoint_matching']) is not bool:

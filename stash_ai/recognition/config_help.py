@@ -143,6 +143,7 @@ HELP = {
     'matching.body.identities.scene_bonus_mode': 'Use fixed or evidence-weighted scene support. Set scene_match_bonus to 0 for the no-context control.',
     'matching.body.identities.scene_match_bonus': 'Bonus for a confirmed body owner in the same scene. Null inherits matching.face.same_scene.match_bonus. Range: 0..0.1.',
     'matching.body.identities.endpoint_matching': 'Compare independent face endpoints across views. Null follows tracklet_matching.',
+    'matching.body.identities.body_first_matching': 'Form anonymous SapiensID paths before binding face roots. Compare on labelled holdout scenes.',
     'matching.body.identities.tracklet_matching': 'Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained VTT evidence.',
     'matching.body.identities.track_similarity_threshold': 'Minimum similarity across consecutive body observations. Null inherits cohesion_threshold. Range: 0..1.',
     'matching.body.identities.cohesion_threshold': 'Minimum similarity to every body reference in a scene-local match. Range: 0..1.',
