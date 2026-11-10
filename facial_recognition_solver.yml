@@ -303,6 +303,12 @@ matching:
       # VTT evidence.
       body_first_matching: true
       # Form anonymous SapiensID paths before binding face roots. Compare on labelled holdout scenes.
+      extended_track_graph: null
+      # Use verified long-gap edges in the shared graph. Null follows body_first_matching.
+      turn_recovery: null
+      # Recover independently corroborated body turns. Null follows body_first_matching.
+      turn_similarity_discount: 0.06
+      # Absolute similarity allowance at a measured change of view. Range: 0..1.
       endpoint_matching: true
       # Compare independent face endpoints across views. Null follows tracklet_matching.
       match_threshold: 0.85

@@ -66,6 +66,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
     endpoint_returns = foreign_ids = abstentions = 0
     entrant_episodes = entrant_takeovers = 0
     reacquisition = []
+    censored = wrong_returns = 0
     for scene,people in by_scene.items():
         for person,track in people.items():
             previous = missing_since = None
@@ -79,7 +80,11 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
                     counts[person]['scene_id_switches'] += 1
                 if previous == current and missing_since is not None:
                     reacquisition.append(cue-missing_since)
+                if missing_since is not None and current!=previous:
+                    wrong_returns += 1
                 previous, missing_since = current, None
+            if missing_since is not None:
+                censored += 1
             # A labelled arrival needs a previously visible partner and continuation.
             for cue, observations in track.items():
                 if (tagged(observations, 'entrant') and cue-1 not in track and cue+1 in track
@@ -155,7 +160,7 @@ def sequence_metrics(labels, samples, locations, decisions, excluded=(), *, timi
         return sum(rates)/len(rates) if rates else None
     return dict(entrant_episodes=entrant_episodes, entrant_takeovers=entrant_takeovers,
                 scene_id_switches=sum(c['scene_id_switches'] for c in counts.values()),
-                reacquired_episodes=len(reacquisition), reacquisition_cues=sum(reacquisition),
+                unrecovered_at_end=censored, wrong_reacquisitions=wrong_returns, reacquired_episodes=len(reacquisition), reacquisition_cues=sum(reacquisition),
                 max_reacquisition_cues=max(reacquisition, default=0), returned_people=sorted(returned_people), rooted_turns=sorted(turn_roots), turns=sum(c['turns'] for c in counts.values()),
                 one_id_turns=sum(c['one_id_turns'] for c in counts.values()),
                 id_switches=sum(c['id_switches'] for c in counts.values()),

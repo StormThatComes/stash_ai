@@ -644,3 +644,16 @@ to freeze the current anonymous track containing that body. Both options are
 repeatable. Labels require independent retained observations of the performer.
 The report records the scene and exact frozen addresses. Regenerate labels
 after replacing the source scan.
+
+The labelled holdout also runs eight combinations of formation order, the
+extended track graph and turn recovery. Protected entrant stress cases compare
+both formation orders with the other controls held constant. The sequence
+report counts losses still open at the end of the labelled track and returns
+under another identity. Matching uses cue order and measured shot evidence.
+
+For an external, manually labelled VTT set, run
+`python -m benchmarks.benchmark_fragment_pipeline --config facial_recognition.yml --real-holdout holdout.json --scope SCOPE`.
+Use the retained database and observation IDs from the same scan in the holdout
+manifest. Include a labelled rear turn, contact and a brief entrant alongside a
+persistent partner. For synthetic sensitivity runs, use `--varied-crops` and
+`--occupancy periodic|spread|burst|random`.

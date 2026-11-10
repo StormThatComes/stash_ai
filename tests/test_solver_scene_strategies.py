@@ -34,7 +34,8 @@ def test_all_strategy_families_share_retained_observations(tmp_path):
         result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
                                manifest,compare_strategies=True)
     strategies = result['scene_strategies']
-    assert len(strategies)==16
+    assert len(strategies)==24
+    assert sum(name.startswith('order-') for name in strategies)==8
     assert strategies['body-first']['body_first_matching']
     assert not strategies['face-first']['body_first_matching']
     from stash_ai.recognition.scene_strategy_validation import training_profiles
