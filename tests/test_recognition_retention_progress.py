@@ -50,7 +50,7 @@ def test_auto_prune_owns_live_rows_until_commit(tmp_path, monkeypatch, terminal)
     assert rows['Auto prune recognition'].n == rows['Auto prune recognition'].total == 3
     assert rows['Inspect retention scenes'].n == 2
     assert 'Prune obsolete recognition evidence' not in rows  # Empty plans skip SQL deletion passes.
-    assert 'Protect references: publications.payload' in stages
+    assert 'Protect references: publications.payload' not in stages
     assert 'Clear obsolete crops: observations' not in stages
     assert all(b.disable for b in bars) and owners == {'stash-console'}
     with FaceDatabase(config.database) as db:
