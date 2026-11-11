@@ -4,6 +4,7 @@ Historical identities never seed the replay. Original sample ownership is kept
 separately so a later split can reactivate profiles retired by consolidation.
 """
 from .evidence_pixels import alias_scope
+from .sql_stream import rows as streamed_rows
 from .profiling import pipeline_stage
 from stash_ai.runtime.cleanup import closing
 import json
@@ -38,7 +39,7 @@ from .parallel_scores import FrozenScores
 
 
 def _observations(db, scan, *, share_vectors=False):
-    return db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
+    return streamed_rows(db,'SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
                       'o.quality,o.rejected,o.dimensions,'+('NULL AS embedding' if share_vectors else 'o.embedding')+
                       ',s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
                       'JOIN scans s ON s.id=o.scan WHERE o.scan=? ORDER BY o.cue,o.id', (scan,))
@@ -90,7 +91,7 @@ def _apply_members(db, replay, mapping, changed=None):
         source = ("SELECT json_extract(value,'$[0]') AS observation, "
                   "json_extract(value,'$[1]') AS person FROM json_each(?)")
         if changed is not None:
-            changed.update(row[0] for row in db.execute(
+            changed.update(row[0] for row in streamed_rows(db,
                 'WITH proposed AS ('+source+') SELECT DISTINCT s.scene FROM proposed p '
                 'JOIN observations o ON o.id=p.observation JOIN scans s ON s.id=o.scan '
                 'LEFT JOIN members m ON m.observation=p.observation WHERE m.person IS NOT p.person',
@@ -793,7 +794,7 @@ def _results(db, selected, config):
     def summaries():
         for batch in _batches(selected):
             grouped = {item['scan']: [] for item in batch}
-            for row in db.execute('SELECT scan,person,status,COUNT(*) AS observations FROM candidates '
+            for row in streamed_rows(db,'SELECT scan,person,status,COUNT(*) AS observations FROM candidates '
                 'WHERE scan IN (SELECT value FROM json_each(?)) AND policy=? '
                 'GROUP BY scan,person,status ORDER BY scan,person,status',
                 (encoded(list(grouped)), policy)):

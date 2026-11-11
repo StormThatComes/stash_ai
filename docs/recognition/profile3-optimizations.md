@@ -70,3 +70,23 @@ CPU deterministic-model tests compare scalar/batched geometry and record forward
 counts, queue fallbacks and simulated OOM retries. These are correctness and
 scheduling checks, not a GPU throughput benchmark. Detector, body encoder and
 sequential scene batch defaults are unchanged.
+
+## Cache writes and SQLite reads
+
+Inference results are packed once into immutable payloads before ownership passes
+to the cache writer. Groups of at most 32 entries share a writer future, quota
+admission and SQLite `executemany`; the existing byte queue budget still applies.
+Geometry is reconstructed once from that payload, giving each unique result its
+own mutable arrays/containers. Duplicate inputs get independent copies. A model
+reusing the same array for multiple outputs cannot make those results alias.
+Read-after-write waits for the corresponding future. Failures drain reservations,
+and `SQLITE_FULL` rolls back and recounts actual database state before reuse.
+
+Read-only rebuild observation and candidate streams use `fetchmany(64)` instead
+of per-row profiled `fetchone`. Candidate-index writes read 256 rows per block.
+Cursor semantics elsewhere are unchanged, including cursors whose tables change
+during iteration. The profiler's SQL fetch calls now count blocks rather than
+individual rows; compare total rows and elapsed time. Cache pack/write timers,
+written-entry/batch counters and queued-byte peak expose serialization tradeoffs.
+Tests verify one write group for 12 results, shared-array isolation, concurrent
+admission, rollback recovery and 17 fetches for a 1,000-row stream.

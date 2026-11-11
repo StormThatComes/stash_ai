@@ -153,39 +153,48 @@ class Store:
         return result
 
     def put(self,key,value,stage='legacy'):
-        blob=pack(value);size=len(blob)+512
-        if size>min(4*1024**2,self.limit//4):return
-        with self.lock:
-            # Leave space for both geometry and the larger embedding stages.
-            if stage!='legacy':
-                fraction=.16 if 'embed' in stage or 'encoder' in stage else .10
-                quota=int(self.limit*fraction)
-                if size>quota:return
-                while self.by_stage.get(stage,0)+size>quota:
+        return self.enqueue_many([(key,value)],stage,synchronous=True)
+
+    def _quota(self,stage):
+        return int(self.limit*(.75 if stage=='legacy' else .16 if 'embed' in stage or 'encoder' in stage else .10))
+
+    def _put_blobs(self,entries,stage):
+        from .profiling import pipeline_timing,pipeline_count
+        required=sum(len(blob)+512 for _,blob in entries)
+        if not entries:return
+        with self.lock, pipeline_timing('inference_cache_write'):
+            try:
+                quota=self._quota(stage)
+                while self.by_stage.get(stage,0)+required>quota:
                     rows=self.db.execute('SELECT key,size FROM entries WHERE stage=? ORDER BY sequence LIMIT 32',(stage,)).fetchall()
                     if not rows:break
                     self.db.executemany('DELETE FROM entries WHERE key=?',[(k,) for k,_ in rows])
                     freed=sum(n for _,n in rows);self.by_stage[stage]-=freed;self.used-=freed
-            self.prune(size)
-            if self.pending%128==0:
+                self.prune(required)
                 from .disk_budget import check
                 check(min(self.limit,2*1024**2),throttled=True)
-            old=self.db.execute('SELECT size,stage FROM entries WHERE key=?',(key,)).fetchone()
-            self.sequence+=1
-            try:
-                self.db.execute('INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?,?)',
-                    (key,blob,hashlib.sha256(blob).hexdigest(),size,self.sequence,stage))
+                old=self.db.execute('SELECT size,stage FROM entries WHERE key IN (SELECT value FROM json_each(?))',
+                    (json.dumps([key for key,_ in entries]),)).fetchall()
+                rows=[]
+                for key,blob in entries:
+                    self.sequence+=1
+                    rows.append((key,blob,hashlib.sha256(blob).hexdigest(),len(blob)+512,self.sequence,stage))
+                self.db.executemany('INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?,?)',rows)
+                for size,old_stage in old:self.by_stage[old_stage]-=size
+                self.by_stage[stage]=self.by_stage.get(stage,0)+required
+                self.used+=required-sum(size for size,_ in old)
+                before=self.pending;self.pending+=len(rows)
+                if self.pending//128!=before//128:self.db.commit()
+                pipeline_count('inference_cache_write_batches')
+                pipeline_count('inference_cache_written_entries',len(rows))
             except sqlite3.OperationalError as error:
                 if getattr(error,'sqlite_errorcode',None)!=sqlite3.SQLITE_FULL:raise
-                # A cache capacity failure cannot invalidate collected evidence.
                 self.db.rollback()
                 self.used=self.db.execute('SELECT COALESCE(SUM(size),0) FROM entries').fetchone()[0]
                 self.by_stage=dict(self.db.execute('SELECT stage,SUM(size) FROM entries GROUP BY stage'))
-                return
-            if old:self.by_stage[old[1]]-=old[0]
-            self.by_stage[stage]=self.by_stage.get(stage,0)+size
-            self.used+=size-(old[0] if old else 0);self.pending+=1
-            if self.pending%128==0:self.db.commit()
+                self.pending=0
+                pipeline_count('inference_cache_full_rollbacks')
+
     def _retire(self, key):
         future, charge = self.queued.pop(key)
         try:
@@ -193,30 +202,58 @@ class Store:
         finally:
             self.queued_bytes -= charge
 
-    def enqueue(self, key, value, stage):
-        if self.writer is None:
-            return self.put(key, value, stage)
+    def enqueue(self,key,value,stage):
+        return self.enqueue_many([(key,value)],stage)
+
+    def enqueue_many(self,items,stage,*,synchronous=False,on_packed=None):
         from contextvars import copy_context
-        from copy import deepcopy
-        from .memory_size import size
-        charge = 3*size(value) + len(key) + 4096
+        from .profiling import pipeline_timing,pipeline_max
+        # Packing freezes mutable geometry once. The writer only owns bytes;
+        # callers can immediately mutate their results without a deep copy.
+        ceiling=min(4*1024**2,self.limit//4,self._quota(stage))
+        group_limit=min(self._quota(stage),self.queue_limit or 4*1024**2)
+        group=[];charge=0
+        def submit():
+            if not group:return
+            with self.queue_lock:
+                while self.queued and self.queued_bytes+charge>self.queue_limit:
+                    self._retire(next(iter(self.queued)))
+                if self.writer is None or synchronous or charge>self.queue_limit:
+                    self._put_blobs(group,stage)
+                else:
+                    future=self.writer.submit(copy_context().run,self._put_blobs,list(group),stage)
+                    for key,blob in group:
+                        size=len(blob)+len(key)+512
+                        self.queued[key]=future,size;self.queued_bytes+=size
+                    pipeline_max('inference_cache_queue_peak_bytes',self.queued_bytes)
+        # Serializes admission across concurrent producer threads; worker writes
+        # take only the DB lock and never wait for this queue lock.
         with self.queue_lock:
-            if key in self.queued:
-                return
-            while self.queued and self.queued_bytes + charge > self.queue_limit:
-                self._retire(next(iter(self.queued)))
-            if charge > self.queue_limit:
-                return self.put(key,value,stage)
-            future = self.writer.submit(copy_context().run, self.put, key, deepcopy(value), stage)
-            self.queued[key] = future, charge
-            self.queued_bytes += charge
+            seen=set()
+            for key,value in items:
+                if key in seen:continue
+                seen.add(key)
+                if key in self.queued:self._retire(key)
+                with pipeline_timing('inference_cache_pack'):
+                    blob=pack(value)
+                if on_packed is not None:on_packed(key,value,blob)
+                size=len(blob)+len(key)+512
+                if len(blob)+512>ceiling:continue
+                if group and (len(group)>=32 or charge+size>group_limit):
+                    submit();group=[];charge=0
+                group.append((key,blob));charge+=size
+            submit()
 
     def close(self):
         try:
             if self.writer is not None:
                 self.writer.shutdown(wait=True)
+                error=None
                 for key in tuple(self.queued):
-                    self._retire(key)
+                    try:self._retire(key)
+                    except BaseException as failure:
+                        if error is None:error=failure
+                if error is not None:raise error
         finally:
             with self.lock:
                 try:self.db.commit()
@@ -255,10 +292,19 @@ def many(stage,contract,values,calculate,*,key=fingerprint):
     if missing:
         computed=calculate(list(missing.values()))
         if len(computed)!=len(missing):raise ValueError('Cached inference returned an incompatible batch.')
-        for identity,value in zip(missing,computed):
-            results[identity]=value;store.enqueue(identity,value,stage);count('inference_'+stage+'_misses')
+        def own(identity,value,blob):
+            from .models import certified_body
+            results[identity]=value if stage=='body_embedding' and certified_body(value) else unpack(blob)
+        store.enqueue_many(zip(missing,computed),stage,on_packed=own)
+        count('inference_'+stage+'_misses',len(computed))
     from copy import deepcopy
     if stage == 'body_embedding':
         from .models import certified_body
         return [v if certified_body(v) else deepcopy(v) for v in (results[k] for k in keys)]
-    return [deepcopy(results[identity]) for identity in keys]
+    # Freshly unpacked values have one owner. Only repeated input keys
+    # need independent copies; the queued writer already owns immutable bytes.
+    seen=set();output=[]
+    for identity in keys:
+        output.append(deepcopy(results[identity]) if identity in seen else results[identity])
+        seen.add(identity)
+    return output
