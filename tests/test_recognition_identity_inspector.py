@@ -280,3 +280,222 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         root.destroy()
         del ui,root
         gc.collect()
+
+
+def vtt_fixture(tmp_path):
+    from dataclasses import replace
+    import json
+    from types import SimpleNamespace
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.models import namespace
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.scanning import scan_scene
+    from stash_ai.recognition.run import instance_scope
+    from stash_ai.recognition.body_observations import contract
+    from stash_ai.recognition.scene_inspection import SceneReader, UnassignedReader
+    from tests.helpers.recognition import MediaClient, Backend
+    from tests.test_recognition_scanning import config as configuration
+    config = configuration(tmp_path)
+    data = plain(config.data)
+    data['detection']['min_face_pixels'] = 256  # Rejected before embedding/crop encoding.
+    data['execution']['media_cache_bytes'] = 0
+    config = replace(config, data=data)
+    media, backend = MediaClient(count=1), Backend()
+    scope = instance_scope(media.url)
+    with FaceDatabase(config.database) as state, SpriteInput(media, media.scene, config) as source:
+        scan, _ = scan_scene(state, scope, media.scene, config, namespace(config), source, lambda: backend)
+        db = state.connection
+        face = db.execute('SELECT id,crop,rejected,quality FROM observations').fetchone()
+        assert face['crop'] is None and face['rejected'] and 'evidence_pixel_sha256' not in json.loads(face['quality'])
+        bounds = [10,20,80,130]
+        db.execute('INSERT INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                   ('rejected-body',scan,0,0.,contract(config),None,json.dumps(dict(bounds=bounds)),
+                    json.dumps(dict(person=dict(bounds=bounds),quality={})), 'person_pixels',None,None))
+        db.commit()
+    closed = []
+    client = SimpleNamespace(url=media.url, api_key='', media=media.media,
+                             scene=lambda _: media.scene, close=lambda: closed.append(True))
+    scan = SceneReader(config,'1').catalogue()['scan']
+    reader = UnassignedReader(config,scan)
+    media.calls.clear()
+    return config, reader, client, media, face['id'], backend, closed
+
+
+def test_vtt_previews_restore_rejected_face_and_body_after_snapshot_closes(tmp_path,monkeypatch):
+    import sqlite3
+    from stash_ai.recognition import inspection_crops
+    from stash_ai.recognition.media import SpriteInput
+    config, reader, client, media, face, backend, closed = vtt_fixture(tmp_path)
+    before = config.database.read_bytes()
+    connections, sources = [], []
+    original = inspection_crops._open_readonly
+    def opened(path):
+        db = original(path)
+        connections.append(db)
+        return db
+    def source(client, scene, config):
+        with pytest.raises(sqlite3.ProgrammingError,match='closed'):
+            connections[-1].execute('SELECT 1')
+        assert config.data['execution']['media_cache_bytes']==0
+        assert config.data['execution']['sprite_cache_bytes']<=64*1048576
+        result = SpriteInput(client,scene,config)
+        sources.append(result)
+        return result
+    monkeypatch.setattr(inspection_crops,'_open_readonly',opened)
+    previews = inspection_crops.VttPreviews(config,client_factory=lambda:client,source_factory=source)
+    try:
+        assert len(reader.page()[0])==2 and not media.calls
+        for kind,address,size in (('face',face,(160,160)),('body','rejected-body',(70,110))):
+            result=reader.detail(kind,address)
+            image, caption=previews.image(kind,address,result['scope'],result['image'])
+            assert image.size==size
+            assert 'Reconstructed from VTT' in caption and 'original crop signature unavailable' in caption
+            image.close()
+        assert len(sources)==1 and len(media.calls)==2  # One VTT and one sprite, shared by both crops.
+        assert backend.calls==0
+        assert config.database.read_bytes()==before
+        assert not config.database.with_name(config.database.name+'.media.sqlite3').exists()
+    finally:
+        previews.close()
+    assert closed==[True] and not sources[0].sprites.entries
+
+
+@pytest.mark.parametrize('damage,kind,message', [
+    ('vtt','face','source changed'), ('sprite','body','source changed'),
+    ('scope','face','STASH_URL'), ('cue','face','cue does not match'),
+    ('geometry','body','bounds'), ('signature','face','recorded signature'),
+    ('signature','body','recorded signature'), ('missing','face','RuntimeError'),
+])
+def test_vtt_preview_refuses_changed_or_unverifiable_evidence(tmp_path,damage,kind,message):
+    import json
+    from io import BytesIO
+    from PIL import Image
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.inspection_crops import VttPreviews
+    config, reader, client, media, face, _, _ = vtt_fixture(tmp_path)
+    if damage=='vtt':
+        key=client.url+'vtt/1.vtt'
+        media.data[key]=media.data[key].replace(b'00:00:00.000',b'00:00:00.100')
+    elif damage=='sprite':
+        with Image.new('RGB',(160,160),'red') as image, BytesIO() as output:
+            image.save(output,format='PNG')
+            media.data[client.url+'sprite/1.jpg']=output.getvalue()
+    elif damage=='scope':
+        client.url='http://other-stash/'
+    elif damage=='missing':
+        def missing(_):
+            raise RuntimeError('https://stash/?token=do-not-show-this-secret')
+        client.scene=missing
+    else:
+        with FaceDatabase(config.database) as state:
+            db=state.connection
+            if damage=='cue':
+                db.execute('UPDATE observations SET seconds=42')
+            elif damage=='geometry':
+                db.execute('UPDATE body_observations SET geometry=?',(json.dumps(dict(bounds=[0,0,9999,9999])),))
+            elif kind=='face':
+                db.execute("UPDATE observations SET quality=json_set(quality,'$.evidence_pixel_sha256','wrong')")
+            else:
+                db.execute("UPDATE body_observations SET quality=json_set(quality,'$.quality.pixel_digest','wrong')")
+            db.commit()
+    address=face if kind=='face' else 'rejected-body'
+    result=reader.detail(kind,address)
+    before=config.database.read_bytes()
+    previews=VttPreviews(config,client_factory=lambda:client)
+    try:
+        image,caption=previews.image(kind,address,result['scope'],result['image'])
+        assert image is None and message in caption
+        assert 'do-not-show-this-secret' not in caption
+        assert result['rejection'] and result['trace']['status']=='unassigned'
+        assert config.database.read_bytes()==before
+    finally:
+        previews.close()
+
+
+def test_vtt_preview_checks_available_signature_and_leaves_retained_pixels_offline(tmp_path):
+    import hashlib
+    from PIL import Image
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.inspection_crops import VttPreviews
+    from tests.helpers.recognition import textured_image
+    config, reader, client, media, face, _, _ = vtt_fixture(tmp_path)
+    with textured_image() as image:
+        digest=hashlib.sha256(str(image.size).encode('ascii')+image.tobytes()).hexdigest()
+    with FaceDatabase(config.database) as state:
+        state.connection.execute("UPDATE observations SET quality=json_set(quality,'$.evidence_pixel_sha256',?)",(digest,))
+        state.connection.commit()
+    previews=VttPreviews(config,client_factory=lambda:client)
+    try:
+        with Image.new('RGB',(2,2)) as stored:
+            retained=(stored,'Retained crop')
+            assert previews.image('face',face,reader.scan['scope'],retained) is retained
+            assert not media.calls and previews.client is None
+        image,caption=previews.image('face',face,reader.scan['scope'],reader.detail('face',face)['image'])
+        assert image.size==(160,160) and 'pixels verified' in caption
+        image.close()
+        assert previews.image('face',face,'different-scope',(None,'Missing'))[0] is None
+    finally:
+        previews.close()
+    assert parser().parse_args(['inspect-scene','--scene-id','1','--offline']).offline
+    assert not parser().parse_args(['inspect-scene','--scene-id','1']).offline
+
+
+def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(tmp_path):
+    tk = pytest.importorskip('tkinter')
+    try:
+        root=tk.Tk()
+    except tk.TclError as error:
+        import os
+        if os.environ.get('STASH_AI_DESKTOP_TEST'):
+            raise
+        pytest.skip(f'No graphical desktop: {error}')
+    from threading import Event, get_ident
+    from stash_ai.recognition.inspection_crops import VttPreviews
+    from stash_ai.recognition.scene_inspection import SceneReader
+    from stash_ai.recognition.scene_window import SceneInspector
+    config, reader, client, media, face, backend, closed=vtt_fixture(tmp_path)
+    main_thread=get_ident()
+    started, release = Event(), Event()
+    def factory():
+        assert get_ident()!=main_thread
+        started.set()
+        assert release.wait(5)
+        return client
+    previews=VttPreviews(config,client_factory=factory)
+    ui=SceneInspector(root,SceneReader(config,'1'),'VTT previews',previews=previews)
+    def wait_for(condition):
+        deadline=time.monotonic()+8
+        while not condition() and time.monotonic()<deadline:
+            root.update()
+            time.sleep(.005)
+        assert condition(), ui.status.get()
+    try:
+        wait_for(lambda: bool(ui.branches))
+        branch=next(iter(ui.branches))
+        ui.load_branch(branch)
+        wait_for(lambda: bool(ui.rows))
+        assert not media.calls
+        row=next(k for k,v in ui.rows.items() if v['id']==face)
+        ui.listing.selection_set(row)
+        wait_for(started.is_set)
+        # An old VTT read must not overwrite a newer observation selection.
+        body=next(k for k,v in ui.rows.items() if v['id']=='rejected-body')
+        ui.listing.selection_set(body)
+        root.update()
+        release.set()
+        wait_for(lambda: 'Reconstructed from VTT' in ui.images.panels['A'].caption.get())
+        assert ui.images.panels['A'].image.size==(70,110)
+        assert 'rejected-body' in ui.status.get()
+        ui.listing.selection_set(row)
+        wait_for(lambda: face in ui.status.get() and ui.images.panels['A'].image is not None)
+        assert ui.images.panels['A'].image.size==(160,160)
+        assert 'Unassigned' in ui.notes.get('1.0','end')
+        assert backend.calls==0
+    finally:
+        release.set()
+        ui.close()
+        root.destroy()
+        del ui,root
+        gc.collect()
+    assert closed==[True]
