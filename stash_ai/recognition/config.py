@@ -52,7 +52,7 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'retained_memory_bytes': 17179869184, 'model_bytes_cache_bytes': 536870912, 'solver_compare_scene_strategies': False, 'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'vitpose_device_decode': False, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
+        'execution': {'sam_frame_batch_size': 4, 'sam_prompt_batch_size': 8, 'refinement_queue_bytes': 134217728, 'pmpose_fused_flip': True, 'retained_memory_bytes': 17179869184, 'model_bytes_cache_bytes': 536870912, 'solver_compare_scene_strategies': False, 'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'vitpose_device_decode': False, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
                       'rebuild_parallel_scenes': True, 'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'detector_batch_size': 1, 'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
@@ -250,6 +250,8 @@ def validate(data):
             raise ValueError('execution.'+name+' requires its corresponding RF-DETR/ViTPose backend.')
         if value!='fp32' and data['models']['device']=='cpu':
             raise ValueError('execution.'+name+' requires CUDA; use fp32 with CPU.')
+    if type(data['execution']['pmpose_fused_flip']) is not bool:
+        raise ValueError('execution.pmpose_fused_flip must be boolean.')
     if data['execution']['gpu_model_policy'] not in ('phase', 'sequential', 'retain'):
         raise ValueError('execution.gpu_model_policy must be phase, sequential or retain.')
     if type(data['execution']['log_vram']) is not bool:
@@ -271,7 +273,7 @@ def validate(data):
                        'max_view_prototypes_per_person': (1, 8), 'max_view_witnesses': (8,128),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100)},
-        'execution': {'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),
+        'execution': {'sam_frame_batch_size': (1,16), 'sam_prompt_batch_size': (1,64), 'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),
                       'sequential_scene_batch_size': (1,16), 'scan_cpu_workers': (1,32), 'detector_batch_size': (1,16), 'recognizer_batch_size': (1,32),
                       'prefetch_scene_depth': (1,16),
                       'rebuild_checkpoint_scenes': (0,1000000), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},

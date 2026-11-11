@@ -106,12 +106,14 @@ def load(config, device):
         model = model.float().to(device).eval()
         from bboxmaskpose.sam2.sam2_image_predictor import SAM2ImagePredictor
         predictor = SAM2ImagePredictor(model, max_hole_area=0., max_sprinkle_area=0.)
-    return Segmenter(predictor, device)
+    return Segmenter(predictor, device, frame_batch_size=config.data['execution']['sam_frame_batch_size'],
+                     prompt_batch_size=config.data['execution']['sam_prompt_batch_size'])
 
 
 class Segmenter:
-    def __init__(self, predictor, device):
+    def __init__(self, predictor, device, *, frame_batch_size=4, prompt_batch_size=8):
         self.predictor, self.device = predictor, device
+        self.frame_batch_size, self.prompt_batch_size = frame_batch_size, prompt_batch_size
 
     def resident_modules(self):
         return [self.predictor.model]
@@ -148,3 +150,64 @@ class Segmenter:
                 not np.isfinite(scores).all() or not 0 <= scores[0] <= 1):
             raise ValueError('SAM-pose2seg returned malformed/non-finite masks or scores.')
         return masks[0].astype(bool), float(scores[0])
+
+    def predict_frames(self, frames):
+        """Batch image embeddings and equal-length prompt sets; never pad tokens."""
+        import numpy as np
+        import torch
+        from .adaptive_gpu import Batches
+        from .profiling import pipeline_count
+        frames=list(frames)
+        image_batches=Batches(self.frame_batch_size,'SAM images')
+        prompt_batches=Batches(self.prompt_batch_size,'SAM prompts')
+
+        def calculate(batch):
+            try:
+                arrays=[]
+                with pipeline_timing('sam_image_prepare'):
+                    for image,_ in batch:
+                        with image.convert('RGB') as rgb:
+                            arrays.append(np.array(rgb,copy=True))
+                with pipeline_timing('sam_image_embedding'):
+                    self.predictor.set_image_batch(arrays)
+                arrays.clear()
+                pipeline_count('sam_embedded_images',len(batch))
+                results=[]
+                for image_index,(_,prompts) in enumerate(batch):
+                    groups={};ordered=[None]*len(prompts)
+                    for index,(positive,negative) in enumerate(prompts):
+                        groups.setdefault(len(positive)+len(negative),[]).append((index,positive,negative))
+                    def decode(group):
+                        coordinates=np.stack([np.concatenate((p,np.asarray(n).reshape(-1,2))) for _,p,n in group])
+                        labels=np.stack([np.r_[np.ones(len(p),dtype=np.int32),np.zeros(len(n),dtype=np.int32)] for _,p,n in group])
+                        with pipeline_timing('sam_mask_prediction'):
+                            # Private API is pinned by the verified source manifest.
+                            mask_input,coords,label,boxes=self.predictor._prep_prompts(
+                                coordinates,labels,None,None,True,img_idx=image_index)
+                            masks,scores,_=self.predictor._predict(coords,label,boxes,mask_input,
+                                multimask_output=False,return_logits=False,img_idx=image_index)
+                        # Avoid transferring the unused low-resolution logits.
+                        with pipeline_timing('sam_mask_readback'):
+                            masks=masks.cpu().numpy();scores=scores.float().cpu().numpy()
+                        if len(masks)!=len(group) or len(scores)!=len(group):
+                            raise ValueError('SAM returned an invalid prompt batch count.')
+                        pipeline_count('sam_decoded_prompts',len(group))
+                        return [self._checked(mask,score) for mask,score in zip(masks,scores)]
+                    for group in groups.values():
+                        values=prompt_batches.run(group,decode,self.device)
+                        for (index,_,_),value in zip(group,values):ordered[index]=value
+                    results.append(ordered)
+                return results
+            finally:
+                self.predictor.reset_predictor()
+        with torch.inference_mode(), torch.autocast(device_type=torch.device(self.device).type,enabled=False):
+            return image_batches.run(frames,calculate,self.device)
+
+    @staticmethod
+    def _checked(masks,scores):
+        import numpy as np
+        if (masks.ndim!=3 or len(masks)!=1 or scores.shape!=(1,) or
+                not np.isfinite(masks).all() or not np.isin(masks,[0,1]).all() or
+                not np.isfinite(scores).all() or not 0<=scores[0]<=1):
+            raise ValueError('SAM-pose2seg returned malformed/non-finite masks or scores.')
+        return masks[0].astype(bool,copy=False),float(scores[0])

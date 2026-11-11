@@ -489,6 +489,17 @@ execution:
     sequential_scene_batch_size: 4
     # Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range:
     # 1..16.
+    sam_frame_batch_size: 4
+    # Maximum images sharing one SAM encoder forward. Range: 1..16; CUDA OOM halves the effective batch.
+    sam_prompt_batch_size: 8
+    # Maximum equal-length person prompts per SAM decoder forward. Range: 1..64; preserves prompt tokens and
+    # order.
+    refinement_queue_mb: 128
+    # CPU mask window budget for cross-frame refinement. Range: 1..4096 MB; fractions allowed. Oversized frames
+    # use the scalar path. Excludes caller-owned images, temporary validation arrays and GPU features.
+    pmpose_fused_flip: true
+    # Run original and horizontally flipped crops in one PMPose forward. May double activation memory; adaptive
+    # CUDA OOM reduces the crop batch. False uses two forwards.
     rfdetr_precision: fp32
     # RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body
     # evidence. Validate detection quality before enabling.

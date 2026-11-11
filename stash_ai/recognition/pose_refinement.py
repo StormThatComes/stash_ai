@@ -86,8 +86,9 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
 
 
 class RefinedPMPose:
-    def __init__(self, pose, segmenter, settings):
+    def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728):
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
+        self.frame_batch_size, self.queue_bytes = frame_batch_size, queue_bytes
 
     def close(self):
         from .resident_models import release
@@ -103,11 +104,9 @@ class RefinedPMPose:
             predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
             raise ValueError('PMPose returned an invalid refinement frame count.')
-        return [self.refine(image, bounds, prediction)
-                for (image, bounds), prediction in zip(frames, predictions)]
+        return self.refine_many(frames, predictions)
 
-    @pipeline_stage('pmpose_mask_refinement')
-    def refine(self, image, bounds, prediction):
+    def _plan(self, bounds, prediction):
         points, scores, probabilities = prediction
         settings = self.settings
         result = (points.copy(), scores.copy(), {k: v.copy() for k, v in probabilities.items()})
@@ -116,8 +115,6 @@ class RefinedPMPose:
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
         jobs = []
-        seen_masks = {}
-        retained_bytes = 0
         for i, box in enumerate(bounds):
             if settings['mode'] == 'overlap' and not any(
                     overlaps(box, other, settings['overlap_threshold']) for j, other in enumerate(bounds) if i != j):
@@ -132,19 +129,36 @@ class RefinedPMPose:
             indices = indices[:settings['max_prompt_points']]
             if len(indices) >= settings['min_prompt_points']:
                 jobs.append((i, indices, foreign))
-        # No reliable prompts / no eligible boxes means no SAM image inference.
-        with self.segmenter.frame(image) if jobs else nullcontext():
+        return result, records, cores, jobs
+
+    def _prompts(self, bounds, points, cores, i, indices):
+        prompts = points[i, indices]
+        neighbours = [j for j, other in enumerate(bounds) if j != i
+                      and overlaps(bounds[i], other, self.settings['overlap_threshold'])]
+        negatives = [points[j,k] for j in neighbours for k in cores[j]
+                     if np.linalg.norm(prompts - points[j,k], axis=1).min() >
+                     max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))]
+        return prompts, neighbours, negatives[:self.settings['max_prompt_points']]
+
+    def refine_many(self, frames, predictions):
+        from .refinement_batches import refine_many
+        return refine_many(self, frames, predictions)
+
+    @pipeline_stage('pmpose_mask_refinement')
+    def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None):
+        points = prediction[0]
+        settings = self.settings
+        result, records, cores, jobs = plan or self._plan(bounds, prediction)
+        seen_masks, retained_bytes = {}, 0
+        supplied = iter(masks) if masks is not None else None
+        second_pass = defer or self._second_pass
+        # Only the scalar compatibility path owns a single-image SAM context.
+        with self.segmenter.frame(image) if jobs and supplied is None else nullcontext():
             pending = []
             for i, indices, foreign in jobs:
-                prompts = points[i, indices]
-                neighbours = [j for j, other in enumerate(bounds) if j != i
-                              and overlaps(bounds[i], other, settings['overlap_threshold'])]
-                negatives = [points[j,k] for j in neighbours for k in cores[j]
-                             if np.linalg.norm(prompts - points[j,k], axis=1).min() >
-                             max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))]
-                negatives = negatives[:settings['max_prompt_points']]
-                mask, score = (self.segmenter.predict(prompts, negatives) if negatives
-                               else self.segmenter.predict(prompts))
+                prompts, neighbours, negatives = self._prompts(bounds, points, cores, i, indices)
+                mask, score = (next(supplied) if supplied is not None else
+                    self.segmenter.predict(prompts, negatives) if negatives else self.segmenter.predict(prompts))
                 record = records[i]
                 record.update(status='rejected', mask_score=score, prompt_indices=indices.tolist(),
                               prompt_points=prompts.tolist())
@@ -178,10 +192,10 @@ class RefinedPMPose:
                     not inside(mask, points[j, cores[j]]).any() for j in neighbours))
                 pending.append((i, box, mask, indices))
                 if len(pending) >= self.pose.batch_size:
-                    self._second_pass(image, pending, result, records, points)
+                    second_pass(image, pending, result, records, points)
                     pending.clear()
             if pending:
-                self._second_pass(image, pending, result, records, points)
+                second_pass(image, pending, result, records, points)
         for record in records:
             if record.get('mask_conflict'):
                 record.update(separated=False, reason='shared_mask_pixels')
@@ -192,6 +206,9 @@ class RefinedPMPose:
     def _second_pass(self, image, pending, result, records, original):
         refined = self.pose.predict(image, [box for _, box, _, _ in pending],
                                     masks=[mask for _, _, mask, _ in pending])
+        self._apply_second_pass(pending, result, records, original, refined)
+
+    def _apply_second_pass(self, pending, result, records, original, refined):
         for offset, (i, box, mask, indices) in enumerate(pending):
             new_points, new_scores, probabilities = refined
             keep = ((new_scores[offset, indices] > self.settings['min_keypoint_score']) &
@@ -222,3 +239,6 @@ class RefinedPMPose:
                 result[2][key][i] = probabilities[key][offset]
             records[i].update(status='refined', reason=None, bounds=box,
                               box_expanded=box != records[i]['detector_bounds'])
+            if records[i].get('mask_conflict'):
+                records[i].update(separated=False, reason='shared_mask_pixels')
+                records[i].pop('encoder_mask', None)

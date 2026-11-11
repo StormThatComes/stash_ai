@@ -99,7 +99,7 @@ def test_batches_restore_flip_labels_and_frame_order_with_empty_frames():
             if flip:
                 scores = scores[:, registry.FLIP]
             return maps, scores, torch.full_like(scores, .75), torch.full_like(scores, .25)
-    refiner = pmpose_pose.PMPose(Model(), device='cpu', batch_size=2)
+    refiner = pmpose_pose.PMPose(Model(), device='cpu', batch_size=2, fused_flip=False)
     with Image.new('RGB', (300, 300)) as image:
         rows = refiner.predict_many([(image, [[10, 20, 110, 220]]), (image, []),
                                     (image, [[160, 50, 260, 250], [10, 20, 110, 220]])])
@@ -116,7 +116,7 @@ def test_batches_restore_flip_labels_and_frame_order_with_empty_frames():
 def test_invalid_model_outputs_fail_closed(failure):
     torch = pytest.importorskip('torch')
     def model(inputs):
-        values = [torch.zeros(1, 17, 64, 48)] + [torch.ones(1, 17) for _ in range(3)]
+        values = [torch.zeros(len(inputs), 17, 64, 48)] + [torch.ones(len(inputs), 17) for _ in range(3)]
         if failure == 'nan': values[0][0, 0, 0, 0] = float('nan')
         if failure == 'range': values[2][0, 0] = 1.1
         if failure == 'shape': values[3] = torch.ones(1, 23)

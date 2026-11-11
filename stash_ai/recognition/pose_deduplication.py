@@ -3,7 +3,7 @@ from collections import Counter
 
 import numpy as np
 
-from .profiling import pipeline_stage, count
+from .profiling import pipeline_stage, pipeline_timing, count
 
 
 CORE = np.array([0, 1, 2, 3, 4, 5, 6, 11, 12])
@@ -136,17 +136,27 @@ class DeduplicatedPMPose:
     def predict_many(self, frames):
         from .pose_deduplication_audit import active, publish
         frames = list(frames)
-        predictions = self.pose.predict_many(frames)
+        with pipeline_timing('pmpose_first_pass'):
+            predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
             raise ValueError('PMPose returned an invalid deduplication frame count.')
-        results = []
+        selected_frames, selected_predictions, reports = [], [], []
         for (image, bounds), prediction in zip(frames, predictions):
             report = select(bounds, prediction, self.settings, audit=active(image))
             keep = np.asarray(report['kept_indices'], dtype=np.int64)
             points, scores, probabilities = prediction
             selected = points[keep], scores[keep], {k: v[keep] for k, v in probabilities.items()}
             selected_bounds = [bounds[i] for i in keep]
-            final = self.refined.refine(image, selected_bounds, selected) if self.refined else (*selected, None)
+            selected_frames.append((image, selected_bounds))
+            selected_predictions.append(selected)
+            reports.append(report)
+        if self.refined and hasattr(self.refined, 'refine_many'):
+            finals = self.refined.refine_many(selected_frames, selected_predictions)
+        elif self.refined:
+            finals = [self.refined.refine(image, bounds, prediction)
+                      for (image,bounds),prediction in zip(selected_frames,selected_predictions)]
+        else:
+            finals = [(*prediction,None) for prediction in selected_predictions]
+        for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))
-            results.append((*final, report))
-        return results
+        return [(*final,report) for final,report in zip(finals,reports)]
