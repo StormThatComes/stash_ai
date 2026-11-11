@@ -500,6 +500,16 @@ execution:
     pmpose_fused_flip: true
     # Run original and horizontally flipped crops in one PMPose forward. May double activation memory; adaptive
     # CUDA OOM reduces the crop batch. False uses two forwards.
+    pmpose_precision: fp32
+    # PMPose forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decode/averaging use float32. Changes
+    # dependent cache and evidence contracts.
+    sam_precision: fp32
+    # SAM encoder/decoder precision: fp32 (default), fp16 or bf16 (CUDA only, requires PMPose refinement).
+    # Validate masks against fp32 before enabling.
+    profile_every_n_batches: 0
+    # Sample PMPose/SAM CUDA events every N forwards, per stage; 0 disables, range: 0..10000. Requires
+    # rebuild.profile. Bounded event queue, no forced synchronization; reports completed samples and
+    # allocated/reserved VRAM.
     rfdetr_precision: fp32
     # RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body
     # evidence. Validate detection quality before enabling.

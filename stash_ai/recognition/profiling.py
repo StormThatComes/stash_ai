@@ -205,12 +205,14 @@ _pipeline = ContextVar('recognition_pipeline_profile', default=None)
 
 
 class _Pipeline:
-    def __init__(self):
+    def __init__(self, cuda_sample_every=0):
         self.started = time.perf_counter()
         self.owner = get_ident()
         self.lock = Lock()
         self.closed = False
         self.stages, self.worker_stages, self.counts = {}, {}, {}
+        self.cuda_sample_every=cuda_sample_every
+        self.cuda_stages={};self.cuda_pending=[];self.cuda_dropped=0
 
     def record(self, name, seconds, failed):
         with self.lock:
@@ -224,11 +226,11 @@ class _Pipeline:
 
 
 @contextmanager
-def pipeline_scope(enabled):
+def pipeline_scope(enabled, *, cuda_sample_every=0):
     if not enabled:
         yield
         return
-    state = _Pipeline()
+    state = _Pipeline(cuda_sample_every)
     token = _pipeline.set(state)
     try:
         yield
@@ -274,13 +276,14 @@ def pipeline_snapshot():
     state = _pipeline.get()
     if state is None:
         return None
+    gpu=_cuda_snapshot(state) if state.cuda_sample_every else {}
     with state.lock:
         return dict(format=2, elapsed_seconds=time.perf_counter()-state.started,
             scope='host elapsed time; nested stages overlap; no forced CUDA synchronization',
             stages={key: dict(value) for key, value in state.stages.items()},
             worker_stages={key: dict(value) for key, value in state.worker_stages.items()},
             worker_scope='summed background task elapsed time; overlaps coordinator and other workers',
-            counts=dict(state.counts))
+            counts=dict(state.counts), **gpu)
 
 
 @contextmanager
@@ -311,3 +314,54 @@ def pipeline_stage(name):
                 return function(*args, **kwargs)
         return call
     return decorate
+
+
+@contextmanager
+def pipeline_cuda_timing(name,device):
+    """Optional bounded CUDA event sampling, with no synchronize calls."""
+    state=_pipeline.get()
+    if state is None or not state.cuda_sample_every or str(device).split(':')[0]!='cuda':
+        yield
+        return
+    import torch
+    with state.lock:
+        row=state.cuda_stages.setdefault(name,dict(forwards=0,samples=0,seconds=0.,
+            allocated_bytes_max=0,reserved_bytes_max=0))
+        row['forwards']+=1
+        sampled=(row['forwards']-1)%state.cuda_sample_every==0
+    if not sampled:
+        yield
+        return
+    _cuda_snapshot(state)
+    with state.lock:
+        full=len(state.cuda_pending)>=64
+        if full:state.cuda_dropped+=1
+    if full:
+        yield
+        return
+    with torch.cuda.device(device):
+        start=torch.cuda.Event(enable_timing=True);end=torch.cuda.Event(enable_timing=True)
+        start.record()
+        yield
+        end.record()
+        allocated=torch.cuda.memory_allocated(device);reserved=torch.cuda.memory_reserved(device)
+    with state.lock:
+        row['allocated_bytes_max']=max(row['allocated_bytes_max'],allocated)
+        row['reserved_bytes_max']=max(row['reserved_bytes_max'],reserved)
+        state.cuda_pending.append((name,start,end))
+
+
+def _cuda_snapshot(state):
+    with state.lock:
+        pending=[]
+        for name,start,end in state.cuda_pending:
+            if end.query():
+                row=state.cuda_stages[name]
+                row['samples']+=1
+                row['seconds']+=start.elapsed_time(end)/1000.
+            else:pending.append((name,start,end))
+        state.cuda_pending=pending
+        return dict(cuda=dict(sample_every=state.cuda_sample_every,
+            scope='completed sampled CUDA events; stage intervals can overlap; VRAM sampled after forward',
+            stages={key:dict(row) for key,row in state.cuda_stages.items()},
+            pending_samples=len(pending),dropped_samples=state.cuda_dropped))

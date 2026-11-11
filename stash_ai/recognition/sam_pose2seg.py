@@ -1,5 +1,5 @@
 """Lazy, verified SAM-pose2seg loading without the OpenMMLab training stack."""
-from .profiling import pipeline_stage, pipeline_timing
+from .profiling import pipeline_stage, pipeline_timing, pipeline_cuda_timing
 from contextlib import contextmanager
 import hashlib
 import importlib.abc
@@ -85,6 +85,8 @@ def source_imports(sources):
 
 @pipeline_stage('sam_model_load')
 def load(config, device):
+    from .inference_precision import validate
+    validate(device,config.data['execution']['sam_precision'])
     try:
         import torch
         import torchvision
@@ -107,11 +109,15 @@ def load(config, device):
         from bboxmaskpose.sam2.sam2_image_predictor import SAM2ImagePredictor
         predictor = SAM2ImagePredictor(model, max_hole_area=0., max_sprinkle_area=0.)
     return Segmenter(predictor, device, frame_batch_size=config.data['execution']['sam_frame_batch_size'],
-                     prompt_batch_size=config.data['execution']['sam_prompt_batch_size'])
+                     prompt_batch_size=config.data['execution']['sam_prompt_batch_size'],
+                     precision=config.data['execution']['sam_precision'])
 
 
 class Segmenter:
-    def __init__(self, predictor, device, *, frame_batch_size=4, prompt_batch_size=8):
+    def __init__(self, predictor, device, *, frame_batch_size=4, prompt_batch_size=8, precision='fp32'):
+        from .inference_precision import validate
+        validate(device,precision)
+        self.precision=precision
         self.predictor, self.device = predictor, device
         self.frame_batch_size, self.prompt_batch_size = frame_batch_size, prompt_batch_size
 
@@ -127,9 +133,10 @@ class Segmenter:
         import torch
         # One image embedding shared by all people; never retain frame features
         # across cues, including when prompting or the second pose pass fails.
-        with torch.inference_mode(), torch.autocast(device_type=torch.device(self.device).type, enabled=False):
+        from .inference_precision import autocast
+        with torch.inference_mode(), autocast(self.device,self.precision):
             try:
-                with pipeline_timing('sam_image_embedding'), image.convert('RGB') as rgb:
+                with pipeline_timing('sam_image_embedding'), pipeline_cuda_timing('sam_image_encoder',self.device), image.convert('RGB') as rgb:
                     self.predictor.set_image(np.array(rgb, copy=True))
                 yield self
             finally:
@@ -142,8 +149,15 @@ class Segmenter:
         if len(negative):
             points = np.concatenate((points, negative))
             labels = np.concatenate((labels, np.zeros(len(negative), dtype=np.int32)))
-        masks, scores, _ = self.predictor.predict(point_coords=points, point_labels=labels,
-            box=None, multimask_output=False)
+        if self.precision!='fp32':
+            mask_input,coords,label,boxes=self.predictor._prep_prompts(points,labels,None,None,True)
+            with pipeline_cuda_timing('sam_prompt_decoder',self.device):
+                masks,scores,_=self.predictor._predict(coords,label,boxes,mask_input,multimask_output=False)
+            masks=masks[0].cpu().numpy();scores=scores[0].float().cpu().numpy()
+        else:
+            with pipeline_cuda_timing('sam_prompt_decoder',self.device):
+                masks, scores, _ = self.predictor.predict(point_coords=points, point_labels=labels,
+                    box=None, multimask_output=False)
         masks, scores = np.asarray(masks), np.asarray(scores)
         if (masks.ndim != 3 or len(masks) != 1 or scores.shape != (1,) or
                 not np.isfinite(masks).all() or not np.isin(masks, [0, 1]).all() or
@@ -168,7 +182,7 @@ class Segmenter:
                     for image,_ in batch:
                         with image.convert('RGB') as rgb:
                             arrays.append(np.array(rgb,copy=True))
-                with pipeline_timing('sam_image_embedding'):
+                with pipeline_timing('sam_image_embedding'), pipeline_cuda_timing('sam_image_encoder',self.device):
                     self.predictor.set_image_batch(arrays)
                 arrays.clear()
                 pipeline_count('sam_embedded_images',len(batch))
@@ -180,7 +194,7 @@ class Segmenter:
                     def decode(group):
                         coordinates=np.stack([np.concatenate((p,np.asarray(n).reshape(-1,2))) for _,p,n in group])
                         labels=np.stack([np.r_[np.ones(len(p),dtype=np.int32),np.zeros(len(n),dtype=np.int32)] for _,p,n in group])
-                        with pipeline_timing('sam_mask_prediction'):
+                        with pipeline_timing('sam_mask_prediction'), pipeline_cuda_timing('sam_prompt_decoder',self.device):
                             # Private API is pinned by the verified source manifest.
                             mask_input,coords,label,boxes=self.predictor._prep_prompts(
                                 coordinates,labels,None,None,True,img_idx=image_index)
@@ -200,7 +214,8 @@ class Segmenter:
                 return results
             finally:
                 self.predictor.reset_predictor()
-        with torch.inference_mode(), torch.autocast(device_type=torch.device(self.device).type,enabled=False):
+        from .inference_precision import autocast
+        with torch.inference_mode(), autocast(self.device,self.precision):
             return image_batches.run(frames,calculate,self.device)
 
     @staticmethod

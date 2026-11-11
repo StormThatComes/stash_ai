@@ -33,6 +33,10 @@ def pose(config):
         from .pmpose_registry import contract
         model=contract(p)
         for gate in ('presence_threshold','visibility_threshold'):model.pop(gate,None)
+        from .inference_precision import contract as precision_contract
+        numerical=precision_contract(config).get('inference_precision',{})
+        active={key:value for key,value in numerical.items() if key in ('pmpose_precision','sam_precision')}
+        if active:model['inference_precision']=active
     return ['pose-estimator-v1',model,config.data['models']['device'],
             config.data['execution']['vitpose_precision'] if backend=='vitpose_plus_large' else 'fp32']
 

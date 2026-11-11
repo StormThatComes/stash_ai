@@ -90,3 +90,29 @@ individual rows; compare total rows and elapsed time. Cache pack/write timers,
 written-entry/batch counters and queued-byte peak expose serialization tradeoffs.
 Tests verify one write group for 12 results, shared-array isolation, concurrent
 admission, rollback recovery and 17 fetches for a 1,000-row stream.
+
+## Optional SAM/PMPose precision and sampled CUDA timings
+
+`execution.gpu.pmpose_precision` and `sam_precision` accept `fp32`, `fp16` and
+`bf16`. Both default to FP32. Reduced precision requires the corresponding active
+CUDA model; CPU and unsupported BF16 configurations fail explicitly. Weights stay
+FP32, autocast covers forwards, and PMPose averaging/decode returns to FP32. SAM
+scores are converted to FP32 before NumPy, including the scalar fallback. Raw
+PMPose cache keys include its non-default precision; full pose/body evidence
+contracts include active SAM/PMPose precision. Face and raw detector caches remain
+independent. FP32 contracts retain their previous signatures.
+
+For GPU measurements, enable `execution.rebuild.profile: true` and set
+`execution.gpu.profile_every_n_batches: 10` (0, the default, disables it). Pipeline
+history then includes `cuda`: completed sampled event times by SAM encoder,
+SAM prompt decoder and PMPose forward, sampled allocated/reserved VRAM, pending
+samples and samples dropped when the 64-event queue is full. There is no forced
+CUDA synchronization. Sampled stage times are not the whole run's elapsed time;
+stage intervals can overlap, and sampled VRAM is not a process-wide peak.
+
+Compare FP32 and each optional precision on the same frames using detection audit
+before accepting it. Keep scene/cue order, thresholds and cache state comparable;
+check mask ownership, keypoint drift, rejected observations and resulting identity
+assignments, alongside time and VRAM. CPU tests verify contracts, dtype boundaries,
+validation and event scheduling. Actual CUDA throughput and numerical quality
+require a GPU run; neither is established by the CPU tests.

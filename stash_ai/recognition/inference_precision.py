@@ -5,7 +5,9 @@ def contract(config):
     settings=config.data.get('execution',{});pose=config.data['sapiensid']['pose']
     result={}
     for name,active in (('rfdetr_precision',pose.get('detector')=='rfdetr_xl'),
-                        ('vitpose_precision',pose.get('backend')=='vitpose_plus_large')):
+                        ('vitpose_precision',pose.get('backend')=='vitpose_plus_large'),
+                        ('pmpose_precision',pose.get('backend')=='pmpose'),
+                        ('sam_precision',pose.get('backend')=='pmpose' and pose.get('refinement',{}).get('enabled'))):
         value=settings.get(name,'fp32')
         if active and value!='fp32':result[name]=value
     if pose.get('backend')=='vitpose_plus_large' and settings.get('vitpose_device_decode'):
@@ -18,7 +20,7 @@ def validate(device,precision):
     if precision=='fp32':return
     import torch
     if torch.device(device).type!='cuda' or not torch.cuda.is_available():
-        raise ValueError('Optional RF-DETR/ViTPose mixed precision requires a CUDA device; select fp32 for CPU.')
+        raise ValueError('Optional model mixed precision requires a CUDA device; select fp32 for CPU.')
     if precision=='bf16':
         with torch.cuda.device(device):
             if not torch.cuda.is_bf16_supported():raise ValueError('Selected CUDA device does not support bf16 inference.')
