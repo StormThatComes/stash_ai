@@ -39,6 +39,8 @@ def load(config, device):
 
 
 def _load_model(config, device):
+    from .inference_precision import validate
+    validate(device,config.data['execution']['pmpose_precision'])
     try:
         import cv2
         import numpy as np
@@ -61,7 +63,8 @@ def _load_model(config, device):
         load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     model = model.float().to(device).eval()
     pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'],
-                  fused_flip=config.data['execution']['pmpose_fused_flip'])
+                  fused_flip=config.data['execution']['pmpose_fused_flip'],
+                  precision=config.data['execution']['pmpose_precision'])
     return pose
 
 
@@ -71,7 +74,7 @@ def _pipeline(pose, config, device):
     settings = config.data['sapiensid']['pose'].get('refinement', {})
     from .inference_cache import current
     if current() is not None:
-        pose=RawPMPose(pose,device)
+        pose=RawPMPose(pose,device,precision=config.data['execution']['pmpose_precision'])
     refined = None
     if settings.get('enabled', False):
         from .sam_pose2seg import load as load_segmenter
@@ -91,11 +94,14 @@ def _pipeline(pose, config, device):
 
 class PMPose:
     supports_masked_batches = True
-    def __init__(self, model, *, device, batch_size, fused_flip=True):
+    def __init__(self, model, *, device, batch_size, fused_flip=True, precision='fp32'):
         from .adaptive_gpu import Batches
         self.model, self.device, self.batch_size = model, device, batch_size
         self.batches=Batches(batch_size,'PMPose')
+        from .inference_precision import validate
+        validate(device,precision)
         self.fused_flip=fused_flip
+        self.precision=precision
 
     def resident_modules(self):return [self.model]
 
@@ -176,7 +182,11 @@ class PMPose:
 
     def _forward(self, inputs):
         import torch
-        output = self.model(inputs)
+        from .inference_precision import autocast
+        from .profiling import pipeline_cuda_timing,pipeline_count
+        with autocast(self.device,self.precision), pipeline_cuda_timing('pmpose_forward',self.device):
+            output = self.model(inputs)
+        pipeline_count('pmpose_'+self.precision+'_forwards')
         shapes = ((len(inputs), 17, 64, 48),) + ((len(inputs), 17),) * 3
         if (not isinstance(output, (tuple, list)) or len(output) != 4 or
                 any(not isinstance(v, torch.Tensor) or tuple(v.shape) != shape
@@ -187,4 +197,4 @@ class PMPose:
             valid = torch.stack([(torch.isfinite(v) & (v >= 0) & (v <= 1)).all() for v in output]).all()
             if not bool(valid):
                 raise ValueError('PMPose returned malformed/non-finite heatmaps or probabilities.')
-        return output
+        return [value.float() for value in output]

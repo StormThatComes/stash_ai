@@ -41,9 +41,10 @@ class Pose:
 
 class RawPMPose(Pose):
     """Cache raw first and masked passes by their exact pixels, boxes and masks."""
-    def __init__(self,model,device):
+    def __init__(self,model,device,*,precision='fp32'):
         from .pmpose_registry import SHA256,INFERENCE
         self.model=model;self.contract=[SHA256,INFERENCE,str(device)]
+        if precision!='fp32':self.contract.append({'precision':precision})
 
     def predict(self,image,bounds,masks=None):
         return self.predict_many([(image,bounds,masks)])[0]

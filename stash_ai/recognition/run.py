@@ -148,7 +148,8 @@ def _run(args, config, services):
     report = RunReport(args.progress_style == 'verbose', tqdm.write)
     display = RunDisplay(report)
     try:
-        with present(report, args.progress_style, status_position=2), pipeline_scope(config.data['execution']['profile_rebuild']):
+        with present(report, args.progress_style, status_position=2), pipeline_scope(config.data['execution']['profile_rebuild'],
+                cuda_sample_every=config.data['execution']['profile_cuda_every']):
             _execute(args, config, services=services, display=display)
     except BaseException as error:
         display.finish('interrupted' if isinstance(error, KeyboardInterrupt) else 'failed')
