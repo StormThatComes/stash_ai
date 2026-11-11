@@ -14,7 +14,9 @@ _active = ContextVar('recognition_sprite_cache', default=None)
 
 class SpriteCache:
     def __init__(self, limit):
-        self.limit, self.size, self.peak = limit, 0, 0
+        from .retained_memory import current
+        self.budget = current()
+        self.limit, self.size, self.peak = min(limit, self.budget.limit) if self.budget else limit, 0, 0
         self.entries, self.lock = OrderedDict(), threading.RLock()
         self.hits = self.misses = self.evictions = 0
         self.decoders = {}
@@ -40,12 +42,16 @@ class SpriteCache:
             self.size -= removed[1]
             if key[0] == 'pixels':
                 removed[0].close()
-        while self.entries and self.size + size > self.limit:
+        while self.entries and (self.size + size > self.limit or
+                self.budget is not None and not self.budget.replace(self, self.size + size)):
             old_key, old = self.entries.popitem(last=False)
             self.size -= old[1]
             self.evictions += 1
             if old_key[0] == 'pixels':
                 old[0].close()
+        if self.budget is not None and not self.budget.replace(self, self.size + size):
+            self.budget.replace(self, self.size)
+            return False
         self.entries[key] = value, size
         self.size += size
         self.peak = max(self.peak, self.size)
@@ -111,6 +117,7 @@ class SpriteCache:
             sheets = [v[0] for k,v in self.entries.items() if k[0] == 'pixels']
             self.entries.clear()
             self.size = 0
+            if self.budget is not None:self.budget.replace(self, 0)
             cleanup([sheet.close for sheet in sheets])
 
 

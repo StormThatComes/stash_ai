@@ -90,10 +90,11 @@ _GROUPS = (
     ('portraits.output', 'portraits', 'jpeg_quality'),
 
     ('execution.models', 'models', 'directory download_missing'),
+    ('execution.models', 'execution', 'verified_cache_mb=model_bytes_cache_bytes'),
     ('execution.gpu', 'models', 'device'),
     ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram cpu_residency_mb=cpu_residency_bytes sequential_scene_batch_size rfdetr_precision vitpose_precision vitpose_device_decode'),
     ('execution.scan', 'execution',
-     'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_mb=scan_queue_bytes '
+     'retained_memory_mb=retained_memory_bytes max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_mb=scan_queue_bytes '
      'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_mb=media_cache_bytes '
      'sprite_cache_mb=sprite_cache_bytes inference_cache_mb=inference_cache_bytes'),
     ('execution.rebuild', 'execution',

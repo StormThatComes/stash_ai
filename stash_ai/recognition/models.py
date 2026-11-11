@@ -110,7 +110,10 @@ def verify(path, asset):
 def verified_bytes(path, asset):
     # Returning immutable bytes binds verification to the exact object consumed
     # by OpenCV/ORT/safetensors. No verified path is reopened by a loader.
-    return _asset_bytes(path, asset, materialize=True)
+    from .retained_memory import current
+    cache = current()
+    load = lambda: _asset_bytes(path, asset, materialize=True)
+    return load() if cache is None else cache.verified((asset.sha256, asset.size), load)
 
 
 def asset_selection(config):

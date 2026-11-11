@@ -220,6 +220,8 @@ HELP = {
     'execution.gpu': 'Inference device, model lifetime and memory logging.',
     'execution.gpu.device': 'Inference device: cuda, cpu or auto (prefer CUDA when available).',
     'execution.gpu.model_policy': 'phase: unload inference models/cache after VTT (default); reload lazily for portraits. sequential: additionally run faces then bodies per scene, unloading between them. retain: keep face models until run exit (legacy throughput policy).',
+    'execution.models.verified_cache_mb': 'Verified immutable model bytes retained between phase loads, within scan.retained_memory_mb. Range: 0..8192 MB; fractions allowed. Zero disables.',
+    'execution.scan.retained_memory_mb': 'Shared RAM cap for cached sprites, verified model bytes and parked CPU weights. Excludes active models, in-flight scan work and rebuild RAM; not total RSS. Range: 1..1048576 MB; fractions allowed.',
     'execution.gpu.cpu_residency_mb': 'Maximum CPU MB for parked model weights between sequential scene windows. Zero disables parking. Range: 0..65536 MB; fractions allowed.',
     'execution.gpu.sequential_scene_batch_size': 'Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range: 1..16.',
     'execution.gpu.rfdetr_precision': 'RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body evidence. Validate detection quality before enabling.',

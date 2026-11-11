@@ -1,5 +1,6 @@
 """One application ORT distribution and shared CUDA library/provider policy."""
 from importlib import metadata
+from .profiling import pipeline_stage
 from types import SimpleNamespace
 
 from stash_ai.backends.onnx_session import _execution_providers
@@ -30,6 +31,7 @@ def runtime(config):
     return ort, providers
 
 
+@pipeline_stage('onnx_session_create')
 def session(config, model, *, runtime_info=None, cpu_fallback=True, cpu_threads=1):
     if type(cpu_threads) is not int or not 1<=cpu_threads<=16:
         raise ValueError('Recognition CPU session threads must be between one and sixteen.')

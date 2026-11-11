@@ -1,5 +1,5 @@
 """Run-owned lazy model stages and an optional byte-bounded CPU weight pool."""
-from .profiling import pipeline_timing
+from .profiling import pipeline_timing, pipeline_count
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,16 +17,24 @@ def release(model):
 
 class Pool:
     def __init__(self,limit):
+        from .retained_memory import current
+        self.budget = current()
         self.limit=limit;self.parked=OrderedDict();self.used=0
 
     def take(self,key,loader,device):
-        if key not in self.parked:return loader()
+        if key not in self.parked:
+            pipeline_count('resident_model_loads')
+            with pipeline_timing('resident_model_load'):return loader()
         model,modules,size=self.parked.pop(key);self.used-=size
         try:
-            for module in modules:module.to(device)
+            with pipeline_timing('resident_model_restore'):
+                for module in modules:module.to(device)
+            pipeline_count('resident_model_restores')
             return model
         except BaseException:
             release(model);raise
+        finally:
+            if self.budget is not None:self.budget.replace(self,self.used)
 
     def put(self,key,model,device):
         # Only explicit adapters with no pending readbacks or device-specific workers.
@@ -36,17 +44,26 @@ class Pool:
         modules=modules(model)
         size=sum(t.numel()*t.element_size() for m in modules for t in (*m.parameters(),*m.buffers()))
         if not size or size>self.limit or key in self.parked:release(model);return
-        while self.used+size>self.limit:
+        while self.parked and (self.used+size>self.limit or
+                self.budget is not None and not self.budget.replace(self,self.used+size)):
             _,(old,_,n)=self.parked.popitem(last=False);self.used-=n;release(old)
+        if self.budget is not None and not self.budget.replace(self,self.used+size):
+            self.budget.replace(self,self.used)
+            release(model);return
         try:
-            for module in modules:module.to('cpu')
+            prepare=getattr(model,'prepare_residency',None)
+            if callable(prepare):prepare()
+            with pipeline_timing('resident_model_park'):
+                for module in modules:module.to('cpu')
         except BaseException:
+            if self.budget is not None:self.budget.replace(self,self.used)
             release(model);raise
         self.parked[key]=(model,modules,size);self.used+=size
 
     def close(self):
         from stash_ai.runtime.cleanup import cleanup
         models=list(self.parked.values());self.parked.clear();self.used=0
+        if self.budget is not None:self.budget.replace(self,0)
         cleanup([('close parked model',lambda m=m:release(m)) for m,_,_ in models])
 
 
