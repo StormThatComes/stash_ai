@@ -117,6 +117,8 @@ def test_bad_mask_outputs_raise_instead_of_falling_back(masks,scores):
 def test_loader_strictly_checks_real_torch_state_dict_before_using_predictor(tmp_path,monkeypatch):
     torch=pytest.importorskip('torch')
     pytest.importorskip('hydra');pytest.importorskip('iopath');pytest.importorskip('torchvision')
+    config=configuration(tmp_path)
+    config.data['execution'].update(sam_frame_batch_size=2,sam_prompt_batch_size=3)
     path=tmp_path/'model.pt'
     torch.save({'model':torch.nn.Linear(2,3).state_dict()},path)
     monkeypatch.setattr(sam.registry,'SIZE',path.stat().st_size)
@@ -128,8 +130,9 @@ def test_loader_strictly_checks_real_torch_state_dict_before_using_predictor(tmp
     sources['bboxmaskpose/sam2/example.py']=b'import torch\nclass Model(torch.nn.Linear):\n def __init__(self, **kw): super().__init__(2,3)\n'
     monkeypatch.setattr(sam,'assets',lambda _: (sources,path))
     with fresh_namespace():
-        segmenter=sam.load(None,'cpu')
+        segmenter=sam.load(config,'cpu')
         assert not segmenter.predictor.model.training
+        assert segmenter.frame_batch_size==2 and segmenter.prompt_batch_size==3
         path.write_bytes(b'x'*path.stat().st_size)
         with pytest.raises(ValueError,match='SHA256'):
-            sam.load(None,'cpu')
+            sam.load(config,'cpu')
