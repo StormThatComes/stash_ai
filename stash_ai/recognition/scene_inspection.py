@@ -119,7 +119,7 @@ class UnassignedReader:
                     proof = json.loads(member['proof'])
                     item = _decision(member, proof, self.body_policy)
                     decisions.append(item)
-                    variants.append(_variant(item, {k: proof[k] for k in explain.MEASUREMENTS if k in proof},
+                    variants.append(_variant(item, {k: proof[k] for k in explain.MEASUREMENTS if proof.get(k) is not None},
                                              explain.references(proof, 'body', row['face'])))
                 elif row['face']:
                     associations.append(dict(kind='face', observation=row['face'], label='Linked face'))

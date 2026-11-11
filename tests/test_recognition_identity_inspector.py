@@ -263,6 +263,11 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         wait_for(lambda: 'Retained rejection: blurred' in ui.notes.get('1.0','end'))
         assert 'detection.min_sharpness' in ui.notes.get('1.0','end')
         assert ui.images.panels['A'].image.size==(37,43)
+        from stash_ai.recognition.identity_window import describe
+        attempt = ui.branches[unknown]['reader'].detail('face','unmatched-face')['trace']
+        assert 'No competitor result retained' not in describe(attempt)
+        attempt['decisions'][0]['metrics'] = {'probe.rival_score': .66}
+        assert 'No competitor result retained' not in describe(attempt)
         ui.scene_entry.delete(0,'end')
         ui.scene_entry.insert(0,'10')
         ui.search()

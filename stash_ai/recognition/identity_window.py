@@ -29,7 +29,8 @@ def describe(trace):
             lines.append(f"Observed lead: {score - runner:.4f}")
         if not decision['references']:
             lines.append('No source observation IDs retained for this decision.')
-        if not any(k in metrics for k in ('runner','rival','rival_score')):
+        scores = metrics.get('recorded_scores') or ()
+        if not any(k.rsplit('.',1)[-1] in ('runner','rival','rival_score','rival_cluster') for k in metrics) and len(scores)<2:
             lines.append('No competitor result retained.')
         for edge in decision['merges']:
             route = edge.get('route') or 'recorded identity merge'
