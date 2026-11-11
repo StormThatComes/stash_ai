@@ -21,8 +21,8 @@ class RuntimeSettings:
     CHECKPOINT_BATCHES: int = 8
     PREFETCH_BATCHES: int = 4
     RESULT_PREFETCH_BATCHES: int = 32
-    RAM_CACHE_GB: float = 24.0
-    RAM_BUDGET_GB: float = 32.0
+    RAM_CACHE_MB: float = 24576.0
+    RAM_BUDGET_MB: float = 32768.0
     PREPARE_WORKERS: int = 4
     MERGE_STATE_FILE: Path = INSTALL_ROOT / "tagger_sources.sqlite3"
     TEMPORAL_POLICY: TemporalPolicy = field(default_factory=TemporalPolicy)

@@ -216,7 +216,7 @@ body-mode boundaries, missing references, pair blockers and nearest competitors.
 These diagnostics are hints, not impossibility proofs. Hybrid diagnostics inspect
 only pairs touching the goals, retaining target-pair proofs and the nearest
 competitor per target instead of an all-library pair matrix. The configured
-SapiensID `reference_bytes`, `plan_bytes` and `max_candidate_pairs` budgets also
+SapiensID `reference_mb`, `plan_mb` and `max_candidate_pairs` budgets also
 bound this work; exceeding them fails explicitly.
 
 Reports include final destinations, missing/withheld counts, conflicting trials,

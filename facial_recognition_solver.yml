@@ -1,6 +1,7 @@
 # VTT recognition. Settings take effect when a recognition command runs.
 # Face and body similarities are cosine scores. Support counts independent cues.
 # Face/body sizes are source pixels. Face pose deviation is a landmark score.
+# Memory/disk limits use MB (1 MB = 1048576 bytes = 1 MiB); fractions are allowed.
 
 version: 2
 # Recognition YAML layout. Use 2 for this schema.
@@ -221,9 +222,9 @@ matching:
         # Maximum selected face references per identity; does not limit stored observations. Range: 2..128.
         max_people_per_lookup: 20000
         # Maximum identities loaded into a face lookup; exceeding it stops the lookup. Range: 1..100000.
-        max_reference_bytes: 2147483648
-        # Face reference byte cap (1 MiB..64 GiB), including views; not a total RAM/VRAM limit. Range:
-        # 1048576..68719476736.
+        max_reference_mb: 2048
+        # Face reference cap in MB, including views; not a total RAM/VRAM limit. Range: 1..65536 MB; fractions
+        # allowed.
     anchors:
       # Face observations allowed to seed an identity.
       min_identity_support: 2
@@ -277,7 +278,7 @@ matching:
       max_prototypes_per_person: 4
       # Maximum primary confirmed face-view representatives per identity. Range: 1..8.
       max_witnesses: 32
-      # Maximum witnesses per adaptive view; shares max_reference_bytes. Range: 8..128.
+      # Maximum witnesses per adaptive view; shares max_reference_mb. Range: 8..128.
     same_scene:
       # Rules for matches supported within one scene.
       match_bonus: 0.03
@@ -453,13 +454,13 @@ portraits:
     # seconds.
     timeout_seconds: 30.0
     # Time budget in seconds for each video extraction session. Range: 1..600.
-    max_video_bytes: 67108864
-    # Maximum video bytes fetched per extraction session, not a source-file size limit. Range:
-    # 1048576..1073741824.
+    max_video_mb: 64
+    # Maximum video MB fetched per extraction session, not a source-file size limit. Range: 1..1024 MB;
+    # fractions allowed.
   output:
     # Encoding of the published portrait.
     jpeg_quality: 90
-    # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_bytes.
+    # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_mb.
 
 execution:
   # Model locations, concurrency and resource budgets by stage.
@@ -479,9 +480,9 @@ execution:
     # exit (legacy throughput policy).
     log_vram: true
     # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
-    cpu_residency_bytes: 0
-    # Maximum CPU bytes for parked model weights between sequential scene windows. Zero disables parking. Range:
-    # 0..68719476736.
+    cpu_residency_mb: 0
+    # Maximum CPU MB for parked model weights between sequential scene windows. Zero disables parking. Range:
+    # 0..65536 MB; fractions allowed.
     sequential_scene_batch_size: 4
     # Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range:
     # 1..16.
@@ -503,8 +504,9 @@ execution:
     # Stash API/media request timeout in seconds; not a whole-run time limit. Range: 1..600.
     cpu_workers: 4
     # CPU workers for face quality, alignment and JPEG work; inference has one owner. Range: 1..32.
-    queue_bytes: 268435456
-    # Byte budget for in-flight scan CPU work; oversized work runs serially. Range: 65536..4294967296.
+    queue_mb: 256
+    # Budget in MB for in-flight scan CPU work; oversized work runs serially. Range: 0.0625..4096 MB; fractions
+    # allowed.
     detector_batch_size: 1
     # Face detection microbatch; native batching only for compatible dynamic ONNX models, otherwise serial.
     # Range: 1..16.
@@ -516,29 +518,30 @@ execution:
     # Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.
     prefetch_scene_depth: 3
     # Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers. Range: 1..16.
-    media_cache_bytes: 1073741824
-    # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range:
-    # 0..68719476736.
-    sprite_cache_bytes: 1073741824
-    # Byte cap for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..68719476736.
-    inference_cache_bytes: 8589934592
+    media_cache_mb: 1024
+    # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range: 0..65536 MB;
+    # fractions allowed.
+    sprite_cache_mb: 1024
+    # Cap in MB for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..65536 MB;
+    # fractions allowed.
+    inference_cache_mb: 8192
     # Disk cap for reusable detection/pose/embedding/quality stages keyed by exact pixels; 0 disables. Range:
-    # 0..68719476736.
+    # 0..65536 MB; fractions allowed.
   rebuild:
     # Identity rebuild workers, checkpoints and working memory.
-    disk_total_bytes: 322122547200
-    # Maximum combined recognition database, caches, checkpoints and scratch bytes per volume; 0 disables.
-    # Range: 0..10995116277760.
-    disk_free_bytes: 1073741824
+    disk_total_mb: 307200
+    # Maximum combined recognition database, caches, checkpoints and scratch size in MB per volume; 0 disables.
+    # Range: 0..10485760 MB; fractions allowed.
+    disk_free_mb: 1024
     # Free disk reserve per volume, also covering unattributed SQLite sort files and other applications; 0
-    # disables. Range: 0..1099511627776.
-    sqlite_cache_bytes: 67108864
+    # disables. Range: 0..1048576 MB; fractions allowed.
+    sqlite_cache_mb: 64
     # SQLite page-cache ceiling per replay/reference store, additionally constrained by the shared RAM budget.
-    # Range: 32768..1073741824.
-    scratch_bytes: 274877906944
+    # Range: 0.03125..1024 MB; fractions allowed.
+    scratch_mb: 262144
     # Combined capacity of private replay databases, reference pages, body witnesses and search files; includes
     # journal headroom. Excludes persistent caches, checkpoints and SQLite internal sort files. Range:
-    # 1048576..1099511627776.
+    # 1..1048576 MB; fractions allowed.
     scratch_directory: recognition_work
     # Scratch parent directory, relative to this YAML; null uses recognition_work next to the database.
     # Run-owned files are removed on exit.
@@ -559,33 +562,35 @@ execution:
     # Experimental preloading of the next scene's immutable rebuild inputs.
     profile: false
     # Record rebuild SQL, fetch and pipeline timings in run history.
-    memory_bytes: 10737418240
+    memory_mb: 10240
     # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range:
-    # 1048576..1099511627776.
-    cache_bytes: 2147483648
-    # Rebuild evidence cache byte cap; borrows idle working memory and yields to queues/banks; 0 disables.
-    # Range: 0..68719476736.
-    matrix_cache_bytes: 1073741824
-    # Packed reference matrix cache byte cap, within rebuild_cache_bytes; 0 disables. Range: 0..68719476736.
-    queue_bytes: 268435456
-    # Pending rebuild CPU work byte cap; shares the working-memory budget with caches. Range: 65536..1073741824.
+    # 1..1048576 MB; fractions allowed.
+    cache_mb: 2048
+    # Rebuild evidence cache cap in MB; borrows idle working memory and yields to queues/banks; 0 disables.
+    # Range: 0..65536 MB; fractions allowed.
+    matrix_cache_mb: 1024
+    # Packed reference matrix cache cap in MB, within execution.rebuild.cache_mb; 0 disables. Range: 0..65536
+    # MB; fractions allowed.
+    queue_mb: 256
+    # Pending rebuild CPU work cap in MB; shares the working-memory budget with caches. Range: 0.0625..1024 MB;
+    # fractions allowed.
     checkpoint_mode: incremental
     # incremental writes committed row deltas and compacts every 16 generations; snapshot writes full strict
     # prefixes. Values: snapshot, incremental.
     checkpoint_scenes: 0
     # Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range:
     # 0..1000000.
-    checkpoint_bytes: 8589934592
-    # Maximum bytes per rebuild recovery checkpoint generation. Range: 1048576..8589934592.
-    replay_snapshot_bytes: 103079215104
-    # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range:
-    # 1048576..1099511627776.
-    pixel_index_bytes: 4294967296
-    # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range:
-    # 1048576..1099511627776.
-    derived_cache_bytes: 4294967296
+    checkpoint_mb: 8192
+    # Maximum MB per rebuild recovery checkpoint generation. Range: 1..8192 MB; fractions allowed.
+    replay_snapshot_mb: 98304
+    # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range: 1..1048576 MB;
+    # fractions allowed.
+    pixel_index_mb: 4096
+    # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range: 1..1048576
+    # MB; fractions allowed.
+    derived_cache_mb: 4096
     # Persistent derived-data disk budget, split between centroids, appearances and plans; 0 disables. Range:
-    # 0..1099511627776.
+    # 0..1048576 MB; fractions allowed.
     body:
       # Limits for hybrid and body matching plans.
       max_candidate_pairs: 1000000
@@ -594,11 +599,12 @@ execution:
       max_witness_comparisons: 100000000
       # Maximum exact vector comparisons per body scene/global pass, including face vetoes. Range: positive
       # integer.
-      reference_bytes: 2147483648
-      # Byte budget for body/hybrid reference banks, metadata and lookup working arrays. Range: positive
-      # integer.
-      plan_bytes: 536870912
-      # Byte budget for retained body/hybrid matching plans and decision proofs. Range: positive integer.
+      reference_mb: 2048
+      # Budget in MB for body/hybrid reference banks, metadata and lookup working arrays. Range: >=
+      # 9.5367431640625e-07 MB; fractions allowed.
+      plan_mb: 512
+      # Budget in MB for retained body/hybrid matching plans and decision proofs. Range: >= 9.5367431640625e-07
+      # MB; fractions allowed.
   solver:
     # Solver strategy comparison on labelled validation scenes.
     compare_scene_strategies: true
@@ -609,8 +615,8 @@ execution:
     # Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.
     faceocc_batch_size: 4
     # Faces per portrait visibility inference batch (1..8); 1 disables batching.
-    ranking_cache_bytes: 16777216
-    # Byte cap for completed VTT portrait rankings; 0 disables. Range: 0..68719476736.
+    ranking_cache_mb: 16
+    # Cap in MB for completed VTT portrait rankings; 0 disables. Range: 0..65536 MB; fractions allowed.
     prefetch: true
     # Prepare bounded VTT portrait sources and quality measurements ahead of use.
 
@@ -620,13 +626,14 @@ storage:
   # Additional directory for solver reports and checkpoints, relative to this YAML.
   database: faces_state.sqlite3
   # Recognition SQLite database path, relative to this YAML.
-  max_crop_bytes: 1048576
-  # Maximum bytes per stored JPEG crop (>=1024); encoding reduces quality/size to fit. Range: 1024..8388608.
+  max_crop_mb: 1
+  # Maximum MB per stored JPEG crop; encoding reduces quality/size to fit. Range: 0.0009765625..8 MB; fractions
+  # allowed.
   crop_policy: all
   # all retains every eligible crop; selected skips image encoding until portrait/report demand. Reports need
   # --restore-crops for omitted images. Values: all, selected.
   retain_person_crops: true
-  # Keep body crops for inspection/portraits, subject to storage.max_crop_bytes.
+  # Keep body crops for inspection/portraits, subject to storage.max_crop_mb.
   retention:
     # Evidence pruning after successful recognition runs.
     auto_prune: false

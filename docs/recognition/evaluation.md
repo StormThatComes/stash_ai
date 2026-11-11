@@ -186,7 +186,7 @@ quality changes separately:
 - `adaptive_view_witnesses`: grow retained witnesses from eight with the square
   root of independent support, up to `max_view_witnesses` (default 32). Existing
   medoid/diversity selection preserves rare endpoints and supported reserve
-  looks. All additional vectors count against `max_reference_bytes`.
+  looks. All additional vectors count against `max_reference_mb`.
 - `deduplicate_detections`: same-cue detections need box IoU at least 0.90,
   every landmark displacement at most 3% of the smaller box diagonal, and
   embedding cosine at least 0.995 to share physical-face evidence. Similar

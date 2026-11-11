@@ -269,18 +269,17 @@ def validate(data):
         'clustering': {'same_scene_min_support': (1, 1000), 'auxiliary_min_support': (1, 1000),
                        'view_min_support': (2, 1000), 'view_attach_min_support': (1, 1000),
                        'max_view_prototypes_per_person': (1, 8), 'max_view_witnesses': (8,128),
-                       'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
-                       'max_reference_bytes': (1048576, 68719476736)},
-        'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
-                      'max_video_bytes': (1048576, 1073741824)},
-        'execution': {'disk_total_bytes': (0,10995116277760), 'disk_free_bytes': (0,1099511627776), 'rebuild_sqlite_cache_bytes': (32768,1073741824), 'rebuild_scratch_bytes': (1048576,1099511627776), 'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),
-                      'rebuild_queue_bytes': (65536,1073741824),
-                      'cpu_residency_bytes': (0,68719476736), 'sequential_scene_batch_size': (1,16), 'scan_cpu_workers': (1,32), 'scan_queue_bytes': (65536,4294967296), 'detector_batch_size': (1,16), 'recognizer_batch_size': (1,32),
-                      'inference_cache_bytes': (0,68719476736), 'sprite_cache_bytes': (0,68719476736), 'media_cache_bytes': (0,68719476736), 'portrait_ranking_cache_bytes': (0,68719476736), 'prefetch_scene_depth': (1,16),
-                      'derived_cache_bytes': (0,1099511627776), 'pixel_index_bytes': (1048576,1099511627776), 'rebuild_cache_bytes': (0,68719476736), 'rebuild_matrix_cache_bytes': (0,68719476736),
-                      'rebuild_checkpoint_scenes': (0,1000000), 'rebuild_checkpoint_bytes': (1048576,8589934592), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'rebuild_memory_bytes': (1048576, 1099511627776), 'replay_snapshot_bytes': (1048576, 1099511627776), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
-        'storage': {'max_crop_bytes': (1024, 8388608)},
+                       'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000)},
+        'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100)},
+        'execution': {'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),
+                      'sequential_scene_batch_size': (1,16), 'scan_cpu_workers': (1,32), 'detector_batch_size': (1,16), 'recognizer_batch_size': (1,32),
+                      'prefetch_scene_depth': (1,16),
+                      'rebuild_checkpoint_scenes': (0,1000000), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
     }
+    from .config_units import BYTE_LIMITS
+    from .config_layout import get
+    for path, (low, high) in BYTE_LIMITS.items():
+        _number(get(data, path), path, low, float('inf') if high is None else high, integer=True)
     for section, fields in integers.items():
         for key, bounds in fields.items():
             _number(data[section][key], f'{section}.{key}', *bounds, integer=True)

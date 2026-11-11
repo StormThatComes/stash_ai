@@ -50,7 +50,7 @@ def test_parallel_replay_resume_and_winner_verification(tmp_path, scheduling, sa
 def test_parallel_cli_and_joint_memory_limit(tmp_path):
     from stash_ai.recognition.cli import parser
     args = ['report-merge', '--performer-set', '900,901', '--solve',
-            '--solver-cpus', '16', '--solver-trials', '4', '--solver-memory-gib', '96']
+            '--solver-cpus', '16', '--solver-trials', '4', '--solver-memory-mb', '98304']
     parsed = parser().parse_args(args)
     assert parsed.solver_cpus == 16 and parsed.solver_trials == 4
     with pytest.raises(SystemExit):

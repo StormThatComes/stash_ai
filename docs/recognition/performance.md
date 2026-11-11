@@ -1,6 +1,33 @@
 # Recognition execution and recovery
 
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
+## Memory and disk units
+
+All numeric memory/disk limits in v2 YAML use `*_mb` keys. Here **1 MB =
+1048576 bytes (1 MiB)**, consistent with the application's previous binary
+budgets. Values may be fractional, such as `queue_mb: 0.0625`,
+`max_crop_mb: 0.5` or `memory_mb: 40960.5`. Comments list ranges in MB.
+Sub-byte remainders are rounded down only when converting to internal byte
+budgets; positive limits smaller than one byte are rejected. Zero disables
+only the limits whose comments explicitly allow it.
+
+The bundled run and solver profiles retain their existing effective budgets.
+Old v1 files and old v2 `*_bytes` keys remain readable in bytes, including
+existing snapshots. Combining the legacy byte key and its MB replacement for
+the same limit is an error. Use the existing migration command to write all
+limits in MB, including when the source already uses v2:
+
+```powershell
+python stash_ai.py recognition migrate-config --face-config facial_recognition.yml --output facial_recognition_mb.yml
+```
+
+Exports and solver-generated v2 YAML preserve fractional MB. Internal resource
+accounting and machine-readable byte counters continue to use integer bytes.
+The solver option is now `--solver-memory-mb 65536` for 64 GiB (fractions such as
+`65536.5` are accepted). Replace `--solver-memory-gib` by `--solver-memory-mb`
+and multiply its old value by 1024. The offline parallel benchmark likewise
+uses `--queue-mb 64` in place of `--queue-bytes 67108864`.
+
 
 The shipped `facial_recognition.yml` is a starting profile for 16 available CPU
 slots, 64 GiB RAM allocated to this project and an SSD, with CUDA inference.
@@ -109,7 +136,7 @@ Scene-level release lines are verbose-only. At most one new scene is sampled
 every ten seconds (keeping its before/after pair), and history retains the latest
 scene per boundary rather than an unbounded event list. Set `log_vram: false` to disable
 queries and logs without disabling cleanup. VRAM is separate from
-`execution.rebuild.memory_bytes`, which budgets CPU working allocations.
+`execution.rebuild.memory_mb`, which budgets CPU working allocations.
 
 The VTT scan shares its pixel worker pool between face and person preparation.
 When CPU workers and face microbatches are enabled, preparation from one
@@ -194,7 +221,7 @@ reference fingerprint and logical reference budget are preserved. General
 reference loads use bounded person batches, including full membership-scope
 validation outside the representative cap.
 
-`execution.rebuild.memory_bytes` is a shared live working budget (8 GiB by default),
+`execution.rebuild.memory_mb` is a shared live working budget (8 GiB by default),
 covering replay pages, working reservations and evictable caches. It is not an
 upfront allocation, an OS RSS cap or the representative-vector limit. It can be
 increased on hosts with more RAM, such as a 96 GB system. If the canonical index
@@ -241,7 +268,7 @@ execution:
   rebuild:
     workers: 16
     native_threads: 1
-    queue_bytes: 67108864
+    queue_mb: 64
     profile: true
 ```
 
@@ -279,8 +306,8 @@ Rebuild uses retained embeddings and never loads or invokes GPU models. CPU
 workers receive neither models nor SQLite connections. Scan and portrait inference remains separate from this CPU pool;
 model release follows the GPU policy described above.
 
-`rebuild_queue_bytes` bounds queued CPU jobs including estimated scratch/results;
-its effective value is capped at the admitted `rebuild_memory_bytes`. Packed matrix
+`execution.rebuild.queue_mb` bounds queued CPU jobs including estimated scratch/results;
+its effective value is capped at the admitted `execution.rebuild.memory_mb`. Packed matrix
 caches, the bounded current query batch and sparse-result accumulator retain
 their separate bounded ownership. This field is not a total-process RSS cap or
 unified accounting of every rebuild cache. No disk-backed working cache is
@@ -332,7 +359,7 @@ payloads receive their reference context during insertion rather than a second
 JSON update pass.
 
 The disposable replay database now resides in RAM, including SQLite temporary
-work. Its live main-database pages share `execution.rebuild.memory_bytes` with
+work. Its live main-database pages share `execution.rebuild.memory_mb` with
 working reservations and the evictable evidence cache. There is no fixed quarter
 for Python work or half for SQLite: each can borrow unused capacity. Page ceilings
 shrink before other owners reserve that capacity. Exceeding the shared budget
@@ -350,7 +377,7 @@ all eligible vectors without a separate per-scene prefetch RAM fraction or
 observation limit. Actual allocation failures, SQLite lock/read failures and
 worker errors fail the rebuild instead of silently falling back to serial
 decoding. Current and pending prefetched vectors reserve space in the same
-`execution.rebuild.memory_bytes` budget as replay pages and other working data. Disable the
+`execution.rebuild.memory_mb` budget as replay pages and other working data. Disable the
 option explicitly to use serial input handling. The read-only worker traverses indexed observation order
 without a large SQLite sort. Only immutable vectors are prepared; assignments
 and SQLite writes stay ordered on the coordinator. Invalid vectors are reported
@@ -366,7 +393,7 @@ default; they do not predict a production rebuild's completion time. The
 benchmark reports process RSS after each trial, not isolated peak process RAM.
 
 Matching policy v8 separates representative/decision semantics from the
-`max_reference_bytes` and `max_people_per_lookup` admission limits. Existing v7
+`max_reference_mb` and `max_people_per_lookup` admission limits. Existing v7
 candidates receive one retained-evidence replay; no new inference is requested.
 Completed rebuilds can reuse results after monotonic capacity increases only
 when all current input, reference, label-origin, alias and exact candidate
@@ -389,7 +416,7 @@ Interrupted cold rebuilds can optionally keep durable recovery generations with
 Active replay, temporary work and caches remain in RAM. The sidecar directory
 `<recognition-database>.rebuild` stores only derived strict grouping/candidate,
 alias and merge-support rows, without observations, vectors, JPEGs or old labels.
-`execution.rebuild.checkpoint_bytes` caps each generation (default 512 MiB,
+`execution.rebuild.checkpoint_mb` caps each generation (default 512 MiB,
 maximum 8 GiB); publication briefly needs both old and new generations. Raw
 selected evidence and current historical labels are copied again on resume.
 
@@ -467,10 +494,10 @@ selected-scene work without pretending to reread embeddings.
 
 ## Run-wide immutable evidence cache
 
-`execution.rebuild.cache_bytes` (default 1 GiB, capped by currently unused
-`rebuild_memory_bytes`) shares one LRU budget across validated vectors, immutable
+`execution.rebuild.cache_mb` (default 1 GiB, capped by currently unused
+`execution.rebuild.memory_mb`) shares one LRU budget across validated vectors, immutable
 JSON metadata, sealed replay cue evidence, packed matrices, numerical pair evidence
-and lazy co-presence lookups. `rebuild_matrix_cache_bytes` (default 512 MiB) caps
+and lazy co-presence lookups. `execution.rebuild.matrix_cache_mb` (default 512 MiB) caps
 all retained matrices within that same budget. Zero disables either cache. These
 execution settings do not change the matching policy or retained decisions.
 
@@ -519,7 +546,7 @@ train another match. Profiling adds `local_cohort_scenes` and `process_cohort_bl
 `execution.scan.cpu_workers` (default 4) prepares face quality, supported ONNX
 alignment tensors and JPEG crops on CPU workers. Detector, visibility and embedding
 inference remain on the calling model owner. Preparation and encoding use bounded
-queues (`scan_queue_bytes`, default 256 MiB); workers own their image copies and
+queues (`execution.scan.queue_mb`, default 256 MiB); workers own their image copies and
 oversize jobs run synchronously. The queue allowance reserves estimated image
 scratch and results; it does not limit input image dimensions or source downloads.
 A cue advances its checkpoint only after every face finishes. Any error discards
@@ -536,7 +563,7 @@ readers. Results are consumed in requested scene order, errors stay associated
 with their scene, and all speculative inputs are closed on cancellation.
 `prefetch_scenes: false` retains synchronous input loading.
 
-`execution.scan.sprite_cache_bytes` defaults to 1 GiB. One thread-safe, content-addressed
+`execution.scan.sprite_cache_mb` defaults to 1 GiB. One thread-safe, content-addressed
 LRU shares compressed sprite bytes and decoded RGB sheets across scan and portrait
 input owners. Source manifests still verify their own sprite hashes. Cropping
 holds the cache lock so eviction cannot close borrowed pixels; only owned crops
@@ -570,7 +597,7 @@ by an atomic manifest switch and verified before import. Every 16 generations a
 new base compacts the chain. A failed write retains the preceding committed
 prefix. Late/ready phase checkpoints are still independent full images.
 
-`checkpoint_bytes` bounds the current strict chain (the shipped profiles allow
+`checkpoint_mb` bounds the current strict chain (the shipped profiles allow
 8 GiB); old/new generations can coexist during publication, and the shared
 per-volume disk budget includes that temporary overlap. `snapshot` retains the
 previous full-prefix format. Large benchmarks remain manual.
@@ -578,8 +605,8 @@ previous full-prefix format. Large benchmarks remain manual.
 The raw replay input cache uses selected raw-observation and pixel dependency
 stamps, rather than the global decision clock. It contains no frozen ownership:
 performer labels and historical origins are refreshed from authoritative SQLite
-before matching, including on a cache hit. Its byte limit is
-`replay_snapshot_bytes`, independent of the derived checkpoint size.
+before matching, including on a cache hit. Its size limit in MB is
+`replay_snapshot_mb`, independent of the derived checkpoint size.
 
 Independent strict face scenes can run as complete CPU jobs with
 `execution.rebuild.parallel_scenes` (default true). It requires anchor/view
@@ -600,7 +627,7 @@ score screening and stop only after an unchanged scalar score proves separation.
 The optional hybrid cue index spills to budgeted scratch SQLite when its RAM
 allowance is exhausted; exhausted scratch falls back to the original exact SQL.
 
-`execution.scan.inference_cache_bytes` enables a disposable SQLite cache next to
+`execution.scan.inference_cache_mb` enables a disposable SQLite cache next to
 the recognition database (shipped: 8 GiB; legacy/default configuration: disabled).
 Detection, top-down pose, prepared face/body embeddings, and measured quality
 have separate versioned keys. Quality/identity thresholds are reapplied to cached

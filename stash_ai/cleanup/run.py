@@ -45,9 +45,9 @@ class CleanupRun:
     def run(self):
         app, args = self.app, self.args
         with merge_store.StateStore(args.state_db, merge_store.scope_for(app.STASH_URL), app.DRY_RUN,
-                cache_bytes=int(args.ram_cache_gb * 2**30),
+                cache_bytes=int(args.ram_cache_mb * 2**20),
                 allow_cleanup=self.wide or args.abandon_pending,
-                memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as self.store:
+                memory_budget_bytes=int(args.ram_budget_mb * 2**20)) as self.store:
             if args.abandon_pending:
                 from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))

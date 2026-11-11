@@ -1,5 +1,6 @@
 """Solver-wide admission limits, independent of recognition policy/YAML."""
 from .resource_errors import ResourceLimit
+from stash_ai.byte_units import mb_to_bytes
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -116,7 +117,7 @@ def plan(config, options=None, *, source=None, scope=None, namespace=None):
                            f'with minimum working budget={minimum_rebuild} bytes (not measured RSS)')
         raise ValueError(f'Cannot start {requested_trials} simultaneous solver trials: '
                          f'resources admit only {admitted}. ' + '; '.join(reasons) + '. '
-                         'Adjust --solver-trials, --solver-cpus or --solver-memory-gib '
+                         'Adjust --solver-trials, --solver-cpus or --solver-memory-mb '
                          'to fit the available resources.')
     admission = ('automatic_serial_ceiling_exceeds_available' if memory < trial_bytes else 'automatic_available_memory') if automatic and available_ram is not None else ('automatic_memory_unavailable' if automatic else 'explicit')
     profile = options.get('profile', False)
@@ -133,14 +134,14 @@ def cli_options(args):
     """Keep the legacy serial execution unless a solver option was requested."""
     cpus = getattr(args, 'solver_cpus', None)
     trials = getattr(args, 'solver_trials', 1)
-    memory = getattr(args, 'solver_memory_gib', None)
+    memory = getattr(args, 'solver_memory_mb', None)
     profile = getattr(args, 'profile_solver', False)
     scheduling = getattr(args, 'solver_scheduling', 'batch')
     if cpus is None and trials == 1 and memory is None and not profile and scheduling == 'batch':
         return None
     options = dict(trials=trials, profile=profile, scheduling=scheduling)
     if cpus is not None:options['cpus'] = cpus
-    if memory is not None:options['memory_bytes'] = memory * 1024**3
+    if memory is not None:options['memory_bytes'] = mb_to_bytes(memory, name='--solver-memory-mb', minimum=1 / 1024**2)
     return options
 
 

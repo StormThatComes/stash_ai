@@ -20,8 +20,8 @@ model inference and a large local merge cache.
 
 | Option | Default | Meaning |
 |---|---:|---|
-| `--ram-budget-gb` | 32 | Whole-process memory target |
-| `--ram-cache-gb` | 24 | Shared cache for results, indexes and media |
+| `--ram-budget-mb` | 32768 | Whole-process memory target in MB |
+| `--ram-cache-mb` | 24576 | Shared cache in MB for results, indexes and media |
 | `--prepare-workers` | 4 | Parallel CPU frame transformations |
 | `--checkpoint-batches` | 8 | Save progress every N processed batches (integer >= 1) |
 | `--prefetch-batches` | 4 | Prepared batches ahead of inference |
@@ -92,7 +92,7 @@ the entire state database.
 Lower limits if the system starts swapping:
 
 ```powershell
-python .\stash_ai.py --models all --ram-budget-gb 20 --ram-cache-gb 14
+python .\stash_ai.py --models all --ram-budget-mb 20480 --ram-cache-mb 14336
 ```
 
 For unusually large scenes, one active structure
@@ -194,7 +194,7 @@ most two CPU batch producers have isolated HTTP sessions.
 A full current-scene queue does not block fetching or preparing
 the next scene. Each active input queue has a separate capacity:
 current and next scenes can both retain batches simultaneously.
-These are live CPU inputs and lie outside `--ram-cache-gb`.
+These are live CPU inputs and lie outside `--ram-cache-mb`.
 Larger prefetch depth raises memory use proportionally to
 `prefetch_batches` and `batch_size`; it does not increase the
 number of look-ahead scenes or the GPU result-queue depth.
@@ -275,3 +275,9 @@ helpers, each process gets one-fifth of the budget; once they
 exit, the parent regains the entire budget. Model-report workers
 use the same eligibility settings and limits as the sequential
 report.
+
+Memory CLI limits use MB (1 MB = 1048576 bytes, equivalent to MiB) and accept
+fractional values, for example `--ram-cache-mb 512.5`. The defaults are 32768 MB
+for the process target and 24576 MB for caches. Replace the former `--ram-budget-gb`
+and `--ram-cache-gb` options by their `-mb` equivalents and multiply old GiB values
+by 1024. The old options are rejected to avoid ambiguous units.

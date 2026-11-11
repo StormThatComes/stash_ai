@@ -6,6 +6,9 @@ renames a leaf (public=internal). Order also defines the printed document.
 from collections.abc import Mapping
 import re
 
+from stash_ai.byte_units import bytes_to_mb
+from .config_units import BYTE_LIMITS, from_mb
+
 _GROUPS = (
     ('face.detector', 'models', 'backend=detector'),
     ('face.detector', 'detection', 'score_threshold nms_threshold max_faces_per_frame'),
@@ -44,7 +47,7 @@ _GROUPS = (
      'min_face_pixels=min_auxiliary_face_pixels min_sharpness=min_auxiliary_sharpness '
      'min_visible_face_fraction=min_auxiliary_visible_face_fraction'),
     ('matching.face.samples.references', 'clustering',
-     'max_samples_per_person max_people_per_lookup max_reference_bytes'),
+     'max_samples_per_person max_people_per_lookup max_reference_mb=max_reference_bytes'),
     ('matching.face.anchors', 'recognition', 'min_identity_support'),
     ('matching.face.anchors.quality', 'clustering',
      'min_face_pixels=min_anchor_face_pixels min_sharpness=min_anchor_sharpness '
@@ -83,32 +86,32 @@ _GROUPS = (
     ('portraits.weights', 'portraits.weights',
      'visibility frontal resolution sharpness exposure neutral_expression open_eyes closed_mouth '
      'open_mouth'),
-    ('portraits.source', 'portraits', 'kind=source ffmpeg time_offsets timeout_seconds max_video_bytes'),
+    ('portraits.source', 'portraits', 'kind=source ffmpeg time_offsets timeout_seconds max_video_mb=max_video_bytes'),
     ('portraits.output', 'portraits', 'jpeg_quality'),
 
     ('execution.models', 'models', 'directory download_missing'),
     ('execution.gpu', 'models', 'device'),
-    ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram cpu_residency_bytes sequential_scene_batch_size rfdetr_precision vitpose_precision vitpose_device_decode'),
+    ('execution.gpu', 'execution', 'model_policy=gpu_model_policy log_vram cpu_residency_mb=cpu_residency_bytes sequential_scene_batch_size rfdetr_precision vitpose_precision vitpose_device_decode'),
     ('execution.scan', 'execution',
-     'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_bytes=scan_queue_bytes '
-     'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_bytes '
-     'sprite_cache_bytes inference_cache_bytes'),
+     'max_cues checkpoint_cues timeout_seconds cpu_workers=scan_cpu_workers queue_mb=scan_queue_bytes '
+     'detector_batch_size recognizer_batch_size prefetch_frames prefetch_scenes prefetch_scene_depth media_cache_mb=media_cache_bytes '
+     'sprite_cache_mb=sprite_cache_bytes inference_cache_mb=inference_cache_bytes'),
     ('execution.rebuild', 'execution',
-     'disk_total_bytes disk_free_bytes sqlite_cache_bytes=rebuild_sqlite_cache_bytes scratch_bytes=rebuild_scratch_bytes scratch_directory=rebuild_scratch_directory '
+     'disk_total_mb=disk_total_bytes disk_free_mb=disk_free_bytes sqlite_cache_mb=rebuild_sqlite_cache_bytes scratch_mb=rebuild_scratch_bytes scratch_directory=rebuild_scratch_directory '
      'parallel_scenes=rebuild_parallel_scenes storage=rebuild_storage workers=rebuild_workers native_threads=rebuild_native_threads '
      'cohort_backend=rebuild_cohort_backend nomination_device=rebuild_nomination_device '
-     'prefetch_scenes=rebuild_prefetch_scenes profile=profile_rebuild memory_bytes=rebuild_memory_bytes '
-     'cache_bytes=rebuild_cache_bytes matrix_cache_bytes=rebuild_matrix_cache_bytes '
-     'queue_bytes=rebuild_queue_bytes checkpoint_mode=rebuild_checkpoint_mode checkpoint_scenes=rebuild_checkpoint_scenes '
-     'checkpoint_bytes=rebuild_checkpoint_bytes replay_snapshot_bytes pixel_index_bytes derived_cache_bytes'),
+     'prefetch_scenes=rebuild_prefetch_scenes profile=profile_rebuild memory_mb=rebuild_memory_bytes '
+     'cache_mb=rebuild_cache_bytes matrix_cache_mb=rebuild_matrix_cache_bytes '
+     'queue_mb=rebuild_queue_bytes checkpoint_mode=rebuild_checkpoint_mode checkpoint_scenes=rebuild_checkpoint_scenes '
+     'checkpoint_mb=rebuild_checkpoint_bytes replay_snapshot_mb=replay_snapshot_bytes pixel_index_mb=pixel_index_bytes derived_cache_mb=derived_cache_bytes'),
     ('execution.rebuild.body', 'sapiensid.execution',
-     'max_candidate_pairs max_witness_comparisons reference_bytes plan_bytes'),
+     'max_candidate_pairs max_witness_comparisons reference_mb=reference_bytes plan_mb=plan_bytes'),
     ('execution.solver', 'execution', 'compare_scene_strategies=solver_compare_scene_strategies'),
     ('execution.portraits', 'execution',
      'cpu_threads=portrait_cpu_threads faceocc_batch_size=portrait_faceocc_batch_size '
-     'ranking_cache_bytes=portrait_ranking_cache_bytes prefetch=prefetch_portraits'),
+     'ranking_cache_mb=portrait_ranking_cache_bytes prefetch=prefetch_portraits'),
 
-    ('storage', 'storage', 'output_directory database max_crop_bytes crop_policy'),
+    ('storage', 'storage', 'output_directory database max_crop_mb=max_crop_bytes crop_policy'),
     ('storage', 'sapiensid.storage', 'retain_person_crops'),
     ('storage.retention', 'storage.retention',
      'auto_prune keep_previous_scans keep_previous_person_contracts prune_obsolete_crops'),
@@ -127,6 +130,8 @@ def _paths():
 
 PUBLIC_PATHS = _paths()
 INTERNAL_PATHS = {value: key for key, value in PUBLIC_PATHS.items()}
+LEGACY_BYTE_PATHS = {key[:-3] + '_bytes': value for key, value in PUBLIC_PATHS.items()
+                     if value.endswith('_bytes')}
 VITPOSE_BATCH = 'pose.estimator.vitpose_plus_large.batch_size'
 
 
@@ -166,6 +171,7 @@ def apply_v2(data, supplied):
     body['pose'].update(detector='rfdetr_xl', backend='vitpose_plus_large')
     shared = dict.fromkeys(POINT_FIELDS, .5)
     shared_paths = {f'pose.point_quality.{field}': field for field in POINT_FIELDS}
+    seen = set()
     for key, value in leaf_items(supplied):
         if key == 'version':
             continue
@@ -173,11 +179,21 @@ def apply_v2(data, supplied):
             _number(value, key, 0, 1)
             shared[shared_paths[key]] = value
             continue
-        if key not in PUBLIC_PATHS:
+        internal = PUBLIC_PATHS.get(key, LEGACY_BYTE_PATHS.get(key))
+        if internal is None:
             if value == {} and (key == 'pose.point_quality' or any(p.startswith(key + '.') for p in PUBLIC_PATHS)):
                 continue
             raise ValueError(f'{key}: unknown v2 setting or expected a mapping.')
-        put(data, PUBLIC_PATHS[key], value)
+        if internal in seen:
+            raise ValueError(f'{key}: do not combine legacy byte and MB settings for the same limit.')
+        seen.add(internal)
+        if key in PUBLIC_PATHS and internal.endswith('_bytes'):
+            value = from_mb(internal, value, name=key)
+        elif key in LEGACY_BYTE_PATHS:
+            low, high = BYTE_LIMITS[internal]
+            _number(value, key + ' (legacy bytes)', low,
+                    float('inf') if high is None else high, integer=True)
+        put(data, internal, value)
     source_body = supplied.get('body', {})
     if 'enabled' not in source_body.get('collection', {}):
         body['collection']['enabled'] = body['enabled']
@@ -212,7 +228,7 @@ def v2_document(data, *, source=b''):
             value = pose.get('vitpose_batch_size', pose['batch_size'])
         else:
             value = get(data, internal)
-        put(result, public, plain(value))
+        put(result, public, public_value(internal, plain(value)))
     # Preserve an explicit override even if it currently equals its inherited
     # value. A later edit to the shared threshold must still respect it.
     original = parse_yaml(source) if source else {}
@@ -239,6 +255,8 @@ def internal_path(path):
     """Resolve a v2 field, including an indexed regional-rule minimum."""
     if path in PUBLIC_PATHS:
         return PUBLIC_PATHS[path]
+    if path in LEGACY_BYTE_PATHS:
+        return LEGACY_BYTE_PATHS[path]
     rules = 'matching.body.anchors.keypoint_rules'
     if path == rules or path.startswith(rules + '.'):
         return 'sapiensid.identities.anchor_keypoint_rules' + path[len(rules):]
@@ -252,10 +270,22 @@ def public_path(path):
     return INTERNAL_PATHS[path]
 
 
+def internal_setting(path, value):
+    """Resolve a public edit and convert MB; internal/legacy byte edits stay bytes."""
+    resolved = internal_path(path)
+    if path in PUBLIC_PATHS and resolved.endswith('_bytes'):
+        value = from_mb(resolved, value, name=path)
+    return resolved, value
+
+
+def public_value(path, value):
+    return bytes_to_mb(value) if path.endswith('_bytes') else value
+
+
 def v2_patch(internal_patch):
     result = {}
     for path, value in leaf_items(internal_patch):
-        put(result, INTERNAL_PATHS[path], value)
+        put(result, INTERNAL_PATHS[path], public_value(path, value))
     return result
 
 

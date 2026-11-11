@@ -21,7 +21,7 @@ import pytest
     ('scoped_reports', ['--scenes', '20', '--selected', '2', '--repeats', '2']),
     ('state_compression', ['--frames', '4', '--labels', '2', '--repeats', '2']),
     ('recognition_parallel', ['--scenes', '20', '--people', '16', '--workers', '1', '2',
-                              '--queue-bytes', '65536', '--repeats', '1']),
+                              '--queue-mb', '0.0625', '--repeats', '1']),
 ])
 def test_offline_entry_point(name, arguments):
     result = subprocess.run([sys.executable, '-m', 'benchmarks.benchmark_' + name, *arguments],

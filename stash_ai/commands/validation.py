@@ -127,11 +127,11 @@ def validate_pipeline(app, parser, args):
         parser.error("--checkpoint-batches must be >= 1.")
     if not 1 <= args.cleanup_page_size <= 10000 or not 1 <= args.cleanup_write_batch_size <= 1000:
         parser.error("--cleanup-page-size must be 1..10000 and --cleanup-write-batch-size must be 1..1000.")
-    if not math.isfinite(args.ram_cache_gb) or args.ram_cache_gb < 0:
-        parser.error("--ram-cache-gb must be a finite number >= 0.")
-    if not math.isfinite(args.ram_budget_gb) or args.ram_budget_gb <= 0:
-        parser.error("--ram-budget-gb must be a finite number > 0.")
-    args.ram_cache_gb = min(args.ram_cache_gb, args.ram_budget_gb * .75)
+    if not math.isfinite(args.ram_cache_mb) or args.ram_cache_mb < 0:
+        parser.error("--ram-cache-mb must be a finite number >= 0.")
+    if not math.isfinite(args.ram_budget_mb) or args.ram_budget_mb <= 0:
+        parser.error("--ram-budget-mb must be a finite number > 0.")
+    args.ram_cache_mb = min(args.ram_cache_mb, args.ram_budget_mb * .75)
     if not math.isfinite(args.rethreshold_spool_limit_mb) or args.rethreshold_spool_limit_mb < 0:
         parser.error('--rethreshold-spool-limit-mb must be finite and >= 0.')
     if args.rethreshold_spool_limit_mb and not (args.rethreshold_scenes or args.rethreshold_markers):

@@ -266,7 +266,7 @@ def test_preloaded_collection_metadata_removes_pair_queries(tmp_path):
 @pytest.mark.parametrize('prefetch', [0, 2, 4, 8])
 def test_multi_batch_prefetch_resume_matches_uninterrupted_results(pipeline, prefetch):
     p = pipeline; p.fail['wd'] = 4
-    args = [*p.args, '--prefetch-batches', str(prefetch), '--ram-cache-gb', '0.01']
+    args = [*p.args, '--prefetch-batches', str(prefetch), '--ram-cache-mb', '10.24']
     with pytest.raises(KeyboardInterrupt): app.main(args)
     p.fail.clear()
     assert app.main(args) == 0
@@ -317,7 +317,7 @@ def test_9000_scene_dry_run_prints_only_a_collection_summary(pipeline, monkeypat
     monkeypatch.setattr(p.stash, 'iter_scenes', lambda ids: (scene(i) for i in range(9000)))
     monkeypatch.setattr(p.stash, 'find_scene', scene)
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
-    args = ['--models', 'wd', '--no-hierarchy', '--state-db', str(p.path), '--merge-only', '--dry-run', '--ram-cache-gb', '.001']
+    args = ['--models', 'wd', '--no-hierarchy', '--state-db', str(p.path), '--merge-only', '--dry-run', '--ram-cache-mb', '1.024']
     assert app.main(args) == 0
     output = capsys.readouterr().out
     assert len(output.splitlines()) <= 15 and 'scenes_synced=9000' in output
@@ -327,7 +327,7 @@ def test_9000_scene_dry_run_prints_only_a_collection_summary(pipeline, monkeypat
 @pytest.mark.parametrize('value', ['-1', 'nan', 'inf'])
 def test_invalid_ram_budget_is_rejected_before_work(pipeline, value):
     with pytest.raises(SystemExit) as exc:
-        app.main([*pipeline.args, '--ram-cache-gb', value])
+        app.main([*pipeline.args, '--ram-cache-mb', value])
     assert exc.value.code == 2 and not pipeline.loaded and not pipeline.stash.writes
 
 

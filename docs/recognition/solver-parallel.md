@@ -30,7 +30,7 @@ shared inputs/cache; face/hybrid kernels; complete body proofs and rivals.
 ## Usage
 
 ```powershell
-python stash_ai.py recognition report-merge --performer-set 900,901 --solve --face-config facial_recognition_solver.yml --solver-cpus 16 --solver-trials 4 --solver-memory-gib 64 --profile-solver --checkpoint solver.json
+python stash_ai.py recognition report-merge --performer-set 900,901 --solve --face-config facial_recognition_solver.yml --solver-cpus 16 --solver-trials 4 --solver-memory-mb 65536 --profile-solver --checkpoint solver.json
 ```
 
 Default execution remains one trial using the existing rebuild settings. Explicit
@@ -96,13 +96,13 @@ configured working maximum only within the total machine budget.
 Both files are standalone templates with the same model and matching settings;
 neither inherits a locally edited configuration. For an existing tuned setup,
 copy your current YAML to `facial_recognition_solver.yml`, then copy only
-`execution.rebuild` and `matching.face.samples.references.max_reference_bytes`
+`execution.rebuild` and `matching.face.samples.references.max_reference_mb`
 from the shipped solver profile. Keep both files in the same directory so
 relative database and model paths keep their meaning. Preserve your model,
 detection, matching and anchor-rule settings when transferring solver results
 back to the run configuration; keep the run resource limits.
 
-The 96 GiB `replay_snapshot_bytes` setting is a per-image disk ceiling. Source
+The 96 GiB `replay_snapshot_mb` setting is a per-image disk ceiling. Source
 snapshots, parallel private replay images, caches and the recognition database
 can coexist, so it does not enforce a combined 300 GB SSD budget. Measure disk
 usage on retained subsets before running all 10,000 scenes concurrently.
@@ -129,7 +129,7 @@ give each trial at most 16 GiB including additional headroom; the solver no
 longer demands two full 30 GiB allocations per trial. Both private RAM databases
 and other registered work share that trial's working limit, with SQLite page
 ceilings updated as reservations change. Source snapshots remain on disk under
-`execution.rebuild.replay_snapshot_bytes`.
+`execution.rebuild.replay_snapshot_mb`.
 
 The baseline uses the same effective memory limit as candidate trials, including
 spawned workers and reused worker caches. Runtime limits are included in checkpoint
@@ -140,7 +140,7 @@ fits it: a larger replay fails with a typed resource error naming the owner, act
 shared limit and reservation totals. Reducing trial count increases available
 memory per trial. Automatic serial execution retains its existing behavior when
 the configured ceiling exceeds detected available RAM. An explicit
-`--solver-memory-gib` replaces automatic admission and must be chosen to fit
+`--solver-memory-mb` replaces automatic admission and must be chosen to fit
 the machine; it does not allocate or enforce an operating-system RAM limit.
 
 Auto and compact display the trial budget, fresh and restored attempts, failures, best result

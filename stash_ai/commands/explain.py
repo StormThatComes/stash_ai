@@ -75,8 +75,8 @@ def explain(app, args, core_policies, scene_policies):
     label = merge_labels.raw_label(args.explain_tag.removeprefix(merge_labels.AI.prefix))
     # Inspection always opens a read-only snapshot, even without --dry-run.
     with consistent_source(args.state_db), StateStore(args.state_db, scope_for(app.STASH_URL), True,
-                    cache_bytes=int(args.ram_cache_gb * 2**30),
-                    memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
+                    cache_bytes=int(args.ram_cache_mb * 2**20),
+                    memory_budget_bytes=int(args.ram_budget_mb * 2**20)) as store:
         reports = []
         for scene_id in dict.fromkeys(args.scene_id):
             diagnostics = Counter()

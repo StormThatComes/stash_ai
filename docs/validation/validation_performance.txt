@@ -5,7 +5,7 @@ python -m pytest -q
 
 Wszystkie moduły Python przechodzą parsowanie AST.
 Wartości wszystkich 8 konfiguracji YAML są zgodne z poprzednią paczką.
-Zmiany stałych konfiguracji: RAM_CACHE_GB=24, RAM_BUDGET_GB=32, PREPARE_WORKERS=4.
+Zmiany stałych konfiguracji: RAM_CACHE_MB=24576, RAM_BUDGET_MB=32768, PREPARE_WORKERS=4.
 Pozostałe stałe, w tym połączenie, progi i ograniczenia wyników: bez zmian.
 Nie wykonywano połączeń z produkcyjnym Stash ani inferencji na rzeczywistym GPU.
 

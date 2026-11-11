@@ -6,8 +6,8 @@ from stash_ai.commands import arguments, validation
 
 
 def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch, tmp_path):
-    monkeypatch.setattr(app, "RAM_CACHE_GB", 12.0)
-    monkeypatch.setattr(app, "RAM_BUDGET_GB", 8.0)
+    monkeypatch.setattr(app, "RAM_CACHE_MB", 12288.0)
+    monkeypatch.setattr(app, "RAM_BUDGET_MB", 8192.0)
     monkeypatch.setattr(app, "DEFAULT_RESUME", False)
     monkeypatch.setattr(app, "PREPARE_WORKERS", 3)
     monkeypatch.setattr(app, "CHECKPOINT_BATCHES", 13)
@@ -17,8 +17,8 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch, tmp_path)
 
     args = arguments.parse_args(app, [])
 
-    assert args.ram_cache_gb == 6.0
-    assert args.ram_budget_gb == 8.0
+    assert args.ram_cache_mb == 6144.0
+    assert args.ram_budget_mb == 8192.0
     assert args.resume is False
     assert args.model_config == app.MODELS_CONFIG_FILE
     assert args.merge_workers == 4

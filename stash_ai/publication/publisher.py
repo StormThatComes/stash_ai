@@ -247,8 +247,8 @@ class MergePublisher:
 
             # Inference/scan caches are not shared with spawned processes.
             self.store.cache.clear()
-            cache_share = int(self.args.ram_cache_gb * 2**30) // (workers + 1)
-            budget_share = max(1, int(self.args.ram_budget_gb * 2**30) // (workers + 1))
+            cache_share = int(self.args.ram_cache_mb * 2**20) // (workers + 1)
+            budget_share = max(1, int(self.args.ram_budget_mb * 2**20) // (workers + 1))
             with self.store.cache.temporary_budget(
                     limit=min(self.store.cache.limit, cache_share), rss_budget=budget_share):
                 from stash_ai.runtime.resources import WorkerTelemetry, ResourceMonitor, observe
@@ -263,8 +263,8 @@ class MergePublisher:
                     [scene_id for scene_id, _ in pending],
                     self.core_policies, self.scene_policies,
                     workers=workers,
-                    cache_bytes=int(self.args.ram_cache_gb * 2**30),
-                    memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
+                    cache_bytes=int(self.args.ram_cache_mb * 2**20),
+                    memory_budget_bytes=int(self.args.ram_budget_mb * 2**20),
                     **({'profile': True} if self.report.profile is not None else {}),
                     **({'telemetry': telemetry} if telemetry is not None else {}),
                 )

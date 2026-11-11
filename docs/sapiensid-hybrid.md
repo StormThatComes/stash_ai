@@ -186,7 +186,7 @@ Batch size is 1–16. CPU preparation builds bounded tensors; one owning thread
 transfers and executes a batch. The scan pipeline can batch prepared person
 inputs across VTT cues while preserving complete-cue checkpoint boundaries.
 Collection does not construct another face detector. Retained PNGs
-exceeding `storage.max_crop_bytes` are omitted with an explicit metadata reason;
+exceeding `storage.max_crop_mb` are omitted with an explicit metadata reason;
 features remain usable. Disabling person-crop retention saves space without
 changing embeddings or face portraits.
 
@@ -196,8 +196,8 @@ an N×N matrix or approximate/top-k pruning. Only nominated pairs receive exact
 original-witness gates. A second bounded pass checks every outsider, without an
 N² Python rival list. Arithmetic remains quadratic in identity count.
 
-`reference_bytes` bounds numerical reference/centroid working storage, including
-conservative copy allowances; it is not a total process-RSS limit. `plan_bytes`
+`reference_mb` bounds numerical reference/centroid working storage, including
+conservative copy allowances; it is not a total process-RSS limit. `plan_mb`
 bounds serialized pair proofs, retained core history and alias evidence per
 transaction; `max_candidate_pairs` bounds graph candidates.
 Python object and SQLite overhead are additional. Exceeding a budget stops the
@@ -357,7 +357,7 @@ needed for reports. Repeated core checks reuse scores within the frozen pass.
 `execution.rebuild.body.max_candidate_pairs` counts nominated identity pairs in the
 hybrid/global planners. `max_witness_comparisons` (default 1,000,000) separately
 limits exact vector comparisons per body scene or global pass, including original
-core and face checks. `reference_bytes` and `plan_bytes` still bound working
+core and face checks. `reference_mb` and `plan_mb` still bound working
 references and retained proofs. Budget exhaustion raises an error before applying
 a global merge plan; no rivals or original witnesses are silently dropped.
 
@@ -365,7 +365,7 @@ During a production rebuild, a byte-bounded derived cache reuses independent
 scene results and numeric evidence across selections. Its entries share the
 recognition database transaction. New or changed competitors still participate
 in the global decision. The total entry budget is the smaller of 64 MiB and
-one eighth of `execution.rebuild.cache_bytes`. Setting that byte budget to zero
+one eighth of `execution.rebuild.cache_mb`. Setting that budget to zero
 disables durable reuse. The face-order, strict-scene, body-scene and hybrid-pair
 cache counters appear in `rebuild_profile.counts` when profiling is enabled.
 `hybrid_unchanged_pair_proofs_recomputed` counts newly computed hybrid proofs
