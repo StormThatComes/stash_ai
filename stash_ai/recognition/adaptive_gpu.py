@@ -54,6 +54,9 @@ class Batches:
                 from .profiling import pipeline_count
                 pipeline_count('cuda_oom_retries')
             else:
+                from .profiling import pipeline_count
+                key=self.kind.lower().replace(' ','_').replace('-','_')
+                pipeline_count(key+'_batch_'+str(len(batch)))
                 histogram = _sizes.get()
                 if histogram is not None:
                     histogram[self.kind, len(batch)] += 1

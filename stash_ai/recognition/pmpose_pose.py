@@ -34,6 +34,7 @@ def load(config, device):
     # A miss in downstream refinement need not reload weights for a cached raw pass.
     pose=Stage('pmpose_raw',lambda:_load_model(config,device),device)
     pose.batch_size=config.data['sapiensid']['pose']['pmpose_batch_size']
+    pose.supports_masked_batches=True
     return _pipeline(pose,config,device)
 
 
@@ -59,7 +60,8 @@ def _load_model(config, device):
     with torch.serialization.safe_globals(allowed):
         load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     model = model.float().to(device).eval()
-    pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'])
+    pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'],
+                  fused_flip=config.data['execution']['pmpose_fused_flip'])
     return pose
 
 
@@ -77,7 +79,9 @@ def _pipeline(pose, config, device):
         from .resident_models import current as model_pool,Stage
         segmenter=(Stage('pmpose_segmenter',lambda:load_segmenter(config,device),device)
                    if model_pool() is not None else load_segmenter(config,device))
-        refined = RefinedPMPose(pose,segmenter,settings)
+        refined = RefinedPMPose(pose,segmenter,settings,
+            frame_batch_size=config.data['execution']['sam_frame_batch_size'],
+            queue_bytes=config.data['execution']['refinement_queue_bytes'])
     deduplication = config.data['sapiensid']['pose'].get('deduplication', {})
     if deduplication.get('enabled', False):
         from .pose_deduplication import DeduplicatedPMPose
@@ -86,10 +90,12 @@ def _pipeline(pose, config, device):
 
 
 class PMPose:
-    def __init__(self, model, *, device, batch_size):
+    supports_masked_batches = True
+    def __init__(self, model, *, device, batch_size, fused_flip=True):
         from .adaptive_gpu import Batches
         self.model, self.device, self.batch_size = model, device, batch_size
         self.batches=Batches(batch_size,'PMPose')
+        self.fused_flip=fused_flip
 
     def resident_modules(self):return [self.model]
 
@@ -130,7 +136,12 @@ class PMPose:
         @pipeline_stage('pmpose_inference')
         def infer(prepared):
             inputs=to_device(torch.from_numpy(np.stack([crop for _,(crop,_,_) in prepared])),self.device)
-            output=self._forward(inputs);flipped=self._forward(inputs.flip(-1))
+            if self.fused_flip:
+                doubled=self._forward(torch.cat((inputs,inputs.flip(-1))))
+                output=[v[:len(inputs)] for v in doubled]
+                flipped=[v[len(inputs):] for v in doubled]
+            else:
+                output=self._forward(inputs);flipped=self._forward(inputs.flip(-1))
             values=[(a+(b[:,registry.FLIP].flip(-1) if i==0 else b[:,registry.FLIP]))*.5
                     for i,(a,b) in enumerate(zip(output,flipped))]
             centers=np.stack([c for _,(_,c,_) in prepared]);scales=np.stack([s for _,(_,_,s) in prepared])
@@ -139,7 +150,8 @@ class PMPose:
                 points=decode_batch(values[0],centers,scales)
             else:
                 points=[decode(h,c,s) for h,c,s in zip(values[0].cpu().numpy(),centers,scales)]
-            scores,presence,visibility=[v.cpu().numpy() for v in values[1:]]
+            with pipeline_timing('pmpose_probability_readback'):
+                scores,presence,visibility=torch.stack(values[1:]).cpu().numpy()
             return list(zip(points,scores,presence,visibility))
 
         # A single future owns at most one additional batch of CPU crops.
@@ -167,8 +179,12 @@ class PMPose:
         output = self.model(inputs)
         shapes = ((len(inputs), 17, 64, 48),) + ((len(inputs), 17),) * 3
         if (not isinstance(output, (tuple, list)) or len(output) != 4 or
-                any(not isinstance(v, torch.Tensor) or tuple(v.shape) != shape or
-                    not torch.isfinite(v).all() or torch.any((v < 0) | (v > 1))
+                any(not isinstance(v, torch.Tensor) or tuple(v.shape) != shape
                     for v, shape in zip(output, shapes))):
-            raise ValueError('PMPose returned malformed/non-finite heatmaps or probabilities.')
+            raise ValueError('PMPose returned malformed heatmaps or probabilities.')
+        # One scalar readback validates every output, including both flip views.
+        with pipeline_timing('pmpose_output_validation'):
+            valid = torch.stack([(torch.isfinite(v) & (v >= 0) & (v <= 1)).all() for v in output]).all()
+            if not bool(valid):
+                raise ValueError('PMPose returned malformed/non-finite heatmaps or probabilities.')
         return output

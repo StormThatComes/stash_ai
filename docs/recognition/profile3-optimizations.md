@@ -40,3 +40,33 @@ and hash work, not ONNX session construction. SAM can now park its weights in CP
 after resetting all image-specific predictor state. Model load, restore, park,
 asset verification and ONNX session creation have separate timers; retained
 memory peak and failed admissions are counters in the pipeline profile.
+
+## Bounded SAM and masked PMPose batches
+
+`execution.gpu.sam_frame_batch_size` (4) shares a SAM encoder forward between
+images; `sam_prompt_batch_size` (8) batches people with equal prompt lengths in
+one image. Prompt tokens are not padded. The adapter uses the private prompt and
+prediction methods from the already hash-pinned SAM source revision, avoiding
+transfer of unused low-resolution logits. Both batching levels halve on CUDA OOM,
+retain ordering and propagate errors if even one item cannot run. Predictor image
+state is reset on every exit, including failed forwards.
+
+`refinement_queue_mb` (128) bounds the estimated retained CPU masks in a window.
+Oversized frames use the existing scalar path; this budget excludes caller-owned
+images, temporary mask-validation arrays and GPU feature tensors. The masked
+second pass batches people across the window, including after deduplication, and
+flushes at window boundaries. Existing mask ownership, drift, limb, overlap and
+audit gates still apply. Calls without the batched adapter retain compatibility.
+
+`pmpose_fused_flip` defaults to true: original and flipped crops share one forward,
+then the same label reversal and averaging. Activation memory can double; adaptive
+OOM handling reduces crop batch size. False restores two forwards. All tensor
+validity checks share one scalar GPU readback; probability outputs share one CPU
+transfer. New batch-size counters cover SAM images/prompts and PMPose, with
+separate SAM readback and PMPose validation/probability-readback timers. Second-pass
+people/batch counts and maximum window bytes expose whether larger windows help.
+
+CPU deterministic-model tests compare scalar/batched geometry and record forward
+counts, queue fallbacks and simulated OOM retries. These are correctness and
+scheduling checks, not a GPU throughput benchmark. Detector, body encoder and
+sequential scene batch defaults are unchanged.
