@@ -175,11 +175,12 @@ def _execute(args, config, *, services, display):
     from .disk_budget import scope as disk_scope
     from .inference_cache import scope as inference_scope
     from .resident_models import scope as model_scope
+    from .retained_memory import scope as retained_scope
     with ExitStack() as resources_stack:
         with pipeline_timing('startup'), phase(report, 'Recognition startup'):
             with activity(report, 'Check recognition disk budget'):
                 disk_budget = resources_stack.enter_context(disk_scope(config))
-            for scope_factory in (inference_scope, model_scope, sprite_scope):
+            for scope_factory in (retained_scope, inference_scope, model_scope, sprite_scope):
                 resources_stack.enter_context(scope_factory(config))
             resources_stack.enter_context(policy_scope())
             with activity(report, 'Open recognition database'):

@@ -113,6 +113,12 @@ class Segmenter:
     def __init__(self, predictor, device):
         self.predictor, self.device = predictor, device
 
+    def resident_modules(self):
+        return [self.predictor.model]
+
+    def prepare_residency(self):
+        self.predictor.reset_predictor()
+
     @contextmanager
     def frame(self, image):
         import numpy as np

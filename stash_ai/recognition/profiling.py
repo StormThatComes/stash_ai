@@ -262,6 +262,14 @@ def pipeline_count(name, amount=1):
                 state.counts[name] = state.counts.get(name, 0) + amount
 
 
+def pipeline_max(name, value):
+    state = _pipeline.get()
+    if state is not None:
+        with state.lock:
+            if not state.closed:
+                state.counts[name] = max(state.counts.get(name, 0), value)
+
+
 def pipeline_snapshot():
     state = _pipeline.get()
     if state is None:

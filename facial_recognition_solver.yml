@@ -470,6 +470,9 @@ execution:
     # Model asset directory, relative to this YAML.
     download_missing: true
     # Allow missing model assets to download during explicit recognition commands.
+    verified_cache_mb: 512
+    # Verified immutable model bytes retained between phase loads, within scan.retained_memory_mb. Range:
+    # 0..8192 MB; fractions allowed. Zero disables.
   gpu:
     # Inference device, model lifetime and memory logging.
     device: cuda
@@ -496,6 +499,9 @@ execution:
     # Use optional compact CUDA DARK decoding for ViTPose; ambiguous heatmaps use the reference processor.
   scan:
     # VTT input, scan workers, queues, caches and checkpoints.
+    retained_memory_mb: 16384
+    # Shared RAM cap for cached sprites, verified model bytes and parked CPU weights. Excludes active models,
+    # in-flight scan work and rebuild RAM; not total RSS. Range: 1..1048576 MB; fractions allowed.
     max_cues: 0
     # Maximum VTT cues scanned per selected scene; 0 scans all cues. Range: 0..10000.
     checkpoint_cues: 32
