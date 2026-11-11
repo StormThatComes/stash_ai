@@ -259,6 +259,12 @@ def parser():
     inspect.add_argument('--observation-id', help='Initially show this retained observation.')
     inspect.add_argument('--face-config', type=Path, help='Recognition YAML selecting the model namespace.')
     inspect.add_argument('--faces-db', type=Path, help='Existing recognition SQLite database.')
+    scene_inspect = commands.add_parser('inspect-scene', allow_abbrev=False,
+        help='Browse scene identities, all their retained observations and unassigned scene evidence in a desktop tree.')
+    scene_inspect.add_argument('--scene-id', type=stash_id, required=True)
+    scene_inspect.add_argument('--scope', help='Stash instance scope, required for ambiguous scene IDs.')
+    scene_inspect.add_argument('--face-config', type=Path, help='Recognition YAML selecting the model namespace.')
+    scene_inspect.add_argument('--faces-db', type=Path, help='Existing recognition SQLite database.')
     merge_report = commands.add_parser('report-merge', allow_abbrev=False,
         help='Compare two Stash performers or internal identities and propose verified YAML changes for frozen-catalogue consolidation (offline, read-only).')
     selector = merge_report.add_mutually_exclusive_group(required=True)
@@ -393,7 +399,7 @@ def _execute(args, config, services):
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
-    if args.command == 'inspect-identity':
+    if args.command in ('inspect-identity', 'inspect-scene'):
         try:
             from .identity_window import execute
         except ImportError as error:

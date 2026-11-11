@@ -292,3 +292,45 @@ lower bound is displayed as a bound; exact scores are shown only if measured.
 Shared face-merge evidence is stored by content address and resolved on read.
 Older decisions are still readable. The next selected rebuild reuses compatible
 scan embeddings and populates the additional evidence.
+
+### Desktop scene inspector
+
+```sh
+python stash_ai.py recognition inspect-scene --scene-id 123
+python stash_ai.py recognition inspect-scene --scene-id 123 --scope SCOPE --face-config facial_recognition.yml --faces-db faces_state.sqlite3
+```
+
+The English-language Windows/Linux window opens a collapsible tree. Each
+identity with accepted face or body membership in the entry scene has a branch
+labelled with its Stash performer ID. Expanding it loads **all retained member
+observations across all scenes**, in pages of 80. IDs without a linked Stash
+performer are explicitly labelled `no Stash performer`. The number in each
+branch title counts its observations in the entry scene only. Blue rows mark
+that scene. The remaining rows provide the performer's wider recognition context.
+
+`Unassigned in this scene` includes every retained face without membership and
+every retained body without accepted membership, including withheld and
+provisional tracks. An accepted auxiliary or attachment is already assigned
+and does not enter this group. Accepted internal identities without a Stash ID
+remain in their labelled identity branches. The unassigned group is local to
+the entry scene, with all retained body collection contracts included. Historical
+contracts are marked in the detail panel.
+
+Select an unassigned observation to inspect its crop, retained rejection,
+matching attempts and available references. The detail panel also compares
+retained measurements with detection/collection and anchor/auxiliary quality
+gates, using the same admission projection as the identity report. Detection
+settings are hash-verified when possible. Otherwise the UI labels them as
+current YAML only. Current quality eligibility does not reconstruct a historical
+matching decision. `Recorded evidence` opens the retained matching proofs.
+
+The scene catalogue uses the current scan head, including a partial scan whose
+status is shown. Older superseded scans do not populate the unassigned group.
+Changing the Scene ID or using `Load / refresh` rebuilds the tree. Ambiguous
+Stash scopes require `--scope`. Lists load metadata only and crops are decoded
+on selection, using read-only SQLite snapshots and background workers.
+
+Only observations retained in SQLite can be shown. Detections discarded before
+storage, pruned observations and absent measurements cannot be recovered by
+this viewer. Missing crops remain visible entries. The inspector performs no
+inference, rerun, automatic threshold adjustment or state changes.

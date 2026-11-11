@@ -13,7 +13,8 @@ from .tune_worker import Worker
 def describe(trace):
     lines = [f"{trace['status'].capitalize()} · {trace['role']} · {trace['evidence_status'].replace('_', ' ')}"]
     if not trace['decisions']:
-        lines.append('Membership is recorded. No accepted decision explaining it was retained.')
+        lines.append('No accepted identity membership is recorded.' if trace['status']=='unassigned' else
+                     'Membership is recorded. No accepted decision explaining it was retained.')
     for decision in trace['decisions']:
         lines.extend(('', decision['summary'], f"Reason: {decision['reason']}"))
         if decision.get('reference_role'):
@@ -28,7 +29,8 @@ def describe(trace):
             lines.append(f"Observed lead: {score - runner:.4f}")
         if not decision['references']:
             lines.append('No source observation IDs retained for this decision.')
-        if not any(k in metrics for k in ('runner','rival','rival_score')):
+        scores = metrics.get('recorded_scores') or ()
+        if not any(k.rsplit('.',1)[-1] in ('runner','rival','rival_score','rival_cluster') for k in metrics) and len(scores)<2:
             lines.append('No competitor result retained.')
         for edge in decision['merges']:
             route = edge.get('route') or 'recorded identity merge'
@@ -39,9 +41,35 @@ def describe(trace):
     return '\n'.join(lines)
 
 
+def describe_diagnostics(result):
+    if 'admission' not in result:
+        return ''
+    from .admission_panel import SOURCES
+    lines = ['', 'Retained rejection: ' + (result['rejection'] or 'none'),
+             'Scan status: ' + result['scan_status'],
+             'Individual quality gates do not establish identity membership.']
+    if result.get('contract_current') is False:
+        lines.append('Historical body collection contract differs from the current YAML.')
+    for decision in result.get('recorded_decisions', []):
+        lines.extend(('', 'Recorded ' + decision['status'] + ': ' + str(decision['recorded'].get('reason', 'unknown')),
+                      'Policy: ' + decision['policy'] + (' (current)' if decision['current'] else ' (other policy)')))
+        if decision.get('person'):
+            lines.append('Recorded candidate identity: ' + decision['person'])
+        lines.append(decision['explanation'])
+    for group in result['admission']['groups']:
+        lines.extend(('', group['stage'] + ' · ' + group['status'].upper(), SOURCES[group['configuration_source']]))
+        for check in group['checks']:
+            value = check['measured'] if check['measured'] is not None else 'unknown'
+            lines.append(f"[{check['status'].upper()}] {check['parameter']}: {value} {check['operator']} {check['threshold']}")
+        if group.get('note'):
+            lines.append(group['note'])
+    return '\n' + '\n'.join(lines)
+
+
 class Inspector:
     def __init__(self, root, reader, title, observation=None):
         self.root, self.reader = root, reader
+        self.detail_reader = reader
         self.worker = Worker('identity-inspector')
         self.offset = 0
         self.refs, self.proofs = [], []
@@ -52,6 +80,37 @@ class Inspector:
         panel.pack(fill='both', expand=True)
         panel.rowconfigure(1, weight=1)
         panel.columnconfigure(1, weight=1)
+        self.build_browser(panel, observation)
+        right = ttk.Frame(panel)
+        right.grid(row=1, column=1, sticky='nsew')
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=3)
+        right.rowconfigure(2, weight=1)
+        self.images = ImagePair(right)
+        self.images.panels['A'].configure(text='Selected observation')
+        self.images.panels['B'].configure(text='Recorded reference')
+        self.images.compare(True)
+        self.images.grid(row=0, column=0, sticky='nsew')
+        refbar = ttk.Frame(right)
+        refbar.grid(row=1, column=0, sticky='ew', pady=6)
+        ttk.Label(refbar, text='Reference').pack(side='left')
+        self.references = ttk.Combobox(refbar, state='readonly')
+        self.references.pack(side='left', fill='x', expand=True, padx=4)
+        self.references.bind('<<ComboboxSelected>>', self.show_reference)
+        self.proof_button = ttk.Button(refbar, text='Recorded evidence', command=self.show_proofs)
+        self.proof_button.pack(side='right')
+        self.notes = tk.Text(right, height=10, width=40, wrap='word', state='disabled')
+        self.notes.grid(row=2, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(right, command=self.notes.yview)
+        scrollbar.grid(row=2, column=1, sticky='ns')
+        self.notes.configure(yscrollcommand=scrollbar.set)
+        self.status = tk.StringVar()
+        ttk.Label(panel, textvariable=self.status).grid(row=2, column=0, columnspan=2, sticky='w')
+        self.rows = {}
+        self.poll_id = root.after(30, self.poll)
+        self.search()
+
+    def build_browser(self, panel, observation):
         bar = ttk.Frame(panel)
         bar.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0,8))
         self.entries = {}
@@ -81,34 +140,6 @@ class Inspector:
         self.next = ttk.Button(buttons, text='Next', command=lambda: self.page(1))
         self.prev.pack(side='left')
         self.next.pack(side='left')
-        right = ttk.Frame(panel)
-        right.grid(row=1, column=1, sticky='nsew')
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(0, weight=3)
-        right.rowconfigure(2, weight=1)
-        self.images = ImagePair(right)
-        self.images.panels['A'].configure(text='Selected observation')
-        self.images.panels['B'].configure(text='Recorded reference')
-        self.images.compare(True)
-        self.images.grid(row=0, column=0, sticky='nsew')
-        refbar = ttk.Frame(right)
-        refbar.grid(row=1, column=0, sticky='ew', pady=6)
-        ttk.Label(refbar, text='Reference').pack(side='left')
-        self.references = ttk.Combobox(refbar, state='readonly')
-        self.references.pack(side='left', fill='x', expand=True, padx=4)
-        self.references.bind('<<ComboboxSelected>>', self.show_reference)
-        self.proof_button = ttk.Button(refbar, text='Merge proof', command=self.show_proofs)
-        self.proof_button.pack(side='right')
-        self.notes = tk.Text(right, height=10, width=40, wrap='word', state='disabled')
-        self.notes.grid(row=2, column=0, sticky='nsew')
-        scrollbar = ttk.Scrollbar(right, command=self.notes.yview)
-        scrollbar.grid(row=2, column=1, sticky='ns')
-        self.notes.configure(yscrollcommand=scrollbar.set)
-        self.status = tk.StringVar()
-        ttk.Label(panel, textvariable=self.status).grid(row=2, column=0, columnspan=2, sticky='w')
-        self.rows = {}
-        self.poll_id = root.after(30, self.poll)
-        self.search()
 
     def text(self, value):
         self.notes.configure(state='normal')
@@ -169,13 +200,14 @@ class Inspector:
             return
         self.clear_detail()
         self.status.set('Loading ' + row['id'])
-        self.worker.request(partial(self.reader.detail, row['kind'], row['id']),
+        self.worker.request(partial(self.detail_reader.detail, row['kind'], row['id']),
                             partial(self.show_detail, row), self.error)
 
     def show_detail(self, row, result):
         self.images.show('A', *result['image'])
         trace = result['trace']
-        self.text(describe(trace))
+        self.text(describe(trace) + describe_diagnostics(result))
+        self.proofs.extend(result.get('recorded_decisions', []))
         for decision in trace['decisions']:
             self.refs.extend(decision['references'])
             self.proofs.extend(decision['merges'])
@@ -196,12 +228,12 @@ class Inspector:
             return
         ref = self.refs[index]
         self.images.show('B', None, 'Loading reference…')
-        self.worker.request(partial(self.reader.reference, ref['kind'], ref['observation']),
+        self.worker.request(partial(self.detail_reader.reference, ref['kind'], ref['observation']),
                             lambda result: self.images.show('B', *result), self.error)
 
     def show_proofs(self):
         window = tk.Toplevel(self.root)
-        window.title('Recorded merge evidence')
+        window.title('Recorded evidence')
         notes = tk.Text(window, wrap='word', width=85, height=30)
         notes.pack(side='left', fill='both', expand=True)
         scroll = ttk.Scrollbar(window, command=notes.yview)
@@ -224,14 +256,23 @@ class Inspector:
 
 
 def execute(args, config):
-    reader = IdentityReader(config, identity_id=args.identity_id, performer_id=args.performer_id, scope=args.scope)
+    scene_mode = args.command == 'inspect-scene'
+    if scene_mode:
+        from .scene_inspection import SceneReader
+        from .scene_window import SceneInspector
+        reader = SceneReader(config, args.scene_id, scope=args.scope)
+    else:
+        reader = IdentityReader(config, identity_id=args.identity_id, performer_id=args.performer_id, scope=args.scope)
     try:
         root = tk.Tk()
     except tk.TclError as error:
         raise RuntimeError('The identity inspector requires a graphical desktop. Try python -m tkinter.') from error
     try:
-        title = 'Performer ' + args.performer_id if args.performer_id else 'Identity ' + args.identity_id
-        window = Inspector(root, reader, title, args.observation_id)
+        if scene_mode:
+            window = SceneInspector(root, reader, 'Scene ' + args.scene_id)
+        else:
+            title = 'Performer ' + args.performer_id if args.performer_id else 'Identity ' + args.identity_id
+            window = Inspector(root, reader, title, args.observation_id)
         root.protocol('WM_DELETE_WINDOW', root.quit)
         try:
             root.mainloop()
