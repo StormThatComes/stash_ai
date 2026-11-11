@@ -1,5 +1,6 @@
 """Transactionally maintained reverse lookups for automatic retention."""
 from .progress import work
+from .profiling import pipeline_stage, pipeline_count
 
 SOURCES={
     'merge':('identity_merges','source','evidence'),
@@ -59,21 +60,34 @@ TRIGGERS=_triggers()
 SCHEMA=DDL+';\n'.join(TRIGGERS.values())+';\n'
 
 
-def refresh(db,writable):
+def uuid_address(column):
+    # Superset of every UUID string emitted by recognition; no semantic fields
+    # are assumed, so nested audit references remain protected.
+    return (f"length({column})=36 AND substr({column},9,1)='-' AND substr({column},14,1)='-' "
+            f"AND substr({column},19,1)='-' AND substr({column},24,1)='-' "
+            f"AND {column} NOT GLOB '*[^0-9a-fA-F-]*'")
+
+
+@pipeline_stage('retention_index_refresh')
+def refresh(db,writable, *, success_only=False):
     from .retention_plan import REFERENCE_BATCH_ROWS
     from .database import encoded
     ready=db.execute('SELECT value FROM metadata WHERE key=?',(MARKER,)).fetchone()
-    if ready and ready[0]!='1':raise ValueError('Invalid retention index version.')
+    if ready and ready[0] not in ('1','2'):raise ValueError('Invalid retention index version.')
     if not writable:
-        return bool(ready and not db.execute('SELECT 1 FROM retention_dirty LIMIT 1').fetchone())
-    if not ready:
-        db.execute('DELETE FROM retention_links')
+        dirty = " WHERE kind='success'" if success_only else ''
+        return bool(ready and (success_only or ready[0]=='2') and not db.execute('SELECT 1 FROM retention_dirty'+dirty+' LIMIT 1').fetchone())
+    rebuild = not ready or ready[0]!='2'
+    if rebuild:
         db.execute('DELETE FROM retention_verified')
-        db.execute('DELETE FROM retention_dirty')
-        for kind,(table,key,_) in SOURCES.items():
-            db.execute(f'INSERT INTO retention_dirty SELECT ?,{key} FROM {table} ORDER BY rowid',(kind,))
-        db.execute("INSERT INTO retention_dirty SELECT 'success',run FROM progress WHERE phase='rebuild'")
-    for kind,(table,key,column) in {**SOURCES,'success':('progress','run','data')}.items():
+        if not success_only:
+            db.execute('DELETE FROM retention_links')
+            db.execute('DELETE FROM retention_dirty')
+            for kind,(table,key,_) in SOURCES.items():
+                db.execute(f'INSERT INTO retention_dirty SELECT ?,{key} FROM {table} ORDER BY rowid',(kind,))
+        db.execute("INSERT OR IGNORE INTO retention_dirty SELECT 'success',run FROM progress WHERE phase='rebuild'")
+    sources = {} if success_only else SOURCES
+    for kind,(table,key,column) in {**sources,'success':('progress','run','data')}.items():
         with work(f'Inspect references: {table}.{column}',unit='record',
                   total=lambda:db.execute('SELECT COUNT(*) FROM retention_dirty WHERE kind=?',(kind,)).fetchone()[0]) as progress:
             while True:
@@ -95,12 +109,17 @@ def refresh(db,writable):
                     db.execute('DELETE FROM retention_links WHERE kind=? AND doc IN '+selected,(kind,ids))
                     db.execute(f'INSERT OR IGNORE INTO retention_links SELECT ?,t.{key},substr(CAST(j.value AS BLOB),1,128) '
                         f'FROM {table} t CROSS JOIN json_tree(t.{column}) j WHERE t.{key} IN '+selected+
-                        " AND j.type='text'",(kind,ids))
+                        " AND j.type='text' AND ("+uuid_address('j.value')+
+                        " OR EXISTS(SELECT 1 FROM observations o WHERE o.id=j.value) "
+                        "OR EXISTS(SELECT 1 FROM body_observations b WHERE b.id=j.value))",(kind,ids))
+                    pipeline_count('retention_index_links_changed', db.execute('SELECT changes()').fetchone()[0])
                 db.execute('DELETE FROM retention_dirty WHERE kind=? AND doc IN '+selected,(kind,ids))
+                pipeline_count('retention_index_documents',len(rows))
                 progress.advance(len(rows),force=True)
+    if success_only:return True
     if db.execute('SELECT 1 FROM retention_dirty LIMIT 1').fetchone():
         raise ValueError('Unknown retention index dependency.')
-    if not ready:db.execute('INSERT INTO metadata VALUES (?,?)',(MARKER,'1'))
+    if rebuild:db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(MARKER,'2'))
     return True
 
 
