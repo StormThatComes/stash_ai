@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 import time
+from threading import Lock, get_ident
 
 _active = ContextVar('recognition_rebuild_profile', default=None)
 _tables = ('candidates', 'observations', 'members', 'people', 'scans',
@@ -203,51 +204,102 @@ def profile(database, enabled):
 _pipeline = ContextVar('recognition_pipeline_profile', default=None)
 
 
+class _Pipeline:
+    def __init__(self):
+        self.started = time.perf_counter()
+        self.owner = get_ident()
+        self.lock = Lock()
+        self.closed = False
+        self.stages, self.worker_stages, self.counts = {}, {}, {}
+
+    def record(self, name, seconds, failed):
+        with self.lock:
+            if self.closed:
+                return
+            stages = self.stages if get_ident() == self.owner else self.worker_stages
+            row = stages.setdefault(name, dict(calls=0, errors=0, seconds=0.))
+            row['calls'] += 1
+            row['errors'] += int(failed)
+            row['seconds'] += seconds
+
+
 @contextmanager
 def pipeline_scope(enabled):
     if not enabled:
         yield
         return
-    metrics = dict(format=1, stages={}, scope='coordinator elapsed time; nested stages overlap')
-    token = _pipeline.set((metrics, time.perf_counter()))
+    state = _Pipeline()
+    token = _pipeline.set(state)
     try:
         yield
     finally:
+        with state.lock:
+            state.closed = True
         _pipeline.reset(token)
 
 
-def pipeline_count(name,amount=1):
-    active=_pipeline.get()
-    if active is not None:
-        counts=active[0].setdefault('counts',{})
-        counts[name]=counts.get(name,0)+amount
+def pipeline_bind(function):
+    """Capture only telemetry for an owned thread task, never DB/model contexts."""
+    state = _pipeline.get()
+    if state is None:
+        return function
+
+    @wraps(function)
+    def call(*args, **kwargs):
+        token = _pipeline.set(state)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _pipeline.reset(token)
+    return call
+
+
+def pipeline_count(name, amount=1):
+    state = _pipeline.get()
+    if state is not None:
+        with state.lock:
+            if not state.closed:
+                state.counts[name] = state.counts.get(name, 0) + amount
 
 
 def pipeline_snapshot():
-    active = _pipeline.get()
-    if active is None:
+    state = _pipeline.get()
+    if state is None:
         return None
-    metrics, start = active
-    return dict(metrics, elapsed_seconds=time.perf_counter()-start,
-                stages={key: dict(value) for key, value in metrics['stages'].items()})
+    with state.lock:
+        return dict(format=2, elapsed_seconds=time.perf_counter()-state.started,
+            scope='host elapsed time; nested stages overlap; no forced CUDA synchronization',
+            stages={key: dict(value) for key, value in state.stages.items()},
+            worker_stages={key: dict(value) for key, value in state.worker_stages.items()},
+            worker_scope='summed background task elapsed time; overlaps coordinator and other workers',
+            counts=dict(state.counts))
+
+
+@contextmanager
+def pipeline_timing(name):
+    state = _pipeline.get()
+    if state is None:
+        yield
+        return
+    started, failed = time.perf_counter(), False
+    try:
+        yield
+    except (StopIteration, StopAsyncIteration):
+        raise  # Normal iterator exhaustion is not an operational failure.
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        state.record(name, time.perf_counter()-started, failed)
 
 
 def pipeline_stage(name):
     def decorate(function):
         @wraps(function)
         def call(*args, **kwargs):
-            active = _pipeline.get()
-            if active is None:
+            if _pipeline.get() is None:
                 return function(*args, **kwargs)
-            start, failed = time.perf_counter(), True
-            try:
-                result = function(*args, **kwargs)
-                failed = False
-                return result
-            finally:
-                row = active[0]['stages'].setdefault(name, dict(calls=0, errors=0, seconds=0.))
-                row['calls'] += 1
-                row['errors'] += int(failed)
-                row['seconds'] += time.perf_counter()-start
+            with pipeline_timing(name):
+                return function(*args, **kwargs)
         return call
     return decorate

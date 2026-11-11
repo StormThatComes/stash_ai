@@ -1,4 +1,5 @@
 """Bounded same-origin media input; credentials never enter stored manifests."""
+from .profiling import pipeline_stage, pipeline_timing, pipeline_count, pipeline_bind
 from collections import OrderedDict
 from io import BytesIO
 import hashlib
@@ -22,6 +23,7 @@ def safe_url(url):
     return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
 
 
+@pipeline_stage('media_read')
 def bounded_media(client, url, limit, timeout, *, cache=None,verify_only=False):
     from stash_ai.runtime.cleanup import closing
     from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
@@ -40,8 +42,10 @@ def bounded_media(client, url, limit, timeout, *, cache=None,verify_only=False):
                 raise TimeoutError('Recognition media deadline exceeded.')
             headers={'If-None-Match':retained[0]} if retained is not None and current==url else {}
             options=dict(headers=headers) if headers else {}
-            response = call_with_deadline(lambda: client.media.get(current, stream=True, allow_redirects=False,
-                                         timeout=(min(5., remaining), remaining),**options), deadline)
+            pipeline_count('media_http_requests')
+            with pipeline_timing('media_http_headers'):
+                response = call_with_deadline(lambda: client.media.get(current, stream=True, allow_redirects=False,
+                                             timeout=(min(5., remaining), remaining),**options), deadline)
             with closing(response, name='close recognition media response'):
                 if response.status_code in (301, 302, 303, 307, 308):
                     location = response.headers.get('Location')
@@ -50,6 +54,7 @@ def bounded_media(client, url, limit, timeout, *, cache=None,verify_only=False):
                     current = urljoin(current, location)
                     continue
                 if response.status_code==304:
+                    pipeline_count('media_http_not_modified')
                     if retained is None or current!=url:
                         raise ValueError('Recognition media returned an unsolicited cache acknowledgement.')
                     if response.headers.get('ETag',retained[0])!=retained[0]:
@@ -81,14 +86,16 @@ def bounded_media(client, url, limit, timeout, *, cache=None,verify_only=False):
                         chunks.append(chunk)
                     return b''.join(chunks)
                 from .media_cache import VerifiedBytes
-                data=VerifiedBytes(call_with_deadline(body, deadline, cancel=lambda: abort_response(response)))
+                with pipeline_timing('media_http_body'):
+                    data=VerifiedBytes(call_with_deadline(body, deadline, cancel=lambda: abort_response(response)))
+                pipeline_count('media_downloaded_bytes', len(data))
                 if cache is not None and current==url:
                     etag=None if 'no-store' in response.headers.get('Cache-Control','').lower() else response.headers.get('ETag')
                     cache.put(url,etag,data)
                 return data
         raise ValueError('Too many recognition media redirects.')
 
-    return call_with_deadline(acquire, deadline)
+    return call_with_deadline(pipeline_bind(acquire), deadline)
 
 
 class SpriteInput:
@@ -186,6 +193,7 @@ class SpriteInput:
     def thumbnail(self, index):
         return self._cue_image(index, maximum=self.portrait_sheet_bytes)
 
+    @pipeline_stage('frame_materialize')
     def _cue_image(self, index, *, maximum=None):
         cue = self.cues[index]
         if not isinstance(self.cache.get(cue.image), bytes):

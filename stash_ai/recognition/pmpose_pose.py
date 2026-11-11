@@ -1,4 +1,5 @@
 """Optional bbox-only PMPose-B adapter with separate OKS/presence/visibility."""
+from .profiling import pipeline_stage, pipeline_timing, pipeline_bind
 from . import pmpose_registry as registry
 
 
@@ -122,9 +123,11 @@ class PMPose:
         from .gpu_transfers import to_device
         cuda=str(self.device).split(':')[0]=='cuda'
 
+        @pipeline_stage('pmpose_prepare')
         def prepare_batch(batch):
             return [(job,prepare(frames[job[0]][0],job[2],job[3])) for job in batch]
 
+        @pipeline_stage('pmpose_inference')
         def infer(prepared):
             inputs=to_device(torch.from_numpy(np.stack([crop for _,(crop,_,_) in prepared])),self.device)
             output=self._forward(inputs);flipped=self._forward(inputs.flip(-1))
@@ -145,10 +148,14 @@ class PMPose:
             position=0;pending=None
             while position<len(jobs):
                 batch=jobs[position:position+self.batches.maximum] if pending is None else queued
-                prepared=pending.result() if pending is not None else prepare_batch(batch)
+                if pending is None:
+                    prepared=prepare_batch(batch)
+                else:
+                    with pipeline_timing('pmpose_prepare_wait'):
+                        prepared=pending.result()
                 position+=len(batch)
                 queued=jobs[position:position+self.batches.maximum]
-                pending=pool.submit(prepare_batch,queued) if pool is not None and queued else None
+                pending=pool.submit(pipeline_bind(prepare_batch),queued) if pool is not None and queued else None
                 outputs=self.batches.run(prepared,infer,self.device)
                 for ((frame,index,_,_),_), (points,scores,presence,visibility) in zip(prepared,outputs):
                     result[frame][0][index]=points;result[frame][1][index]=scores

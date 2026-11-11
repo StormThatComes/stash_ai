@@ -1,4 +1,5 @@
 """Phase-owned GPU cleanup and bounded, best-effort memory diagnostics."""
+from .profiling import pipeline_stage
 from contextlib import contextmanager
 import gc
 import os
@@ -191,6 +192,7 @@ class GpuMemory:
         finally:
             self.record(stage, 'after')
 
+    @pipeline_stage('model_release')
     def release(self, stage, callbacks, *, scene=None, stop=()):
         self.record(stage, 'before_release', scene=scene)
         try:

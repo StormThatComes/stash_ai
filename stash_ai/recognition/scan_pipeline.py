@@ -1,4 +1,5 @@
 """Bounded CPU preparation/JPEG work around one caller-owned inference stage."""
+from .profiling import pipeline_bind, pipeline_stage
 from contextlib import contextmanager
 from contextvars import ContextVar
 from collections import deque
@@ -29,6 +30,7 @@ class OwnedFuture(Future):
     def __init__(self,stage):
         super().__init__();self.stage=stage
 
+    @pipeline_stage('pixel_result_wait')
     def result(self,timeout=None):
         try:return super().result(timeout)
         finally:
@@ -66,6 +68,7 @@ class CpuStage:
             if not entry[2]:
                 del self.images[key];self.bytes-=entry[3];entry[1].close()
 
+    @pipeline_stage('pixel_prepare')
     def _call(self, function, image, value, key, cache):
         try:
             from .inference_cache import using
@@ -96,7 +99,7 @@ class CpuStage:
             self.peak_bytes=max(self.peak_bytes,self.bytes)
         try:
             from .inference_cache import current
-            job = self.executor.submit(self._call,function,owned,value,key,current())
+            job = self.executor.submit(pipeline_bind(self._call),function,owned,value,key,current())
         except BaseException:
             self._release_image(key)
             self.retire(future)
@@ -255,6 +258,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
         entry['tensor'] = prepare_embedding(pixels, entry['face'])
         return entry
 
+    @pipeline_stage('face_crop_encode')
     def encode(pixels, entry):
         if entry['reason'] is None:
             details = {}

@@ -1,4 +1,5 @@
 """SapiensID v1 person embeddings anchored to real detected face observations."""
+from .profiling import pipeline_stage, pipeline_timing
 import math
 from threading import get_ident
 
@@ -168,7 +169,8 @@ class SapiensIDFaces(YuNetDetector):
                 if _defer is not None:
                     _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))
                     return faces
-                prediction = self.pose_refiner.predict(image, bounds)
+                with pipeline_timing('pose_estimation'):
+                    prediction = self.pose_refiner.predict(image, bounds)
             else:
                 points = result.keypoints.xy.detach().cpu().numpy()
                 confidences = result.keypoints.conf.detach().cpu().numpy()
@@ -255,6 +257,7 @@ class SapiensIDFaces(YuNetDetector):
         from .cached_pose import detections
         return detections(self,source if isinstance(source,list) else [source],self._predict_pose_raw)
 
+    @pipeline_stage('person_detection')
     def _predict_pose_raw(self, source):
         settings = self.config.data['sapiensid']['pose']
         from .profiling import count
@@ -296,7 +299,8 @@ class SapiensIDFaces(YuNetDetector):
             self.detect(image,faces=faces,_result=detections.get(id(image)),_defer=deferred if batched else None)
             if not batched:prepared[id(image)]=image,faces,self.frame_people
         if batched:
-            predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
+            with pipeline_timing('pose_estimation'):
+                predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
             if len(predictions)!=len(deferred):
                 raise ValueError('Pose refiner returned an invalid frame count.')
             for (image,faces,bounds,scores),prediction in zip(deferred,predictions):
@@ -358,6 +362,7 @@ class SapiensIDFaces(YuNetDetector):
         mask = self._person(image,face).get('pose_refinement', {}).get('encoder_mask')
         return (*value,mask) if mask else value
 
+    @pipeline_stage('body_embedding')
     def embed_inputs(self, prepared):
         self._owner()
         return self.encoder.embed_prepared(prepared)

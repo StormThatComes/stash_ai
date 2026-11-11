@@ -8,6 +8,7 @@ from stash_ai.runtime.cleanup import closing, cleanup
 from stash_ai.runtime.console import present, status, activity, phase, skipped
 from stash_ai.runtime.report import RunReport
 from .config import digest
+from .profiling import pipeline_stage, pipeline_timing, pipeline_snapshot
 from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
 from .backend import LazyBackend
@@ -57,6 +58,7 @@ class Services:
     expression: object = FaceExpression
 
 
+@pipeline_stage('publication')
 def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress,*,guard=None):
     db = database.connection
     from .publication_probe import Probe
@@ -174,7 +176,7 @@ def _execute(args, config, *, services, display):
     from .inference_cache import scope as inference_scope
     from .resident_models import scope as model_scope
     with ExitStack() as resources_stack:
-        with phase(report, 'Recognition startup'):
+        with pipeline_timing('startup'), phase(report, 'Recognition startup'):
             with activity(report, 'Check recognition disk budget'):
                 disk_budget = resources_stack.enter_context(disk_scope(config))
             for scope_factory in (inference_scope, model_scope, sprite_scope):
@@ -191,7 +193,7 @@ def _execute(args, config, *, services, display):
                 report.console.live_fields = resources.fields
             client.report = report
             ui = RunProgress(report, portraits=portraits_only, metadata=bool(services.metadata))
-            with ui.phase('Recognition selection'):
+            with pipeline_timing('selection'), ui.phase('Recognition selection'):
                 ready = {}
                 if portraits_only:
                     ready = retained_targets(database, config, scope, args.scene_id or None,
@@ -237,7 +239,7 @@ def _execute(args, config, *, services, display):
             model_policy = config.data['execution']['gpu_model_policy']
             sequential = model_policy == 'sequential' and config.data['sapiensid']['enabled']
             try:
-                with ui.phase('Recognition assets'):
+                with pipeline_timing('asset_setup'), ui.phase('Recognition assets'):
                     with work('Configure lazy model loading', 1, unit='step', position=0) as assets:
                         paths = LazyAssets(config, services.assets, report)
                         assets.advance()
@@ -555,6 +557,7 @@ def _execute(args, config, *, services, display):
                     from .profiling import pipeline_snapshot
                     timings = pipeline_snapshot()
                     if timings is not None:
+                        timings['cutoff'] = 'before_auto_prune'
                         summary['pipeline_profile'] = timings
                     if getattr(report, 'recognition_rebuild_profile', None) is not None:
                         summary['rebuild_profile'] = report.recognition_rebuild_profile
@@ -595,22 +598,38 @@ def _execute(args, config, *, services, display):
                              ('render recognition error summary', show_errors),
                              ('finish recognition history', finish_history)],
                             report=report, primary=resource_error)
-                if resource_error is not None:
-                    raise resource_error
-                if outcome == 'success' and not portraits_only:
-                    from .db_retention import after_run, format_report
-                    try:
-                        retained = after_run(database, config, run, api_key=key)
-                    except KeyboardInterrupt:
-                        display.retention = 'interrupted'
-                        raise
-                    except Exception as error:
-                        display.retention = 'failed'
-                        report.optional('recognition_retention_error', report.issue, 'recognition',
-                                        'retention', None, error, safe_error(error, key))
-                        retained = None
-                    if retained is None and display.retention == 'skipped':
-                        skipped(report, 'Recognition auto prune', 'disabled or no eligible rebuild')
-                    if retained is not None:
-                        display.retention = 'success'
-                        report.optional('recognition_retention_report', report.write, format_report(retained))
+                try:
+                    if resource_error is not None:
+                        raise resource_error
+                    if outcome == 'success' and not portraits_only:
+                        from .db_retention import after_run, format_report
+                        try:
+                            retained = after_run(database, config, run, api_key=key)
+                        except KeyboardInterrupt:
+                            display.retention = 'interrupted'
+                            raise
+                        except Exception as error:
+                            display.retention = 'failed'
+                            report.optional('recognition_retention_error', report.issue, 'recognition',
+                                            'retention', None, error, safe_error(error, key))
+                            retained = None
+                        if retained is None and display.retention == 'skipped':
+                            skipped(report, 'Recognition auto prune', 'disabled or no eligible rebuild')
+                        if retained is not None:
+                            display.retention = 'success'
+                            report.optional('recognition_retention_report', report.write, format_report(retained))
+                finally:
+                    # Keep the already durable recognition outcome. Retention may
+                    # fail independently; only refresh telemetry after its attempt.
+                    report.optional('recognition_profile_finalize', _finish_pipeline_profile,
+                                    database, run, display.retention)
+
+
+def _finish_pipeline_profile(database, run, retention):
+    timings = pipeline_snapshot()
+    if timings is None:
+        return
+    timings.update(cutoff='after_auto_prune_before_profile_write', retention_outcome=retention)
+    with database.connection:
+        database.connection.execute("UPDATE runs SET summary=json_set(summary,'$.pipeline_profile',json(?)) WHERE id=?",
+                                    (encoded(timings), run))

@@ -1,4 +1,5 @@
 """Resumable supplementary inference; one invocation owns all GPU models."""
+from .profiling import pipeline_stage
 from functools import cached_property
 from io import BytesIO
 import json
@@ -59,6 +60,7 @@ class PersonCollector:
             missing.update(set(range(total))-complete)
         return missing
 
+    @pipeline_stage('body_enrichment')
     def enrich(self, db, scan, source):
         if not self.config.data['sapiensid']['enabled']:
             return 0
@@ -263,6 +265,7 @@ class PersonCollector:
         self.deferred_bytes=0
         return records
 
+    @pipeline_stage('body_sqlite_checkpoint')
     def _flush_resume(self,db):
         if self.resume_rows:
             with db:self.write_records(db,self.resume_rows)
@@ -287,6 +290,7 @@ class PersonCollector:
             with db:
                 self.write_records(db,rows)
 
+    @pipeline_stage('body_sqlite_write')
     def write_records(self,db,rows):
         from .body_observations import save_records
         save_records(db,self.config,rows)

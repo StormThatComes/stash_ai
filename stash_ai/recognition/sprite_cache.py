@@ -1,4 +1,5 @@
 """Thread-safe, content-addressed compressed/decoded sprite LRU for one run."""
+from .profiling import pipeline_timing, pipeline_count
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -22,9 +23,11 @@ class SpriteCache:
     def _get(self, key):
         row = self.entries.pop(key, None)
         if row is None:
+            pipeline_count('sprite_' + ('decoded' if key[0] == 'pixels' else 'compressed') + '_misses')
             self.misses += 1
             return None
         self.entries[key] = row
+        pipeline_count('sprite_' + ('decoded' if key[0] == 'pixels' else 'compressed') + '_hits')
         self.hits += 1
         return row[0]
 
@@ -86,7 +89,8 @@ class SpriteCache:
                     return crop(sheet, cue)
             # Different sprites may decode concurrently. Only one decoder for
             # a digest runs at once; decoded owners are published atomically.
-            with open_image(BytesIO(data)) as raw:
+            pipeline_count('sprite_decodes')
+            with pipeline_timing('sprite_decode'), open_image(BytesIO(data)) as raw:
                 size = raw.width * raw.height * 3
                 if size + 512 > self.limit or maximum is not None and size > maximum:
                     return crop(raw, cue)

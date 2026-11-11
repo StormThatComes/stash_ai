@@ -4,11 +4,12 @@ import math
 
 import numpy as np
 
-from .profiling import pipeline_stage
+from .profiling import pipeline_stage, pipeline_timing
 
 CORE = (0, 1, 2, 3, 4, 5, 6, 11, 12)  # Head/torso, not the suspect wrists/ankles.
 
 
+@pipeline_stage('mask_prompt_core')
 def reliable_core(points, scores, probabilities, box, settings):
     indices = np.asarray(CORE)
     xy = points[indices]
@@ -41,6 +42,7 @@ def inside(mask, points):
     return result
 
 
+@pipeline_stage('mask_validation')
 def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None):
     """Return an admitted mask/box or an explicit, auditable rejection reason."""
     import cv2
@@ -97,7 +99,8 @@ class RefinedPMPose:
 
     def predict_many(self, frames):
         frames = list(frames)
-        predictions = self.pose.predict_many(frames)
+        with pipeline_timing('pmpose_first_pass'):
+            predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
             raise ValueError('PMPose returned an invalid refinement frame count.')
         return [self.refine(image, bounds, prediction)

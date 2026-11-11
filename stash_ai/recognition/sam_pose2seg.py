@@ -1,4 +1,5 @@
 """Lazy, verified SAM-pose2seg loading without the OpenMMLab training stack."""
+from .profiling import pipeline_stage, pipeline_timing
 from contextlib import contextmanager
 import hashlib
 import importlib.abc
@@ -82,6 +83,7 @@ def source_imports(sources):
         sys.meta_path.remove(loader)
 
 
+@pipeline_stage('sam_model_load')
 def load(config, device):
     try:
         import torch
@@ -119,12 +121,13 @@ class Segmenter:
         # across cues, including when prompting or the second pose pass fails.
         with torch.inference_mode(), torch.autocast(device_type=torch.device(self.device).type, enabled=False):
             try:
-                with image.convert('RGB') as rgb:
+                with pipeline_timing('sam_image_embedding'), image.convert('RGB') as rgb:
                     self.predictor.set_image(np.array(rgb, copy=True))
                 yield self
             finally:
                 self.predictor.reset_predictor()
 
+    @pipeline_stage('sam_mask_prediction')
     def predict(self, points, negative=()):
         import numpy as np
         labels = np.ones(len(points), dtype=np.int32)
