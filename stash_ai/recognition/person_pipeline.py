@@ -1,4 +1,5 @@
 """Owned CPU preparation with cross-cue batches and complete-cue publication."""
+from .profiling import pipeline_stage, pipeline_timing
 from collections import deque
 from functools import cached_property
 from concurrent.futures import Future
@@ -21,6 +22,7 @@ class PreparedCollector:
     def person_contract(self):
         return contract(self.config)
 
+    @pipeline_stage('body_prepare_and_encode')
     def prepare(self,image,value,ready=None):
         bounds,points,*mask=value
         from .sapiensid_v1 import prepare_person_input
@@ -32,7 +34,7 @@ class PreparedCollector:
         encoded = None
         omitted = False
         if self.config.data['sapiensid']['storage']['retain_person_crops'] and self.config.data['storage']['crop_policy']=='all':
-            with image.crop(bounds) as crop, BytesIO() as output:
+            with pipeline_timing('body_crop_encode'), image.crop(bounds) as crop, BytesIO() as output:
                 crop.save(output, format='PNG')
                 if output.tell() <= self.config.data['storage']['max_crop_bytes']:
                     encoded = output.getvalue()
@@ -117,7 +119,8 @@ class PreparedCollector:
     def infer(self):
         if not self.jobs:return
         jobs=self.jobs[:self.step]
-        ready=[future.result() for _,_,future in jobs]
+        with pipeline_timing('body_prepare_wait'):
+            ready=[future.result() for _,_,future in jobs]
         vectors=self.model.embed_inputs(ready)
         if len(vectors)!=len(ready):raise ValueError('SapiensID batch returned an invalid feature count.')
         # Validate every vector before marking a cue complete.

@@ -1,4 +1,5 @@
 """Invocation-owned identity models borrowed by scans and video portraits."""
+from .profiling import pipeline_stage, pipeline_timing
 from stash_ai.runtime.cleanup import cleanup
 from contextlib import contextmanager, nullcontext
 
@@ -21,7 +22,8 @@ class LazyBackend:
         if self.closed:
             raise RuntimeError('Recognition backend owner is closed.')
         if self.model is None:
-            model = self.factory(self.config, self.paths)
+            with pipeline_timing('face_model_load'):
+                model = self.factory(self.config, self.paths)
             self.model = model
             try:
                 self.loaded(model)
@@ -76,17 +78,21 @@ class _BorrowedBackend:
             self.owner.invalidate(self.model)
             raise
 
+    @pipeline_stage('face_detection')
     def detect(self, image):
         return self._infer('detect', image)
 
+    @pipeline_stage('face_detection_batch')
     def detect_faces_many(self,images):
         if callable(getattr(self.model,'detect_faces_many',None)):
             return self._infer('detect_faces_many',images)
         return [self.detect(image) for image in images]
 
+    @pipeline_stage('face_embedding')
     def embed(self, image, face):
         return self._infer('embed', image, face)
 
+    @pipeline_stage('face_embedding_batch')
     def embed_prepared_many(self, tensors):
         return self._infer('embed_prepared_many', tensors)
 

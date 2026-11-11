@@ -208,3 +208,64 @@ coordinator RSS, SQLite reads, available process I/O counters, solver trials
 and the physical assignment partition. Compare the incremental result before
 and after revalidating the complete selection against the cold partition.
 A small smoke run can use `--scenes 2 --cues 10 --batch 1 --solver-trials 2`.
+
+## Run pipeline profiling
+
+Set `execution.rebuild.profile: true` in the active v2 YAML and run recognition
+normally. The existing `runs.summary.pipeline_profile` field now uses format 2.
+It records scalar counters and timings only, with no scene URLs, SQL text,
+embeddings, images or per-cue events. The number of fields does not grow with the
+number of scenes. Profiling does not change model settings or force CUDA
+synchronization.
+
+- `stages` contains elapsed time on the coordinator thread.
+- `worker_stages` contains summed elapsed time in explicitly instrumented media,
+  pixel preparation, PMPose preparation and scan-writer tasks. These durations
+  overlap both the coordinator and other workers; they are not CPU utilization.
+- `counts` combines bounded counters from these participants, including HTTP
+  requests/downloaded bytes, sprite cache lookups and actual sprite decodes.
+- Every timer includes `calls`, `errors` and `seconds`. Normal iterator exhaustion
+  is counted as a call but no longer as an error. Actual source failures still
+  propagate and increment the error counter.
+
+Useful stage families:
+
+| Stages | What they include |
+| --- | --- |
+| `scene_input_prepare`, `media_read`, `media_http_headers`, `media_http_body` | Source verification and HTTP work, including scene-prefetch workers |
+| `frame_materialize`, `sprite_decode`, `frame_input_wait`, `frame_queue_put` | Synchronous body-frame reads, sprite decoding, consumer waits and producer backpressure |
+| `face_model_load`, `person_detector_model_acquire`, `pose_model_acquire`, `body_model_acquire`, `sam_model_load`, `model_release` | Lazy initialization/acquisition and phase cleanup; acquisition can include restoring parked CPU weights |
+| `face_detection_batch`, `face_detection`, `face_embedding_batch`, `face_embedding` | Face inference API calls, including their cache/adapter overhead |
+| `body_enrichment`, `person_detection`, `pose_estimation`, `body_embedding` | Sequential pose/backfill work and the detector/pose/identity stages |
+| `pmpose_first_pass`, `pmpose_mask_refinement`, `pmpose_masked_second_pass` | Initial pose estimation and the mask-assisted refinement pipeline |
+| `sam_image_embedding`, `sam_mask_prediction`, `mask_prompt_core`, `mask_validation` | SAM image features, per-person prompting, prompt selection and mask/box checks |
+| `pmpose_prepare`, `pmpose_prepare_wait`, `pmpose_inference` | CPU crops, their consumption and inference/decoding, across both pose passes |
+| `pixel_prepare`, `pixel_result_wait`, `face_crop_encode`, `body_prepare_and_encode`, `body_crop_encode`, `body_prepare_wait` | Pixel-worker work, encoding and waiting for prepared body inputs |
+| `scan_sqlite_write`, `scan_writer_wait`, `body_sqlite_checkpoint`, `body_sqlite_write` | Complete-cue scan transactions and body-evidence persistence; the body-write timer alone excludes the caller's commit |
+| `publication`, `auto_prune`, `retention_plan`, `retention_delete` | Publication and retention after recognition |
+
+Timers are inclusive. For example, `pmpose_masked_second_pass` is inside
+`pmpose_mask_refinement`, and `sam_image_embedding` is also inside refinement.
+Do not add nested stages or worker/coordinator durations to estimate total time.
+GPU-facing timers are host elapsed time, not CUDA kernel time; asynchronous work
+can finish at a later transfer or existing synchronization boundary. Acquisition
+timers may be nested in the first inference call.
+
+The recognition outcome is first saved durably with `cutoff: before_auto_prune`.
+After retention succeeds, fails or is interrupted, the same summary's pipeline
+profile is refreshed with `cutoff: after_auto_prune_before_profile_write` and
+`retention_outcome`. This final snapshot includes retention and model cleanup,
+but excludes the final telemetry write and outer database/cache teardown. The
+existing run status and `finished` timestamp retain their recognition-completion
+meaning. An interrupted process or failed telemetry write can leave the earlier,
+explicitly labelled snapshot; it does not invalidate the recognition outcome.
+
+Export the latest finalized summary after the command exits, for example:
+
+```powershell
+sqlite3 -readonly faces_state.sqlite3 "SELECT summary FROM runs WHERE finished IS NOT NULL ORDER BY started DESC LIMIT 1;" > run-profile.json
+```
+
+Include the active YAML and code revision with the report. Compare fresh and
+reused scene/cue counts before comparing timings. A cache lookup miss is not an
+operational error, and a batch maximum does not describe actual batch occupancy.

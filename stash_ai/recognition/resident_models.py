@@ -1,4 +1,5 @@
 """Run-owned lazy model stages and an optional byte-bounded CPU weight pool."""
+from .profiling import pipeline_timing
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -66,7 +67,12 @@ class Stage:
         self.pool=current();self.model=None;self.failed=False
 
     def invoke(self,name,*args,**kwargs):
-        if self.model is None:self.model=self.pool.take(self.key,self.loader,self.device)
+        if self.model is None:
+            stage = {'person_detector': 'person_detector_model_acquire',
+                     'pose_refiner': 'pose_model_acquire',
+                     'person_encoder': 'body_model_acquire'}.get(self.key, 'other_model_acquire')
+            with pipeline_timing(stage):
+                self.model=self.pool.take(self.key,self.loader,self.device)
         try:
             if name=='predict_many' and not hasattr(self.model,name):
                 return [self.model.predict(*row) for row in args[0]]

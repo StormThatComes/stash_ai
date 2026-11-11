@@ -1,5 +1,5 @@
 """Bounded CPU/media lookahead; inference and SQLite stay on the caller."""
-from .profiling import pipeline_stage
+from .profiling import pipeline_stage, pipeline_bind
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -22,13 +22,14 @@ class FramePrefetch:
 
     def launch(self):
         try:
-            self.channel.worker = Thread(target=self._produce, name='recognition-frames', daemon=True)
+            self.channel.worker = Thread(target=pipeline_bind(self._produce), name='recognition-frames', daemon=True)
             self.channel.worker.start()
             return self
         except BaseException:
             self.close()
             raise
 
+    @pipeline_stage('frame_queue_put')
     def _send_image(self, value):
         while not self.channel.stopped.is_set():
             try:
@@ -123,6 +124,7 @@ class ScenePrefetch:
         self.blocked_seconds = 0.
         self.depth = config.data['execution']['prefetch_scene_depth']
 
+    @pipeline_stage('scene_input_prepare')
     def _prepare(self, identifier, token=None):
         stack = ExitStack()
         try:
@@ -169,7 +171,7 @@ class ScenePrefetch:
             self.executor = ThreadPoolExecutor(max_workers=min(4,self.depth), thread_name_prefix='recognition-scenes')
         token = Cancellation()
         try:
-            submit_owned(self.executor, lambda: self._background(identifier, token),
+            submit_owned(self.executor, pipeline_bind(lambda: self._background(identifier, token)),
                          lambda future: self.queued.__setitem__(identifier, (future, token)))
         except BaseException:
             self.close()

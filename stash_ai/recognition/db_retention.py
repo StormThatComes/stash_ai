@@ -1,4 +1,5 @@
 """Explicit offline pruning and opt-in post-success retention; never VACUUM."""
+from .profiling import pipeline_stage, pipeline_timing
 import json
 import sqlite3
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ def _validate(db):
         raise ValueError('SQLite quick_check failed; retention refused.')
 
 
+@pipeline_stage('retention_delete')
 def _apply(db):
     if not any(db.execute(sql).fetchone() for sql in (
         'SELECT 1 FROM retention_actions LIMIT 1',
@@ -104,7 +106,8 @@ def on_connection(db, config, *, apply=False, scope=None, scenes=None, notify=la
         raise ValueError('Retention requires an explicit transaction.')
     notify('Plan recognition retention', 0, 1)
     try:
-        plan.prepare(db, config, scope=scope, scenes=scenes,writable=apply)
+        with pipeline_timing('retention_plan'):
+            plan.prepare(db, config, scope=scope, scenes=scenes,writable=apply)
         with stage('Summarize reclaimable evidence'):
             result = plan.summarize(db)
         result.update(applied=apply, scope=scope, scenes=scenes,
@@ -160,6 +163,7 @@ def prune_database(config, *, apply=False, scope=None, scenes=None, notify=lambd
         raise
 
 
+@pipeline_stage('auto_prune')
 def after_run(database, config, run, *, api_key=''):
     from .diagnostics import message
     """Only a successfully finalized run may prune its own selected scenes."""

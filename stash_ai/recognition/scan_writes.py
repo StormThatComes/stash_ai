@@ -1,10 +1,12 @@
 """One outstanding complete-cue transaction per scan; only the owner reports progress."""
+from .profiling import pipeline_bind, pipeline_stage, pipeline_timing
 from concurrent.futures import ThreadPoolExecutor
 import sqlite3
 
 from .database import encoded
 
 
+@pipeline_stage('scan_sqlite_write')
 def write(db, batch, collector):
     from .pixel_storage import compact
     from .cold_payloads import available, put
@@ -60,7 +62,8 @@ class Writer:
             try:
                 from stash_ai.runtime.console import activity, current_report
                 with activity(current_report(), 'save VTT checkpoint', wait='SQLite write'):
-                    cursor = future.result()
+                    with pipeline_timing('scan_writer_wait'):
+                        cursor = future.result()
             except BaseException:
                 self.failed = True
                 raise
@@ -71,7 +74,7 @@ class Writer:
         if self.executor is None:
             self.progress(write(self.db, batch, self.collector))
         else:
-            self.future = self.executor.submit(self.write_batch, batch)
+            self.future = self.executor.submit(pipeline_bind(self.write_batch), batch)
 
     def close(self):
         try:
