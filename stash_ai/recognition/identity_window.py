@@ -67,8 +67,9 @@ def describe_diagnostics(result):
 
 
 class Inspector:
-    def __init__(self, root, reader, title, observation=None):
+    def __init__(self, root, reader, title, observation=None, *, previews=None):
         self.root, self.reader = root, reader
+        self.previews, self.preview_scope = previews, None
         self.detail_reader = reader
         self.worker = Worker('identity-inspector')
         self.offset = 0
@@ -149,6 +150,7 @@ class Inspector:
 
     def clear_detail(self):
         self.refs, self.proofs = [], []
+        self.preview_scope = None
         self.images.show('A', None, '')
         self.images.show('B', None, '')
         self.references.set('')
@@ -200,10 +202,17 @@ class Inspector:
             return
         self.clear_detail()
         self.status.set('Loading ' + row['id'])
-        self.worker.request(partial(self.detail_reader.detail, row['kind'], row['id']),
+        self.worker.request(partial(self.load_detail, self.detail_reader, row['kind'], row['id']),
                             partial(self.show_detail, row), self.error)
 
+    def load_detail(self, reader, kind, address):
+        result = reader.detail(kind, address)
+        if self.previews is not None:
+            result['image'] = self.previews.image(kind, address, result['scope'], result['image'])
+        return result
+
     def show_detail(self, row, result):
+        self.preview_scope = result['scope']
         self.images.show('A', *result['image'])
         trace = result['trace']
         self.text(describe(trace) + describe_diagnostics(result))
@@ -228,8 +237,12 @@ class Inspector:
             return
         ref = self.refs[index]
         self.images.show('B', None, 'Loading reference…')
-        self.worker.request(partial(self.detail_reader.reference, ref['kind'], ref['observation']),
+        self.worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope),
                             lambda result: self.images.show('B', *result), self.error)
+
+    def load_reference(self, reader, kind, address, scope):
+        result = reader.reference(kind, address)
+        return self.previews.image(kind, address, scope, result) if self.previews is not None else result
 
     def show_proofs(self):
         window = tk.Toplevel(self.root)
@@ -251,7 +264,7 @@ class Inspector:
 
     def close(self):
         self.root.after_cancel(self.poll_id)
-        self.worker.close(lambda: None)
+        self.worker.close(self.previews.close if self.previews is not None else lambda: None)
         self.panel.destroy()
 
 
@@ -269,7 +282,9 @@ def execute(args, config):
         raise RuntimeError('The identity inspector requires a graphical desktop. Try python -m tkinter.') from error
     try:
         if scene_mode:
-            window = SceneInspector(root, reader, 'Scene ' + args.scene_id)
+            from .inspection_crops import VttPreviews
+            window = SceneInspector(root, reader, 'Scene ' + args.scene_id,
+                                    previews=None if args.offline else VttPreviews(config))
         else:
             title = 'Performer ' + args.performer_id if args.performer_id else 'Identity ' + args.identity_id
             window = Inspector(root, reader, title, args.observation_id)

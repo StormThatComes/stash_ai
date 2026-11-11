@@ -332,5 +332,32 @@ on selection, using read-only SQLite snapshots and background workers.
 
 Only observations retained in SQLite can be shown. Detections discarded before
 storage, pruned observations and absent measurements cannot be recovered by
-this viewer. Missing crops remain visible entries. The inspector performs no
-inference, rerun, automatic threshold adjustment or state changes.
+this viewer. The inspector performs no inference, rerun, automatic threshold
+adjustment or recognition state changes.
+
+When a selected observation or reference has no readable stored crop,
+`inspect-scene` now reconstructs its preview from Stash VTT. This includes
+unassigned faces and bodies rejected before crop encoding. The existing
+`STASH_URL` and `STASH_API_KEY` select the source instance. Opening the tree,
+expanding groups and paging never contact Stash. Reconstruction starts only
+when an observation or reference image is requested, on the detail worker.
+
+The preview uses recorded geometry and is labelled `Reconstructed from VTT`.
+Stash scope, the VTT/sprite fingerprint and cue must match the retained scan.
+An existing pixel signature is also checked. Rejected detections commonly have
+no crop signature; these previews explicitly say that only the source was
+verified. Changed or unavailable sources, invalid bounds and signature
+mismatches leave an explanatory placeholder while preserving decision details.
+The current source configuration must select the same VTT cues as the original
+scan. One source is reused in memory, with a sprite cache capped at 64 MiB.
+Reconstructed previews are not written to the recognition database or a media
+cache and do not change assignment, rejection or quality evidence.
+
+For fully offline browsing, retain the earlier behavior with:
+
+```sh
+python stash_ai.py recognition inspect-scene --scene-id 123 --offline
+```
+
+`inspect-identity` remains offline. `report-identity --restore-crops` continues
+to require retained pixel signatures for its exported identity evidence.

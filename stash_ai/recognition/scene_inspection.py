@@ -128,7 +128,7 @@ class UnassignedReader:
             return dict(trace=trace, recorded_decisions=decisions, admission=admission, rejection=row['rejected'],
                         associations=associations, image=_image(db, self.scan, kind, address), scene=self.scan['scene'],
                         cue=row['cue'], seconds=row['seconds'], scan_status=self.scan['status'],
-                        contract_current=kind=='face' or row['contract']==contract(self.config))
+                        contract_current=kind=='face' or row['contract']==contract(self.config), scope=self.scan['scope'])
 
     def reference(self, kind, address):
         with closing(_open_readonly(self.config.database)) as db:

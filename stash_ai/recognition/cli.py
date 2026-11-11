@@ -262,6 +262,8 @@ def parser():
     scene_inspect = commands.add_parser('inspect-scene', allow_abbrev=False,
         help='Browse scene identities, all their retained observations and unassigned scene evidence in a desktop tree.')
     scene_inspect.add_argument('--scene-id', type=stash_id, required=True)
+    scene_inspect.add_argument('--offline', action='store_true',
+        help='Use stored crops only. By default, selected missing previews are reconstructed from verified Stash VTT.')
     scene_inspect.add_argument('--scope', help='Stash instance scope, required for ambiguous scene IDs.')
     scene_inspect.add_argument('--face-config', type=Path, help='Recognition YAML selecting the model namespace.')
     scene_inspect.add_argument('--faces-db', type=Path, help='Existing recognition SQLite database.')

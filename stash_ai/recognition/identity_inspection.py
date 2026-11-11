@@ -89,7 +89,7 @@ class IdentityReader:
                                 for r in db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? ORDER BY id',
                                                     (row['scan'], address))]
             return dict(trace=trace, associations=associations, image=_image(db, person, kind, address),
-                        scene=row['scene'], cue=row['cue'], seconds=row['seconds'])
+                        scene=row['scene'], cue=row['cue'], seconds=row['seconds'], scope=person['scope'])
 
     def reference(self, kind, address):
         with closing(_open_readonly(self.config.database)) as db:
