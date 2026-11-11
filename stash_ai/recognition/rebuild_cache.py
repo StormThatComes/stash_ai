@@ -9,6 +9,7 @@ from contextlib import contextmanager, ExitStack
 from stash_ai.runtime.cleanup import cleanup
 from .config import digest
 from .database import encoded
+from .sql_stream import rows as streamed_rows
 from .profiling import count, measured
 from .progress import work
 
@@ -65,7 +66,7 @@ def _assignment_index(db, selected):
             rows=db.execute('SELECT o.id,(SELECT c.rowid FROM candidates c WHERE '+observation_sql('c')+
                 '=o.id ORDER BY c.rowid DESC LIMIT 1) FROM observations o WHERE o.scan IN '
                 '(SELECT value FROM json_each(?)) ORDER BY o.id',(scans,))
-            while batch := list(itertools.islice(rows,256)):
+            while batch := rows.fetchmany(256):
                 db.executemany(f'INSERT INTO {name} VALUES (?,?)',((r[0],r[1]) for r in batch if r[1] is not None))
                 indexed.advance(len(batch))
         yield name
@@ -99,7 +100,7 @@ def _input_context(db,selected,scope,namespace,config=None,*,scene_progress=True
                     'SELECT COUNT(*) FROM observations WHERE scan IN '
                     '(SELECT value FROM json_each(?))',(scans,)).fetchone()[0],
                     unit='observation') as observations:
-                for row in db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
+                for row in streamed_rows(db,'SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
                     "o.rejected,o.dimensions,o.embedding,CASE WHEN json_valid(o.quality) THEN "
                     "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage','$.evidence_crop_sha256','$.evidence_pixel_sha256','$.evidence_thumbnail','$.evidence_aspect','$.evidence_thumbnail_id'"+visibility_fields+") END, "
                     "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.view_shot') END "
@@ -122,7 +123,7 @@ def _input_context(db,selected,scope,namespace,config=None,*,scene_progress=True
                         join=f'LEFT JOIN {assignments_index} a ON a.observation=o.id LEFT JOIN candidates c ON c.rowid=a.candidate '
                     with work('Validate rebuild assignment evidence',observations.total,
                             unit='observation') as assignments:
-                        for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
+                        for row in streamed_rows(db,'SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
                                 "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
                                 + join +
                                 'WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
@@ -162,15 +163,15 @@ def binding_context(db,scope,namespace):
 
 def _binding_context(db,scope,namespace):
     hasher=hashlib.sha256()
-    for row in db.execute('SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id',
+    for row in streamed_rows(db,'SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id',
                           (scope,namespace)):
         _hash_row(hasher,row)
-    for row in db.execute('SELECT m.source,m.target FROM identity_merges m JOIN people p ON p.id=m.source '
+    for row in streamed_rows(db,'SELECT m.source,m.target FROM identity_merges m JOIN people p ON p.id=m.source '
                           'WHERE p.scope=? AND p.namespace=? ORDER BY m.source',(scope,namespace)):
         _hash_row(hasher,row)
     # Origins have no scope column. Any origin repair conservatively invalidates
     # cached label binding, including changes outside the selected subset.
-    for row in db.execute('SELECT * FROM identity_origins ORDER BY sample_key'):
+    for row in streamed_rows(db,'SELECT * FROM identity_origins ORDER BY sample_key'):
         _hash_row(hasher,row)
     return hasher.hexdigest()
 
@@ -234,7 +235,7 @@ def complete(db,selected,policy,context):
             ids=encoded([item['scan'] for item in selected[start:start+256]])
             remaining=dict(db.execute('SELECT scan,COUNT(*) FROM observations WHERE rejected IS NULL '
                 'AND scan IN (SELECT value FROM json_each(?)) GROUP BY scan',(ids,)))
-            rows=db.execute("SELECT c.id,c.person,c.status,c.scan,json_extract(c.payload,'$.observation') AS observation,"
+            rows=streamed_rows(db,"SELECT c.id,c.person,c.status,c.scan,json_extract(c.payload,'$.observation') AS observation,"
                 "json_extract(c.payload,'$.reference_context') AS context,o.scan AS actual_scan,o.rejected,"
                 'o.dimensions,o.embedding,m.person AS member,p.performer,p.scope AS member_scope,'
                 'p.namespace AS member_namespace,s.scope AS scan_scope,s.namespace AS scan_namespace FROM candidates c '
