@@ -24,7 +24,7 @@ class IdentityReader:
         self.face_policy = matching_policy(config)
         self.body_policy = body_policy(config)
 
-    def page(self, *, scene=None, cue=None, observation=None, offset=0):
+    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False):
         """Page metadata only. A pasted observation ID uses the observation primary key."""
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
@@ -32,10 +32,14 @@ class IdentityReader:
             for kind, (observations, members) in TABLES.items():
                 if kind == 'body' and not bodies_available(db):
                     continue
-                sql = (f"SELECT '{kind}' AS kind,o.id,s.scene,o.cue,o.seconds "
+                state = "m.status" if kind == 'body' else "'accepted'"
+                role = "m.role" if kind == 'body' else "'member'"
+                sql = (f"SELECT '{kind}' AS kind,o.id,s.scene,o.cue,o.seconds,{state} AS status,{role} AS role "
                        f'FROM {members} m JOIN {observations} o ON o.id=m.observation '
                        'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=?')
                 args.extend((person['id'], person['scope'], person['namespace']))
+                if accepted_only and kind == 'body':
+                    sql += " AND m.status='accepted'"
                 for column, value in (('s.scene', scene), ('o.cue', cue), ('o.id', observation)):
                     if value is not None:
                         sql += f' AND {column}=?'
