@@ -231,7 +231,7 @@ streams finish or close. With `prefetch_batches: 0`, queues show `off`; without
 a next scene, they show `next=off`.
 
 `Cache` is estimated retained memory in the shared RAM cache relative
-to its effective configured limit, after applying `ram_budget_gb`.
+to its effective configured limit, after applying `ram_budget_mb`.
 It covers shared media, input, result and index caches, **not**
 the process's total RAM consumption or VRAM usage.
 `checkpoint interval` is processed batches since the last successful

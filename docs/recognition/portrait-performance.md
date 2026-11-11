@@ -11,7 +11,7 @@ measurement contracts/bases, target and portrait metadata. Cached ranks do not
 skip live ownership/current-image checks before publication or JPEG digest and
 framing checks. Missing measurements, recognition-crop approximations, quality
 errors and source failures keep the full evaluation/retry path. Corrupt or
-changed descriptors also recompute. The cache is bounded by `execution.portraits.ranking_cache_bytes` (16 MiB by
+changed descriptors also recompute. The cache is bounded by `execution.portraits.ranking_cache_mb` (16 MiB by
 default; zero disables it), rather than a fixed descriptor count. Oversized
 results are not cached or truncated. Ranking still scores every eligible VTT
 observation in RAM.
@@ -29,7 +29,7 @@ in 256-scene chunks; all-scene discovery preserves the retained-scan contract.
 false keeps the serial path). The metadata phase shares two verified scene
 sources through an isolated read owner, prefetches at most two upcoming
 thumbnails, and retains at most eight decoded thumbnails. Queue allowances
-scale from `execution.rebuild.memory_bytes`, capped at 256 MiB: thumbnail pixels
+scale from `execution.rebuild.memory_mb`, capped at 256 MiB: thumbnail pixels
 use at most one quarter, and detached next-target descriptors use one eighth
 and at most 128 observations. Oversized sources/frames use original serial
 acquisition; no working data spills to disk. Source caches and decoded sheets

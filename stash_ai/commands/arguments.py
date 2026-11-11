@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
+from stash_ai.byte_units import mb_argument
 from stash_ai.commands.validation import validate_args
 from stash_ai.commands.modes import Command
 
@@ -60,10 +61,10 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Buffer N inferred CPU result batches while processing/checkpointing results; "
                              "1..128, overrides YAML result_prefetch_batches (default: 32). "
                              "Used only with --prefetch-batches > 0.")
-    parser.add_argument("--ram-cache-gb", type=float, default=app.RAM_CACHE_GB, metavar="GIB",
-                        help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
-    parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",
-                        help="Process RAM target in GiB (default: 32); reserves 25%% for models and active work. RSS pressure evicts caches.")
+    parser.add_argument("--ram-cache-mb", type=mb_argument, default=app.RAM_CACHE_MB, metavar="MB",
+                        help="Shared result/index/media cache in MB (1 MB = 1048576 bytes; fractions allowed; default: 24576); 0 disables. Capped to 75%% of --ram-budget-mb.")
+    parser.add_argument("--ram-budget-mb", type=mb_argument, default=app.RAM_BUDGET_MB, metavar="MB",
+                        help="Process RAM target in MB (1 MB = 1048576 bytes; fractions allowed; default: 32768); reserves 25%% for models and active work. RSS pressure evicts caches.")
     parser.add_argument("--prepare-workers", type=int, choices=range(1, 17), default=None,
                         help="CPU image preparation workers; overrides YAML prepare_workers (default: 4).")
     parser.add_argument("--merge-workers", type=int, choices=range(1, 17), default=None,
@@ -94,8 +95,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Apply YAML marker thresholds to complete cached frames; requires --merge-only. "
                              "Scene/model pairs with no saved marker evidence are skipped. "
                              "Never runs inference; rejects changed scene thresholds or insufficient retention.")
-    parser.add_argument('--rethreshold-spool-limit-mb', type=float, default=0., metavar='MIB',
-                        help='Abort threshold preflight if its temporary SQLite pager exceeds this MiB limit; 0 is unlimited.')
+    parser.add_argument('--rethreshold-spool-limit-mb', type=mb_argument, default=0., metavar='MB',
+                        help='Abort threshold preflight if its temporary SQLite pager exceeds this MB limit (1 MB = 1048576 bytes; fractions allowed); 0 is unlimited.')
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
                              "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")

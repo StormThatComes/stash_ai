@@ -40,7 +40,7 @@ def publication(tmp_path, monkeypatch):
     args = runtime_args(
         report=report,
         state_db=tmp_path / 'state.db', merge_workers=1, profile_merge=None,
-        force_merge=False, ram_cache_gb=1, ram_budget_gb=3,
+        force_merge=False, ram_cache_mb=1024, ram_budget_mb=3072,
     )
     reasons = {}
     monkeypatch.setattr(
@@ -235,7 +235,7 @@ def test_parent_budget_is_shared_until_workers_close_and_restored(publication, m
     from stash_ai.runtime.cache import RamCache
     p = publication
     p.args.merge_workers = 2
-    p.args.ram_cache_gb, p.args.ram_budget_gb = 3 / 1024, 9 / 1024
+    p.args.ram_cache_mb, p.args.ram_budget_mb = 3, 9
     p.store.cache = RamCache(3 * 2**20, rss_budget=9 * 2**20)
     monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 0)
     closed = []

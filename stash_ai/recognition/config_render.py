@@ -23,6 +23,7 @@ def render_v2(document):
         lines.extend(('# VTT recognition. Settings take effect when a recognition command runs.',
                       '# Face and body similarities are cosine scores. Support counts independent cues.',
                       '# Face/body sizes are source pixels. Face pose deviation is a landmark score.',
+                      '# Memory/disk limits use MB (1 MB = 1048576 bytes = 1 MiB); fractions are allowed.',
                       ''))
 
     def write(mapping, prefix='', indent=''):

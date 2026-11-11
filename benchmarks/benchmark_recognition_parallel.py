@@ -79,11 +79,13 @@ def main():
     parser.add_argument('--repeats', type=int, default=1)
     parser.add_argument('--workers', type=int, nargs='+', default=[1, 8, 16, 20])
     parser.add_argument('--native-threads', type=int, default=1)
-    parser.add_argument('--queue-bytes', type=int, default=67108864)
+    from stash_ai.byte_units import mb_argument, mb_to_bytes
+    parser.add_argument('--queue-mb', type=mb_argument, default=64, metavar='MB',
+                        help='Queue budget in MB (1 MB = 1048576 bytes; fractions allowed).')
     args = parser.parse_args()
     try:
         result = run(args.scenes, args.people, args.dimensions, args.repeats,
-                     args.workers, args.native_threads, args.queue_bytes)
+                     args.workers, args.native_threads, mb_to_bytes(args.queue_mb, minimum=1 / 1024**2))
     except ValueError as error:
         parser.error(str(error))
     print(json.dumps(result, indent=2))

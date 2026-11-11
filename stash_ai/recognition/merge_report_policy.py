@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from .config import plain, validate
-from .config_layout import internal_path, public_path, v2_patch
+from .config_layout import internal_setting, public_path, v2_patch
 from .global_views import cohort_evidence, consolidation_plan
 from .pose_policy import restricted
 
@@ -45,7 +45,7 @@ def assign(data, path, value):
 def patched(config, changes):
     data = plain(config.data)
     for path, value in changes.items():
-        path = internal_path(path)
+        path, value = internal_setting(path, value)
         parameter(data, path)  # Refuse unknown paths before assigning.
         assign(data, path, value)
     validate(data)
@@ -56,7 +56,7 @@ def proposal(config, changes):
     import yaml
     from .pose_anchor_rules import PARAMETER as regional
     patch, details = {}, []
-    changes = {internal_path(path):value for path,value in changes.items()}
+    changes = dict(internal_setting(path, value) for path, value in changes.items())
     for path, value in sorted(changes.items()):
         current = plain(parameter(config.data, path))
         pin = pins_inherited_value(config.data,path,value,changes)

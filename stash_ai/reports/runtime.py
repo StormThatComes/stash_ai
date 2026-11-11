@@ -59,8 +59,8 @@ def report_policies(runtime, args):
 
 
 def report_memory(args):
-    return dict(cache_bytes=int(args.ram_cache_gb * 2**30),
-                memory_budget_bytes=int(args.ram_budget_gb * 2**30))
+    return dict(cache_bytes=int(args.ram_cache_mb * 2**20),
+                memory_budget_bytes=int(args.ram_budget_mb * 2**20))
 
 
 @contextmanager

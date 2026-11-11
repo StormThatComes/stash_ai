@@ -26,7 +26,7 @@ def probe(root):
     checkpoint = root/'checkpoint.json'
     argv = arguments(cfg,goals,checkpoint,maximum=6)
     argv[argv.index('--yaml-output')] = '--checkpoint'
-    argv += ['--solver-cpus','4','--solver-trials','4','--solver-memory-gib','64']
+    argv += ['--solver-cpus','4','--solver-trials','4','--solver-memory-mb','65536']
     # Admission in this probe is synthetic, including on two-core CI runners.
     with pytest.MonkeyPatch.context() as patch, redirect_stdout(io.StringIO()):
         patch.setattr(os, 'process_cpu_count', lambda:4, raising=False)

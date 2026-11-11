@@ -54,7 +54,7 @@ extends outside the real source, that observation is rejected as
 This local geometry rejection does not turn a broken or unavailable model into a
 successful scan.
 
-Fresh retained face JPEGs also obey `storage.max_crop_bytes` (minimum 1024 bytes).
+Fresh retained face JPEGs also obey `storage.max_crop_mb` (minimum 0.0009765625 MB).
 Encoding starts at quality 90, then reduces JPEG quality and, if needed, dimensions
 without upscaling. `crop_bounds` retains source coordinates; `crop_encoding`
 records the actual JPEG quality, pixel size and downscaling. This applies even
@@ -246,7 +246,7 @@ both support minimums; remove it before specifying either split key.
 | `matching.face.same_scene.min_support` | Strong independent cue times in that scene before the bonus applies (default 3; range 1..1000). |
 | `matching.face.samples.references.max_samples_per_person` | Bounds each group's retained representatives and the final survivor's lookup sample. |
 | `matching.face.samples.references.max_people_per_lookup` | Caps active compatible identities, including provisional groups; aliases are excluded. |
-| `matching.face.samples.references.max_reference_bytes` | Caps the bounded reference vectors; exceeding it rolls back that scene's matching and local merges. |
+| `matching.face.samples.references.max_reference_mb` | Caps the bounded reference vectors; exceeding it rolls back that scene's matching and local merges. |
 
 ### Pose-aware anchor and auxiliary matching
 
@@ -370,7 +370,7 @@ observations and pairwise exemplar agreement at
 landmarks divides left/right/other orientations before similarity grouping;
 it is not a head-angle estimate, and embedding similarity still determines
 the appearance subcluster. Up to `max_view_prototypes_per_person` strongest
-views are kept, within `max_reference_bytes`.
+views are kept, within `max_reference_mb`.
 
 In a second frozen pass, previously unmatched auxiliary faces may match these
 confirmed views. Match strength must reach at least the higher of `view_match_threshold` and
@@ -394,13 +394,13 @@ increases false-positive exposure and is not a calibrated probability.
 
 ### Reference budget
 
-`matching.face.samples.references.max_reference_bytes` caps the sum of the float32 embedding array
+`matching.face.samples.references.max_reference_mb` caps the sum of the float32 embedding array
 bytes used as references in a lookup, including provisional new groups while
 matching the selected scene. Compatible retained people from the same Stash
 instance and model namespace participate even when their scenes are not selected.
 Each person contributes at most `max_samples_per_person` vectors (default 32).
-The default limit is 134217728 bytes (128 MiB); the supported range is 1 MiB
-through 64 GiB (68719476736 bytes). Exceeding it fails that scene's matching
+The default limit is 128 MB; the supported range is 1..65536 MB.
+Fractional limits are accepted; 1 MB = 1048576 bytes (MiB). Exceeding it fails that scene's matching
 instead of silently dropping people or samples. The error includes required bytes, configured limit
 and the numbers of people/groups and samples reached at the failure.
 
@@ -427,7 +427,7 @@ matching:
   face:
     samples:
       references:
-        max_reference_bytes: 8589934592  # 8 GiB; allocated only as references are loaded.
+        max_reference_mb: 8192  # 8 GiB; allocated only as references are loaded.
 ```
 
 Existing YAML values remain unchanged after upgrading. Increasing this limit
@@ -711,7 +711,7 @@ appearances are examined first, with the remaining confirmed appearances availab
 to matching and competition. It is not a semantic cutoff that can create a new
 identity merely because its matching appearance ranked fifth. The former first-32
 discovery cutoff is also removed in this complete mode. Candidate and retained
-evidence are checked against `max_reference_bytes`; exceeding the budget fails
+evidence are checked against `max_reference_mb`; exceeding the budget fails
 explicitly instead of silently dropping a rare view. Matching policy v21 records
 these changes; the scan and model caches remain reusable.
 
@@ -864,7 +864,7 @@ raw-anchor, ownership, opposite-side and co-presence vetoes.
 Incomplete identity components can recover complete subgroups larger than two.
 Every pair needs original frozen evidence, every outsider remains a competitor,
 and overlapping incompatible proposals veto each other. Subgroup search is
-bounded to 128 nodes and a quarter of `max_reference_bytes`; on exhaustion the
+bounded to 128 nodes and a quarter of `max_reference_mb`; on exhaustion the
 previous conservative pair/component route remains. Provisional cross-scene
 confirmation uses the same bounded proposal logic.
 

@@ -153,7 +153,7 @@ def merge_trial(directory, scene_count, use_chunks):
     path = Path(directory)/'state.db'
     report = RunReport(write=lambda _: None); report.profile = ProfileMetrics()
     args = SimpleNamespace(state_db=path, merge_workers=2, profile_merge=None, force_merge=True,
-                           ram_cache_gb=0, ram_budget_gb=.5)
+                           ram_cache_mb=0, ram_budget_mb=512)
     frames = [dict(start=float(i), end=float(i+1), tags=[['tag', .9]]) for i in range(8)]
     original = parallel.chunk_size
     if not use_chunks: parallel.chunk_size = lambda total, workers: 1

@@ -70,7 +70,12 @@ Changing the actual model or a collection threshold still changes its contract.
 | `clustering.min_auxiliary_face_pixels`, `clustering.min_anchor_face_pixels` | `matching.face.samples.minimum.min_face_pixels`, `matching.face.anchors.quality.min_face_pixels` |
 | `sapiensid.identities.anchor_keypoint_rules` | `matching.body.anchors.keypoint_rules` |
 | `sapiensid.matching.face_floor` | `matching.hybrid.face_floor` |
-| `execution.rebuild_memory_bytes` | `execution.rebuild.memory_bytes` |
+| `execution.rebuild_memory_bytes` | `execution.rebuild.memory_mb` |
+
+Memory limits use MB (1 MB = 1048576 bytes) in v2; divide legacy byte values
+by 1048576 when renaming a key. Fractions are supported. Existing v2 byte keys
+remain readable, and `migrate-config` converts them to MB. See
+[units and migration](recognition/performance.md#memory-and-disk-units).
 
 Detection sweeps and tuning grids accept either spelling. Solver winners and
 YAML diffs use the layout of their input. A diff is applied to that input.

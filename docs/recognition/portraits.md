@@ -182,7 +182,7 @@ The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary
 `max_view_prototypes_per_person` priority, including context-validated additions.
 There is no silent 32-cohort discovery cutoff. Scratch exemplars and emitted
-medoids are checked against `matching.face.samples.references.max_reference_bytes`; insufficient memory
+medoids are checked against `matching.face.samples.references.max_reference_mb`; insufficient memory
 fails explicitly. Matching policy v30 rebuilds decisions from retained embeddings.
 
 Frozen view-query support can cross prototype boundaries of the same identity
@@ -348,7 +348,7 @@ nose/eye/ear points with clearance to keep the head when possible. Without usabl
 head points, a shorter crop keeps the top of the person. Cropping cannot restore
 a head already outside the retained source. `null` keeps natural framing.
 `jpeg_quality` is preferred: encoding lowers JPEG quality and, if needed, image
-dimensions to fit `storage.max_crop_bytes`, without upscaling. Common ratios use
+dimensions to fit `storage.max_crop_mb`, without upscaling. Common ratios use
 exact integer multiples; arbitrary ratios or very small images are limited by
 whole-pixel rounding. Cached JPEGs with incompatible dimensions are regenerated
 from available source pixels rather than reused.
@@ -513,7 +513,7 @@ tests; hosted CPU jobs do not claim measurements on actual CUDA hardware.
 `portraits.source.kind: video` retains the video-frame mode. Install system FFmpeg
 (or configure `portraits.source.ffmpeg`); absence or unsupported/budget-limited video
 is recorded on the video candidate while links remain eligible. `time_offsets`,
-`max_candidates`, `timeout_seconds`, `max_video_bytes` and `ffmpeg` in the portraits section are
+`max_candidates`, `timeout_seconds`, `max_video_mb` and `ffmpeg` in the portraits section are
 used only by the video source. When no usable identity-verified video portrait is
 found, selection tries accepted VTT observations and then retained recognition
 crops. Metadata records the fallback rather than claiming a video frame/time.

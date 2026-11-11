@@ -16,18 +16,18 @@ and deduplication. These counts are not identity counts or benchmark timings.
 - `execution.rebuild.storage: disk` is the default. Replay tables, reference vectors,
   body witness metadata and scene plans use private disk-backed storage. The
   `memory` mode retains the original RAM replay for small workloads.
-- `execution.rebuild.memory_bytes` limits tracked working allocations. Disk images
-  have a separate `replay_snapshot_bytes` budget. Reference telemetry reports the logical
+- `execution.rebuild.memory_mb` limits tracked working allocations. Disk images
+  have a separate `replay_snapshot_mb` budget. Reference telemetry reports the logical
   vector volume, including paged vectors; it is not a process RSS measurement.
-- `execution.rebuild.pixel_index_bytes` defaults to 4 GiB. This is a disk index
+- `execution.rebuild.pixel_index_mb` defaults to 4 GiB. This is a disk index
   allowance, separate from the face reference RAM budget.
-- `execution.rebuild.derived_cache_bytes` defaults to 4 GiB, divided into centroid
+- `execution.rebuild.derived_cache_mb` defaults to 4 GiB, divided into centroid
   (25%), appearance (50%) and other plan (25%) pools. Appearance vectors use
   checksum-verified binary chunks; selected evidence is loaded only after a miss.
 - Enabling `execution.rebuild.checkpoint_scenes` also enables durable pure body
   scene plans, global body reports and hybrid reports. Source signatures are
   revalidated before reuse. Main assignments still commit atomically. Checkpoint
-  files are optional caches and use `checkpoint_bytes`; they never authorize
+  files are optional caches and use `checkpoint_mb`; they never authorize
   remote publication. The default remains disabled (0).
 
 ## Incremental work and exact decisions

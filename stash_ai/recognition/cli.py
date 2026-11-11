@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 
 from .config import load
+from stash_ai.byte_units import mb_argument
 
 
 def stash_id(value):
@@ -31,10 +32,10 @@ class RecognitionParser(argparse.ArgumentParser):
                 value = getattr(result, field)
                 if value is not None and not 1 <= value <= 16:
                     self.error('--' + field.replace('_', '-') + ' must be in 1..16.')
-            if result.solver_memory_gib is not None and result.solver_memory_gib < 1:
-                self.error('--solver-memory-gib must be positive.')
+            if result.solver_memory_mb is not None and result.solver_memory_mb <= 0:
+                self.error('--solver-memory-mb must be positive.')
             if not result.solve and (result.solver_cpus is not None or result.solver_trials != 1
-                    or result.solver_memory_gib is not None or result.solver_scheduling != 'batch'):
+                    or result.solver_memory_mb is not None or result.solver_scheduling != 'batch'):
                 self.error('Solver execution options require --solve.')
             if result.feasibility_trials < 0:
                 self.error('--feasibility-trials must be nonnegative.')
@@ -312,7 +313,8 @@ def parser():
         help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
     merge_report.add_argument('--solver-cpus', type=int, help='Joint CPU budget, 1..16; enables bounded solver execution.')
     merge_report.add_argument('--solver-trials', type=int, default=1, help='Requested simultaneous trial capacity (default: 1); errors if CPU/RAM admission would reduce it.')
-    merge_report.add_argument('--solver-memory-gib', type=int, help='Total trial memory admission budget in GiB; not a hard RSS limit.')
+    merge_report.add_argument('--solver-memory-mb', type=mb_argument, metavar='MB',
+        help='Total trial memory admission budget in MB (1 MB = 1048576 bytes; fractions allowed); not a hard RSS limit.')
     merge_report.add_argument('--solver-scheduling', choices=('batch', 'async'), default='batch', help='Deterministic batches or completion-driven search; both support checkpoint resume.')
     merge_report.add_argument('--profile-solver', '--profile-report', dest='profile_solver', action='store_true',
         help='Profile report execution and optional solver trials; final output cost is included in the stderr summary.')

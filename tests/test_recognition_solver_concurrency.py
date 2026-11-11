@@ -139,7 +139,7 @@ def test_cli_rejects_reduced_concurrency_before_trials_or_output(tmp_path, style
     checkpoint = tmp_path/'checkpoint.json'
     output = tmp_path/'report.json'
     argv = arguments(config, goals, tmp_path, style) + [
-        '--solver-cpus', '1', '--solver-trials', '4', '--solver-memory-gib', '20',
+        '--solver-cpus', '1', '--solver-trials', '4', '--solver-memory-mb', '20480',
         '--checkpoint', str(checkpoint), '--output', str(output)]
     repo = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, str(repo/'stash_ai.py'), 'recognition', *argv],

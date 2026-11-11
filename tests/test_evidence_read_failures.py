@@ -27,7 +27,7 @@ def test_explain_rejects_commit_after_final_snapshot_read(tmp_path, monkeypatch,
         return result
     monkeypatch.setattr(StateStore, 'snapshot', snapshot)
     monkeypatch.setattr(explain.merge, 'evidence', lambda *args: ([], []))
-    args = SimpleNamespace(state_db=path, ram_cache_gb=0, ram_budget_gb=0,
+    args = SimpleNamespace(state_db=path, ram_cache_mb=0, ram_budget_mb=0,
                            scene_id=['1'], explain_tag='ai:tag')
     with pytest.raises(RuntimeError, match='source state DB changed'):
         explain.explain(app, args, empty_policies(), empty_policies())

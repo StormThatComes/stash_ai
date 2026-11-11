@@ -52,9 +52,9 @@ class MergedRun:
         app, args = self.app, self.args
         with merge_store.StateStore(
                 args.state_db, merge_store.scope_for(app.STASH_URL), app.DRY_RUN,
-                cache_bytes=int(args.ram_cache_gb * 2**30),
+                cache_bytes=int(args.ram_cache_mb * 2**20),
                 allow_cleanup=args.abandon_pending,
-                memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
+                memory_budget_bytes=int(args.ram_budget_mb * 2**20)) as store:
             self.store = store
             store.report = self.report
             store.initialization.configure(app, args, self.settings)
