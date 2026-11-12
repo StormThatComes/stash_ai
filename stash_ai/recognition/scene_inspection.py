@@ -19,6 +19,17 @@ def _accepted(kind):
     return "m.person IS NOT NULL" + (" AND m.status='accepted'" if kind == 'body' else '')
 
 
+def _unassigned_query(kind):
+    """Share membership and displayed-state rules between counts and pages."""
+    observations, members = TABLES[kind]
+    status = "COALESCE(m.status,'unassigned')" if kind == 'body' else "'unassigned'"
+    role = "COALESCE(m.role,'unknown')" if kind == 'body' else "'unknown'"
+    state = f"COALESCE(NULLIF(o.rejected,''),CASE WHEN {status}='accepted' THEN {role} ELSE {status} END)"
+    return (f"SELECT '{kind}' AS kind,o.id,? AS scene,o.cue,o.seconds,"
+            f'{status} AS status,{role} AS role,o.rejected,{state} AS state FROM {observations} o '
+            f'LEFT JOIN {members} m ON m.observation=o.id WHERE o.scan=? AND NOT ({_accepted(kind)})')
+
+
 class SceneReader:
     def __init__(self, config, scene, *, scope=None):
         self.config, self.scene, self.scope = config, str(scene), scope
@@ -34,7 +45,7 @@ class SceneReader:
             if len(scans) != 1:
                 raise ValueError('Scene ID occurs in multiple Stash scopes. Start with --scope.')
             scan = dict(scans[0])
-            groups, unassigned = {}, 0
+            groups, unassigned_groups = {}, []
             for kind, (observations, members) in TABLES.items():
                 if kind == 'body' and not bodies_available(db):
                     continue
@@ -44,11 +55,12 @@ class SceneReader:
                     'GROUP BY p.id,p.performer', (scan['id'], scan['scope'], self.namespace)):
                     group = groups.setdefault(row['id'], dict(identity=row['id'], performer=row['performer'], count=0))
                     group['count'] += row['count']
-                unassigned += db.execute(f'SELECT COUNT(*) FROM {observations} o '
-                    f'LEFT JOIN {members} m ON m.observation=o.id WHERE o.scan=? AND NOT ({_accepted(kind)})',
-                    (scan['id'],)).fetchone()[0]
+                unassigned_groups.extend(dict(kind=kind, state=row['state'], count=row['count'])
+                    for row in db.execute('SELECT state,COUNT(*) AS count FROM (' + _unassigned_query(kind) +
+                                          ') GROUP BY state ORDER BY state', (scan['scene'], scan['id'])))
             # Count only scene-local metadata. All-scene member pages are loaded on expansion.
-            return dict(scan=scan, unassigned=unassigned,
+            return dict(scan=scan, unassigned=sum(g['count'] for g in unassigned_groups),
+                        unassigned_groups=unassigned_groups,
                         groups=sorted(groups.values(), key=lambda g: (not bool(g['performer']), g['performer'] or '', g['identity'])))
 
     def identity_reader(self, identity, scope):
@@ -65,20 +77,27 @@ class UnassignedReader:
         self.config, self.scan = config, scan
         self.face_policy, self.body_policy = matching_policy(config), body_policy(config)
 
-    def page(self, *, offset=0):
+    def page(self, *, offset=0, kind=None, state=None):
+        """Filter metadata by kind and displayed state before applying pagination."""
+        if kind is not None and kind not in TABLES:
+            raise ValueError('Observation kind must be face or body.')
         with closing(_open_readonly(self.config.database)) as db:
             queries, args = [], []
-            for kind, (observations, members) in TABLES.items():
-                if kind == 'body' and not bodies_available(db):
+            for sample_kind in TABLES:
+                if kind is not None and sample_kind != kind:
                     continue
-                status = "COALESCE(m.status,'unassigned')" if kind == 'body' else "'unassigned'"
-                role = "COALESCE(m.role,'unknown')" if kind == 'body' else "'unknown'"
-                queries.append(f"SELECT '{kind}' AS kind,o.id,? AS scene,o.cue,o.seconds,"
-                    f'{status} AS status,{role} AS role,o.rejected FROM {observations} o '
-                    f'LEFT JOIN {members} m ON m.observation=o.id WHERE o.scan=? AND NOT ({_accepted(kind)})')
+                if sample_kind == 'body' and not bodies_available(db):
+                    continue
+                queries.append(_unassigned_query(sample_kind))
                 args.extend((self.scan['scene'], self.scan['id']))
-            rows = [dict(r) for r in db.execute('SELECT * FROM ('+' UNION ALL '.join(queries)+
-                ') ORDER BY cue,kind,id LIMIT ? OFFSET ?', (*args, PAGE_SIZE+1, offset))]
+            if not queries:
+                return [], False
+            sql = 'SELECT * FROM ('+' UNION ALL '.join(queries)+')'
+            if state is not None:
+                sql += ' WHERE state=?'
+                args.append(state)
+            rows = [dict(r) for r in db.execute(sql+' ORDER BY cue,kind,id LIMIT ? OFFSET ?',
+                                               (*args, PAGE_SIZE+1, offset))]
             return rows[:PAGE_SIZE], len(rows)>PAGE_SIZE
 
     def detail(self, kind, address):

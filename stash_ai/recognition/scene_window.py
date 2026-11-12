@@ -75,16 +75,27 @@ class SceneInspector(Inspector):
             for kind in ('face', 'body'):
                 self.add_branch(kind.capitalize(), reader, False,
                                 f"{kind.capitalize()} observations\n{description}", parent=item, kind=kind)
-        self.add_branch(f"Unassigned in this scene · {result['unassigned']}",
-                        UnassignedReader(self.reader.config, self.scan), True,
-                        'No accepted face or body membership. Includes provisional body tracks.\n'
-                        'Only retained observations from this scene scan are available.')
+        reader = UnassignedReader(self.reader.config, self.scan)
+        item = self.listing.insert('', 'end', text=f"Unassigned in this scene · {result['unassigned']}")
+        description = ('No accepted face or body membership. Includes provisional body tracks.\n'
+                       'Only retained observations from this scene scan are available.')
+        self.groups[item] = description
+        for kind in ('face', 'body'):
+            kind_item = self.listing.insert(item, 'end', text=kind.capitalize())
+            self.groups[kind_item] = f'{kind.capitalize()} observations\n{description}'
+            states = [g for g in result['unassigned_groups'] if g['kind']==kind]
+            for group in states:
+                self.add_branch(f"{group['state']} · {group['count']}", reader, True,
+                                f"{kind.capitalize()} observations · State: {group['state']}\n{description}",
+                                parent=kind_item, kind=kind, state=group['state'])
+            if not states:
+                self.listing.insert(kind_item, 'end', text='No observations in this group.')
         self.status.set('Expand a performer to see all scenes, or inspect unassigned observations from this scene.')
 
-    def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None):
+    def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None, state=None):
         item = self.listing.insert(parent, 'end', text=label)
         marker = self.listing.insert(item, 'end', text='Expand to load…')
-        self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, offset=0,
+        self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, state=state, offset=0,
                                    loading=False, loaded=False, marker=marker, description=description)
 
     def expand(self, _event=None):
@@ -107,7 +118,7 @@ class SceneInspector(Inspector):
         self.more_items.pop(marker, None)
         self.listing.delete(marker)
         for row in rows:
-            state = row.get('rejected') or (row['role'] if row['status']=='accepted' else row['status'])
+            state = row.get('state') or (row['role'] if row['status']=='accepted' else row['status'])
             child = self.listing.insert(item, 'end', text=row['id'],
                 values=(row['scene'],row['cue'],row['kind'],state),
                 tags=('entry_scene',) if row['scene']==self.reader.scene else ())
@@ -147,10 +158,11 @@ class SceneInspector(Inspector):
         if self.queue and self.tree_worker.future is None:
             item = self.queue.popleft()
             branch = self.branches[item]
-            args = dict(offset=branch['offset'])
-            if not branch['unassigned']:
+            args = dict(offset=branch['offset'], kind=branch['kind'])
+            if branch['unassigned']:
+                args['state'] = branch['state']
+            else:
                 args['accepted_only'] = True
-                args['kind'] = branch['kind']
             self.tree_worker.request(partial(branch['reader'].page, **args),
                                      partial(self.show_branch, item), partial(self.branch_error, item))
         super().poll()
