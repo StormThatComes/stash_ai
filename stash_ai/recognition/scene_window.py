@@ -12,6 +12,7 @@ class SceneInspector(Inspector):
     def build_browser(self, panel, observation):
         self.tree_worker = Worker('scene-inspector-tree')
         self.queue, self.branches, self.more_items = deque(), {}, {}
+        self.groups = {}
         bar = ttk.Frame(panel)
         bar.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0,8))
         ttk.Label(bar, text='Scene ID').pack(side='left')
@@ -51,6 +52,7 @@ class SceneInspector(Inspector):
         self.tree_worker.invalidate()
         self.queue.clear()
         self.branches.clear()
+        self.groups.clear()
         self.more_items.clear()
         self.rows.clear()
         self.listing.delete(*self.listing.get_children())
@@ -66,19 +68,23 @@ class SceneInspector(Inspector):
         for group in result['groups']:
             label = (f"Performer {group['performer']}" if group['performer'] else
                      f"Identity {group['identity'][:12]} · no Stash performer")
-            self.add_branch(label + f" · {group['count']} in scene",
-                            self.reader.identity_reader(group['identity'], self.scan['scope']), False,
-                            f"Identity {group['identity']}\nAll retained scenes. Expand to load observations.")
+            item = self.listing.insert('', 'end', text=label + f" · {group['count']} in scene")
+            description = f"Identity {group['identity']}\nAll retained scenes. Expand Face or Body to load observations."
+            self.groups[item] = description
+            reader = self.reader.identity_reader(group['identity'], self.scan['scope'])
+            for kind in ('face', 'body'):
+                self.add_branch(kind.capitalize(), reader, False,
+                                f"{kind.capitalize()} observations\n{description}", parent=item, kind=kind)
         self.add_branch(f"Unassigned in this scene · {result['unassigned']}",
                         UnassignedReader(self.reader.config, self.scan), True,
                         'No accepted face or body membership. Includes provisional body tracks.\n'
                         'Only retained observations from this scene scan are available.')
         self.status.set('Expand a performer to see all scenes, or inspect unassigned observations from this scene.')
 
-    def add_branch(self, label, reader, unassigned, description):
-        item = self.listing.insert('', 'end', text=label)
+    def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None):
+        item = self.listing.insert(parent, 'end', text=label)
         marker = self.listing.insert(item, 'end', text='Expand to load…')
-        self.branches[item] = dict(reader=reader, unassigned=unassigned, offset=0,
+        self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, offset=0,
                                    loading=False, loaded=False, marker=marker, description=description)
 
     def expand(self, _event=None):
@@ -128,6 +134,8 @@ class SceneInspector(Inspector):
         self.clear_detail()
         if item in self.more_items:
             self.load_branch(self.more_items[item])
+        elif item in self.groups:
+            self.text(self.groups[item])
         elif item in self.branches:
             self.text(self.branches[item]['description'])
         elif item in self.rows:
@@ -142,6 +150,7 @@ class SceneInspector(Inspector):
             args = dict(offset=branch['offset'])
             if not branch['unassigned']:
                 args['accepted_only'] = True
+                args['kind'] = branch['kind']
             self.tree_worker.request(partial(branch['reader'].page, **args),
                                      partial(self.show_branch, item), partial(self.branch_error, item))
         super().poll()
