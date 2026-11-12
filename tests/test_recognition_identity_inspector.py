@@ -131,6 +131,68 @@ def test_identity_kind_filter_pages_before_limit_without_loading_crops(tmp_path,
     assert config.database.read_bytes() == before
 
 
+def add_grouped_unassigned(config):
+    from stash_ai.recognition.database import FaceDatabase
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        for table, source, addresses in (
+                ('observations', 'rejected-face', ('blurred-1', 'blurred-2')),
+                ('body_observations', 'withheld-body', ('withheld-1', 'withheld-2', 'rejected-withheld'))):
+            template = dict(db.execute(f'SELECT * FROM {table} WHERE id=?', (source,)).fetchone())
+            for cue, address in enumerate(addresses, 1):
+                row = dict(template, id=address, cue=cue)
+                db.execute(f'INSERT INTO {table} VALUES ('+','.join('?' for _ in row)+')', tuple(row.values()))
+                if table == 'body_observations':
+                    member = dict(db.execute('SELECT * FROM body_members WHERE observation=?', (source,)).fetchone())
+                    member['observation'] = address
+                    db.execute('INSERT INTO body_members VALUES ('+','.join('?' for _ in member)+')', tuple(member.values()))
+        db.execute("UPDATE body_observations SET rejected='person_blurred' WHERE id='rejected-withheld'")
+        template = dict(db.execute("SELECT * FROM body_observations WHERE id='rejected-body'").fetchone())
+        row = dict(template, id='unmatched-body', rejected=None)
+        db.execute('INSERT INTO body_observations VALUES ('+','.join('?' for _ in row)+')', tuple(row.values()))
+        db.commit()
+
+
+def test_unassigned_kind_state_counts_and_pages_match_displayed_state(tmp_path, monkeypatch):
+    from stash_ai.recognition import scene_inspection, identity_inspection
+    from stash_ai.recognition.scene_inspection import SceneReader, UnassignedReader
+    config, _ = scene_fixture(tmp_path)
+    add_grouped_unassigned(config)
+    before = config.database.read_bytes()
+    monkeypatch.setattr(scene_inspection, 'PAGE_SIZE', 2)
+    monkeypatch.setattr(identity_inspection, 'cold_crop', lambda *_: pytest.fail('List loaded pixels'))
+    result = SceneReader(config, '2').catalogue()
+    counts = {(g['kind'], g['state']):g['count'] for g in result['unassigned_groups']}
+    assert counts == {('face','blurred'):3, ('face','unassigned'):1,
+                      ('body','person_blurred'):2, ('body','provisional'):1,
+                      ('body','unassigned'):1, ('body','withheld'):3}
+    assert result['unassigned'] == sum(counts.values()) == 11
+    reader = UnassignedReader(config, result['scan'])
+    ids = []
+    for (kind, state), count in counts.items():
+        rows = []
+        for offset in range(0, count, 2):
+            page, more = reader.page(kind=kind, state=state, offset=offset)
+            assert more == (offset+2 < count)
+            rows.extend(page)
+        assert len(rows) == count
+        assert {(r['kind'],r['state']) for r in rows} == {(kind,state)}
+        assert all(r['state'] == (r['rejected'] or (r['role'] if r['status']=='accepted' else r['status'])) for r in rows)
+        ids.extend(r['id'] for r in rows)
+    all_ids = [r['id'] for offset in range(0,11,2) for r in reader.page(offset=offset)[0]]
+    assert len(set(ids)) == len(ids) == 11 and set(ids) == set(all_ids)
+    assert {'accepted-body','internal-face','outside-rejected'}.isdisjoint(ids)
+    assert reader.page(kind='face', state='withheld') == ([], False)
+    assert reader.page(kind='body', state="' OR 1=1 --") == ([], False)
+    assert reader.page(kind='body', state='withheld', offset=3) == ([], False)
+    assert {r['kind'] for r in reader.page(state='unassigned')[0]} == {'face','body'}
+    with pytest.raises(ValueError, match='kind'):
+        reader.page(kind='invalid')
+    monkeypatch.setattr(scene_inspection, 'bodies_available', lambda _: False)
+    assert reader.page(kind='body', state='unassigned') == ([], False)
+    assert config.database.read_bytes() == before
+
+
 def test_scene_tree_partitions_memberships_and_pages_all_identity_scenes(tmp_path, monkeypatch):
     from stash_ai.recognition import scene_inspection, identity_inspection
     from stash_ai.recognition.scene_inspection import SceneReader, UnassignedReader
@@ -192,6 +254,7 @@ def test_scene_uses_current_scan_head_and_requires_unambiguous_scope(tmp_path):
         SceneReader(config, '2').catalogue()
     current = SceneReader(config,'2',scope='scope').catalogue()
     assert current['scan']['status']=='partial' and current['groups']==[] and current['unassigned']==0
+    assert current['unassigned_groups']==[]
     with FaceDatabase(config.database) as state:
         activate(state.connection,original)
         state.connection.commit()
@@ -215,6 +278,10 @@ def test_scene_cli_requires_positive_id_and_unassigned_refresh_detects_assignmen
         state.connection.execute('INSERT INTO members VALUES (?,?)',('unmatched-face',person))
         state.connection.commit()
     assert 'unmatched-face' not in {r['id'] for r in reader.page()[0]}
+    assert reader.page(kind='face', state='unassigned') == ([], False)
+    refreshed = SceneReader(config,'2').catalogue()
+    assert refreshed['unassigned']==4
+    assert ('face','unassigned') not in {(g['kind'],g['state']) for g in refreshed['unassigned_groups']}
     with pytest.raises(ValueError,match='Refresh'):
         reader.detail('face','unmatched-face')
     assert reader.reference('face','outside-scope')[0] is None
@@ -255,6 +322,7 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
     monkeypatch.setattr(identity_inspection,'PAGE_SIZE',2)
     monkeypatch.setattr(scene_inspection,'PAGE_SIZE',2)
     config, person = scene_fixture(tmp_path)
+    add_grouped_unassigned(config)
     ui = SceneInspector(root, scene_inspection.SceneReader(config,'2'), 'Test scene')
 
     def wait_for(condition):
@@ -270,25 +338,39 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         ui.listing.item(item,open=True)
 
     try:
-        wait_for(lambda: len(ui.branches)==5)
+        wait_for(lambda: len(ui.branches)==10)
         owner = {v['kind']:k for k,v in ui.branches.items()
                  if not v['unassigned'] and v['reader'].selector[1]==person}
         face, body = owner['face'], owner['body']
         parent = ui.listing.parent(face)
         assert ui.listing.parent(body)==parent
-        assert len(ui.groups)==2
-        for group in ui.groups:
+        assert len(ui.groups)==5
+        for group in ui.listing.get_children():
             assert [ui.listing.item(child,'text') for child in ui.listing.get_children(group)]==['Face','Body']
         expand(parent)
         ui.listing.selection_set(parent)
         wait_for(lambda: person in ui.notes.get('1.0','end'))
         assert not ui.rows  # Opening the performer itself does not load observations.
         assert not any(b['loading'] or b['loaded'] for b in ui.branches.values())
-        unknown = next(k for k,v in ui.branches.items() if v['unassigned'])
+        unassigned = {(v['kind'],v['state']):k for k,v in ui.branches.items() if v['unassigned']}
+        unknown = unassigned['face','blurred']
+        withheld = unassigned['body','withheld']
+        unknown_kind = ui.listing.parent(unknown)
+        unknown_root = ui.listing.parent(unknown_kind)
+        assert ui.listing.item(unknown_root,'text')=='Unassigned in this scene · 11'
+        assert ui.listing.item(unknown_kind,'text')=='Face'
+        assert ui.listing.item(unknown,'text')=='blurred · 3'
+        assert {ui.listing.item(k,'text') for k in ui.listing.get_children(unknown_kind)}=={'blurred · 3','unassigned · 1'}
+        expand(unknown_root)
+        expand(unknown_kind)
+        ui.listing.selection_set(unknown_kind)
+        wait_for(lambda: 'Face observations' in ui.notes.get('1.0','end'))
+        assert not ui.rows
         expand(face)
         expand(body)
+        expand(withheld)
         expand(unknown)  # Queued expansions must all complete.
-        wait_for(lambda: all(ui.branches[k]['loaded'] for k in (face,body,unknown)))
+        wait_for(lambda: all(ui.branches[k]['loaded'] for k in (face,body,unknown,withheld)))
         assert ui.branches[face]['offset']==2 and ui.branches[body]['offset']==1
         while ui.branches[face]['offset']<6:
             marker=ui.branches[face]['marker']
@@ -302,14 +384,21 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         assert {row['scene'] for row in faces}=={'2','10'}
         assert [row['id'] for row in bodies]==['accepted-body']
         assert ui.branches[body]['offset']==1
-        empty = next(k for k,v in ui.branches.items() if v['kind']=='body' and v['reader'].selector[1]=='internal')
+        empty = next(k for k,v in ui.branches.items() if not v['unassigned'] and v['kind']=='body' and v['reader'].selector[1]=='internal')
         expand(empty)
         wait_for(lambda: ui.branches[empty]['loaded'])
         assert [ui.listing.item(k,'text') for k in ui.listing.get_children(empty)]==['No observations in this group.']
-        while 'rejected-face' not in {r['id'] for r in ui.rows.values()}:
+        while ui.branches[unknown]['offset']<3:
             old=ui.branches[unknown]['offset']
             ui.listing.selection_set(ui.branches[unknown]['marker'])
             wait_for(lambda: ui.branches[unknown]['offset']>old)
+        assert ui.branches[unknown]['offset']==3 and ui.branches[withheld]['offset']==2
+        ui.listing.selection_set(ui.branches[withheld]['marker'])
+        wait_for(lambda: ui.branches[withheld]['offset']==3)
+        assert {ui.rows[k]['id'] for k in ui.listing.get_children(unknown)}=={'rejected-face','blurred-1','blurred-2'}
+        assert {ui.rows[k]['id'] for k in ui.listing.get_children(withheld)}=={'withheld-body','withheld-1','withheld-2'}
+        for item, state in ((unknown,'blurred'),(withheld,'withheld')):
+            assert all(ui.listing.item(k,'values')[-1]==state for k in ui.listing.get_children(item))
         leaf=next(k for k,r in ui.rows.items() if r['id']=='rejected-face')
         ui.listing.selection_set(leaf)
         wait_for(lambda: 'Retained rejection: blurred' in ui.notes.get('1.0','end'))
@@ -324,7 +413,12 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         ui.scene_entry.insert(0,'10')
         ui.search()
         wait_for(lambda: bool(ui.branches))
-        assert len(ui.groups)==1 and len(ui.branches)==3
+        assert len(ui.groups)==4 and len(ui.branches)==3
+        unknown = next(k for k,v in ui.branches.items() if v['unassigned'])
+        assert ui.branches[unknown]['state']=='too-small'
+        unknown_root = ui.listing.parent(ui.listing.parent(unknown))
+        empty_body = ui.listing.get_children(unknown_root)[1]
+        assert [ui.listing.item(k,'text') for k in ui.listing.get_children(empty_body)]==['No observations in this group.']
         assert not ui.rows
         assert not ui.notes.get('1.0','end').strip()
         assert all('rejected-face'!=row['id'] for row in ui.rows.values())
@@ -525,9 +619,9 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         assert condition(), ui.status.get()
     try:
         wait_for(lambda: bool(ui.branches))
-        branch=next(iter(ui.branches))
-        ui.load_branch(branch)
-        wait_for(lambda: bool(ui.rows))
+        for branch in ui.branches:
+            ui.load_branch(branch)
+        wait_for(lambda: all(v['loaded'] for v in ui.branches.values()))
         assert not media.calls
         row=next(k for k,v in ui.rows.items() if v['id']==face)
         ui.listing.selection_set(row)

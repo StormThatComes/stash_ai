@@ -317,6 +317,14 @@ remain in their labelled identity branches. The unassigned group is local to
 the entry scene, with all retained body collection contracts included. Historical
 contracts are marked in the detail panel.
 
+The unassigned tree is grouped as `Face` / `Body`, then by the displayed `State`.
+State groups use the retained rejection reason (such as `blurred` or
+`person_blurred`) when present, otherwise the membership state (such as
+`unassigned`, `provisional` or `withheld`). Each state group shows its observation
+count and loads independent pages of 80 on expansion. Only states present in
+the entry scene are listed; empty kinds show an explicit message. Counts and
+pages use the same membership and state rules, and refresh rebuilds the groups.
+
 Select an unassigned observation to inspect its crop, retained rejection,
 matching attempts and available references. The detail panel also compares
 retained measurements with detection/collection and anchor/auxiliary quality
