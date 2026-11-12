@@ -1,6 +1,7 @@
 """Finite recognition and retained-portrait orchestration; no tag runtime or hook."""
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, replace
+from itertools import chain
 import os
 from urllib.parse import urlsplit
 
@@ -141,6 +142,20 @@ def execute(args, config, *, services=None):
         return _run(args, config, services)
 
 
+def _scene_ids(args, client):
+    if args.all_scenes:
+        return client.scene_ids()
+    explicit = dict.fromkeys(args.scene_id or ())
+    ranges = getattr(args, 'scene_range', None)
+    if not ranges:
+        return explicit
+    # Enumerate existing IDs once: gaps and wide numeric ranges must not
+    # create missing-scene requests or allocate every integer in a range.
+    matching = (identifier for identifier in client.scene_ids()
+                if any(start <= int(identifier) <= end for start, end in ranges))
+    return chain(explicit, matching)
+
+
 def _run(args, config, services):
     from .profiling import pipeline_scope
     from tqdm import tqdm
@@ -202,7 +217,7 @@ def _execute(args, config, *, services, display):
                                              performer_ids=performer_ids or None)
                     source = args.scene_id or sorted({s['scene'] for t in ready.values() for s in t['scans']}, key=int)
                 else:
-                    source = client.scene_ids() if args.all_scenes else dict.fromkeys(args.scene_id)
+                    source = _scene_ids(args, client)
                 identifiers = []
                 seen = set()
                 with tracking(

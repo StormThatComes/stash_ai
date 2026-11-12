@@ -12,11 +12,24 @@ def stash_id(value):
     return str(int(value))
 
 
+def scene_range(value):
+    parts = value.split('-')
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError('Expected START-END with positive Stash integer IDs')
+    start, end = (int(stash_id(part.strip())) for part in parts)
+    if start > end:
+        raise argparse.ArgumentTypeError('Scene range START must be less than or equal to END')
+    return start, end
+
+
 class RecognitionParser(argparse.ArgumentParser):
     def parse_args(self, args=None, namespace=None):
         result = super().parse_args(args, namespace)
-        if result.command == 'run' and not (result.scene_id or result.all_scenes):
-            self.error('recognition run requires --scene-id or --all-scenes')
+        if result.command == 'run':
+            if not (result.scene_id or result.scene_range or result.all_scenes):
+                self.error('recognition run requires --scene-id, --scene-range or --all-scenes')
+            if result.all_scenes and result.scene_range:
+                self.error('--scene-range cannot be combined with --all-scenes')
         if result.command == 'audit-detection':
             from .detection_masks import MaskOptions
             try:
@@ -137,6 +150,8 @@ def parser():
             maintenance.add_argument('--scene-id', action='append', type=stash_id, help='Limit to these scenes; repeatable.')
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
+    run.add_argument('--scene-range', action='append', type=scene_range, metavar='START-END',
+        help='Existing scenes in this inclusive ID range; repeat for multiple ranges and combine with --scene-id. Cannot be used with --all-scenes.')
     evaluation = commands.add_parser('evaluate', allow_abbrev=False,
         help='Evaluate labelled retained VTT embeddings offline in isolated RAM; never publish.')
     selection = evaluation.add_mutually_exclusive_group(required=True)

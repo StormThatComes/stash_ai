@@ -12,8 +12,22 @@ include the dependencies used by the shipped RF-DETR-XL and PMPose configuration
 ```powershell
 python stash_ai.py recognition run --scene-id 123
 python stash_ai.py recognition run --scene-id 123 --scene-id 456
+python stash_ai.py recognition run --scene-range 100-200 --scene-range 500-650
+python stash_ai.py recognition run --scene-range 100-200 --scene-range 500-650 --scene-id 900
 python stash_ai.py recognition run --all-scenes
 ```
+
+`--scene-range START-END` selects existing scenes by numeric Stash ID, including
+both endpoints. Repeat it for multiple ranges and combine it with `--scene-id`;
+their union is processed once per scene, in ascending numeric ID order. Gaps in
+the ID sequence are skipped, and a range with no existing scenes adds no work.
+Both endpoints must be positive integers with START <= END (`123-123` is valid).
+Ranges reuse the paginated scene-ID listing once per invocation (with its existing
+100,000-scene listing limit), without fetching media for unselected scenes or
+expanding every integer in a range. An explicitly supplied `--scene-id` still
+follows the normal single-scene lookup, including error reporting if it is missing.
+`--all-scenes` cannot be combined with either selection option. Ranges are
+available for `recognition run` only.
 
 Set `STASH_URL` and, when required, `STASH_API_KEY` as in the [quick start](../README.md#quick-start).
 `--all-scenes` snapshots the scene IDs for one finite invocation. Missing pinned
