@@ -6,6 +6,7 @@ from tkinter import ttk
 from functools import partial
 
 from .identity_inspection import IdentityReader, PAGE_SIZE
+from .inspection_advice import describe as describe_advice
 from .tune_images import ImagePair
 from .tune_worker import Worker
 
@@ -215,7 +216,7 @@ class Inspector:
         self.preview_scope = result['scope']
         self.images.show('A', *result['image'])
         trace = result['trace']
-        self.text(describe(trace) + describe_diagnostics(result))
+        self.text(describe_advice(result.get('suggestions')) + describe(trace) + describe_diagnostics(result))
         self.proofs.extend(result.get('recorded_decisions', []))
         for decision in trace['decisions']:
             self.refs.extend(decision['references'])

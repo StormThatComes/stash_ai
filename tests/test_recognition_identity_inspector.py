@@ -403,6 +403,8 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         ui.listing.selection_set(leaf)
         wait_for(lambda: 'Retained rejection: blurred' in ui.notes.get('1.0','end'))
         assert 'detection.min_sharpness' in ui.notes.get('1.0','end')
+        assert 'Suggested next steps' in ui.notes.get('1.0','end')
+        assert 'YAML patch to test:' in ui.notes.get('1.0','end')
         assert ui.images.panels['A'].image.size==(37,43)
         from stash_ai.recognition.identity_window import describe
         attempt = ui.branches[unknown]['reader'].detail('face','unmatched-face')['trace']
@@ -646,3 +648,146 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         del ui,root
         gc.collect()
     assert closed==[True]
+
+
+def advice_fixture(tmp_path):
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    config, _, _ = seed(tmp_path, 1)
+    data = plain(config.data)
+    data['detection'].update(min_visible_face_fraction=0, max_pose_deviation=None)
+    data['sapiensid']['enabled'] = True
+    data['sapiensid']['collection']['enabled'] = True
+    data['sapiensid']['identities']['enabled'] = True
+    return replace(config, data=data, document_version=2)
+
+
+def advice_admission(config, kind='face', **measurements):
+    from types import SimpleNamespace
+    from stash_ai.recognition import admission_report
+    policies = SimpleNamespace(resolve=lambda *_: (config,'current_configuration_hash_verified'))
+    if kind == 'face':
+        quality = dict(pixels=128, sharpness=30., complete=True, alignment_valid=True, pose_deviation=.1)
+        quality.update(measurements)
+        return admission_report.face(quality, [0]*14+[.99], config, policies, 'test')
+    metadata = dict(person=dict(score=.99, bounds=[0,0,300,500]),
+                    quality=dict(width=300, height=500, sharpness=100., keypoints=17, overlap=0.))
+    metadata['quality'].update(measurements)
+    return admission_report.person(metadata, config, policies, 'test', independent=True)
+
+
+@pytest.mark.parametrize('version', [1,2])
+def test_advice_emits_valid_yaml_with_strict_and_inclusive_boundaries(tmp_path, version):
+    from dataclasses import replace
+    import yaml
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    from stash_ai.recognition.merge_report_policy import patched
+    config = replace(advice_fixture(tmp_path), document_version=version)
+    admission = advice_admission(config, sharpness=7.25)
+    admission['groups'][0]['checks'][0]['measured'] = config.data['detection']['score_threshold']
+    result = suggest(config,'face',admission,[], 'blurred')
+    path = result['paths'][0]
+    changes = {c['parameter']:c['proposed'] for c in path['changes']}
+    assert changes == {'detection.score_threshold':.899999, 'detection.min_sharpness':7.25}
+    patched(config,changes)  # Valid together under production config constraints.
+    patch = yaml.safe_load(path['yaml'])
+    assert (patch['face']['quality'] if version==2 else patch['detection'])['min_sharpness']==7.25
+    assert 'fresh scan evidence' in path['next_action']
+    assert 'not a verified assignment replay' in describe(result)
+    assert len(result['paths'])==2
+
+
+def test_advice_offers_auxiliary_before_relaxing_face_anchor_quality(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest
+    config = advice_fixture(tmp_path)
+    config.data['clustering'].update(min_anchor_sharpness=40., auxiliary_matching=False)
+    advice = suggest(config,'face',advice_admission(config),[],None)
+    auxiliary, anchor = advice['paths'][:2]
+    assert {c['yaml_parameter']:c['proposed'] for c in auxiliary['changes']}=={'matching.face.auxiliary.enabled':True}
+    assert {c['yaml_parameter']:c['proposed'] for c in anchor['changes']}=={'matching.face.anchors.quality.min_sharpness':30.}
+    assert config.data['clustering']['min_anchor_sharpness']==40.
+    assert 'rebuild assignments' in auxiliary['next_action']
+
+
+@pytest.mark.parametrize('measured', [None, float('nan'), float('inf')])
+def test_advice_does_not_guess_missing_measurements_or_fix_geometry_with_yaml(tmp_path, measured):
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    config = advice_fixture(tmp_path)
+    result = suggest(config,'face',advice_admission(config, sharpness=measured, alignment_valid=False),[], 'blurred')
+    assert not any(p['changes'] for p in result['paths'])
+    assert 'measurement unavailable' in describe(result)
+    assert 'alignment_valid: fail' in describe(result)
+
+
+def test_advice_rechecks_current_thresholds_instead_of_recommending_historical_values(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    config = advice_fixture(tmp_path)
+    admission = advice_admission(config, sharpness=7.25)
+    admission['groups'][0]['configuration_source']='retained_configuration_hash_verified'
+    config.data['detection']['min_sharpness']=5.
+    result = suggest(config,'face',admission,[], 'blurred')
+    assert not result['paths'][0]['changes']
+    assert 'Reprocess this scene' in describe(result)
+    assert 'Scan settings differ' in describe(result)
+
+
+def test_advice_uses_current_independent_body_support_and_keeps_an_evidence_alternative(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    config = advice_fixture(tmp_path)
+    config.data['sapiensid']['identities']['min_support']=3
+    decision = dict(current=True, status='provisional', recorded=dict(reason='body_scene_core',independent_support=2,required_support=3))
+    result = suggest(config,'body',advice_admission(config,'body'),[decision],None)
+    assert {c['yaml_parameter']:c['proposed'] for p in result['paths'] for c in p['changes']}=={'matching.body.identities.min_support':2}
+    assert any('collect stronger evidence' in p['title'] for p in result['paths'])
+    decision['current']=False
+    result = suggest(config,'body',advice_admission(config,'body'),[decision],None)
+    assert not any(p['changes'] for p in result['paths'])
+    assert 'No current-policy matching attempt' in describe(result)
+
+
+def test_advice_keeps_body_rival_margin_and_regional_keypoint_rules(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    from stash_ai.recognition.admission_report import check, group
+    config = advice_fixture(tmp_path)
+    settings = config.data['sapiensid']['identities']
+    settings.update(match_threshold=.85, cohesion_threshold=.8, ambiguity_margin=.1)
+    admission = advice_admission(config,'body')
+    admission['groups'].append(dict(group('person_anchor_keypoints_any', [
+        check('sapiensid.identities.anchor_keypoint_rules.any.0.min',1,3),
+        check('sapiensid.identities.anchor_keypoint_rules.any.1.min',3,3)]), status='pass'))
+    decision = dict(current=True, status='withheld', recorded=dict(
+        reason='ambiguous_or_insufficient_face_body_bank',score=.8,minimum=.7,runner=.79,rival='other'))
+    result = suggest(config,'body',admission,[decision],None)
+    changes = {c['parameter']:c['proposed'] for p in result['paths'] for c in p['changes']}
+    assert changes=={'sapiensid.identities.match_threshold':.8,'sapiensid.identities.cohesion_threshold':.7}
+    assert 'rival margin also fails' in describe(result)
+    assert not any('Qualify as a body anchor'==p['title'] for p in result['paths'])
+    admission['groups'][-1]['status']='fail'
+    result = suggest(config,'body',admission,[],None)
+    assert 'Keep the configured all/any rules' in describe(result)
+    assert not any('keypoint_rules' in c['parameter'] for p in result['paths'] for c in p['changes'])
+
+
+def test_advice_reports_disabled_body_route_before_tuning_support(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest
+    config = advice_fixture(tmp_path)
+    config.data['sapiensid']['identities']['enabled']=False
+    result = suggest(config,'body',advice_admission(config,'body'),[],None)
+    assert {c['yaml_parameter']:c['proposed'] for c in result['paths'][0]['changes']}=={'matching.body.identities.enabled':True}
+
+
+def test_advice_face_matching_requires_measured_candidate_without_failed_rival_margin(tmp_path):
+    from stash_ai.recognition.inspection_advice import suggest, describe
+    config = advice_fixture(tmp_path)
+    decision = dict(current=True, status='withheld', recorded=dict(reason='insufficient_match_or_cohesion',scores=[.62,.3]))
+    admission = advice_admission(config)
+    result = suggest(config,'face',admission,[decision],None)
+    assert {c['yaml_parameter']:c['proposed'] for p in result['paths'] for c in p['changes']}=={'matching.face.match_threshold':.62}
+    decision['recorded']['scores']=[.62,.61]
+    result = suggest(config,'face',admission,[decision],None)
+    assert not any(p['changes'] for p in result['paths'])
+    assert 'rival margin' in describe(result)
+    decision['recorded'].update(reason='co_present_identity_conflict', scores=[.9,.3])
+    result = suggest(config,'face',admission,[decision],None)
+    assert not any(p['changes'] for p in result['paths'])
+    assert 'do not bypass' in describe(result)

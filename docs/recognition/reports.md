@@ -333,6 +333,27 @@ settings are hash-verified when possible. Otherwise the UI labels them as
 current YAML only. Current quality eligibility does not reconstruct a historical
 matching decision. `Recorded evidence` opens the retained matching proofs.
 
+For an unassigned observation, `Suggested next steps` precedes the recorded
+evidence. It shows current YAML values, measured boundaries, copyable YAML
+patches and the next run needed to test them. The patch uses the loaded YAML
+layout (v1 or v2), and must pass configuration validation. Detection/collection
+blockers come first and require fresh scan evidence. Matching or sample-role
+changes require rebuilding assignments with the relevant scenes selected.
+
+Alternative paths can preserve anchor requirements and try an auxiliary
+attachment, qualify the sample as an anchor, or collect more independent
+evidence without relaxing settings. Current-policy face candidate scores,
+body-core support and frozen-body-bank scores can yield measured
+support/similarity proposals.
+Ambiguity, co-presence conflicts, missing measurements and historical matching
+policies do not produce guessed threshold values. Regional keypoint rules are
+explained without rewriting their `all`/`any` lists.
+
+These are first-step hypotheses from retained evidence, **not replay-verified
+assignments**. Clearing a quality gate does not prove identity ownership, and
+YAML settings affect other observations too. The viewer does not apply patches,
+run models, change memberships or bypass face/identity guards.
+
 The scene catalogue uses the current scan head, including a partial scan whose
 status is shown. Older superseded scans do not populate the unassigned group.
 Changing the Scene ID or using `Load / refresh` rebuilds the tree. Ambiguous
