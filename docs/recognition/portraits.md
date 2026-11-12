@@ -33,7 +33,7 @@ no-ops with `portrait_people_selected=0`.
 
 `recognition portraits` replaces `recognition run --portraits-only`; the old
 switch is no longer accepted. `--performer-id` belongs only to the portraits
-action. Normal `recognition run` still requires `--scene-id` or `--all-scenes`.
+action. Normal `recognition run` requires `--scene-id`, `--scene-range` or `--all-scenes`.
 Both actions support `--face-config`, `--faces-db`, `--device`,
 `--progress-style`, and `--retry-unresolved-images`.
 
