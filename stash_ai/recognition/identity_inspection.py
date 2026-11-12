@@ -24,27 +24,36 @@ class IdentityReader:
         self.face_policy = matching_policy(config)
         self.body_policy = body_policy(config)
 
-    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False):
-        """Page metadata only. A pasted observation ID uses the observation primary key."""
+    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False, kind=None):
+        """Page metadata, optionally restricted to one kind before pagination.
+
+        A pasted observation ID uses the observation primary key.
+        """
+        if kind is not None and kind not in TABLES:
+            raise ValueError('Observation kind must be face or body.')
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
             queries, args = [], []
-            for kind, (observations, members) in TABLES.items():
-                if kind == 'body' and not bodies_available(db):
+            for sample_kind, (observations, members) in TABLES.items():
+                if kind is not None and sample_kind != kind:
                     continue
-                state = "m.status" if kind == 'body' else "'accepted'"
-                role = "m.role" if kind == 'body' else "'member'"
-                sql = (f"SELECT '{kind}' AS kind,o.id,s.scene,o.cue,o.seconds,{state} AS status,{role} AS role "
+                if sample_kind == 'body' and not bodies_available(db):
+                    continue
+                state = "m.status" if sample_kind == 'body' else "'accepted'"
+                role = "m.role" if sample_kind == 'body' else "'member'"
+                sql = (f"SELECT '{sample_kind}' AS kind,o.id,s.scene,o.cue,o.seconds,{state} AS status,{role} AS role "
                        f'FROM {members} m JOIN {observations} o ON o.id=m.observation '
                        'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=?')
                 args.extend((person['id'], person['scope'], person['namespace']))
-                if accepted_only and kind == 'body':
+                if accepted_only and sample_kind == 'body':
                     sql += " AND m.status='accepted'"
                 for column, value in (('s.scene', scene), ('o.cue', cue), ('o.id', observation)):
                     if value is not None:
                         sql += f' AND {column}=?'
                         args.append(value)
                 queries.append(sql)
+            if not queries:
+                return [], False
             sql = 'SELECT * FROM (' + ' UNION ALL '.join(queries) + ') ORDER BY CAST(scene AS INTEGER),scene,cue,kind,id LIMIT ? OFFSET ?'
             rows = [dict(row) for row in db.execute(sql, [*args, PAGE_SIZE+1, offset])]
             return rows[:PAGE_SIZE], len(rows) > PAGE_SIZE

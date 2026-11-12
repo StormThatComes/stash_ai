@@ -103,6 +103,34 @@ def scene_fixture(tmp_path):
     return config, person
 
 
+def test_identity_kind_filter_pages_before_limit_without_loading_crops(tmp_path, monkeypatch):
+    from stash_ai.recognition import identity_inspection
+    config, person = scene_fixture(tmp_path)
+    before = config.database.read_bytes()
+    monkeypatch.setattr(identity_inspection, 'PAGE_SIZE', 2)
+    monkeypatch.setattr(identity_inspection, 'cold_crop', lambda *_: pytest.fail('List loaded pixels'))
+    reader = IdentityReader(config, identity_id=person)
+    pages = [reader.page(kind='face', accepted_only=True, offset=i) for i in (0,2,4)]
+    assert [more for _, more in pages] == [True, True, False]
+    faces = [row for rows, _ in pages for row in rows]
+    assert len({row['id'] for row in faces}) == 6
+    assert {row['kind'] for row in faces} == {'face'}
+    assert {row['scene'] for row in faces} == {'2', '10'}
+    bodies, more = reader.page(kind='body', accepted_only=True)
+    assert not more and [row['id'] for row in bodies] == ['accepted-body']
+    assert {row['kind'] for row in bodies} == {'body'}
+    assert reader.page(kind='body', accepted_only=True, offset=1) == ([], False)
+    sample = faces[-1]
+    assert reader.page(kind='face', scene=sample['scene'], cue=sample['cue'],
+                       observation=sample['id']) == ([sample], False)
+    assert reader.page(kind='body', observation=sample['id']) == ([], False)
+    with pytest.raises(ValueError, match='kind'):
+        reader.page(kind='invalid')
+    monkeypatch.setattr(identity_inspection, 'bodies_available', lambda _: False)
+    assert reader.page(kind='body') == ([], False)
+    assert config.database.read_bytes() == before
+
+
 def test_scene_tree_partitions_memberships_and_pages_all_identity_scenes(tmp_path, monkeypatch):
     from stash_ai.recognition import scene_inspection, identity_inspection
     from stash_ai.recognition.scene_inspection import SceneReader, UnassignedReader
@@ -242,18 +270,42 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         ui.listing.item(item,open=True)
 
     try:
-        wait_for(lambda: len(ui.branches)==3)
-        owner = next(k for k,v in ui.branches.items() if not v['unassigned'] and v['reader'].selector[1]==person)
+        wait_for(lambda: len(ui.branches)==5)
+        owner = {v['kind']:k for k,v in ui.branches.items()
+                 if not v['unassigned'] and v['reader'].selector[1]==person}
+        face, body = owner['face'], owner['body']
+        parent = ui.listing.parent(face)
+        assert ui.listing.parent(body)==parent
+        assert len(ui.groups)==2
+        for group in ui.groups:
+            assert [ui.listing.item(child,'text') for child in ui.listing.get_children(group)]==['Face','Body']
+        expand(parent)
+        ui.listing.selection_set(parent)
+        wait_for(lambda: person in ui.notes.get('1.0','end'))
+        assert not ui.rows  # Opening the performer itself does not load observations.
+        assert not any(b['loading'] or b['loaded'] for b in ui.branches.values())
         unknown = next(k for k,v in ui.branches.items() if v['unassigned'])
-        expand(owner)
-        expand(unknown)  # Queued expansions must both complete.
-        wait_for(lambda: ui.branches[owner]['loaded'] and ui.branches[unknown]['loaded'])
-        while ui.branches[owner]['offset']<7:
-            marker=ui.branches[owner]['marker']
-            old=ui.branches[owner]['offset']
+        expand(face)
+        expand(body)
+        expand(unknown)  # Queued expansions must all complete.
+        wait_for(lambda: all(ui.branches[k]['loaded'] for k in (face,body,unknown)))
+        assert ui.branches[face]['offset']==2 and ui.branches[body]['offset']==1
+        while ui.branches[face]['offset']<6:
+            marker=ui.branches[face]['marker']
+            old=ui.branches[face]['offset']
             ui.listing.selection_set(marker)
-            wait_for(lambda: ui.branches[owner]['offset']>old)
-        assert {row['scene'] for row in ui.rows.values() if row['reader']==ui.branches[owner]['reader']}=={'2','10'}
+            wait_for(lambda: ui.branches[face]['offset']>old)
+        faces = [ui.rows[k] for k in ui.listing.get_children(face)]
+        bodies = [ui.rows[k] for k in ui.listing.get_children(body)]
+        assert len({row['id'] for row in faces})==6
+        assert {row['kind'] for row in faces}=={'face'}
+        assert {row['scene'] for row in faces}=={'2','10'}
+        assert [row['id'] for row in bodies]==['accepted-body']
+        assert ui.branches[body]['offset']==1
+        empty = next(k for k,v in ui.branches.items() if v['kind']=='body' and v['reader'].selector[1]=='internal')
+        expand(empty)
+        wait_for(lambda: ui.branches[empty]['loaded'])
+        assert [ui.listing.item(k,'text') for k in ui.listing.get_children(empty)]==['No observations in this group.']
         while 'rejected-face' not in {r['id'] for r in ui.rows.values()}:
             old=ui.branches[unknown]['offset']
             ui.listing.selection_set(ui.branches[unknown]['marker'])
@@ -272,6 +324,7 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         ui.scene_entry.insert(0,'10')
         ui.search()
         wait_for(lambda: bool(ui.branches))
+        assert len(ui.groups)==1 and len(ui.branches)==3
         assert not ui.rows
         assert not ui.notes.get('1.0','end').strip()
         assert all('rejected-face'!=row['id'] for row in ui.rows.values())

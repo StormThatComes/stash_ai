@@ -302,10 +302,11 @@ python stash_ai.py recognition inspect-scene --scene-id 123 --scope SCOPE --face
 
 The English-language Windows/Linux window opens a collapsible tree. Each
 identity with accepted face or body membership in the entry scene has a branch
-labelled with its Stash performer ID. Expanding it loads **all retained member
-observations across all scenes**, in pages of 80. IDs without a linked Stash
-performer are explicitly labelled `no Stash performer`. The number in each
-branch title counts its observations in the entry scene only. Blue rows mark
+labelled with its Stash performer ID. Each identity contains separate collapsible
+`Face` and `Body` groups. Expanding either group loads its **retained member
+observations across all scenes**, with independent pages of 80 per group. IDs
+without a linked Stash performer are explicitly labelled `no Stash performer`.
+The number in each branch title counts its observations in the entry scene only. Blue rows mark
 that scene. The remaining rows provide the performer's wider recognition context.
 
 `Unassigned in this scene` includes every retained face without membership and
