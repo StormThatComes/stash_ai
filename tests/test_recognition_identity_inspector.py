@@ -69,6 +69,12 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         ui.show_geometry.set(True)
         ui.toggle_geometry()
         assert ui.images.panels['A'].image is annotated[0]
+        ui.images.set_zoom('A',2.)
+        assert ui.images.panels['A'].zoom==2. and ui.images.panels['B'].zoom==1.
+        ui.sync_zoom.set(True);ui.sync_viewports()
+        assert ui.images.panels['B'].zoom==2.
+        ui.images.fit('A')
+        assert .05<=ui.images.panels['A'].zoom<=8.
         assert 'No recorded reference' in ui.images.panels['B'].caption.get()
     finally:
         ui.close()

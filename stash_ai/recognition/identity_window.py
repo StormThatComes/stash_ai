@@ -8,7 +8,7 @@ from functools import partial
 from .identity_inspection import IdentityReader, PAGE_SIZE
 from .inspection_advice import describe as describe_advice
 from .inspection_overlays import render as render_geometry
-from .tune_images import ImagePair
+from .inspection_images import InspectorImages as ImagePair
 from .inspection_runtime import Worker, Cache, stamp, local, check_cancelled
 
 
@@ -112,6 +112,13 @@ class Inspector:
         self.proof_button = ttk.Button(refbar, text='Recorded evidence', command=self.show_proofs)
         self.proof_button.pack(side='right')
         ttk.Button(refbar, text='Retry images', command=self.retry_images).pack(side='right')
+        toolsbar=ttk.Frame(right)
+        toolsbar.grid(row=3,column=0,sticky='ew')
+        for name in ('A','B'):
+            ttk.Button(toolsbar,text=f'Fit {name}',command=lambda n=name:self.images.fit(n)).pack(side='left')
+            ttk.Button(toolsbar,text=f'{name} 100%',command=lambda n=name:self.images.set_zoom(n,1.)).pack(side='left')
+        self.sync_zoom=tk.BooleanVar(master=root,value=False)
+        ttk.Checkbutton(toolsbar,text='Sync viewports',variable=self.sync_zoom,command=self.sync_viewports).pack(side='left')
         self.notes = tk.Text(right, height=10, width=40, wrap='word', state='disabled')
         self.notes.grid(row=2, column=0, sticky='nsew')
         scrollbar = ttk.Scrollbar(right, command=self.notes.yview)
@@ -243,6 +250,11 @@ class Inspector:
     def toggle_geometry(self):
         for panel, variants in self.preview_images.items():
             self.images.show(panel, *variants[int(self.show_geometry.get())])
+
+    def sync_viewports(self):
+        self.images.synchronized=self.sync_zoom.get()
+        if self.images.synchronized:self.images.set_zoom('A',self.images.zooms['A'])
+        self.images.layout()
 
     def show_detail(self, row, result):
         self.preview_scope = result['scope']

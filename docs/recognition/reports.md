@@ -444,3 +444,16 @@ and obsolete results are discarded. Closing the window does not wait for HTTP.
 configuration and database/WAL revision. Scene lists use continuation keys and
 retain at most 1,000 observation rows; `Earlier observations…` restarts an evicted
 branch without accumulating an unlimited Tk tree.
+
+`Search / filters` searches the complete scene-inspector scope (all retained
+scenes of its performers plus the entry scene's unassigned observations), before
+pagination. Filters include observation/performer/scene IDs, kind, state/rejection,
+reason, current/historical/missing policy, missing retained crop and maximum
+recorded ranking lead. Sort by scene/cue, state, lead or sharpness. An absent
+measurement stays unknown. Clear filters restores the grouped tree.
+
+Image panels have independent Fit/100% controls, cursor-centered wheel zoom and
+drag panning; `Sync viewports` links them explicitly. Refresh restores open groups
+and the selected observation where still present. Back/Forward retains up to 50
+session locations including filters and viewports. Selections beyond a loaded
+page are restored explicitly without walking every intervening page.
