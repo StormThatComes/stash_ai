@@ -11,7 +11,7 @@ import math
 import os
 
 from .config import plain
-from .fragmentation_report import _open_readonly
+from .inspection_runtime import open_readonly as _open_readonly, check_cancelled, Cancelled
 from .identity_inspection import TABLES
 from .media import SpriteInput, verify_portrait_cue
 from .models import namespace
@@ -32,6 +32,7 @@ class VttPreviews:
         # Only bounded in-memory sprite reuse. Do not create a media SQLite cache.
         data = plain(config.data)
         data['execution']['media_cache_bytes'] = 0
+        data['execution']['timeout_seconds'] = min(10, data['execution']['timeout_seconds'])
         data['execution']['sprite_cache_bytes'] = min(data['execution']['sprite_cache_bytes'], 64 * 1048576)
         self.config = replace(config, data=data)
         self.namespace = namespace(config)
@@ -39,9 +40,13 @@ class VttPreviews:
         self.source_factory = source_factory
         self.client = self.source = self.selection = None
 
+    def fork(self):
+        return type(self)(self.config, client_factory=self.client_factory, source_factory=self.source_factory)
+
     def image(self, kind, address, scope, retained, *, geometry=None):
         if retained[0] is not None:
             return retained
+        check_cancelled()
         caption = retained[1]
         try:
             table = TABLES[kind][0]
@@ -64,6 +69,7 @@ class VttPreviews:
                 self._close_source()
                 source = self.source_factory(self.client, self.client.scene(row['scene']), self.config)
                 self.source, self.selection = source, selection
+            check_cancelled()
             if self.source.fingerprint != row['input_sha']:
                 raise PreviewUnavailable('VTT source changed after recognition.')
             index = row['cue']
@@ -78,6 +84,7 @@ class VttPreviews:
             with self.source.thumbnail(index) as frame:
                 # PIL crops at rounded integer pixel edges; use that exact
                 # viewport when mapping source geometry onto the preview.
+                check_cancelled()
                 bounds = tuple(round(v) for v in _bounds(kind, source_geometry, quality, frame.size))
                 with frame.crop(bounds) as crop:
                     image = crop.convert('RGB')
@@ -97,6 +104,9 @@ class VttPreviews:
             except BaseException:
                 image.close()
                 raise
+        except Cancelled:
+            self._close_source()
+            raise
         except PreviewUnavailable as error:
             self._close_source()
             return None, caption + ' · Preview unavailable: ' + str(error)

@@ -9,7 +9,7 @@ from .identity_inspection import IdentityReader, PAGE_SIZE
 from .inspection_advice import describe as describe_advice
 from .inspection_overlays import render as render_geometry
 from .tune_images import ImagePair
-from .tune_worker import Worker
+from .inspection_runtime import Worker, Cache, stamp, local, check_cancelled
 
 
 def describe(trace):
@@ -75,6 +75,11 @@ class Inspector:
         self.preview_images = {}
         self.detail_reader = reader
         self.worker = Worker('identity-inspector')
+        factory = previews.fork if previews is not None else None
+        self.image_worker = Worker('inspector-image', workers=2, resource=factory)
+        self.reference_worker = Worker('inspector-reference', workers=2, resource=factory)
+        self.image_cache = Cache(64*1048576, entries=48)
+        self.current_row = None
         self.offset = 0
         self.refs, self.proofs = [], []
         self.filters = {}
@@ -106,6 +111,7 @@ class Inspector:
         self.references.bind('<<ComboboxSelected>>', self.show_reference)
         self.proof_button = ttk.Button(refbar, text='Recorded evidence', command=self.show_proofs)
         self.proof_button.pack(side='right')
+        ttk.Button(refbar, text='Retry images', command=self.retry_images).pack(side='right')
         self.notes = tk.Text(right, height=10, width=40, wrap='word', state='disabled')
         self.notes.grid(row=2, column=0, sticky='nsew')
         scrollbar = ttk.Scrollbar(right, command=self.notes.yview)
@@ -155,6 +161,9 @@ class Inspector:
         self.notes.configure(state='disabled')
 
     def clear_detail(self):
+        self.image_worker.invalidate()
+        self.reference_worker.invalidate()
+        self.current_row = None
         self.refs, self.proofs = [], []
         self.preview_scope = None
         self.preview_images.clear()
@@ -208,8 +217,9 @@ class Inspector:
         if row is None:
             return
         self.clear_detail()
+        self.current_row = dict(row, reader=self.detail_reader)
         self.status.set('Loading ' + row['id'])
-        self.worker.request(partial(self.load_detail, self.detail_reader, row['kind'], row['id']),
+        self.worker.request(partial(self.detail_reader.detail, row['kind'], row['id'], pixels=False),
                             partial(self.show_detail, row), self.error)
 
     def load_detail(self, reader, kind, address):
@@ -218,8 +228,10 @@ class Inspector:
         return result
 
     def prepare_preview(self, kind, address, scope, result):
-        if self.previews is not None:
-            result['image'] = self.previews.image(kind, address, scope, result['image'], geometry=result['geometry'])
+        previews = getattr(local, 'preview', None) or self.previews
+        if previews is not None:
+            result['image'] = previews.image(kind, address, scope, result['image'], geometry=result['geometry'])
+        check_cancelled()
         image, caption = result['image']
         annotated, label = render_geometry(image, result['geometry'])
         result['annotated'] = annotated, caption + (' · '+label if label else '')
@@ -234,7 +246,9 @@ class Inspector:
 
     def show_detail(self, row, result):
         self.preview_scope = result['scope']
-        self.display_preview('A', result)
+        self.images.show('A', None, 'Loading crop…')
+        self.image_worker.request(partial(self.load_reference, self.detail_reader, row['kind'],row['id'],result['scope']),
+                                  partial(self.display_preview,'A'),partial(self.image_error,'A'))
         trace = result['trace']
         self.text(describe_advice(result.get('suggestions')) + describe(trace) + describe_diagnostics(result))
         self.proofs.extend(result.get('recorded_decisions', []))
@@ -259,13 +273,31 @@ class Inspector:
         ref = self.refs[index]
         self.preview_images.pop('B', None)
         self.images.show('B', None, 'Loading reference…')
-        self.worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope),
-                            partial(self.display_preview, 'B'), self.error)
+        self.reference_worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope),
+                            partial(self.display_preview, 'B'), partial(self.image_error,'B'))
 
     def load_reference(self, reader, kind, address, scope):
+        key = (str(reader.config.database),stamp(reader.config.database),scope,kind,address)
+        cache = getattr(self,'image_cache',None)
+        result = cache.get(key) if cache else None
+        if result is not None:
+            return result
         result = reader.preview(kind, address)
         self.prepare_preview(kind, address, scope, result)
+        if cache and result['image'][0] is not None and stamp(reader.config.database)==key[1]:
+            cache.put(key,result)
         return result
+
+    def image_error(self, panel, error):
+        self.images.show(panel,None,f'Preview failed ({type(error).__name__}). Use Retry images.')
+
+    def retry_images(self):
+        self.image_cache.clear()
+        if self.current_row and self.preview_scope:
+            row=self.current_row
+            self.image_worker.request(partial(self.load_reference,row['reader'],row['kind'],row['id'],self.preview_scope),
+                                      partial(self.display_preview,'A'),partial(self.image_error,'A'))
+        self.show_reference()
 
     def show_proofs(self):
         window = tk.Toplevel(self.root)
@@ -283,10 +315,14 @@ class Inspector:
 
     def poll(self):
         self.worker.poll()
+        self.image_worker.poll()
+        self.reference_worker.poll()
         self.poll_id = self.root.after(30, self.poll)
 
     def close(self):
         self.root.after_cancel(self.poll_id)
+        self.image_worker.close()
+        self.reference_worker.close()
         self.worker.close(self.previews.close if self.previews is not None else lambda: None)
         self.panel.destroy()
 

@@ -54,7 +54,7 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             root.update()
-            if address in ui.status.get() and 'known_identity' in ui.notes.get('1.0','end'):
+            if address in ui.status.get() and 'known_identity' in ui.notes.get('1.0','end') and ui.images.panels['A'].image is not None:
                 break
             time.sleep(.005)
         assert 'known_identity' in ui.notes.get('1.0','end')
@@ -420,7 +420,7 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
             assert all(ui.listing.item(k,'values')[-1]==state for k in ui.listing.get_children(item))
         leaf=next(k for k,r in ui.rows.items() if r['id']=='rejected-face')
         ui.listing.selection_set(leaf)
-        wait_for(lambda: 'Retained rejection: blurred' in ui.notes.get('1.0','end'))
+        wait_for(lambda: 'Retained rejection: blurred' in ui.notes.get('1.0','end') and ui.images.panels['A'].image is not None)
         assert 'detection.min_sharpness' in ui.notes.get('1.0','end')
         assert 'Suggested next steps' in ui.notes.get('1.0','end')
         assert 'YAML patch to test:' in ui.notes.get('1.0','end')
@@ -666,7 +666,10 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         root.destroy()
         del ui,root
         gc.collect()
-    assert closed==[True]
+    deadline=time.monotonic()+2
+    while not closed and time.monotonic()<deadline:
+        time.sleep(.005)
+    assert closed and all(closed)
 
 
 def advice_fixture(tmp_path):

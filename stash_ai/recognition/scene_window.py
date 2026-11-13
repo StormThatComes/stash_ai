@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from .identity_window import Inspector
 from .scene_inspection import SceneReader, UnassignedReader
-from .tune_worker import Worker
+from .inspection_runtime import Worker
 
 
 class SceneInspector(Inspector):
@@ -13,6 +13,7 @@ class SceneInspector(Inspector):
         self.tree_worker = Worker('scene-inspector-tree')
         self.queue, self.branches, self.more_items = deque(), {}, {}
         self.groups = {}
+        self.restart_items = {}
         bar = ttk.Frame(panel)
         bar.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0,8))
         ttk.Label(bar, text='Scene ID').pack(side='left')
@@ -54,6 +55,7 @@ class SceneInspector(Inspector):
         self.branches.clear()
         self.groups.clear()
         self.more_items.clear()
+        self.restart_items.clear()
         self.rows.clear()
         self.listing.delete(*self.listing.get_children())
         self.clear_detail()
@@ -96,7 +98,7 @@ class SceneInspector(Inspector):
         item = self.listing.insert(parent, 'end', text=label)
         marker = self.listing.insert(item, 'end', text='Expand to load…')
         self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, state=state, level=level, offset=0,
-                                   loading=False, loaded=False, marker=marker, description=description)
+                                   loading=False, loaded=False, marker=marker, description=description, after=None)
 
     def expand(self, _event=None):
         item = self.listing.focus()
@@ -137,6 +139,15 @@ class SceneInspector(Inspector):
                 tags=('entry_scene',) if row['scene']==self.reader.scene else ())
             self.rows[child] = dict(row, reader=branch['reader'])
         branch.update(offset=branch['offset']+len(rows), loaded=True, loading=False)
+        if rows: branch['after']=rows[-1]
+        while len(self.rows)>1000:
+            child=next(iter(self.rows))
+            parent=self.listing.parent(child)
+            self.rows.pop(child)
+            self.listing.delete(child)
+            if parent not in self.restart_items.values():
+                marker=self.listing.insert(parent,0,text='Earlier observations…')
+                self.restart_items[marker]=parent
         if more:
             marker = branch['marker'] = self.listing.insert(item, 'end', text='Load more…')
             self.more_items[marker] = item
@@ -156,7 +167,16 @@ class SceneInspector(Inspector):
         item = selected[0] if selected else None
         self.worker.invalidate()
         self.clear_detail()
-        if item in self.more_items:
+        if item in self.restart_items:
+            parent=self.restart_items.pop(item)
+            for child in self.listing.get_children(parent):
+                self.rows.pop(child,None)
+                self.more_items.pop(child,None)
+                self.listing.delete(child)
+            branch=self.branches[parent]
+            branch.update(offset=0,after=None,marker=self.listing.insert(parent,'end',text='Loading…'))
+            self.load_branch(parent)
+        elif item in self.more_items:
             self.load_branch(self.more_items[item])
         elif item in self.groups:
             self.text(self.groups[item])
@@ -174,7 +194,7 @@ class SceneInspector(Inspector):
             if branch['level'] == 'states':
                 task = partial(branch['reader'].states, branch['kind'])
             else:
-                args = dict(offset=branch['offset'], kind=branch['kind'], state=branch['state'])
+                args = dict(after=branch['after'], kind=branch['kind'], state=branch['state'])
                 if not branch['unassigned']:
                     args['accepted_only'] = True
                 task = partial(branch['reader'].page, **args)
