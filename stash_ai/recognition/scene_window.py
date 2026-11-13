@@ -2,10 +2,12 @@
 from collections import deque
 from functools import partial
 from tkinter import ttk
+import tkinter as tk
 
 from .identity_window import Inspector
 from .scene_inspection import SceneReader, UnassignedReader
 from .inspection_runtime import Worker
+from .inspection_navigation import History
 
 
 class SceneInspector(Inspector):
@@ -14,6 +16,7 @@ class SceneInspector(Inspector):
         self.queue, self.branches, self.more_items = deque(), {}, {}
         self.groups = {}
         self.restart_items = {}
+        self.view_filters={};self.history=History();self.restore_state=None;self.restoring=False
         bar = ttk.Frame(panel)
         bar.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0,8))
         ttk.Label(bar, text='Scene ID').pack(side='left')
@@ -22,6 +25,9 @@ class SceneInspector(Inspector):
         self.scene_entry.pack(side='left', padx=6)
         self.scene_entry.bind('<Return>', lambda _: self.search())
         ttk.Button(bar, text='Load / refresh', command=self.search).pack(side='left')
+        ttk.Button(bar,text='Search / filters',command=self.filter_dialog).pack(side='left')
+        ttk.Button(bar,text='Back',command=lambda:self.navigate(-1)).pack(side='left')
+        ttk.Button(bar,text='Forward',command=lambda:self.navigate(1)).pack(side='left')
         self.summary = ttk.Label(bar)
         self.summary.pack(side='left', padx=10)
         left = ttk.Frame(panel)
@@ -48,6 +54,10 @@ class SceneInspector(Inspector):
         if not scene.isascii() or not scene.isdecimal() or int(scene)<=0:
             self.status.set('Enter a positive scene ID.')
             return
+        if not self.restoring and self.rows:
+            self.restore_state=self.capture()
+            self.history.record(self.restore_state)
+            if scene!=self.reader.scene:self.restore_state=None
         self.reader = SceneReader(self.reader.config, str(int(scene)), scope=self.reader.scope)
         self.worker.invalidate()
         self.tree_worker.invalidate()
@@ -67,6 +77,13 @@ class SceneInspector(Inspector):
     def show_catalogue(self, result):
         self.scan = result['scan']
         self.summary.configure(text=f"Scope {self.scan['scope']} · {self.scan['status']} scan")
+        if self.view_filters:
+            from .inspection_search import SearchReader
+            reader=SearchReader(self.reader,self.view_filters,scan=self.scan)
+            self.add_branch('Search results',reader,True,'Filtered across the complete view',level='search')
+            item=next(reversed(self.branches))
+            self.listing.item(item,open=True);self.load_branch(item)
+            return
         for group in result['groups']:
             label = (f"Performer {group['performer']}" if group['performer'] else
                      f"Identity {group['identity'][:12]} · no Stash performer")
@@ -93,6 +110,7 @@ class SceneInspector(Inspector):
             if not states:
                 self.listing.insert(kind_item, 'end', text='No observations in this group.')
         self.status.set('Expand a performer to see all scenes, or inspect unassigned observations from this scene.')
+        self.restore_view()
 
     def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None, state=None, level='observations'):
         item = self.listing.insert(parent, 'end', text=label)
@@ -127,6 +145,7 @@ class SceneInspector(Inspector):
                 self.listing.insert(item, 'end', text='No observations in this group.')
             branch.update(loaded=True, loading=False)
             self.status.set('Expand a state to load observations across all scenes.')
+            self.restore_view()
             return
         rows, more = result
         marker = branch['marker']
@@ -137,7 +156,7 @@ class SceneInspector(Inspector):
             child = self.listing.insert(item, 'end', text=row['id'],
                 values=(row['scene'],row['cue'],row['kind'],state),
                 tags=('entry_scene',) if row['scene']==self.reader.scene else ())
-            self.rows[child] = dict(row, reader=branch['reader'])
+            self.rows[child] = dict(row, reader=branch['reader'].owner(row) if branch['level']=='search' else branch['reader'])
         branch.update(offset=branch['offset']+len(rows), loaded=True, loading=False)
         if rows: branch['after']=rows[-1]
         while len(self.rows)>1000:
@@ -154,6 +173,7 @@ class SceneInspector(Inspector):
         elif not rows and not branch['offset']:
             self.listing.insert(item, 'end', text='No observations in this group.')
         self.status.set(f"Loaded {branch['offset']} observations in this group" + (' · more available' if more else ''))
+        self.restore_view()
 
     def branch_error(self, item, error):
         branch = self.branches[item]
@@ -185,6 +205,7 @@ class SceneInspector(Inspector):
         elif item in self.rows:
             self.detail_reader = self.rows[item]['reader']
             super().select()
+            if not self.restoring:self.history.record(self.capture())
 
     def poll(self):
         self.tree_worker.poll()
@@ -194,13 +215,91 @@ class SceneInspector(Inspector):
             if branch['level'] == 'states':
                 task = partial(branch['reader'].states, branch['kind'])
             else:
-                args = dict(after=branch['after'], kind=branch['kind'], state=branch['state'])
+                args = (dict(offset=branch['offset']) if branch['level']=='search' else
+                        dict(after=branch['after'], kind=branch['kind'], state=branch['state']))
                 if not branch['unassigned']:
                     args['accepted_only'] = True
                 task = partial(branch['reader'].page, **args)
             self.tree_worker.request(task,
                                      partial(self.show_branch, item), partial(self.branch_error, item))
         super().poll()
+
+    def filter_dialog(self):
+        from .inspection_search import SORTS
+        window=tk.Toplevel(self.root);window.title('Search this view')
+        entries={}
+        choices={'kind':['All','face','body'],'state':['All','anchor','auxiliary','attachment','unknown','unassigned','provisional','withheld'],
+                 'policy':['All','current','historical','missing'],'sort':list(SORTS)}
+        for i,(key,label) in enumerate((('text','Observation ID contains'),('performer','Performer ID'),('scene','Scene ID'),('kind','Kind'),('state','State / rejection'),('reason','Reason contains'),('policy','Policy'),('max_margin','Maximum recorded lead'),('sort','Sort'))):
+            ttk.Label(window,text=label).grid(row=i,column=0,sticky='w',padx=6,pady=3)
+            widget=ttk.Combobox(window,values=choices[key]) if key in choices else ttk.Entry(window)
+            widget.insert(0,str(self.view_filters.get(key,'')))
+            widget.grid(row=i,column=1,padx=6,pady=3);entries[key]=widget
+        missing=tk.BooleanVar(master=window,value=self.view_filters.get('missing_crop',False))
+        ttk.Checkbutton(window,text='Missing retained crop',variable=missing).grid(row=9,column=0,columnspan=2)
+        def apply(clear=False):
+            self.view_filters={} if clear else {k:w.get().strip() for k,w in entries.items() if w.get().strip() and w.get().strip()!='All'}
+            if not clear and missing.get():self.view_filters['missing_crop']=True
+            self.restore_state=None;self.restoring=True;self.search();self.restoring=False;window.destroy()
+        ttk.Button(window,text='Apply',command=apply).grid(row=10,column=0)
+        ttk.Button(window,text='Clear filters',command=lambda:apply(True)).grid(row=10,column=1)
+
+    def branch_key(self,branch):
+        reader=branch['reader']
+        return (getattr(reader,'selector',('unassigned',))[1] if hasattr(reader,'selector') and not branch['unassigned'] else 'unassigned',branch['kind'],branch['state'])
+
+    def capture(self):
+        row=self.current_row
+        return dict(scene=self.reader.scene,filters=dict(self.view_filters),selected=(row['kind'],row['id']) if row else None,
+                    row=dict(row) if row else None,open=[self.branch_key(b) for k,b in self.branches.items() if self.listing.item(k,'open')],
+                    scroll=self.listing.yview()[0],images=self.images.view_state())
+
+    def navigate(self,direction):
+        if self.history.index>=0:self.history.entries[self.history.index]=self.capture()
+        state=self.history.move(direction)
+        if state:
+            state=dict(state);state.pop('selection_requested',None);state.pop('restored_panels',None)
+            self.restoring=True;self.restore_state=state;self.view_filters=dict(state['filters'])
+            self.scene_entry.delete(0,'end');self.scene_entry.insert(0,state['scene']);self.search()
+
+    def restore_view(self):
+        state=self.restore_state
+        if not state:return
+        for item,branch in list(self.branches.items()):
+            if self.branch_key(branch) in state['open']:
+                self.listing.item(item,open=True)
+                parent=self.listing.parent(item)
+                if parent:self.listing.item(parent,open=True)
+                if not branch['loaded'] and not branch['loading']:self.load_branch(item)
+        self.listing.yview_moveto(state['scroll'])
+        selected=state.get('selected')
+        if selected and not state.get('selection_requested'):
+            state['selection_requested']=True
+            row=state['row'];reader=row['reader']
+            self.worker.request(partial(reader.page,kind=row['kind'],observation=row['id']),
+                                partial(self.restore_selection,state),self.error)
+        elif not selected:self.restoring=False
+
+    def restore_selection(self,state,result):
+        rows,_=result
+        if not rows:
+            self.status.set('Previous selection is no longer a member. Refresh completed.');self.restoring=False;return
+        row=dict(rows[0],reader=state['row']['reader'])
+        child=next((k for k,v in self.rows.items() if (v['kind'],v['id'])==state['selected']),None)
+        if child is None:
+            parent=self.listing.insert('','end',text='Restored selection',open=True)
+            child=self.listing.insert(parent,'end',text=row['id'],values=(row['scene'],row['cue'],row['kind'],row['state']))
+            self.rows[child]=row
+        self.listing.selection_set(child);self.listing.see(child)
+        self.root.after_idle(lambda:setattr(self,'restoring',False))
+
+    def display_preview(self,panel,result):
+        super().display_preview(panel,result)
+        if (self.restore_state and self.restore_state.get('images') and self.current_row and
+                (self.current_row['kind'],self.current_row['id'])==self.restore_state.get('selected') and
+                panel not in self.restore_state.get('restored_panels',set())):
+            self.images.restore(self.restore_state['images'])
+            self.restore_state.setdefault('restored_panels',set()).add(panel)
 
     def close(self):
         self.tree_worker.close(lambda: None)

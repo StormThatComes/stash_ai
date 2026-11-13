@@ -81,7 +81,7 @@ class UnassignedReader:
         self.face_policy, self.body_policy = matching_policy(config), body_policy(config)
 
     @cached
-    def page(self, *, offset=0, kind=None, state=None, after=None):
+    def page(self, *, offset=0, kind=None, state=None, after=None, observation=None):
         """Filter metadata by kind and displayed state before applying pagination."""
         if kind is not None and kind not in TABLES:
             raise ValueError('Observation kind must be face or body.')
@@ -103,6 +103,9 @@ class UnassignedReader:
             if after is not None:
                 sql += (' AND ' if state is not None else ' WHERE ')+ '(cue,kind,id)>(?,?,?)'
                 args.extend((after['cue'],after['kind'],after['id']))
+            if observation is not None:
+                sql += (' AND ' if state is not None or after is not None else ' WHERE ')+ 'id=?'
+                args.append(observation)
             rows = [dict(r) for r in db.execute(sql+' ORDER BY cue,kind,id LIMIT ? OFFSET ?',
                                                (*args, PAGE_SIZE+1, offset))]
             return rows[:PAGE_SIZE], len(rows)>PAGE_SIZE
