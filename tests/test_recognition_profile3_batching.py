@@ -55,6 +55,24 @@ def test_oversized_frame_uses_scalar_path_and_failure_propagates():
         assert sam.frames==sam.resets==2
 
 
+def test_deferred_conflict_cannot_restore_a_quality_mask():
+    model=RefinedPMPose(BatchedPose(),BatchedSegmenter(),defaults())
+    model.pose.batch_size=1  # First mask is finalized before its rival is seen.
+    model.settings.update(masked_identity_crop=True,max_foreign_coverage=1.)
+    def shared_mask(points,negative=()):
+        mask=np.zeros((100,150),dtype=bool)
+        x=20 if points[0,0]<65 else 67
+        mask[10:65,x:x+40]=True
+        mask[65:90,35:97]=True
+        return mask,.99
+    model.segmenter.predict=shared_mask
+    with Image.new('RGB',(150,100)) as image:
+        rows=model.predict_many([(image,[[20,10,80,90],[64,10,125,90]])]*2)
+    for row in rows:
+        assert all(r['mask_conflict'] for r in row[3])
+        assert all(not {'encoder_mask','overlap_mask'}.intersection(r) for r in row[3])
+
+
 def test_sam_batches_equal_length_prompts_and_retries_images_without_reordering():
     torch=pytest.importorskip('torch')
     from stash_ai.recognition.sam_pose2seg import Segmenter as RealSegmenter

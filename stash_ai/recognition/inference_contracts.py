@@ -33,6 +33,10 @@ def pose(config):
         from .pmpose_registry import contract
         model=contract(p)
         for gate in ('presence_threshold','visibility_threshold'):model.pop(gate,None)
+        if p.get('refinement',{}).get('enabled'):
+            # Older cached refined poses did not retain a quality mask.
+            # Raw PMPose/SAM caches remain valid and can rebuild this output.
+            model['quality_mask'] = 'crop-bits-v1'
         from .inference_precision import contract as precision_contract
         numerical=precision_contract(config).get('inference_precision',{})
         active={key:value for key,value in numerical.items() if key in ('pmpose_precision','sam_precision')}

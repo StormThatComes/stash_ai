@@ -89,6 +89,7 @@ def test_expands_box_recovers_wrist_and_retains_original_geometry_for_audit():
     assert model.pose.calls == [('first', 2), ('masked', 1)]
     record = first[3][0]
     assert record['status'] == 'refined' and record['box_expanded']
+    assert record['overlap_mask'] and 'encoder_mask' not in record
     assert record['bounds'] == [20,10,80,90] and record['detector_bounds'] == BOX
     detector = object.__new__(SapiensIDFaces)
     data = defaults()
@@ -123,6 +124,7 @@ def test_bad_second_pose_keeps_both_original_box_and_original_points():
     with Image.new('RGB', (160,100)) as image:
         result = model.predict(image,[BOX])
     assert result[3][0]['reason'] == 'second_pass_core_drift'
+    assert 'overlap_mask' not in result[3][0]
     assert result[3][0]['bounds'] == BOX
     np.testing.assert_array_equal(result[0][0], pose_points())
 
@@ -304,3 +306,4 @@ def test_shared_foreground_disables_both_encoder_masks_and_prompts_against_partn
         records = model.predict(image, [[20,10,80,90],[64,10,125,90]])[3]
     assert all(negatives) and all(r['mask_conflict'] for r in records)
     assert all(not r['separated'] and 'encoder_mask' not in r for r in records)
+    assert all('overlap_mask' not in r for r in records)

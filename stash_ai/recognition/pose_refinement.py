@@ -200,6 +200,7 @@ class RefinedPMPose:
             if record.get('mask_conflict'):
                 record.update(separated=False, reason='shared_mask_pixels')
                 record.pop('encoder_mask', None)
+                record.pop('overlap_mask', None)
         return (*result, records)
 
     @pipeline_stage('pmpose_masked_second_pass')
@@ -229,11 +230,14 @@ class RefinedPMPose:
                         not inside(mask, [(joints[parent] + joints[child]) / 2])[0]):
                     joints[child] = -1
                     confidence[child] = 0
+            # Quality needs the validated mask even when encoder masking is off.
+            # Both fields share one packed crop and are stripped before storage.
+            import base64
+            left, top, right, bottom = box
+            packed = np.packbits(mask[top:bottom, left:right], axis=None)
+            records[i]['overlap_mask'] = base64.b64encode(packed).decode('ascii')
             if records[i].get('separated') and self.settings.get('masked_identity_crop'):
-                import base64
-                left, top, right, bottom = box
-                packed = np.packbits(mask[top:bottom, left:right], axis=None)
-                records[i]['encoder_mask'] = base64.b64encode(packed).decode('ascii')
+                records[i]['encoder_mask'] = records[i]['overlap_mask']
             result[0][i], result[1][i] = joints, confidence
             for key in result[2]:
                 result[2][key][i] = probabilities[key][offset]
@@ -242,3 +246,4 @@ class RefinedPMPose:
             if records[i].get('mask_conflict'):
                 records[i].update(separated=False, reason='shared_mask_pixels')
                 records[i].pop('encoder_mask', None)
+                records[i].pop('overlap_mask', None)

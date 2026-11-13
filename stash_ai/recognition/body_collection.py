@@ -37,18 +37,15 @@ def quality(image,person,people,settings):
     else:
         sharpness,pixel_digest,appearance_hash=many('body_quality','body-pixels-v1',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
-    overlap=0.
-    for other in people:
-        if other is person:continue
-        a,b,c,d=other['bounds']
-        intersection=max(0,min(right,c)-max(left,a))*max(0,min(bottom,d)-max(top,b))
-        overlap=max(overlap,intersection/((right-left)*(bottom-top)))
+    from .body_overlap import measure
+    overlaps=measure(person,people)
+    overlap=overlaps['overlap']
     from .person_geometry import used_keypoints
     detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
     points=used_keypoints(person)
     border=sum((left==0,top==0,right==image.width,bottom==image.height))
     measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,sharpness=sharpness,
-                  keypoints=points,detected_keypoints=detected,overlap=overlap,border_edges=border)
+                  keypoints=points,detected_keypoints=detected,border_edges=border,**overlaps)
     if packed:
         measured['foreground_hash'] = appearance_hash
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
@@ -59,10 +56,11 @@ def quality(image,person,people,settings):
 
 
 def public_person(person):
-    """Keep frame-local encoder pixels out of retained observation metadata."""
-    if person is None or 'encoder_mask' not in person.get('pose_refinement', {}):
+    """Keep frame-local quality/encoder masks out of observation metadata."""
+    masks = {'encoder_mask', 'overlap_mask'}
+    if person is None or not masks.intersection(person.get('pose_refinement', {})):
         return person
-    details = {k:v for k,v in person['pose_refinement'].items() if k != 'encoder_mask'}
+    details = {k:v for k,v in person['pose_refinement'].items() if k not in masks}
     return dict(person, pose_refinement=details)
 
 

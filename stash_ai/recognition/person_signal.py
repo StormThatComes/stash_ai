@@ -164,7 +164,8 @@ def validate(settings):
             raise ValueError(f'sapiensid.{section}.{key} requires a lowercase SHA256.')
 
 
-def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False):
+def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
+             legacy_mask_overlap=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -222,6 +223,9 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     if (refinement.get('enabled') and refinement.get('masked_identity_crop')
             and not legacy_mask_quality and not legacy_association and not legacy_boundaries):
         evidence['body_mask_quality'] = 'interior-laplacian-v1'
+    if (refinement.get('enabled') and not legacy_mask_overlap and not legacy_mask_quality
+            and not legacy_association and not legacy_boundaries):
+        evidence['body_mask_overlap'] = 'foreground-fraction-box-fallback-v1'
     return digest(evidence)
 
 

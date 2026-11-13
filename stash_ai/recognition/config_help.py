@@ -87,7 +87,7 @@ HELP = {
     'body.collection.min_person_pixels': 'Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.',
     'body.collection.min_sharpness': 'Minimum body-crop sharpness (Laplacian variance at source resolution). Range: 0..1000000.',
     'body.collection.min_keypoints': 'Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.',
-    'body.collection.max_overlap': 'Maximum fraction of this body box covered by any other body box; not IoU. Range: 0..1.',
+    'body.collection.max_overlap': 'Maximum fraction of this person mask shared with any other valid mask; box fallback if either mask is unavailable; not IoU. Range: 0..1.',
     'matching': 'Build and match identities from retained evidence.',
     'matching.face': 'Identity matching using face embeddings.',
     'matching.face.metric': 'Similarity metric; only cosine is supported.',
