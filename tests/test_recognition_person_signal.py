@@ -24,6 +24,8 @@ def test_contract_ignores_policy_paths_and_budgets():
 def test_enabled_accepts_download_destinations_without_loading_assets(tmp_path,monkeypatch):
     monkeypatch.chdir(tmp_path)
     data=defaults();data['sapiensid']['enabled']=True
+    data['sapiensid']['pose']['backend']='pmpose'
+    data['sapiensid']['pose']['refinement']['enabled']=True
     validate(data)
     assert not (tmp_path/'recognition_models').exists()
     data['sapiensid']['model'].update(source_directory='missing',checkpoint_directory='missing')

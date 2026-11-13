@@ -20,6 +20,8 @@ def prepared(tmp_path, faces, bodies, *, count=3, matching=None):
     config, people = seeded(tmp_path, vectors=faces, count=count, recognition=dict(match_threshold=.99))
     data = plain(config.data)
     data['sapiensid']['enabled'] = True
+    data['sapiensid']['pose']['backend'] = 'pmpose'
+    data['sapiensid']['pose']['refinement']['enabled'] = True
     data['sapiensid']['matching'].update(face_floor=.8, person_threshold=.99, min_support=4)
     data['sapiensid']['matching'].update(matching or {})
     config = replace(config, data=data)

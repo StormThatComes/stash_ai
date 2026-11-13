@@ -27,9 +27,8 @@ def quality(image,person,people,settings):
     foreground = foreground_mask(person)
     mask = foreground[0] if foreground is not None else None
     if packed:
-        from .person_geometry import encoder_crop, unpack_mask
+        from .person_geometry import encoder_crop
         width,height = right-left,bottom-top
-        if mask is None:mask = unpack_mask(packed,width,height)
         with encoder_crop(image,bounds,packed) as crop:
             sharp,pixel_digest,appearance_hash = _pixels(crop,(0,0,width,height),mask)
     elif mask is not None:
@@ -37,8 +36,12 @@ def quality(image,person,people,settings):
     else:
         sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v2-quality-count',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
+    if mask is None:
+        # Keep crop texture as a diagnostic, never as evidence for a masked
+        # sharpness floor (including a later body-anchor-only floor).
+        sharp=dict(crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_pixels=0)
     sharpness=sharp['sharpness']
-    sharp['sharpness_method']='sam_mask' if mask is not None else 'body_crop'
+    sharp['sharpness_method']='sam_mask' if mask is not None else 'unavailable'
     from .body_overlap import measure
     overlaps=measure(person,people)
     overlap=overlaps['overlap']
@@ -51,6 +54,7 @@ def quality(image,person,people,settings):
     if packed:
         measured['foreground_hash'] = appearance_hash
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
+            'person_sharpness_mask_unavailable' if settings['min_sharpness']>0 and not sharp['sharpness_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
             'person_keypoints' if points<settings['min_keypoints'] else
             'person_overlap' if overlap>settings['max_overlap'] else None)

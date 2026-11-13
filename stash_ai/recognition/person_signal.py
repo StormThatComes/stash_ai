@@ -227,7 +227,7 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
             and not legacy_association and not legacy_boundaries):
         evidence['body_mask_overlap'] = 'foreground-fraction-box-fallback-v1'
         if not legacy_foreground_sharpness:
-            evidence['body_foreground_sharpness'] = 'sam-interior-independent-of-encoder-v1'
+            evidence['body_foreground_sharpness'] = 'sam-interior-required-v2'
     return digest(evidence)
 
 

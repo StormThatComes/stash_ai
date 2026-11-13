@@ -161,6 +161,8 @@ def upstream(tmp_path, monkeypatch, request):
                                      checkpoint_directory='custom/checkpoints', model_yaml_sha256=sha(yaml))
     data['sapiensid']['pose'].update(path='custom/pose/model.pt', sha256=sha(pose))
     config = SimpleNamespace(data=data, source_path=tmp_path/'recognition.yml', model_dir=tmp_path/'models')
+    data['sapiensid']['collection']['min_sharpness'] = 0
+    data['sapiensid']['identities']['anchor_min_sharpness'] = 0
     validate(data)
     return SimpleNamespace(config=config, calls=calls, payloads=payloads, pose=pose,
                            weights=weights_by_variant[request.param], yaml=yaml,

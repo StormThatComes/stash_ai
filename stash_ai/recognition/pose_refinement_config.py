@@ -19,7 +19,7 @@ def validate(pose):
     if settings['masked_identity_crop'] and not settings['enabled']:
         raise ValueError(prefix + 'masked_identity_crop requires refinement.enabled.')
     if settings['enabled'] and pose['backend'] != 'pmpose':
-        raise ValueError(prefix + 'enabled requires pose.backend: pmpose.')
+        raise ValueError(prefix + 'enabled requires sapiensid.pose.backend: pmpose.')
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')
     for key in ('overlap_threshold', 'min_keypoint_score', 'min_presence', 'min_visibility',

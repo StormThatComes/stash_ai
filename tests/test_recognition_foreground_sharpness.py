@@ -28,15 +28,66 @@ def test_body_mask_ignores_background_without_masking_the_identity_input():
     policy=dict(min_person_pixels=1,min_keypoints=1,min_sharpness=10,max_overlap=1)
     with Image.fromarray(pixels).convert('RGB') as image:
         measured,reason=quality(image,selected,[selected],policy)
-        original,_=quality(image,raw,[raw],policy)
+        original,missing=quality(image,raw,[raw],policy)
         assert measured['sharpness']==0 and reason=='person_sharpness'
         assert measured['sharpness_method']=='sam_mask' and measured['sharpness_pixels']>0
-        assert original['sharpness']>10 and original['sharpness_method']=='body_crop'
+        assert original['crop_sharpness']>10 and original['sharpness_method']=='unavailable'
+        assert original['sharpness']==0 and missing=='person_sharpness_mask_unavailable'
         assert measured['pixel_digest']==original['pixel_digest']
         selected['pose_refinement']['encoder_mask']=selected['pose_refinement']['overlap_mask']
         masked,_=quality(image,selected,[selected],policy)
         assert masked['sharpness']==measured['sharpness']
         assert masked['sharpness_pixels']==measured['sharpness_pixels']
+
+
+@pytest.mark.parametrize('kind',['missing','conflict','skipped','empty','thin'])
+def test_unusable_body_mask_cannot_satisfy_collection_or_anchor_sharpness(kind):
+    from stash_ai.recognition.body_collection import quality
+    from stash_ai.recognition.person_anchor import anchor_gate
+    from stash_ai.recognition.body_identity import defaults
+    mask=np.ones((32,32),bool)
+    if kind in ('empty','thin'):
+        mask[:]=False
+        if kind=='thin':mask[:,16]=True
+    selected=person([0,0,32,32],mask if kind!='missing' else None)
+    if kind!='missing':
+        selected['pose_refinement']['encoder_mask']=selected['pose_refinement']['overlap_mask']
+    if kind=='conflict':selected['pose_refinement']['mask_conflict']=True
+    if kind=='skipped':selected['pose_refinement']['status']='skipped'
+    pixels=(np.indices((32,32)).sum(axis=0)%2*200+25).astype('uint8')
+    with Image.fromarray(pixels).convert('RGB') as image:
+        policy=dict(min_person_pixels=1,min_keypoints=1,min_sharpness=10,max_overlap=1)
+        measured,reason=quality(image,selected,[selected],policy)
+        assert reason=='person_sharpness_mask_unavailable'
+        measured,reason=quality(image,selected,[selected],dict(policy,min_sharpness=0))
+    assert reason is None and measured['sharpness']==0
+    anchor=defaults();anchor.update(anchor_min_keypoints=1,anchor_min_sharpness=1)
+    assert anchor_gate({'quality':measured},anchor)['reason']=='body_anchor_sharpness'
+
+
+def test_missing_body_mask_keeps_an_independently_accepted_face(tmp_path):
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain,validate
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.person_collection import PersonCollector
+    from stash_ai.recognition.scanning import scan_scene
+    from tests.test_recognition_body_collection import settings,Persons
+    config=settings(tmp_path);data=plain(config.data)
+    data['sapiensid']['collection']['min_sharpness']=10
+    data['sapiensid']['pose']['backend']='pmpose'
+    data['sapiensid']['pose']['refinement']['enabled']=True
+    validate(data);config=replace(config,data=data)
+    client=MediaClient();model=Persons(1)
+    collector=PersonCollector(config,{},lambda *args:model)
+    try:
+        with FaceDatabase(config.database) as state,SpriteInput(client,client.scene,config) as source:
+            scan_scene(state,'scope',client.scene,config,'ns',source,Backend,on_cue=collector.collect_frame)
+            assert state.connection.execute('SELECT COUNT(*) FROM observations WHERE embedding IS NOT NULL').fetchone()[0]==3
+            assert state.connection.execute("SELECT COUNT(*) FROM body_observations WHERE embedding IS NULL AND rejected='person_sharpness_mask_unavailable'").fetchone()[0]==3
+            assert model.embedded==0
+    finally:
+        collector.close()
 
 
 def test_face_ellipse_excludes_sharp_crop_corners():

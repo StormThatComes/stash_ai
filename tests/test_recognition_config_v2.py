@@ -22,7 +22,8 @@ def test_migration_preserves_effective_policy_and_scan_contracts(tmp_path, parti
     baseline = defaults()
     baseline['sapiensid']['pose'].update(detector='rfdetr_xl', backend='vitpose_plus_large', batch_size=7)
     baseline['sapiensid']['enabled'] = True
-    baseline['sapiensid']['collection']['enabled'] = True
+    baseline['sapiensid']['collection'].update(enabled=True, min_sharpness=0)
+    baseline['sapiensid']['identities']['anchor_min_sharpness'] = 0
     document = {'version': 1, 'sapiensid': baseline['sapiensid']} if partial else baseline
     if partial:
         document['recognition'] = {'min_support': 2}
@@ -88,7 +89,8 @@ def test_partial_v2_pose_defaults_and_explicit_v1_opt_out(tmp_path):
     config = load(path)
     assert body_observations.enabled(config)
     assert config.data['sapiensid']['pose']['detector'] == 'rfdetr_xl'
-    assert config.data['sapiensid']['pose']['backend'] == 'vitpose_plus_large'
+    assert config.data['sapiensid']['pose']['backend'] == 'pmpose'
+    assert config.data['sapiensid']['pose']['refinement']['enabled']
     path.write_text('version: 2\nbody: {enabled: false}\n')
     assert not body_observations.enabled(load(path))
     path.write_text('version: 1\n')

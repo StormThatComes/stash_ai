@@ -193,6 +193,8 @@ def test_explicit_tune_grid_can_set_minima_but_solver_cannot(tmp_path):
     c = load(root=tmp_path)
     data = plain(c.data)
     data['sapiensid']['enabled'] = True
+    data['sapiensid']['pose']['backend'] = 'pmpose'
+    data['sapiensid']['pose']['refinement']['enabled'] = True
     data['sapiensid']['identities']['anchor_keypoint_rules'] = {
         'all': [{'group': 'hips', 'min': 2}],
         'any': [{'group': 'left_leg', 'min': 3}, {'points': ['right_knee', 'right_ankle'], 'min': 2}]}
@@ -242,7 +244,8 @@ def test_tpe_ignores_regional_minima_even_if_given_options(tmp_path):
     pytest.importorskip('optuna')
     from stash_ai.recognition.merge_solver_sampler import create
     path = tmp_path/'sampler.yml'
-    path.write_text(yaml.safe_dump(dict(version=1, sapiensid=dict(enabled=True, identities=dict(
+    path.write_text(yaml.safe_dump(dict(version=1, sapiensid=dict(enabled=True,
+        pose=dict(backend='pmpose',refinement=dict(enabled=True)), identities=dict(
         anchor_keypoint_rules={'all': [{'group': 'hips', 'min': 1}], 'any': []})))))
     c = load(path)
     key = PARAMETER+'.all.0.min'

@@ -332,6 +332,8 @@ def validate(data):
     if data['names']['file'] is not None and (not isinstance(data['names']['file'], str)
                                              or not data['names']['file'].strip()):
         raise ValueError('names.file must be a path or null.')
+    from .sharpness_policy import validate as validate_sharpness
+    validate_sharpness(data)
 
 
 @dataclass(frozen=True)

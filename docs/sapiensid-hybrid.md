@@ -242,10 +242,20 @@ are `min_person_pixels`, `min_sharpness`, `min_keypoints`, `max_overlap`.
 SAM foreground mask, using original source pixels. Every Laplacian sample and
 its four neighbours must be inside the mask: a sharp mask boundary or textured
 background cannot rescue a blurred body. This works independently of
-`pose.refinement.masked_identity_crop`; without a valid mask the measurement
-falls back to the body crop. The measurement is also used by
-`matching.body.anchors.min_sharpness`. Quality metadata records
-`sharpness_method` (`sam_mask` or `body_crop`) and `sharpness_pixels`.
+`pose.refinement.masked_identity_crop`. A positive collection or body/hybrid
+anchor sharpness floor requires `pose.estimator.backend: pmpose`,
+`pose.refinement.enabled: true` and `pose.refinement.mode: all`. YAML validation
+rejects incompatible settings before model loading, including `mode: overlap`
+which would skip isolated people. Partial v2 configurations default to PMPose
+with SAM enabled in `all` mode, matching the shipped YAML templates. To use a
+backend without masks, disable both body sharpness floors (`0`) and refinement.
+
+If segmentation fails for a particular person, its sharpness is unavailable
+(`0`, no usable pixels); a positive collection threshold rejects it with
+`person_sharpness_mask_unavailable`, and a positive anchor floor cannot pass.
+This does not discard an independently accepted face. The crop score is retained
+only as `crop_sharpness` diagnostics. Quality metadata records `sharpness_method`
+(`sam_mask` or `unavailable`) and `sharpness_pixels`.
 
 `body.collection.max_overlap` compares the intersection of validated instance
 masks divided by this person's foreground area, taking the maximum over other
