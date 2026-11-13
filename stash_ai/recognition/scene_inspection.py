@@ -8,7 +8,7 @@ from .body_observations import contract
 from .clustering import matching_policy
 from .decision_contexts import unpack
 from .decision_evidence import recorded
-from .fragmentation_report import _open_readonly
+from .inspection_runtime import open_readonly as _open_readonly, cached
 from .identity_inspection import IdentityReader, PAGE_SIZE, TABLES, _image
 from .inspection_advice import suggest
 from .inspection_overlays import read as overlay_geometry
@@ -37,6 +37,7 @@ class SceneReader:
         self.config, self.scene, self.scope = config, str(scene), scope
         self.namespace = namespace(config)
 
+    @cached
     def catalogue(self):
         with closing(_open_readonly(self.config.database)) as db:
             scans = db.execute('SELECT s.id,s.scene,s.scope,s.namespace,s.policy_sha,s.status FROM scans s WHERE s.scene=? AND s.namespace=? '
@@ -79,7 +80,8 @@ class UnassignedReader:
         self.config, self.scan = config, scan
         self.face_policy, self.body_policy = matching_policy(config), body_policy(config)
 
-    def page(self, *, offset=0, kind=None, state=None):
+    @cached
+    def page(self, *, offset=0, kind=None, state=None, after=None):
         """Filter metadata by kind and displayed state before applying pagination."""
         if kind is not None and kind not in TABLES:
             raise ValueError('Observation kind must be face or body.')
@@ -98,14 +100,17 @@ class UnassignedReader:
             if state is not None:
                 sql += ' WHERE state=?'
                 args.append(state)
+            if after is not None:
+                sql += (' AND ' if state is not None else ' WHERE ')+ '(cue,kind,id)>(?,?,?)'
+                args.extend((after['cue'],after['kind'],after['id']))
             rows = [dict(r) for r in db.execute(sql+' ORDER BY cue,kind,id LIMIT ? OFFSET ?',
                                                (*args, PAGE_SIZE+1, offset))]
             return rows[:PAGE_SIZE], len(rows)>PAGE_SIZE
 
-    def detail(self, kind, address):
+    def detail(self, kind, address, *, pixels=True):
         with closing(_open_readonly(self.config.database)) as db:
             observations, members = TABLES[kind]
-            row = db.execute(f'SELECT o.* FROM {observations} o LEFT JOIN {members} m ON m.observation=o.id '
+            row = db.execute(f'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.geometry,o.rejected{',o.face,o.contract' if kind == 'body' else ''} FROM {observations} o LEFT JOIN {members} m ON m.observation=o.id '
                 f'WHERE o.id=? AND o.scan=? AND NOT ({_accepted(kind)})', (address, self.scan['id'])).fetchone()
             if row is None:
                 raise ValueError('This observation is no longer unassigned in this scan. Refresh the tree.')
@@ -149,7 +154,7 @@ class UnassignedReader:
             return dict(trace=trace, recorded_decisions=decisions, admission=admission, rejection=row['rejected'],
                         geometry=overlay_geometry(db, self.config, self.scan, kind, address),
                         suggestions=suggest(self.config, kind, admission, decisions, row['rejected']),
-                        associations=associations, image=_image(db, self.scan, kind, address), scene=self.scan['scene'],
+                        associations=associations, image=_image(db, self.scan, kind, address) if pixels else (None, 'Loading crop…'), scene=self.scan['scene'],
                         cue=row['cue'], seconds=row['seconds'], scan_status=self.scan['status'],
                         contract_current=kind=='face' or row['contract']==contract(self.config), scope=self.scan['scope'])
 

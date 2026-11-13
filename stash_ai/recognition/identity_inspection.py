@@ -11,7 +11,7 @@ from .body_identity import available as bodies_available, policy as body_policy
 from .body_observations import contract
 from .clustering import matching_policy
 from .cold_payloads import get as cold_crop
-from .fragmentation_report import _open_readonly
+from .inspection_runtime import open_readonly as _open_readonly, cached
 from .identity_report import _assignment, _decisions, _select
 from .inspection_detachment import suggest
 from .inspection_members import query as member_query
@@ -29,7 +29,8 @@ class IdentityReader:
         self.face_policy = matching_policy(config)
         self.body_policy = body_policy(config)
 
-    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False, kind=None, state=None):
+    @cached
+    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False, kind=None, state=None, after=None):
         """Page metadata, optionally restricted to one kind before pagination.
 
         A pasted observation ID uses the observation primary key.
@@ -45,10 +46,14 @@ class IdentityReader:
             if state is not None:
                 sql += ' WHERE state=?'
                 args.append(state)
+            if after is not None:
+                sql += (' AND ' if state is not None else ' WHERE ')+ '(CAST(scene AS INTEGER),scene,cue,kind,id)>(?,?,?,?,?)'
+                args.extend((int(after['scene']),after['scene'],after['cue'],after['kind'],after['id']))
             sql += ' ORDER BY CAST(scene AS INTEGER),scene,cue,kind,id LIMIT ? OFFSET ?'
             rows = [dict(row) for row in db.execute(sql, [*args, PAGE_SIZE+1, offset])]
             return rows[:PAGE_SIZE], len(rows) > PAGE_SIZE
 
+    @cached
     def states(self, kind):
         """Count accepted member roles across all scenes, only on kind expansion."""
         if kind not in TABLES:
@@ -60,7 +65,7 @@ class IdentityReader:
             sql, args = member_query(person, self.face_policy, [kind], filters=(None,None,None), accepted_only=True)
             return [dict(row) for row in db.execute('SELECT state,COUNT(*) AS count FROM ('+sql+') GROUP BY state ORDER BY state', args)]
 
-    def detail(self, kind, address):
+    def detail(self, kind, address, *, pixels=True):
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
             observations, members = TABLES[kind]
@@ -106,7 +111,7 @@ class IdentityReader:
                 associations = [dict(kind='body', observation=r[0], label='Linked body in this cue')
                                 for r in db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? ORDER BY id',
                                                     (row['scan'], address))]
-            return dict(trace=trace, associations=associations, image=_image(db, person, kind, address),
+            return dict(trace=trace, associations=associations, image=_image(db, person, kind, address) if pixels else (None, 'Loading crop…'),
                         geometry=overlay_geometry(db, self.config, person, kind, address),
                         suggestions=suggest(self.config, kind, trace, admission), admission=admission,
                         rejection=row['rejected'], scan_status=row['scan_status'], contract_current=contract_current,

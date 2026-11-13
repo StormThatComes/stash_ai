@@ -435,3 +435,12 @@ python stash_ai.py recognition inspect-scene --scene-id 123 --offline
 
 `inspect-identity` remains offline. `report-identity --restore-crops` continues
 to require retained pixel signatures for its exported identity evidence.
+
+Inspector loading uses separate bounded metadata, observation-image and reference
+workers. Metadata appears before network previews. New selections cancel queued
+work and interrupt SQLite reads; in-flight HTTP requests have a bounded timeout
+and obsolete results are discarded. Closing the window does not wait for HTTP.
+`Retry images` retries only previews. Read caches are bounded and keyed by the
+configuration and database/WAL revision. Scene lists use continuation keys and
+retain at most 1,000 observation rows; `Earlier observations…` restarts an evicted
+branch without accumulating an unlimited Tk tree.
