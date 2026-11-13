@@ -137,6 +137,8 @@ def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatc
     c=replace(c,data=plain(c.data))
     c.data['execution']['gpu_model_policy']=policy
     c.data['sapiensid']['enabled']=True
+    c.data['sapiensid']['pose']['backend']='pmpose'
+    c.data['sapiensid']['pose']['refinement']['enabled']=True
     c.data['sapiensid']['collection'].update(enabled=True,min_sharpness=0)
     c.data['sapiensid']['identities'].update(enabled=True,min_appearance_distance=0)
     c.data['portraits'].update(enabled=True,kind=kind)
@@ -148,7 +150,7 @@ def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatc
     client.media.get=lambda url,**kw:Response(vtt if '/vtt/' in url else sprite) if '/vtt/' in url or '/sprite/' in url else get(url,**kw)
     backend=Backend();backend.detect=lambda image:[]
     services.backend=lambda *a:backend
-    model=Persons(1)
+    model=Persons(1,masks=True)
     monkeypatch.setattr('stash_ai.recognition.sapiensid_backend.SapiensIDFaces',lambda *a,**k:model)
     assert run(c,services,'1')==0
     assert len(client.links['1'])==2

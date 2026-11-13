@@ -297,13 +297,39 @@ detector score, minimum source face pixels, `face.quality.min_sharpness`,
 alignment validity, complete-face and pose restrictions. When
 `face.quality.min_visible_face_fraction > 0`, it additionally loads **FaceOcc**
 and checks the visibility threshold, just as recognition scanning does.
-With visibility disabled (`0`), no FaceOcc asset is loaded. Rejected faces
+With every face visibility floor disabled (`0`/`null`), no scan FaceOcc asset is
+loaded; all scan/query/anchor sharpness floors must also be disabled. Rejected faces
 are **counted with their rejection reason but not exported as PNGs**.
 The manifest (format 2) includes `detection_rejections`, counters for
 detected/rejected/passing faces, exact applied `detection_policy`, saved
 face quality including optional visibility, and each image's geometry.
 This audit validates detection acceptance, **not** embedding, clustering,
 or the accuracy of identity matching.
+
+`face.quality.min_sharpness` measures facial foreground rather than the complete
+face box. When FaceOcc runs for a visibility policy, it measures only visible
+face pixels inside the face ellipse; the sharpness gate is applied after this
+segmentation. Any positive scan/query/anchor sharpness floor requires at least
+one positive face visibility floor; invalid YAML raises an error before work
+starts and identifies the settings to change. Without FaceOcc, ellipse quality
+is diagnostic only because these floors must be disabled. Both use the same
+256px FaceOcc input scale. Laplacian samples touching a mask boundary
+or synthetic padding are excluded, so a sharp occluder/background cannot rescue
+a blurred face when a correct semantic mask is available. No additional model
+inference is introduced. Higher `min_sharpness` values reject more blur; `0`
+disables the gate. The anchor/query sharpness floors and portrait ranking use
+the same measured value. Active portrait sharpness weighting with a positive
+quality target likewise requires visibility weighting, or anchor-only visibility
+measurement. Portrait quality targets remain preferences, not admission gates.
+
+Quality records include `sharpness_method` (`faceocc_mask`, `face_ellipse`, or
+`unavailable`), `sharpness_pixels`, and the previous rectangular measurement as
+`crop_sharpness` for comparison. These scores differ from the old 112px crop
+variance; existing thresholds may need recalibration on representative frames.
+The scan/quality contracts change so the next run recomputes face measurements.
+Body foreground sharpness has its own `body.collection.min_sharpness` threshold
+and remains measured at source resolution; face and body scores are not
+interchangeable.
 
 The created folder contains a `manifest.json` and three PNGs per passing
 face: `*-source.png` (VTT image with face box and five landmarks),

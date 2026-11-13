@@ -30,6 +30,8 @@ def fixture(root, case):
     config = load(path, database=root/'faces.sqlite3')
     data = plain(config.data)
     data['sapiensid']['enabled'] = case not in ('face','quality')
+    data['sapiensid']['pose']['backend'] = 'pmpose'
+    data['sapiensid']['pose']['refinement']['enabled'] = True
     data['sapiensid']['matching'].update(face_floor=.8,person_threshold=.99,min_support=4)
     if case == 'quality':
         data['clustering'].update(min_anchor_face_pixels=100,min_auxiliary_face_pixels=100)

@@ -2,7 +2,8 @@
 import numpy as np
 
 
-def _mask(person):
+def foreground_mask(person):
+    """Return a validated crop-local SAM mask and its foreground area."""
     from .person_geometry import unpack_mask
     details = person.get('pose_refinement', {})
     packed = details.get('overlap_mask')
@@ -38,9 +39,9 @@ def measure(person, people):
         box_fraction = (x1-x0)*(y1-y0)/area
         box_overlap = max(box_overlap, box_fraction)
         if not decoded:
-            own = _mask(person)
+            own = foreground_mask(person)
             decoded = True
-        peer = _mask(other) if own is not None else None
+        peer = foreground_mask(other) if own is not None else None
         if own is not None and peer is not None:
             shared = np.count_nonzero(own[0][y0-top:y1-top, x0-left:x1-left] &
                                       peer[0][y0-b:y1-b, x0-a:x1-a])

@@ -31,16 +31,18 @@ def available(db):
 
 
 def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
-              legacy_mask_overlap=True):
+              legacy_mask_overlap=True,legacy_foreground_sharpness=True):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
     return digest([version,person_contract(config,legacy_boundaries=legacy_boundaries,
                                           legacy_association=legacy_association,legacy_mask_quality=legacy_mask_quality,
-                                          legacy_mask_overlap=legacy_mask_overlap),settings])
+                                          legacy_mask_overlap=legacy_mask_overlap,
+                                          legacy_foreground_sharpness=legacy_foreground_sharpness),settings])
 
 
 def contract(config):
-    return _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False)
+    return _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False,
+                     legacy_foreground_sharpness=False)
 
 
 def compatible_contracts(config):
@@ -53,7 +55,8 @@ def _previous_contracts(config):
     old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [_contract(config,'independent-person-v4-independent-torso'),
+    return [_contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False),
+            _contract(config,'independent-person-v4-independent-torso'),
             _contract(config,'independent-person-v3-perspective'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),

@@ -19,13 +19,16 @@ from stash_ai.recognition.sapiensid_backend import associate,SapiensIDFaces
 def settings(tmp_path):
     c=config(tmp_path);d=plain(c.data)
     d['sapiensid']['enabled']=True
+    d['sapiensid']['pose']['backend']='pmpose'
+    d['sapiensid']['pose']['refinement']['enabled']=True
     d['sapiensid']['collection'].update(enabled=True,min_sharpness=0,max_overlap=1)
     d['sapiensid']['execution']['batch_size']=2
     return replace(c,data=d)
 
 
 class Persons:
-    def __init__(self,count=2):self.calls=0;self.embedded=0;self.count=count;self.fail=False;self.inputs=[]
+    def __init__(self,count=2,*,masks=False):
+        self.calls=0;self.embedded=0;self.count=count;self.fail=False;self.inputs=[];self.masks=masks
     def _owner(self):pass
     person_geometry=SapiensIDFaces.person_geometry
     def detect(self,image,faces=None):
@@ -36,6 +39,10 @@ class Persons:
             if i==0:points[:3]=[[80.,84.],[111.,60.],[49.,60.]]
             points[5:13]=[[40.,90.],[120.,90.],[30.,110.],[130.,110.],[20.,130.],[140.,130.],[60.,145.],[100.,145.]]
             self.frame_people.append(dict(bounds=[0,0,160,160],keypoints=points,score=.99))
+            if self.masks:
+                import base64
+                self.frame_people[-1]['pose_refinement']=dict(status='refined',bounds=[0,0,160,160],
+                    overlap_mask=base64.b64encode(np.packbits(np.ones((160,160),bool)).tobytes()).decode())
         self.face_matches=associate(faces,self.frame_people)
         return faces
     def embed_inputs(self,prepared):

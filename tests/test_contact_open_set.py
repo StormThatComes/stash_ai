@@ -9,8 +9,8 @@ def test_foreground_edges_do_not_create_sharpness():
     mask[3:9,3:9]=True
     pixels=np.where(mask,35,127).astype('uint8')
     with Image.fromarray(pixels) as image:
-        assert _pixels(image,(0,0,12,12))[0]>0
-        assert _pixels(image,(0,0,12,12),mask)[0]==0
+        assert _pixels(image,(0,0,12,12))[0]['sharpness']>0
+        assert _pixels(image,(0,0,12,12),mask)[0]['sharpness']==0
 
 
 def test_absent_query_uses_a_threshold_learned_on_another_scene():

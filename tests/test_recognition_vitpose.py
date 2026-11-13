@@ -34,7 +34,8 @@ def test_old_yaml_keeps_yolo_and_legacy_contract_is_recoverable(tmp_path):
     from stash_ai.recognition.config import digest
     from stash_ai.recognition.sapiensid_registry import MODELS, UPSTREAM_COMMIT, POSE_INFERENCE
     path = tmp_path / 'old.yml'
-    path.write_text('version: 1\nsapiensid: {enabled: true}\n')
+    path.write_text('version: 1\nsapiensid: {enabled: true, collection: {min_sharpness: 0}, '
+                    'identities: {anchor_min_sharpness: 0}}\n')
     config = load(path)
     s = config.data['sapiensid']
     assert s['pose']['backend'] == 'yolo'

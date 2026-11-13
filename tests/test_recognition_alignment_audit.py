@@ -275,7 +275,7 @@ def test_audit_omits_blurry_and_low_confidence_faces_from_pngs(tmp_path):
 
     cfg=config(tmp_path)
     cfg.source_path.write_text(cfg.source_path.read_text().replace('min_sharpness: 0',
-                                                                   'min_sharpness: 1'))
+        'min_sharpness: 1').replace('min_visible_face_fraction: 0','min_visible_face_fraction: 0.5'))
     cfg=load(cfg.source_path)
 
     class Frames(_AuditFrames):
@@ -291,7 +291,13 @@ def test_audit_omits_blurry_and_low_confidence_faces_from_pngs(tmp_path):
                 return [checked_detection((*FACE.row[:-1],0.5))]
             return [FACE]
 
-    scene=audit_scene(Frames(3),ScoreDetector(),cfg,'1',tmp_path)
+    class MaskVisibility:
+        def measure(self,image,face):
+            from stash_ai.recognition.visibility import prepare,measurement
+            blob,region=prepare(image,face)
+            return measurement(np.ones((1,1,256,256)),region,'cpu',blob=blob)
+
+    scene=audit_scene(Frames(3),ScoreDetector(),cfg,'1',tmp_path,visibility=MaskVisibility())
     assert scene['counters']=={'cues_examined':3,'faces_detected':3,
                                'faces_rejected':2,'faces_passed_detection':1}
     assert scene['detection_rejections']=={'face_blurred':1,

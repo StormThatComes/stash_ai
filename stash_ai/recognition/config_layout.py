@@ -169,7 +169,7 @@ def apply_v2(data, supplied):
     from .config import _number
     body = data['sapiensid']
     body['enabled'] = True
-    body['pose'].update(detector='rfdetr_xl', backend='vitpose_plus_large')
+    body['pose'].update(detector='rfdetr_xl', backend='pmpose')
     shared = dict.fromkeys(POINT_FIELDS, .5)
     shared_paths = {f'pose.point_quality.{field}': field for field in POINT_FIELDS}
     seen = set()
@@ -204,6 +204,8 @@ def apply_v2(data, supplied):
     if 'enabled' not in source_matching.get('global', {}):
         body['global_matching']['enabled'] = body['identities']['enabled']
     source_pose = supplied.get('pose', {})
+    if 'enabled' not in source_pose.get('refinement', {}):
+        body['pose']['refinement']['enabled'] = body['pose']['backend'] == 'pmpose'
     for stage in POINT_STAGES:
         for field in POINT_FIELDS:
             if source_pose.get(stage, {}).get(field) is None:

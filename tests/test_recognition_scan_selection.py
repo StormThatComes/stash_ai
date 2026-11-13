@@ -22,7 +22,7 @@ def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path
     from stash_ai.recognition.merge_goals import resolve
     from stash_ai.recognition.merge_solver import solve
     settings = config(tmp_path)
-    changed = patched(settings, {'detection.min_sharpness': 1.})
+    changed = patched(settings, {'detection.min_face_pixels': 33})
     client = MediaClient('7')
     with FaceDatabase(settings.database) as state:
         first, _ = scan(state, settings, client)
@@ -63,8 +63,8 @@ def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path
 
 def test_new_partial_scan_supersedes_reselected_cache_and_can_be_resumed(tmp_path):
     settings = config(tmp_path)
-    second = patched(settings, {'detection.min_sharpness': 1.})
-    third = patched(settings, {'detection.min_sharpness': 2.})
+    second = patched(settings, {'detection.min_face_pixels': 33})
+    third = patched(settings, {'detection.min_face_pixels': 34})
     client = MediaClient('7')
     with FaceDatabase(settings.database) as state:
         first, _ = scan(state, settings, client)
@@ -88,7 +88,7 @@ def test_switching_between_cached_scans_preserves_heads_in_private_history(tmp_p
     from stash_ai.recognition.merge_goals import fingerprint
     from stash_ai.recognition.hybrid_merge import signature
     settings = config(tmp_path)
-    changed = patched(settings, {'detection.min_sharpness': 1.})
+    changed = patched(settings, {'detection.min_face_pixels': 33})
     client = MediaClient('7')
     with FaceDatabase(settings.database) as state:
         first, _ = scan(state, settings, client)
@@ -117,7 +117,7 @@ def test_reselected_scan_does_not_leak_into_excluded_evaluation_history(tmp_path
     from stash_ai.recognition.offline_evaluation import _ram
     from stash_ai.recognition.scan_heads import PREFIX
     settings = config(tmp_path)
-    changed = patched(settings, {'detection.min_sharpness': 1.})
+    changed = patched(settings, {'detection.min_face_pixels': 33})
     client = MediaClient('7')
     with FaceDatabase(settings.database) as state:
         scan(state, settings, client)

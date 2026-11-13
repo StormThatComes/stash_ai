@@ -695,8 +695,10 @@ def advice_fixture(tmp_path):
     from stash_ai.recognition.config import plain
     config, _, _ = seed(tmp_path, 1)
     data = plain(config.data)
-    data['detection'].update(min_visible_face_fraction=0, max_pose_deviation=None)
+    data['detection'].update(min_visible_face_fraction=.5, max_pose_deviation=None)
     data['sapiensid']['enabled'] = True
+    data['sapiensid']['pose']['backend'] = 'pmpose'
+    data['sapiensid']['pose']['refinement']['enabled'] = True
     data['sapiensid']['collection']['enabled'] = True
     data['sapiensid']['identities']['enabled'] = True
     return replace(config, data=data, document_version=2)
@@ -707,7 +709,9 @@ def advice_admission(config, kind='face', **measurements):
     from stash_ai.recognition import admission_report
     policies = SimpleNamespace(resolve=lambda *_: (config,'current_configuration_hash_verified'))
     if kind == 'face':
-        quality = dict(pixels=128, sharpness=30., complete=True, alignment_valid=True, pose_deviation=.1)
+        from stash_ai.recognition.visibility import CONTRACT_ID
+        quality = dict(pixels=128, sharpness=30., complete=True, alignment_valid=True, pose_deviation=.1,
+                       visible_face_fraction=1.,visibility={'contract':CONTRACT_ID})
         quality.update(measurements)
         return admission_report.face(quality, [0]*14+[.99], config, policies, 'test')
     metadata = dict(person=dict(score=.99, bounds=[0,0,300,500]),

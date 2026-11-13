@@ -77,7 +77,7 @@ def pose_measurements(landmarks):
 def assess(image,detection):
     from .inference_cache import many,current
     if current() is None:return _assess(image,detection)
-    return many('face_quality','face-quality-v1',[(image,tuple(detection.row))],
+    return many('face_quality','face-quality-v2-foreground',[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
@@ -89,6 +89,7 @@ def _assess(image, detection):
               min(image.height, math.ceil(y + height)))
     if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
         return dict(complete=False, landmarks_inside=False, alignment_valid=False, pixels=0, sharpness=0.,
+                    sharpness_method='unavailable', sharpness_pixels=0, crop_sharpness=0.,
                     exposure=0., clipped_fraction=1., pose_deviation=1.)
     with image.crop(bounds) as crop, crop.convert('L') as grey, grey.resize((112, 112)) as resized:
         values = np.asarray(resized, dtype=np.float32)
@@ -108,8 +109,10 @@ def _assess(image, detection):
     mouth_height=float((mouth_mid-eye_mid) @ vertical)
     ordered = bool(eye_distance > 1 and 0 < nose_height < mouth_height)
     pose = pose_measurements(points)
+    from .foreground_quality import face_geometry
+    foreground = face_geometry(image,detection)
     return dict(complete=complete, landmarks_inside=inside and ordered, **alignment_measurements(detection, image),
-                pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,
+                pixels=float(min(width, height)), crop_sharpness=sharpness, exposure=exposure, **foreground,
                 clipped_fraction=clipped, **pose,
                 visibility_method='five-landmark-geometry-estimate-v1')
 
