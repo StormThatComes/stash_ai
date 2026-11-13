@@ -238,7 +238,24 @@ Ambiguous face/person ownership is withheld instead of guessed.
 The independent records retain person bounds, pose points, optional face ID,
 quality measurements, rejection reasons and optional PNGs. The quality controls
 are `min_person_pixels`, `min_sharpness`, `min_keypoints`, `max_overlap`.
-Overlap is measured bounding-box overlap, not a semantic occlusion estimate.
+`body.collection.max_overlap` compares the intersection of validated instance
+masks divided by this person's foreground area, taking the maximum over other
+people (not IoU). Disjoint masks therefore have zero overlap even when their
+bounding boxes overlap heavily. If either mask in a pair is unavailable, empty,
+rejected or conflicting, that pair uses the original box intersection divided by
+this person's box area. Quality records expose `overlap`, `box_overlap` and
+`overlap_basis` (`mask`, `box`, `mixed`, or `none` for no intersecting boxes).
+
+Masks come from successful PMPose/SAM refinement, independently of
+`pose.refinement.masked_identity_crop`. No extra segmentation pass is run.
+Without refinement, collection continues to use boxes. The pre-segmentation
+`pose.refinement.overlap_threshold` still uses boxes to decide when to run SAM;
+mask-conflict and face-association safeguards remain active. Packed overlap
+masks are frame-local and are not stored in observation metadata.
+
+The changed quality contract recollects body evidence on the next recognition
+run with refinement enabled. A rebuild/solver alone cannot recompute masks from
+old metadata. Historical box-based banks remain recognizable as legacy rivals.
 Crop-border contact is recorded for later portrait ranking. Body evidence does
 not create identities in this first stage.
 

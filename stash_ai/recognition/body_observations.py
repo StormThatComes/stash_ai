@@ -30,15 +30,17 @@ def available(db):
     return db.execute("SELECT 1 FROM sqlite_master WHERE name='body_observations' AND type='table'").fetchone() is not None
 
 
-def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False):
+def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
+              legacy_mask_overlap=True):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
     return digest([version,person_contract(config,legacy_boundaries=legacy_boundaries,
-                                          legacy_association=legacy_association,legacy_mask_quality=legacy_mask_quality),settings])
+                                          legacy_association=legacy_association,legacy_mask_quality=legacy_mask_quality,
+                                          legacy_mask_overlap=legacy_mask_overlap),settings])
 
 
 def contract(config):
-    return _contract(config,'independent-person-v4-independent-torso')
+    return _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False)
 
 
 def compatible_contracts(config):
@@ -51,7 +53,8 @@ def _previous_contracts(config):
     old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [_contract(config,'independent-person-v3-perspective'),
+    return [_contract(config,'independent-person-v4-independent-torso'),
+            _contract(config,'independent-person-v3-perspective'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, old_mask, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)

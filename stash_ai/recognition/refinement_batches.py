@@ -64,6 +64,7 @@ def refine_many(owner, frames, predictions):
                 if record.get('mask_conflict'):
                     record.update(separated=False,reason='shared_mask_pixels')
                     record.pop('encoder_mask',None)
+                    record.pop('overlap_mask',None)
         window.clear()
 
     for index,(frame,prediction) in enumerate(zip(frames,predictions)):
