@@ -39,7 +39,7 @@ class VttPreviews:
         self.source_factory = source_factory
         self.client = self.source = self.selection = None
 
-    def image(self, kind, address, scope, retained):
+    def image(self, kind, address, scope, retained, *, geometry=None):
         if retained[0] is not None:
             return retained
         caption = retained[1]
@@ -74,9 +74,11 @@ class VttPreviews:
                     verify_portrait_cue(self.source, row)
                 except ValueError:
                     raise PreviewUnavailable('VTT cue does not match the recorded observation.') from None
-            quality, geometry = json.loads(row['quality']), json.loads(row['geometry'])
+            quality, source_geometry = json.loads(row['quality']), json.loads(row['geometry'])
             with self.source.thumbnail(index) as frame:
-                bounds = _bounds(kind, geometry, quality, frame.size)
+                # PIL crops at rounded integer pixel edges; use that exact
+                # viewport when mapping source geometry onto the preview.
+                bounds = tuple(round(v) for v in _bounds(kind, source_geometry, quality, frame.size))
                 with frame.crop(bounds) as crop:
                     image = crop.convert('RGB')
             try:
@@ -89,6 +91,8 @@ class VttPreviews:
                     if actual != expected:
                         raise PreviewUnavailable('Reconstructed pixels differ from the recorded signature.')
                 verified = 'pixels verified' if expected is not None else 'source verified; original crop signature unavailable'
+                if geometry is not None:
+                    geometry['bounds'] = list(bounds)
                 return image, f"Scene {row['scene']} · cue {index} · {kind} · Reconstructed from VTT · {verified}"
             except BaseException:
                 image.close()

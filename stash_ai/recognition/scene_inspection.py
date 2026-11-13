@@ -11,6 +11,7 @@ from .decision_evidence import recorded
 from .fragmentation_report import _open_readonly
 from .identity_inspection import IdentityReader, PAGE_SIZE, TABLES, _image
 from .inspection_advice import suggest
+from .inspection_overlays import read as overlay_geometry
 from .models import namespace
 from .reference_roles import observation_sql
 from .scan_heads import predicate as current_scan
@@ -146,6 +147,7 @@ class UnassignedReader:
             trace = dict(status='unassigned', role='no accepted membership', decisions=variants,
                          evidence_status='retained_decisions' if decisions else 'no_matching_decision')
             return dict(trace=trace, recorded_decisions=decisions, admission=admission, rejection=row['rejected'],
+                        geometry=overlay_geometry(db, self.config, self.scan, kind, address),
                         suggestions=suggest(self.config, kind, admission, decisions, row['rejected']),
                         associations=associations, image=_image(db, self.scan, kind, address), scene=self.scan['scene'],
                         cue=row['cue'], seconds=row['seconds'], scan_status=self.scan['status'],
@@ -154,6 +156,11 @@ class UnassignedReader:
     def reference(self, kind, address):
         with closing(_open_readonly(self.config.database)) as db:
             return _image(db, self.scan, kind, address)
+
+    def preview(self, kind, address):
+        with closing(_open_readonly(self.config.database)) as db:
+            return dict(image=_image(db, self.scan, kind, address),
+                        geometry=overlay_geometry(db, self.config, self.scan, kind, address))
 
 
 def _decision(row, proof, policy):

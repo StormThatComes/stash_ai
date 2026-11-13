@@ -303,8 +303,14 @@ python stash_ai.py recognition inspect-scene --scene-id 123 --scope SCOPE --face
 The English-language Windows/Linux window opens a collapsible tree. Each
 identity with accepted face or body membership in the entry scene has a branch
 labelled with its Stash performer ID. Each identity contains separate collapsible
-`Face` and `Body` groups. Expanding either group loads its **retained member
-observations across all scenes**, with independent pages of 80 per group. IDs
+`Face` and `Body` groups. Expanding either group loads its recorded membership
+states: `anchor`, `auxiliary`, `attachment` or `unknown`, where present. State
+counts cover **retained member observations across all scenes**, and each state
+loads independent pages of 80 on expansion. Filtering happens before pagination.
+Face states use the same decision categories as the detail panel: accepted
+current-policy evidence takes precedence, merged predecessors are included, and
+missing or conflicting evidence remains `unknown`. Body states use the recorded
+member role. These are recorded roles, not eligibility under today's YAML. IDs
 without a linked Stash performer are explicitly labelled `no Stash performer`.
 The number in each branch title counts its observations in the entry scene only. Blue rows mark
 that scene. The remaining rows provide the performer's wider recognition context.
@@ -406,6 +412,20 @@ The current source configuration must select the same VTT cues as the original
 scan. One source is reused in memory, with a sprite cache capped at 64 MiB.
 Reconstructed previews are not written to the recognition database or a media
 cache and do not change assignment, rejection or quality evidence.
+
+Both inspectors enable `Show geometry` by default for selected observations and
+reference previews. Yellow marks the face box and five retained facial landmarks;
+green marks the body box and available COCO17 pose points and skeleton. A thicker
+box and the caption identify the selected observation. Only explicitly linked
+face/body geometry from the same scan and cue is added. The current collection
+contract is preferred; ambiguous linked poses are omitted instead of combined.
+
+Overlays are drawn on copies, mapping source coordinates through recorded crop
+bounds and image scaling. Missing/outside points are omitted. A retained crop
+without reliable source bounds stays clean with an explanation. VTT previews
+use the verified reconstructed crop transform, after any pixel signature check.
+The checkbox switches between annotated and clean pixels without database,
+network or model work. Crops and recognition evidence are never modified.
 
 For fully offline browsing, retain the earlier behavior with:
 

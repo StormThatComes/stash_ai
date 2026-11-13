@@ -7,6 +7,7 @@ from functools import partial
 
 from .identity_inspection import IdentityReader, PAGE_SIZE
 from .inspection_advice import describe as describe_advice
+from .inspection_overlays import render as render_geometry
 from .tune_images import ImagePair
 from .tune_worker import Worker
 
@@ -71,6 +72,7 @@ class Inspector:
     def __init__(self, root, reader, title, observation=None, *, previews=None):
         self.root, self.reader = root, reader
         self.previews, self.preview_scope = previews, None
+        self.preview_images = {}
         self.detail_reader = reader
         self.worker = Worker('identity-inspector')
         self.offset = 0
@@ -95,6 +97,9 @@ class Inspector:
         self.images.grid(row=0, column=0, sticky='nsew')
         refbar = ttk.Frame(right)
         refbar.grid(row=1, column=0, sticky='ew', pady=6)
+        self.show_geometry = tk.BooleanVar(master=root, value=True)
+        ttk.Checkbutton(refbar, text='Show geometry', variable=self.show_geometry,
+                        command=self.toggle_geometry).pack(side='left', padx=(0,6))
         ttk.Label(refbar, text='Reference').pack(side='left')
         self.references = ttk.Combobox(refbar, state='readonly')
         self.references.pack(side='left', fill='x', expand=True, padx=4)
@@ -152,6 +157,7 @@ class Inspector:
     def clear_detail(self):
         self.refs, self.proofs = [], []
         self.preview_scope = None
+        self.preview_images.clear()
         self.images.show('A', None, '')
         self.images.show('B', None, '')
         self.references.set('')
@@ -208,13 +214,27 @@ class Inspector:
 
     def load_detail(self, reader, kind, address):
         result = reader.detail(kind, address)
-        if self.previews is not None:
-            result['image'] = self.previews.image(kind, address, result['scope'], result['image'])
+        self.prepare_preview(kind, address, result['scope'], result)
         return result
+
+    def prepare_preview(self, kind, address, scope, result):
+        if self.previews is not None:
+            result['image'] = self.previews.image(kind, address, scope, result['image'], geometry=result['geometry'])
+        image, caption = result['image']
+        annotated, label = render_geometry(image, result['geometry'])
+        result['annotated'] = annotated, caption + (' · '+label if label else '')
+
+    def display_preview(self, panel, result):
+        self.preview_images[panel] = result['image'], result['annotated']
+        self.images.show(panel, *self.preview_images[panel][int(self.show_geometry.get())])
+
+    def toggle_geometry(self):
+        for panel, variants in self.preview_images.items():
+            self.images.show(panel, *variants[int(self.show_geometry.get())])
 
     def show_detail(self, row, result):
         self.preview_scope = result['scope']
-        self.images.show('A', *result['image'])
+        self.display_preview('A', result)
         trace = result['trace']
         self.text(describe_advice(result.get('suggestions')) + describe(trace) + describe_diagnostics(result))
         self.proofs.extend(result.get('recorded_decisions', []))
@@ -237,13 +257,15 @@ class Inspector:
         if index < 0:
             return
         ref = self.refs[index]
+        self.preview_images.pop('B', None)
         self.images.show('B', None, 'Loading reference…')
         self.worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope),
-                            lambda result: self.images.show('B', *result), self.error)
+                            partial(self.display_preview, 'B'), self.error)
 
     def load_reference(self, reader, kind, address, scope):
-        result = reader.reference(kind, address)
-        return self.previews.image(kind, address, scope, result) if self.previews is not None else result
+        result = reader.preview(kind, address)
+        self.prepare_preview(kind, address, scope, result)
+        return result
 
     def show_proofs(self):
         window = tk.Toplevel(self.root)
