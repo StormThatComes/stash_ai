@@ -159,14 +159,7 @@ class SceneInspector(Inspector):
             self.rows[child] = dict(row, reader=branch['reader'].owner(row) if branch['level']=='search' else branch['reader'])
         branch.update(offset=branch['offset']+len(rows), loaded=True, loading=False)
         if rows: branch['after']=rows[-1]
-        while len(self.rows)>1000:
-            child=next(iter(self.rows))
-            parent=self.listing.parent(child)
-            self.rows.pop(child)
-            self.listing.delete(child)
-            if parent not in self.restart_items.values():
-                marker=self.listing.insert(parent,0,text='Earlier observations…')
-                self.restart_items[marker]=parent
+        self.trim_rows()
         if more:
             marker = branch['marker'] = self.listing.insert(item, 'end', text='Load more…')
             self.more_items[marker] = item
@@ -174,6 +167,16 @@ class SceneInspector(Inspector):
             self.listing.insert(item, 'end', text='No observations in this group.')
         self.status.set(f"Loaded {branch['offset']} observations in this group" + (' · more available' if more else ''))
         self.restore_view()
+
+    def trim_rows(self):
+        while len(self.rows)>1000:
+            child=next(iter(self.rows))
+            parent=self.listing.parent(child)
+            self.rows.pop(child)
+            self.listing.delete(child)
+            if parent in self.branches and parent not in self.restart_items.values():
+                marker=self.listing.insert(parent,0,text='Earlier observations…')
+                self.restart_items[marker]=parent
 
     def branch_error(self, item, error):
         branch = self.branches[item]
@@ -229,20 +232,20 @@ class SceneInspector(Inspector):
         window=tk.Toplevel(self.root);window.title('Search this view')
         entries={}
         choices={'kind':['All','face','body'],'state':['All','anchor','auxiliary','attachment','unknown','unassigned','provisional','withheld'],
-                 'policy':['All','current','historical','missing'],'sort':list(SORTS)}
-        for i,(key,label) in enumerate((('text','Observation ID contains'),('performer','Performer ID'),('scene','Scene ID'),('kind','Kind'),('state','State / rejection'),('reason','Reason contains'),('policy','Policy'),('max_margin','Maximum recorded lead'),('sort','Sort'))):
+                 'policy':['All','current','historical','missing'],'assignment':['All','assigned','unassigned'],'sort':list(SORTS)}
+        for i,(key,label) in enumerate((('text','Observation ID contains'),('performer','Performer ID'),('scene','Scene ID'),('kind','Kind'),('state','State / rejection'),('reason','Reason contains'),('policy','Policy'),('max_margin','Maximum recorded lead'),('sort','Sort'),('assignment','Membership'))):
             ttk.Label(window,text=label).grid(row=i,column=0,sticky='w',padx=6,pady=3)
             widget=ttk.Combobox(window,values=choices[key]) if key in choices else ttk.Entry(window)
             widget.insert(0,str(self.view_filters.get(key,'')))
             widget.grid(row=i,column=1,padx=6,pady=3);entries[key]=widget
         missing=tk.BooleanVar(master=window,value=self.view_filters.get('missing_crop',False))
-        ttk.Checkbutton(window,text='Missing retained crop',variable=missing).grid(row=9,column=0,columnspan=2)
+        ttk.Checkbutton(window,text='Missing retained crop',variable=missing).grid(row=10,column=0,columnspan=2)
         def apply(clear=False):
             self.view_filters={} if clear else {k:w.get().strip() for k,w in entries.items() if w.get().strip() and w.get().strip()!='All'}
             if not clear and missing.get():self.view_filters['missing_crop']=True
             self.restore_state=None;self.restoring=True;self.search();self.restoring=False;window.destroy()
-        ttk.Button(window,text='Apply',command=apply).grid(row=10,column=0)
-        ttk.Button(window,text='Clear filters',command=lambda:apply(True)).grid(row=10,column=1)
+        ttk.Button(window,text='Apply',command=apply).grid(row=11,column=0)
+        ttk.Button(window,text='Clear filters',command=lambda:apply(True)).grid(row=11,column=1)
 
     def branch_key(self,branch):
         reader=branch['reader']

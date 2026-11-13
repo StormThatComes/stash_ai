@@ -76,6 +76,12 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         ui.images.fit('A')
         assert .05<=ui.images.panels['A'].zoom<=8.
         assert 'No recorded reference' in ui.images.panels['B'].caption.get()
+        ui.decision_details()
+        diagnostics=ui.visual_windows[-1]
+        assert diagnostics.worker.future is None  # Opening evidence does not calculate rivals.
+        assert len(diagnostics.tabs.tabs())==3
+        diagnostics.close()
+        assert diagnostics not in ui.visual_windows
         ui.pin_selected()
         pinned=ui.images.panels['B'].image
         ui.clear_detail()

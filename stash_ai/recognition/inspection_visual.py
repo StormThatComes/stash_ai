@@ -36,7 +36,7 @@ class Visual:
     def request_selected(self,cue=None):
         if not self.current_row or self.preview_scope is None:return
         row=self.current_row
-        self.preview_data.pop('A',None)
+        self.preview_data.pop('A',None);self.preview_images.pop('A',None)
         self.context_cue=cue
         full=self.context_mode.get()=='Full cue'
         self.images.show('A',None,'Loading full cue…' if full else 'Loading crop…')
@@ -104,12 +104,20 @@ class Visual:
 
     def open_row(self,row):
         self.detail_reader=row['reader']
-        if hasattr(self,'branches'):
+        item=getattr(self,'context_item',None)
+        if item and self.listing.exists(item):
+            self.rows.pop(item,None)
+            self.listing.item(item,text=row['id'],values=(row['scene'],row['cue'],row['kind'],row['state']) if hasattr(self,'branches') else (row['scene'],row['cue'],row['kind']))
+        elif hasattr(self,'branches'):
             parent=self.listing.insert('','end',text='Context selection',open=True)
             item=self.listing.insert(parent,'end',text=row['id'],values=(row['scene'],row['cue'],row['kind'],row['state']))
         else:
             item=self.listing.insert('','end',values=(row['scene'],row['cue'],row['kind']))
-        self.rows[item]=row;self.listing.selection_set(item);self.listing.see(item)
+        self.context_item=item;self.rows[item]=row
+        if hasattr(self,'trim_rows'):self.trim_rows()
+        self.listing.selection_set(item);self.listing.see(item)
+        # Reusing the selected context row does not always emit a Tk selection event.
+        self.select()
 
     def layer_dialog(self):
         window=tk.Toplevel(self.root);window.title('Geometry layers')
@@ -221,3 +229,5 @@ class Gallery:
     def close(self):
         if self.closed:return
         self.closed=True;self.window.after_cancel(self.timer);self.worker.close();self.window.destroy()
+        self.photos.clear()
+        if self in self.host.visual_windows:self.host.visual_windows.remove(self)

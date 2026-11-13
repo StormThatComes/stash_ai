@@ -10,6 +10,8 @@ from .inspection_advice import describe as describe_advice
 from .inspection_overlays import render as render_geometry
 from .inspection_images import InspectorImages as ImagePair
 from .inspection_runtime import Worker, Cache, stamp, local, check_cancelled
+from .inspection_visual import Visual
+from .inspection_diagnostic_window import Diagnostics
 
 
 def describe(trace):
@@ -68,10 +70,7 @@ def describe_diagnostics(result):
     return '\n' + '\n'.join(lines)
 
 
-from .inspection_visual import Visual
-
-
-class Inspector(Visual):
+class Inspector(Visual, Diagnostics):
     def __init__(self, root, reader, title, observation=None, *, previews=None):
         self.root, self.reader = root, reader
         self.previews, self.preview_scope = previews, None
@@ -130,6 +129,7 @@ class Inspector(Visual):
         self.status = tk.StringVar()
         ttk.Label(panel, textvariable=self.status).grid(row=2, column=0, columnspan=2, sticky='w')
         self.build_visual(right)
+        self.build_diagnostics(right)
         self.rows = {}
         self.poll_id = root.after(30, self.poll)
         self.search()
@@ -172,6 +172,8 @@ class Inspector(Visual):
         self.notes.configure(state='disabled')
 
     def clear_detail(self):
+        self.detail_data=None
+        self.decision_button.state(['disabled'])
         self.image_worker.invalidate()
         self.reference_worker.invalidate()
         self.current_row = None
@@ -267,6 +269,8 @@ class Inspector(Visual):
         self.images.layout()
 
     def show_detail(self, row, result):
+        self.detail_data=result
+        self.decision_button.state(['!disabled'])
         self.preview_scope = result['scope']
         self.request_selected()
         trace = result['trace']
@@ -341,7 +345,7 @@ class Inspector(Visual):
         self.poll_id = self.root.after(30, self.poll)
 
     def close(self):
-        for window in self.visual_windows:window.close()
+        for window in list(self.visual_windows):window.close()
         self.root.after_cancel(self.poll_id)
         self.image_worker.close()
         self.reference_worker.close()

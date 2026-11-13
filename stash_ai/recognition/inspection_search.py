@@ -27,6 +27,14 @@ class SearchReader:
 
     @cached
     def page(self, *, offset=0, **unused):
+        found=list(self._rows(offset=offset,limit=PAGE_SIZE+1))
+        return found[:PAGE_SIZE],len(found)>PAGE_SIZE
+
+    def iter_rows(self):
+        """Stream the entire filtered scope in one SQLite snapshot, without pixels."""
+        yield from self._rows()
+
+    def _rows(self, *, offset=0, limit=None):
         catalogue=self.source.catalogue();scan=catalogue['scan'];self.scan=scan
         face_policy,body_current=matching_policy(self.config),body_policy(self.config)
         with closing(open_readonly(self.config.database)) as db:
@@ -70,6 +78,8 @@ class SearchReader:
             for name,column in (('text','id'),('reason','reason')):
                 value=self.filters.get(name)
                 if value:sql+=' AND instr(lower(COALESCE('+column+",'')),lower(?))>0";args.append(value)
+            if self.filters.get('assignment')=='unassigned':sql+=" AND status<>'accepted'"
+            elif self.filters.get('assignment')=='assigned':sql+=" AND status='accepted'"
             if self.filters.get('missing_crop'):sql+=' AND missing_crop=1'
             if self.filters.get('max_margin') not in (None,''):
                 maximum=float(self.filters['max_margin'])
@@ -77,9 +87,13 @@ class SearchReader:
                 sql+=' AND margin<=?';args.append(maximum)
             order=SORTS.get(self.filters.get('sort','Scene / cue'))
             if order is None:raise ValueError('Unknown sort order.')
-            found=[dict(r) for r in db.execute(sql+' ORDER BY '+order+' LIMIT ? OFFSET ?',(*args,PAGE_SIZE+1,offset))]
-        for row in found:row.pop('proof',None)
-        return found[:PAGE_SIZE],len(found)>PAGE_SIZE
+            sql+=' ORDER BY '+order
+            if limit is not None:sql+=' LIMIT ? OFFSET ?';args.extend((limit,offset))
+            from .inspection_runtime import check_cancelled
+            for raw in db.execute(sql,args):
+                check_cancelled()
+                row=dict(raw);row.pop('proof',None)
+                yield row
 
     def owner(self, row):
         scan=self.scan or self.source.catalogue()['scan']
