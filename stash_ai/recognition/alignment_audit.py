@@ -169,8 +169,9 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                 for face_index, face in enumerate(faces):
                     stats['faces_detected'] += 1
                     quality = assess(image, face)
+                    initial_policy = dict(policy,min_sharpness=0.) if measurement_required(config) else policy
                     reason = ('face_detection_score' if face.score <= policy['score_threshold']
-                              else rejection(quality, policy))
+                              else rejection(quality, initial_policy))
                     if reason is None and measurement_required(config):
                         try:
                             measurement = visibility.measure(image, face)
@@ -182,6 +183,8 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                             quality.update(measurement)
                             if quality['visible_face_fraction'] < policy['min_visible_face_fraction']:
                                 reason = 'face_occluded'
+                            elif quality['sharpness'] < policy['min_sharpness']:
+                                reason = 'face_blurred'
                     reasons[reason or 'passed_detection_gates'] += 1
                     sizes.append(quality['pixels'])
                     if reason is not None:
@@ -209,7 +212,8 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         'cue_index': index, 'seconds': float(cue.start),
                         'face_index': face_index, 'detection_score': float(face.score),
                         'quality': {key: value for key, value in quality.items()
-                                    if key in ('pixels', 'pose_deviation', 'sharpness', 'exposure',
+                                    if key in ('pixels', 'pose_deviation', 'sharpness', 'sharpness_method',
+                                               'sharpness_pixels', 'crop_sharpness', 'exposure',
                                                'clipped_fraction', 'visible_face_fraction',
                                                'landmarks_inside', 'complete', 'alignment_valid')},
                         'detection_rejection': None,

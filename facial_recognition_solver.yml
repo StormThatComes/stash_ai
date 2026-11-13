@@ -23,7 +23,8 @@ face:
     min_face_pixels: 32
     # Minimum shorter face-box side in source thumbnail pixels. Range: 8..4096.
     min_sharpness: 10.0
-    # Minimum face sharpness (Laplacian variance after resizing to 112x112). Range: 0..100000.
+    # Minimum face-foreground sharpness: FaceOcc mask when measured, otherwise face ellipse, at 256px input
+    # scale; mask edges excluded. Range: 0..100000.
     min_visible_face_fraction: 0.5
     # Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.
     max_pose_deviation: 0.5
@@ -183,7 +184,8 @@ body:
     min_person_pixels: 64
     # Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.
     min_sharpness: 10.0
-    # Minimum body-crop sharpness (Laplacian variance at source resolution). Range: 0..1000000.
+    # Minimum body sharpness inside the SAM mask at source resolution; crop fallback without a valid mask. Mask
+    # edges excluded; independent of masked_identity_crop. Range: 0..1000000.
     min_keypoints: 4
     # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
     max_overlap: 0.65
@@ -342,7 +344,8 @@ matching:
       # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor. Range: 1..8192
       # or null.
       min_sharpness: 25.0
-      # Minimum body-crop sharpness for a scene-local body anchor. Range: 0..1000000.
+      # Minimum foreground sharpness for a scene-local body anchor, using the same SAM-mask/crop measurement as
+      # body collection. Range: 0..1000000.
       keypoint_rules:
         # COCO17 regional rules. Each rule uses a group or a list of named points and a minimum count.
         all: []
@@ -404,8 +407,8 @@ portraits:
     min_face_pixels: 96
     # Preferred shorter face-box side in source pixels; 0 removes this target penalty. Range: 0..4096.
     min_sharpness: 25.0
-    # Preferred minimum face sharpness (Laplacian variance); lower-quality faces remain eligible. Range:
-    # 0..100000.
+    # Preferred minimum face-foreground sharpness (FaceOcc mask or face ellipse at 256px input scale);
+    # lower-quality faces remain eligible. Range: 0..100000.
     min_visible_face_fraction: 0.8
     # Preferred visible face fraction; 0 removes the extra target penalty. Range: 0..1.
     max_pose_deviation: 0.35

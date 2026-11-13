@@ -6,9 +6,10 @@ import math
 from .config import digest
 from .models import ASSETS, verified_bytes
 
-CONTRACT = {'version': 1, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+CONTRACT = {'version': 2, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25', 'region': 'face-box-ellipse-0.45w-0.48h',
-            'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels'}
+            'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
+            'sharpness': 'foreground-interior-laplacian-256-v1'}
 CONTRACT_ID = digest(CONTRACT)
 
 
@@ -162,7 +163,7 @@ def _constants():
             immutable(np.arange(256))[:,None],immutable(np.arange(256))[None,:])
 
 
-def prepare(image, face):
+def prepare(image, face, *, allow_partial=False):
     """Fixed crop and elliptical face ROI; portrait padding never affects ratio."""
     import numpy as np
     from PIL import Image
@@ -181,12 +182,14 @@ def prepare(image, face):
     # Exclude synthetic padding from the visibility denominator.
     real = ((left + (columns + .5) * side / 256 >= 0) & (left + (columns + .5) * side / 256 < image.width)
             & (top + (rows + .5) * side / 256 >= 0) & (top + (rows + .5) * side / 256 < image.height))
+    if allow_partial:
+        region = region & real
     if not region.any() or not real[region].all():
         raise VisibilityGeometryError('Visibility face region extends beyond the real source.')
     return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region
 
 
-def measurement(logits, region, device):
+def measurement(logits, region, device, *, blob=None):
     import numpy as np
     values = np.asarray(logits)
     if values.shape != (1, 1, 256, 256) or not np.isfinite(values).all():
@@ -194,8 +197,13 @@ def measurement(logits, region, device):
     count = int(region.sum())
     if count <= 0:
         raise ValueError('Visibility face region is empty.')
-    visible = int(((values[0, 0] > 0) & region).sum())
-    return _counts(visible,count,device)
+    foreground = (values[0, 0] > 0) & region
+    visible = int(foreground.sum())
+    result = _counts(visible,count,device)
+    if blob is not None:
+        from .foreground_quality import face
+        result.update(face(blob,foreground,'faceocc_mask'))
+    return result
 
 
 def _counts(visible,count,device):
@@ -206,8 +214,8 @@ def _counts(visible,count,device):
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count}}
 
-def device_measurements(logits,regions,device):
-    """Exact boolean/integer reduction; transfer N counts, never N full masks."""
+def device_measurements(logits,regions,device,*,inputs=None):
+    """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
     if tuple(logits.shape)!=(len(regions),1,256,256) or not bool(torch.isfinite(logits).all().item()):
@@ -217,8 +225,14 @@ def device_measurements(logits,regions,device):
     counts=[int(region.sum()) for region in regions]
     if any(value<=0 for value in counts):raise ValueError('Visibility face region is empty.')
     mask=torch.from_numpy(np.stack(regions)).to(logits.device)
-    visible=((logits[:,0]>0)&mask).sum(dim=(1,2)).cpu().tolist()
-    return [_counts(int(value),count,device) for value,count in zip(visible,counts)]
+    foreground=(logits[:,0]>0)&mask
+    visible=foreground.sum(dim=(1,2)).cpu().tolist()
+    results=[_counts(int(value),count,device) for value,count in zip(visible,counts)]
+    if inputs is not None:
+        from .foreground_quality import device_faces
+        for result,quality in zip(results,device_faces(inputs,foreground)):
+            result.update(quality)
+    return results
 
 
 
@@ -274,14 +288,15 @@ class FaceVisibility:
             blobs.append(blob);regions.append(region);positions.append(index)
         if blobs:
             with torch.inference_mode():
-                logits=self.model(torch.from_numpy(blobs[0] if len(blobs)==1 else np.concatenate(blobs)).to(self.device)).float()
+                inputs=torch.from_numpy(blobs[0] if len(blobs)==1 else np.concatenate(blobs)).to(self.device)
+                logits=self.model(inputs).float()
                 if self.device=='cpu':
                     values=logits.cpu().numpy()
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
-                    measurements=[measurement(values[i:i+1],region,self.device) for i,region in enumerate(regions)]
+                    measurements=[measurement(values[i:i+1],region,self.device,blob=blobs[i]) for i,region in enumerate(regions)]
                 else:
-                    measurements=device_measurements(logits,regions,self.device)
+                    measurements=device_measurements(logits,regions,self.device,inputs=inputs)
             for index,value in zip(positions,measurements):result[index]=value
         return result
 

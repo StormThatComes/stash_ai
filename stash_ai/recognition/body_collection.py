@@ -9,34 +9,36 @@ def _pixels(image,bounds,mask=None):
     left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
-        lap=(4*values[1:-1,1:-1]-values[:-2,1:-1]-values[2:,1:-1]
-             -values[1:-1,:-2]-values[1:-1,2:])
-        if mask is not None:
-            interior = (mask[1:-1,1:-1] & mask[:-2,1:-1] & mask[2:,1:-1]
-                        & mask[1:-1,:-2] & mask[1:-1,2:])
-            lap = lap[interior]
-        sharpness=float(lap.var()) if lap.size else 0.
+        from .foreground_quality import laplacian
+        measured=laplacian(values,mask)
         pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
             small=np.asarray(thumb)
             bits=(small[:,1:]>small[:,:-1]).flatten()
             appearance_hash=format(sum(int(v)<<i for i,v in enumerate(bits)),'016x')
-    return sharpness,pixel_digest,appearance_hash
+    return measured,pixel_digest,appearance_hash
 
 
 def quality(image,person,people,settings):
     from .inference_cache import many
     bounds=person['bounds'];left,top,right,bottom=bounds
     packed = person.get('pose_refinement',{}).get('encoder_mask')
+    from .body_overlap import foreground_mask
+    foreground = foreground_mask(person)
+    mask = foreground[0] if foreground is not None else None
     if packed:
         from .person_geometry import encoder_crop, unpack_mask
         width,height = right-left,bottom-top
-        mask = unpack_mask(packed,width,height)
+        if mask is None:mask = unpack_mask(packed,width,height)
         with encoder_crop(image,bounds,packed) as crop:
-            sharpness,pixel_digest,appearance_hash = _pixels(crop,(0,0,width,height),mask)
+            sharp,pixel_digest,appearance_hash = _pixels(crop,(0,0,width,height),mask)
+    elif mask is not None:
+        sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask)
     else:
-        sharpness,pixel_digest,appearance_hash=many('body_quality','body-pixels-v1',[(image,bounds)],
+        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v2-quality-count',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
+    sharpness=sharp['sharpness']
+    sharp['sharpness_method']='sam_mask' if mask is not None else 'body_crop'
     from .body_overlap import measure
     overlaps=measure(person,people)
     overlap=overlaps['overlap']
@@ -44,8 +46,8 @@ def quality(image,person,people,settings):
     detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
     points=used_keypoints(person)
     border=sum((left==0,top==0,right==image.width,bottom==image.height))
-    measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,sharpness=sharpness,
-                  keypoints=points,detected_keypoints=detected,border_edges=border,**overlaps)
+    measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,
+                  keypoints=points,detected_keypoints=detected,border_edges=border,**sharp,**overlaps)
     if packed:
         measured['foreground_hash'] = appearance_hash
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else

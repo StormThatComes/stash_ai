@@ -238,6 +238,15 @@ Ambiguous face/person ownership is withheld instead of guessed.
 The independent records retain person bounds, pose points, optional face ID,
 quality measurements, rejection reasons and optional PNGs. The quality controls
 are `min_person_pixels`, `min_sharpness`, `min_keypoints`, `max_overlap`.
+`body.collection.min_sharpness` measures Laplacian variance only inside a valid
+SAM foreground mask, using original source pixels. Every Laplacian sample and
+its four neighbours must be inside the mask: a sharp mask boundary or textured
+background cannot rescue a blurred body. This works independently of
+`pose.refinement.masked_identity_crop`; without a valid mask the measurement
+falls back to the body crop. The measurement is also used by
+`matching.body.anchors.min_sharpness`. Quality metadata records
+`sharpness_method` (`sam_mask` or `body_crop`) and `sharpness_pixels`.
+
 `body.collection.max_overlap` compares the intersection of validated instance
 masks divided by this person's foreground area, taking the maximum over other
 people (not IoU). Disjoint masks therefore have zero overlap even when their

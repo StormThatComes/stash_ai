@@ -180,8 +180,13 @@ class CpuStage:
 def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
     index,face=pair
     quality=assess(image,face);quality['geometry_contract']=geometry_contract(face,cue)
+    from .pose_policy import measurement_required
+    policy=config.data['detection']
+    # Semantic foreground can differ from the ellipse in either direction.
+    # Decide sharpness only after FaceOcc when visibility is being measured.
+    if measurement_required(config):policy=dict(policy,min_sharpness=0.)
     reason=('face_detection_score' if face.score<=config.data['detection']['score_threshold']
-            else rejection(quality,config.data['detection']))
+            else rejection(quality,policy))
     return dict(index=index,face=face,quality=quality,reason=reason,tensor=None,
                 visibility_input=None,vector=None,crop=None)
 
@@ -329,6 +334,8 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                             entry['quality'].update(measurement)
                             if measurement['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
                                 entry['reason'] = 'face_occluded'
+                            elif entry['quality']['sharpness'] < config.data['detection']['min_sharpness']:
+                                entry['reason'] = 'face_blurred'
                 accepted = [entry for entry in batch if entry['reason'] is None]
                 # JPEG workers can overlap owner-thread inference. Their owned
                 # copies stay alive through cancellation and deferred cue commits.
