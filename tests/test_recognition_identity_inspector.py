@@ -28,6 +28,8 @@ def test_paged_inspection_reads_only_selected_crop(tmp_path, monkeypatch):
     detail = reader.detail('face', address)
     assert detail['image'][0].size == (37,43)
     assert detail['trace']['decisions'][0]['metrics']['score'] == .87
+    assert detail['suggestions']['title'] == 'If this assignment is incorrect'
+    assert detail['suggestions']['paths'][0]['changes'][0]['proposed'] == .870001
     assert reader.reference('face', 'missing')[0] is None
     assert config.database.read_bytes() == before
     args = parser().parse_args(['inspect-identity','--identity-id',person,'--observation-id',address])
@@ -56,6 +58,7 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
                 break
             time.sleep(.005)
         assert 'known_identity' in ui.notes.get('1.0','end')
+        assert 'If this assignment is incorrect' in ui.notes.get('1.0','end')
         assert ui.images.panels['A'].image.size == (37,43)
         assert 'No recorded reference' in ui.images.panels['B'].caption.get()
     finally:
@@ -791,3 +794,219 @@ def test_advice_face_matching_requires_measured_candidate_without_failed_rival_m
     result = suggest(config,'face',admission,[decision],None)
     assert not any(p['changes'] for p in result['paths'])
     assert 'do not bypass' in describe(result)
+
+
+def detachment_trace(reason='known_identity', **metrics):
+    return dict(status='accepted', role='auxiliary', evidence_status='recorded_current_policy',
+                decisions=[dict(reason=reason, stage='match', metrics=metrics, merges=[])])
+
+
+def matching_patches(advice):
+    return [{c['parameter']:c['proposed'] for c in p['changes']}
+            for p in advice['paths'] if not p['title'].startswith(('If quality', 'Reduce the'))]
+
+
+@pytest.mark.parametrize('version', [1,2])
+@pytest.mark.parametrize('reason', ['known_identity','candidate_group','auxiliary_identity','anchor_view_identity'])
+def test_detachment_offers_strict_matching_boundaries_in_loaded_yaml_layout(tmp_path, version, reason):
+    from dataclasses import replace
+    import yaml
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.merge_report_policy import patched
+    config = replace(advice_fixture(tmp_path), document_version=version)
+    original = plain(config.data)
+    trace = detachment_trace(reason, score=.91, match_score=.91, minimum=.85, runner=.7)
+    advice = suggest(config, 'face', trace, advice_admission(config))
+    patches = matching_patches(advice)
+    if reason == 'anchor_view_identity':
+        assert patches == [{'clustering.view_match_threshold':.910001},
+                           {'clustering.view_cohesion_threshold':.850001},
+                           {'clustering.view_ambiguity_margin':.210001}]
+    else:
+        assert patches == [{'recognition.match_threshold':.910001},
+                           {'clustering.cohesion_threshold':.850001, 'recognition.match_threshold':.850001},
+                           {'recognition.ambiguity_margin':.210001}]
+    for path in advice['paths']:
+        patched(config, {c['parameter']:c['proposed'] for c in path['changes']})
+        assert yaml.safe_load(path['yaml']) == path['yaml_patch']
+        assert all(('yaml_parameter' in c) == (version == 2) for c in path['changes'])
+    assert config.data == original
+
+
+def test_detachment_accounts_for_same_scene_bonus_in_effective_gates(tmp_path):
+    from stash_ai.recognition.inspection_detachment import suggest
+    config = advice_fixture(tmp_path)
+    config.data['clustering']['same_scene_match_bonus'] = .08
+    advice = suggest(config, 'face', detachment_trace('same_scene_identity', score=.68, minimum=.63), advice_admission(config))
+    similarity, cohesion = matching_patches(advice)
+    assert similarity['recognition.match_threshold'] == .760001
+    assert similarity['recognition.match_threshold']-.08 > .68
+    assert cohesion['clustering.cohesion_threshold'] == .710001
+    assert cohesion['clustering.cohesion_threshold']-.08 > .63
+    assert 'include this bonus' in ' '.join(advice['notes'])
+
+
+@pytest.mark.parametrize('reason', ['frozen_face_body_bank','body_core_attachment','body_confirmed_core_attachment'])
+def test_detachment_uses_actual_body_comparisons_and_not_certified_lower_bounds(tmp_path, reason):
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.inspection_advice import describe
+    config = advice_fixture(tmp_path)
+    admission = advice_admission(config, 'body')
+    advice = suggest(config, 'body', detachment_trace(reason, score=.94, minimum=.91, runner=.7), admission)
+    assert matching_patches(advice) == [
+        {'sapiensid.identities.match_threshold':.940001},
+        {'sapiensid.identities.cohesion_threshold':.910001},
+        {'sapiensid.identities.ambiguity_margin':.240001}]
+    advice = suggest(config, 'body', detachment_trace('body_core_attachment', certified_floor=.8), admission)
+    assert not matching_patches(advice)
+    assert 'only a lower bound' in describe(advice)
+
+
+@pytest.mark.parametrize('status', ['recorded_other_policy','membership_only'])
+def test_detachment_never_derives_matching_patch_from_historical_or_missing_proof(tmp_path, status):
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.inspection_advice import describe
+    config = advice_fixture(tmp_path)
+    trace = detachment_trace(score=.85, minimum=.75)
+    trace['evidence_status'] = status
+    advice = suggest(config, 'face', trace, advice_admission(config))
+    assert not matching_patches(advice)
+    assert 'No current-policy assignment proof' in describe(advice)
+
+
+@pytest.mark.parametrize('route', ['merge_chain','inherited','seed','multiple','linked_face'])
+def test_detachment_does_not_mistake_membership_route_for_direct_matching(tmp_path, route):
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.inspection_advice import describe
+    config = advice_fixture(tmp_path)
+    kind = 'body' if route == 'linked_face' else 'face'
+    trace = detachment_trace('measured_face_association' if kind=='body' else 'candidate_group', score=.87, minimum=.75)
+    step = trace['decisions'][0]
+    if route == 'merge_chain':
+        step['merges'] = [dict(source='old', target='new', route='global_view')]
+    elif route == 'inherited':
+        step['final_reason'] = 'body_global_identity'
+    elif route == 'seed':
+        step['stage'] = 'seed'
+    elif route == 'multiple':
+        trace['decisions'].append(dict(step))
+    advice = suggest(config, kind, trace, advice_admission(config, kind))
+    assert not matching_patches(advice)
+    expected = {'merge_chain':'inherited through', 'inherited':'inherited through',
+                'seed':'started a candidate group', 'multiple':'multiple or missing', 'linked_face':'linked assigned face'}
+    assert expected[route] in describe(advice)
+
+
+@pytest.mark.parametrize('support,expected', [(2,3),(7,8),(8,None),(None,None)])
+def test_detachment_caps_support_and_warns_that_it_affects_the_whole_core(tmp_path, support, expected):
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.inspection_advice import describe
+    config = advice_fixture(tmp_path)
+    config.data['sapiensid']['identities']['min_support'] = 2
+    advice = suggest(config, 'body', detachment_trace('body_scene_core', independent_support=support), advice_admission(config,'body'))
+    assert matching_patches(advice) == ([{'sapiensid.identities.min_support':expected}] if expected else [])
+    if expected:
+        assert 'whole core provisional' in describe(advice)
+
+
+def test_detachment_quality_distinguishes_global_filter_anchor_demotion_and_scan(tmp_path):
+    from stash_ai.recognition.inspection_detachment import suggest
+    from stash_ai.recognition.inspection_advice import describe
+    from stash_ai.recognition.merge_report_policy import patched
+    from stash_ai.recognition.pose_policy import is_anchor, query_allows
+    config = advice_fixture(tmp_path)
+    config.data['clustering'].update(min_anchor_sharpness=20., min_auxiliary_sharpness=15.)
+    trace = detachment_trace(score=.91)
+    trace['role'] = 'anchor'
+    advice = suggest(config,'face',trace,advice_admission(config))
+    query, anchor, scan = advice['paths'][-3:]
+    def modified(path):
+        return patched(config, {c['parameter']:c['proposed'] for c in path['changes']})
+    quality = dict(sharpness=30., pixels=128, pose_deviation=.1)
+    assert not query_allows(quality, modified(query).data['clustering'])
+    assert not is_anchor(quality, modified(anchor).data['clustering'])
+    assert query_allows(quality, modified(anchor).data['clustering'])
+    assert 'may remain assigned as auxiliary' in describe(advice)
+    assert modified(scan).data['detection']['min_sharpness'] > 30.
+    assert 'fresh scan evidence' in scan['next_action']
+    assert not any('keypoint_rules' in c['parameter'] for p in advice['paths'] for c in p['changes'])
+
+
+@pytest.mark.parametrize('score', [1., None, float('nan'), float('inf')])
+def test_detachment_does_not_guess_impossible_or_missing_similarity(tmp_path, score):
+    from stash_ai.recognition.inspection_detachment import suggest
+    config = advice_fixture(tmp_path)
+    advice = suggest(config,'face',detachment_trace(score=score),advice_admission(config))
+    assert not matching_patches(advice)
+
+
+def test_detachment_scan_uses_strict_detector_and_inclusive_pose_boundaries(tmp_path):
+    from stash_ai.recognition.inspection_detachment import suggest
+    config = advice_fixture(tmp_path)
+    admission = advice_admission(config, pixels=None, sharpness=None, pose_deviation=None)
+    advice = suggest(config,'face',detachment_trace(),admission)
+    assert {c['parameter']:c['proposed'] for c in advice['paths'][-1]['changes']} == {'detection.score_threshold':.99}
+    # Equality rejects a strict detector score gate; a pose maximum must be below the measurement.
+    admission = advice_admission(config, pixels=None, sharpness=None, pose_deviation=.15)
+    advice = suggest(config,'face',detachment_trace(),admission)
+    assert {c['parameter']:c['proposed'] for c in advice['paths'][-1]['changes']} == {
+        'detection.max_pose_deviation':.149999, 'clustering.max_anchor_pose_deviation':.149999}
+
+
+def test_assigned_body_advice_reads_retained_metadata_without_mutation(tmp_path):
+    import json
+    from stash_ai.recognition.database import FaceDatabase
+    config, person = scene_fixture(tmp_path)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute("UPDATE body_members SET proof=? WHERE observation='accepted-body'",
+            (json.dumps(dict(reason='body_core_attachment',score=.94,minimum=.91)),))
+        state.connection.commit()
+    before = config.database.read_bytes()
+    reader = IdentityReader(config, identity_id=person)
+    detail = reader.detail('body','accepted-body')
+    assert matching_patches(detail['suggestions'])[0] == {'sapiensid.identities.match_threshold':.940001}
+    assert detail['contract_current']
+    assert detail['admission']['route'] == 'independent'
+    assert reader.detail('body','provisional-body')['suggestions'] is None
+    assert config.database.read_bytes() == before
+
+
+@pytest.mark.parametrize('signal', ['face','face_and_body'])
+def test_detachment_hybrid_query_never_uses_body_measurement_as_a_face_floor(tmp_path, signal):
+    from stash_ai.recognition.inspection_detachment import suggest
+    config = advice_fixture(tmp_path)
+    advice = suggest(config, 'face', detachment_trace('hybrid_query',signal=signal,score=.94,minimum=.91,rival_score=.7),
+                     advice_admission(config))
+    patches = matching_patches(advice)
+    if signal == 'face':
+        assert patches == [{'recognition.match_threshold':.940001},
+                           {'clustering.cohesion_threshold':.910001,'recognition.match_threshold':.910001},
+                           {'recognition.ambiguity_margin':.240001}]
+    else:
+        assert patches == [{'sapiensid.matching.person_threshold':.910001},
+                           {'sapiensid.matching.ambiguity_margin':.240001}]
+
+
+def test_detachment_track_uses_measured_floor_and_can_pin_inherited_threshold(tmp_path):
+    from stash_ai.recognition.inspection_detachment import suggest
+    config = advice_fixture(tmp_path)
+    config.data['sapiensid']['identities']['track_similarity_threshold'] = None
+    advice = suggest(config, 'body', detachment_trace('local_body_track',track_floor=.91,runner=.7),advice_admission(config,'body'))
+    assert matching_patches(advice) == [{'sapiensid.identities.track_similarity_threshold':.910001},
+                                      {'sapiensid.identities.ambiguity_margin':.210001}]
+
+
+def test_detachment_candidate_seed_stage_survives_reader_projection(tmp_path):
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.inspection_advice import describe
+    config, person, _ = seed(tmp_path,1)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute("UPDATE candidates SET payload=json_set(payload, '$.reason','candidate_group',"
+                                 "'$.face_comparison.stage','seed','$.face_comparison.required_support',2)")
+        state.connection.commit()
+    reader = IdentityReader(config, identity_id=person)
+    detail = reader.detail('face',reader.page()[0][0]['id'])
+    assert detail['trace']['decisions'][0]['stage'] == 'seed'
+    assert not matching_patches(detail['suggestions'])
+    assert 'started a candidate group' in describe(detail['suggestions'])

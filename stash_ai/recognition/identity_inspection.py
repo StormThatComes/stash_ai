@@ -5,12 +5,15 @@ import json
 
 from PIL import Image
 
+from . import admission_report
 from . import assignment_explanation as explain
 from .body_identity import available as bodies_available, policy as body_policy
+from .body_observations import contract
 from .clustering import matching_policy
 from .cold_payloads import get as cold_crop
 from .fragmentation_report import _open_readonly
 from .identity_report import _assignment, _decisions, _select
+from .inspection_detachment import suggest
 from .models import namespace
 
 TABLES = {'face': ('observations', 'members'), 'body': ('body_observations', 'body_members')}
@@ -62,7 +65,8 @@ class IdentityReader:
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
             observations, members = TABLES[kind]
-            row = db.execute(f'SELECT m.*,s.scene,o.cue,o.seconds,o.scan FROM {members} m '
+            row = db.execute(f'SELECT m.*,s.scene,s.policy_sha,s.status AS scan_status,'
+                             f'o.cue,o.seconds,o.scan,o.quality,o.geometry,o.rejected FROM {members} m '
                              f'JOIN {observations} o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
                              'WHERE m.observation=? AND m.person=? AND s.scope=? AND s.namespace=?',
                              (address, person['id'], person['scope'], person['namespace'])).fetchone()
@@ -74,12 +78,18 @@ class IdentityReader:
                 'JOIN people p ON p.id=m.source WHERE p.scope=? AND p.namespace=?) SELECT id FROM family',
                 (person['id'], person['scope'], person['namespace']))}
             merges = RelatedMerges(db, family)
+            policies = admission_report.Policies(db, self.config, person['scope'], person['namespace'])
+            quality = json.loads(row['quality'])
+            contract_current = True
             if kind == 'face':
                 decisions = _decisions(db, person, family, self.face_policy, observation=address).get(address, [])
                 trace = explain.face(decisions, _assignment(decisions), merges, person['id'])
+                admission = admission_report.face(quality, json.loads(row['geometry']), self.config, policies, row['policy_sha'])
             else:
-                linked = db.execute('SELECT face FROM body_observations WHERE id=?', (address,)).fetchone()[0]
-                trace = explain.body(json.loads(row['proof']), linked_face=linked, role=row['role'],
+                body = db.execute('SELECT face,contract FROM body_observations WHERE id=?', (address,)).fetchone()
+                admission = admission_report.person(quality, self.config, policies, body['contract'], independent=True)
+                contract_current = body['contract'] == contract(self.config)
+                trace = explain.body(json.loads(row['proof']), linked_face=body['face'], role=row['role'],
                     status=row['status'], policy=row['policy'], current=row['policy']==self.body_policy,
                     merges=merges, target=person['id'])
             # Keep merge evidence separately from the sample so shared proofs stay shared in reports.
@@ -98,6 +108,8 @@ class IdentityReader:
                                 for r in db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? ORDER BY id',
                                                     (row['scan'], address))]
             return dict(trace=trace, associations=associations, image=_image(db, person, kind, address),
+                        suggestions=suggest(self.config, kind, trace, admission), admission=admission,
+                        rejection=row['rejected'], scan_status=row['scan_status'], contract_current=contract_current,
                         scene=row['scene'], cue=row['cue'], seconds=row['seconds'], scope=person['scope'])
 
     def reference(self, kind, address):

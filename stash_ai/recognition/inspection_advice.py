@@ -220,7 +220,7 @@ def suggest(config, kind, admission, decisions, rejection):
 def describe(advice):
     if not advice:
         return ''
-    lines = ['Suggested next steps'] + advice['notes']
+    lines = [advice.get('title', 'Suggested next steps')] + advice['notes']
     for index, path in enumerate(advice['paths'], 1):
         lines.extend(('', f'{index}. {path["title"]}'))
         for change in path['changes']:

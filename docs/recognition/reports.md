@@ -354,6 +354,30 @@ assignments**. Clearing a quality gate does not prove identity ownership, and
 YAML settings affect other observations too. The viewer does not apply patches,
 run models, change memberships or bypass face/identity guards.
 
+Assigned observations in both `inspect-scene` and `inspect-identity` show
+`If this assignment is incorrect`. This offers alternative YAML changes to test
+when you identify an incorrectly attached sample. Current-policy direct face
+matches, anchor-view matches and measured body-bank/core attachments can suggest
+stricter similarity, weakest-witness cohesion or rival-margin boundaries. Hybrid
+query suggestions distinguish face and body scores; local body tracks use their
+recorded weakest link to a root. An
+inclusive similarity gate must be raised **above** the recorded score; equality
+still accepts it. Same-scene face proposals account for the match bonus. Accepted
+body cores can suggest more independent support, with proposals capped at 8.
+
+Each alternative shows current values, a validated v1/v2 YAML patch, measured
+evidence and the next run needed. Quality alternatives explicitly distinguish
+excluding a sample globally from merely removing anchor eligibility: an auxiliary
+can remain attached. Detection/collection changes require fresh scan evidence.
+Regional keypoint rules are not rewritten. Test alternatives individually and
+check other members for unwanted fragmentation after rebuilding.
+
+The advice does not classify assignments as incorrect or guarantee detachment.
+Another route may reattach the observation. Inherited merge membership directs
+you to the merge chain, and face-associated bodies direct you to the linked face.
+Historical/missing matching proofs, candidate seeds and certified similarity
+lower bounds do not yield invented numeric matching thresholds.
+
 The scene catalogue uses the current scan head, including a partial scan whose
 status is shown. Older superseded scans do not populate the unassigned group.
 Changing the Scene ID or using `Load / refresh` rebuilds the tree. Ambiguous
