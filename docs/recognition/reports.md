@@ -473,3 +473,35 @@ scope/model. Geometry layers independently control boxes, facial landmarks, pose
 points, skeletons and available retained masks. Hover over points for source
 coordinates and retained confidence. Missing masks or point confidence are
 explicitly unavailable; browsing never runs models or changes recognition data.
+
+`Decision details` presents quality gates, retained matching stages, evidence IDs,
+merge edges and final membership as a tree. Each stage identifies its configuration
+source. Double-click evidence to inspect it. Recorded reference-bank selection
+and role are displayed only when retained; membership or an anchor label does not
+prove actual use in later comparisons. Recorded rivals keep unknown IDs/scores
+unknown instead of substituting a newly calculated candidate.
+
+`Calculate candidates` explicitly compares retained embeddings in the same scope
+and model. Face references use strict-role/quality admission and the production
+diversity sampler; body references use a bounded deterministic cue sample of
+accepted anchors from the current collection contract. The selected observation
+and same-cue references are excluded from scoring. Mean/minimum/maximum cosine
+similarities, reference count, current owner and clickable best witness are shown.
+These are exploratory comparisons, not probabilities or a replay of matching:
+tracking, contextual gates, support and complete body-bank construction are not
+rerun. Missing embeddings require re-collection; browsing does not run models.
+Configured reference/person budgets apply; limited results and database changes
+are disclosed. Closing or cancelling interrupts the calculation.
+
+`Review queue` scans metadata across the complete scene-inspector scope, retaining
+the top 500 candidates and showing 80 per page. Every priority has explicit reasons:
+retained rejection (+5), recorded lead at most 0.03 (+4), face sharpness below the
+current role floor (+3), historical/missing decision (+2), unknown role (+1).
+This is a review heuristic, not an error probability or an automatic exclusion.
+
+`Unassigned summary` streams the entry scene's retained unassigned metadata and
+shows state counts plus individual gate failures/unknowns, measured ranges and
+distance to the nearest failed boundary. Gate counts overlap; alternative anchor
+and auxiliary paths remain separate. Historical versus current thresholds are
+labeled. Double-click a state to open its filtered observations. Both aggregate
+views run only when requested and read neither images nor embedding columns.

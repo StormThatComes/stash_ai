@@ -135,7 +135,8 @@ def face(decisions, assignment, merges, target):
         elif route == 'candidate_group' and proof.get('stage') == 'match':
             summary = 'This observation matched the existing candidate group before its support was resolved.'
         variants.append(dict(reason=route, summary=summary, stage=proof.get('stage'),
-                             final_reason=reason, policy=item['policy'], reference_role=payload.get('reference_role'), metrics=data,
+                             final_reason=reason, policy=item['policy'], reference_role=payload.get('reference_role'),
+                             reference_selected=payload.get('reference_selected'), metrics=data,
                              references=references(proof, 'face'), merge_source=source if source != target else None,
                              merges=path))
     return dict(evidence_status=assignment['evidence_status'], status='accepted',

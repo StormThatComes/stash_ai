@@ -114,7 +114,8 @@ def render(image, geometry, layers=None):
         color = COLORS[kind]
         if shape.get('context') and not shape['selected']:color=tuple(c//2 for c in color)
         if kind=='body' and layers.get('masks'):
-            packed=data.get('pose_refinement',{}).get('encoder_mask')
+            refinement=data.get('pose_refinement')
+            packed=refinement.get('encoder_mask') if isinstance(refinement,dict) else None
             if packed:
                 try:
                     from .person_geometry import unpack_mask
