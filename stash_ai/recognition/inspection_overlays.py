@@ -2,7 +2,7 @@
 import json
 import math
 
-from PIL import ImageDraw
+from PIL import Image, ImageDraw
 
 from .body_observations import available, contract as body_contract
 from .person_signal import contract as person_contract
@@ -76,7 +76,7 @@ def _numbers(value, count):
         type(v) in (int,float) and math.isfinite(v) for v in value)
 
 
-def render(image, geometry):
+def render(image, geometry, layers=None):
     """Return an annotated copy and a caption; source bounds must be known."""
     if image is None:
         return image, ''
@@ -84,10 +84,11 @@ def render(image, geometry):
     if not _numbers(bounds,4) or not (0 <= bounds[0] < bounds[2] and 0 <= bounds[1] < bounds[3]):
         return image, 'Geometry unavailable: source crop bounds missing or invalid.'
     left, top, right, bottom = bounds
+    layers=layers or dict(face_boxes=True,body_boxes=True,landmarks=True,keypoints=True,skeleton=True,masks=False)
     sx, sy = image.width/(right-left), image.height/(bottom-top)
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
-    shown = []
+    shown = [];masks_shown=0
     # Smaller face markers on top of larger pose markers keep coincident points
     # distinguishable. Selection is indicated by box width and caption.
     for shape in sorted(geometry['shapes'], key=lambda s: (s['kind'] == 'face', s['selected'])):
@@ -111,18 +112,54 @@ def render(image, geometry):
         mapped = [((p[0]-left)*sx,(p[1]-top)*sy) if _numbers(p,2) and
                   left <= p[0] < right and top <= p[1] < bottom else None for p in points]
         color = COLORS[kind]
-        if kind == 'body' and len(mapped) == 17:
+        if shape.get('context') and not shape['selected']:color=tuple(c//2 for c in color)
+        if kind=='body' and layers.get('masks'):
+            packed=data.get('pose_refinement',{}).get('encoder_mask')
+            if packed:
+                try:
+                    from .person_geometry import unpack_mask
+                    w,h=round(box[2]-box[0]),round(box[3]-box[1])
+                    if not 0<w*h<=4000000:raise ValueError('Mask too large')
+                    with Image.fromarray(unpack_mask(packed,w,h).astype('uint8')*70) as mask:
+                        with mask.transform(image.size,Image.Transform.AFFINE,(1/sx,0,left-box[0],0,1/sy,top-box[1])) as alpha:
+                            annotated.paste(COLORS['body'],(0,0,*image.size),alpha)
+                            masks_shown+=1
+                except (ValueError,TypeError,OverflowError):pass
+        if kind == 'body' and len(mapped) == 17 and layers.get('skeleton'):
             for a,b in SKELETON:
                 if mapped[a] is not None and mapped[b] is not None:
                     draw.line((mapped[a],mapped[b]), fill=color, width=1)
-        draw.rectangle((min(image.width-1,max(0,(clipped[0]-left)*sx)),min(image.height-1,max(0,(clipped[1]-top)*sy)),
+        if layers.get('face_boxes' if kind=='face' else 'body_boxes'):
+            draw.rectangle((min(image.width-1,max(0,(clipped[0]-left)*sx)),min(image.height-1,max(0,(clipped[1]-top)*sy)),
                         min(image.width-1,(clipped[2]-left)*sx),min(image.height-1,(clipped[3]-top)*sy)),
                        outline=color, width=2 if shape['selected'] else 1)
-        for point in mapped:
+        for point in mapped if layers.get('landmarks' if kind=='face' else 'keypoints') else ():
             if point is not None:
                 x,y = point
                 radius = 2 if kind == 'face' else 3
                 draw.ellipse((x-radius,y-radius,x+radius,y+radius), fill=color)
-        shown.append(f"{'Selected' if shape['selected'] else 'Linked'} {kind}: {'yellow' if kind=='face' else 'green'} ({sum(p is not None for p in mapped)} points)")
+        shown.append(f"{'Selected' if shape['selected'] else ('Context' if shape.get('context') else 'Linked')} {kind}: {'yellow' if kind=='face' else 'green'} ({sum(p is not None for p in mapped)} points)")
     caption = '; '.join(shown) if shown else 'No retained geometry intersects this crop.'
+    if layers.get('masks') and not masks_shown:caption+=' · No usable retained mask in this viewport.'
     return annotated, caption + ((' · '+' '.join(geometry['notes'])) if geometry['notes'] else '')
+
+
+def point_info(geometry,size,x,y):
+    from .pose_anchor_rules import POINTS
+    bounds=geometry.get('bounds')
+    if not _numbers(bounds,4) or bounds[2]<=bounds[0] or bounds[3]<=bounds[1]:return ''
+    sx,sy=size[0]/(bounds[2]-bounds[0]),size[1]/(bounds[3]-bounds[1])
+    found=[]
+    for shape in geometry['shapes']:
+        data=shape['geometry'];face=shape['kind']=='face'
+        if face and not isinstance(data,list) or not face and not isinstance(data,dict):continue
+        points=[data[i:i+2] for i in range(4,min(14,len(data)),2)] if face else data.get('keypoints') or []
+        if not isinstance(points,(list,tuple)):continue
+        for i,p in enumerate(points[:5] if face else points[:17]):
+            if not _numbers(p,2) or min(p)<0:continue
+            d=((p[0]-bounds[0])*sx-x)**2+((p[1]-bounds[1])*sy-y)**2
+            if d<=64:
+                scores=[] if face else data.get('keypoint_scores')
+                confidence=scores[i] if isinstance(scores,(list,tuple)) and i<len(scores) else None
+                found.append((d,f'{"Face landmark "+str(i) if face else POINTS[i]} · source ({p[0]:g}, {p[1]:g}) · confidence: {confidence if confidence is not None else "not retained"}'))
+    return min(found,key=lambda p:p[0])[1] if found else ''

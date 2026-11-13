@@ -457,3 +457,19 @@ drag panning; `Sync viewports` links them explicitly. Refresh restores open grou
 and the selected observation where still present. Back/Forward retains up to 50
 session locations including filters and viewports. Selections beyond a loaded
 page are restored explicitly without walking every intervening page.
+
+`Full cue` restores the verified VTT frame and displays retained detections from
+that exact scan/cue (current body contract plus the selected historical body, if
+applicable). Double-click a detection to inspect it. Cue arrows and `Nearby cues`
+follow actual VTT order and timestamps; they do not infer continuity or tracking.
+Source and available selected-crop signatures are checked before displaying the
+full frame. Offline mode keeps retained crops available.
+
+`Gallery` pages the selected state or search result in groups of 12 thumbnails.
+`Pin A → B` holds any inspected observation in the second panel while navigating;
+`Unpin` restores recorded references. Pinned user comparisons are labeled separately
+from decision evidence. `Open observation…` resolves an ID only within the active
+scope/model. Geometry layers independently control boxes, facial landmarks, pose
+points, skeletons and available retained masks. Hover over points for source
+coordinates and retained confidence. Missing masks or point confidence are
+explicitly unavailable; browsing never runs models or changes recognition data.
