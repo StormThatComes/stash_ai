@@ -60,6 +60,15 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         assert 'known_identity' in ui.notes.get('1.0','end')
         assert 'If this assignment is incorrect' in ui.notes.get('1.0','end')
         assert ui.images.panels['A'].image.size == (37,43)
+        assert 'Selected face: yellow' in ui.images.panels['A'].caption.get()
+        clean, annotated = ui.preview_images['A']
+        assert clean[0].tobytes() != annotated[0].tobytes()
+        ui.show_geometry.set(False)
+        ui.toggle_geometry()
+        assert ui.images.panels['A'].image is clean[0]
+        ui.show_geometry.set(True)
+        ui.toggle_geometry()
+        assert ui.images.panels['A'].image is annotated[0]
         assert 'No recorded reference' in ui.images.panels['B'].caption.get()
     finally:
         ui.close()
@@ -374,19 +383,26 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         expand(withheld)
         expand(unknown)  # Queued expansions must all complete.
         wait_for(lambda: all(ui.branches[k]['loaded'] for k in (face,body,unknown,withheld)))
-        assert ui.branches[face]['offset']==2 and ui.branches[body]['offset']==1
-        while ui.branches[face]['offset']<6:
-            marker=ui.branches[face]['marker']
-            old=ui.branches[face]['offset']
-            ui.listing.selection_set(marker)
-            wait_for(lambda: ui.branches[face]['offset']>old)
-        faces = [ui.rows[k] for k in ui.listing.get_children(face)]
-        bodies = [ui.rows[k] for k in ui.listing.get_children(body)]
+        assert ui.branches[face]['offset']==0 and ui.branches[body]['offset']==0
+        face_states = list(ui.listing.get_children(face))
+        body_states = list(ui.listing.get_children(body))
+        assert {ui.listing.item(k,'text') for k in face_states}=={'anchor · 3','auxiliary · 3'}
+        assert {ui.listing.item(k,'text') for k in body_states}=={'auxiliary · 1'}
+        for state in face_states+body_states:
+            expand(state)
+        wait_for(lambda: all(ui.branches[k]['loaded'] for k in face_states+body_states))
+        for state in face_states:
+            assert ui.branches[state]['offset']==2
+            ui.listing.selection_set(ui.branches[state]['marker'])
+            wait_for(lambda: ui.branches[state]['offset']==3)
+            assert all(ui.listing.item(k,'values')[-1]==ui.branches[state]['state'] for k in ui.listing.get_children(state))
+        faces = [ui.rows[k] for state in face_states for k in ui.listing.get_children(state)]
+        bodies = [ui.rows[k] for state in body_states for k in ui.listing.get_children(state)]
         assert len({row['id'] for row in faces})==6
         assert {row['kind'] for row in faces}=={'face'}
         assert {row['scene'] for row in faces}=={'2','10'}
         assert [row['id'] for row in bodies]==['accepted-body']
-        assert ui.branches[body]['offset']==1
+        assert ui.branches[body_states[0]]['offset']==1
         empty = next(k for k,v in ui.branches.items() if not v['unassigned'] and v['kind']=='body' and v['reader'].selector[1]=='internal')
         expand(empty)
         wait_for(lambda: ui.branches[empty]['loaded'])
@@ -1010,3 +1026,65 @@ def test_detachment_candidate_seed_stage_survives_reader_projection(tmp_path):
     assert detail['trace']['decisions'][0]['stage'] == 'seed'
     assert not matching_patches(detail['suggestions'])
     assert 'started a candidate group' in describe(detail['suggestions'])
+
+
+def test_member_state_groups_filter_before_pagination_and_match_detail_roles(tmp_path, monkeypatch):
+    import json
+    from stash_ai.recognition import identity_inspection
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.models import namespace
+    config, person = scene_fixture(tmp_path)
+    reader = IdentityReader(config, identity_id=person)
+    faces = reader.page(kind='face')[0]
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        candidates = [dict(db.execute('SELECT * FROM candidates WHERE json_extract(payload,\'$.observation\')=?', (r['id'],)).fetchone()) for r in faces]
+        # IDs are random and multiple observations share a cue; set roles
+        # explicitly instead of assuming the page preserves insertion order.
+        for index,candidate in enumerate(candidates):
+            payload=json.loads(candidate['payload'])
+            payload['reason']='known_identity' if index in (0,4,5) else 'auxiliary_identity'
+            candidate['payload']=json.dumps(payload)
+            db.execute('UPDATE candidates SET payload=? WHERE id=?',(candidate['payload'],candidate['id']))
+        # Current decisions win over historical roles, even when inserted earlier.
+        old = dict(candidates[0], id='older-role', policy='old-policy')
+        payload = json.loads(old['payload']); payload['reason']='auxiliary_identity'
+        old['payload']=json.dumps(payload)
+        db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',tuple(old.values()))
+        db.execute('UPDATE candidates SET policy=? WHERE id=?',('old-policy',candidates[1]['id']))
+        db.execute('DELETE FROM candidates WHERE id=?',(candidates[2]['id'],))
+        db.execute("UPDATE candidates SET payload=json_set(payload,'$.reason','hybrid_query') WHERE id=?",(candidates[3]['id'],))
+        mixed = dict(candidates[4],id='mixed-current')
+        payload=json.loads(mixed['payload']); payload['reason']='auxiliary_identity'
+        mixed['payload']=json.dumps(payload)
+        db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',tuple(mixed.values()))
+        # A predecessor's accepted proof still explains membership in the survivor.
+        db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',('predecessor','scope',namespace(config),0,None,'predecessor-token'))
+        db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',('predecessor',person,1,'{}','local'))
+        db.execute("UPDATE candidates SET person='predecessor',payload=json_set(payload,'$.reason','known_identity') WHERE id=?",(candidates[5]['id'],))
+        db.commit()
+    before=config.database.read_bytes()
+    expected = {r['id']:reader.detail('face',r['id'])['trace']['role'] for r in faces}
+    monkeypatch.setattr(identity_inspection,'PAGE_SIZE',1)
+    with monkeypatch.context() as context:
+        context.setattr(identity_inspection,'cold_crop',lambda *_: pytest.fail('Grouping loaded pixels'))
+        context.setattr('stash_ai.recognition.decision_contexts.unpack',lambda *_: pytest.fail('Grouping loaded full decision proofs'))
+        groups=reader.states('face')
+        assert {g['state']:g['count'] for g in groups}=={'anchor':2,'auxiliary':1,'attachment':1,'unknown':2}
+        seen=[]
+        for group in groups:
+            for offset in range(group['count']):
+                rows,more=reader.page(kind='face',state=group['state'],offset=offset,accepted_only=True)
+                assert len(rows)==1 and more==(offset+1<group['count'])
+                row=rows[0]
+                assert row['state']==row['role']==expected[row['id']]==group['state']
+                seen.append(row['id'])
+        assert len(set(seen))==len(seen)==6
+        assert reader.states('body')==[dict(state='auxiliary',count=1)]
+        assert reader.page(kind='body',state='anchor',accepted_only=True)==([],False)
+        assert reader.page(kind='face',state="' OR 1=1 --")==([],False)
+        assert reader.page(kind='body',state='provisional')[0][0]['id']=='provisional-body'
+        assert IdentityReader(config,identity_id='internal').states('face')==[dict(state='unknown',count=1)]
+        with pytest.raises(ValueError,match='kind'):
+            reader.states('invalid')
+    assert config.database.read_bytes()==before

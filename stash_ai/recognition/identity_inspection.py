@@ -14,6 +14,8 @@ from .cold_payloads import get as cold_crop
 from .fragmentation_report import _open_readonly
 from .identity_report import _assignment, _decisions, _select
 from .inspection_detachment import suggest
+from .inspection_members import query as member_query
+from .inspection_overlays import read as overlay_geometry
 from .models import namespace
 
 TABLES = {'face': ('observations', 'members'), 'body': ('body_observations', 'body_members')}
@@ -27,7 +29,7 @@ class IdentityReader:
         self.face_policy = matching_policy(config)
         self.body_policy = body_policy(config)
 
-    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False, kind=None):
+    def page(self, *, scene=None, cue=None, observation=None, offset=0, accepted_only=False, kind=None, state=None):
         """Page metadata, optionally restricted to one kind before pagination.
 
         A pasted observation ID uses the observation primary key.
@@ -36,30 +38,27 @@ class IdentityReader:
             raise ValueError('Observation kind must be face or body.')
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
-            queries, args = [], []
-            for sample_kind, (observations, members) in TABLES.items():
-                if kind is not None and sample_kind != kind:
-                    continue
-                if sample_kind == 'body' and not bodies_available(db):
-                    continue
-                state = "m.status" if sample_kind == 'body' else "'accepted'"
-                role = "m.role" if sample_kind == 'body' else "'member'"
-                sql = (f"SELECT '{sample_kind}' AS kind,o.id,s.scene,o.cue,o.seconds,{state} AS status,{role} AS role "
-                       f'FROM {members} m JOIN {observations} o ON o.id=m.observation '
-                       'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=?')
-                args.extend((person['id'], person['scope'], person['namespace']))
-                if accepted_only and sample_kind == 'body':
-                    sql += " AND m.status='accepted'"
-                for column, value in (('s.scene', scene), ('o.cue', cue), ('o.id', observation)):
-                    if value is not None:
-                        sql += f' AND {column}=?'
-                        args.append(value)
-                queries.append(sql)
-            if not queries:
+            kinds = [k for k in TABLES if (kind is None or kind == k) and (k == 'face' or bodies_available(db))]
+            if not kinds:
                 return [], False
-            sql = 'SELECT * FROM (' + ' UNION ALL '.join(queries) + ') ORDER BY CAST(scene AS INTEGER),scene,cue,kind,id LIMIT ? OFFSET ?'
+            sql, args = member_query(person, self.face_policy, kinds, filters=(scene,cue,observation), accepted_only=accepted_only)
+            if state is not None:
+                sql += ' WHERE state=?'
+                args.append(state)
+            sql += ' ORDER BY CAST(scene AS INTEGER),scene,cue,kind,id LIMIT ? OFFSET ?'
             rows = [dict(row) for row in db.execute(sql, [*args, PAGE_SIZE+1, offset])]
             return rows[:PAGE_SIZE], len(rows) > PAGE_SIZE
+
+    def states(self, kind):
+        """Count accepted member roles across all scenes, only on kind expansion."""
+        if kind not in TABLES:
+            raise ValueError('Observation kind must be face or body.')
+        with closing(_open_readonly(self.config.database)) as db:
+            _, person = _select(db, *self.selector)
+            if kind == 'body' and not bodies_available(db):
+                return []
+            sql, args = member_query(person, self.face_policy, [kind], filters=(None,None,None), accepted_only=True)
+            return [dict(row) for row in db.execute('SELECT state,COUNT(*) AS count FROM ('+sql+') GROUP BY state ORDER BY state', args)]
 
     def detail(self, kind, address):
         with closing(_open_readonly(self.config.database)) as db:
@@ -108,6 +107,7 @@ class IdentityReader:
                                 for r in db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? ORDER BY id',
                                                     (row['scan'], address))]
             return dict(trace=trace, associations=associations, image=_image(db, person, kind, address),
+                        geometry=overlay_geometry(db, self.config, person, kind, address),
                         suggestions=suggest(self.config, kind, trace, admission), admission=admission,
                         rejection=row['rejected'], scan_status=row['scan_status'], contract_current=contract_current,
                         scene=row['scene'], cue=row['cue'], seconds=row['seconds'], scope=person['scope'])
@@ -116,6 +116,12 @@ class IdentityReader:
         with closing(_open_readonly(self.config.database)) as db:
             _, person = _select(db, *self.selector)
             return _image(db, person, kind, address)
+
+    def preview(self, kind, address):
+        with closing(_open_readonly(self.config.database)) as db:
+            _, person = _select(db, *self.selector)
+            return dict(image=_image(db, person, kind, address),
+                        geometry=overlay_geometry(db, self.config, person, kind, address))
 
 
 class RelatedMerges(dict):
