@@ -68,7 +68,10 @@ def describe_diagnostics(result):
     return '\n' + '\n'.join(lines)
 
 
-class Inspector:
+from .inspection_visual import Visual
+
+
+class Inspector(Visual):
     def __init__(self, root, reader, title, observation=None, *, previews=None):
         self.root, self.reader = root, reader
         self.previews, self.preview_scope = previews, None
@@ -126,6 +129,7 @@ class Inspector:
         self.notes.configure(yscrollcommand=scrollbar.set)
         self.status = tk.StringVar()
         ttk.Label(panel, textvariable=self.status).grid(row=2, column=0, columnspan=2, sticky='w')
+        self.build_visual(right)
         self.rows = {}
         self.poll_id = root.after(30, self.poll)
         self.search()
@@ -175,7 +179,11 @@ class Inspector:
         self.preview_scope = None
         self.preview_images.clear()
         self.images.show('A', None, '')
-        self.images.show('B', None, '')
+        self.preview_data.clear()
+        if self.pin:
+            self.display_preview('B', self.pin['preview'])
+        else:
+            self.images.show('B', None, '')
         self.references.set('')
         self.references.configure(values=())
         self.proof_button.state(['disabled'])
@@ -234,16 +242,18 @@ class Inspector:
         self.prepare_preview(kind, address, result['scope'], result)
         return result
 
-    def prepare_preview(self, kind, address, scope, result):
+    def prepare_preview(self, kind, address, scope, result, *, full=False, cue=None, layers=None):
         previews = getattr(local, 'preview', None) or self.previews
         if previews is not None:
-            result['image'] = previews.image(kind, address, scope, result['image'], geometry=result['geometry'])
+            result['image'] = previews.image(kind, address, scope, result['image'], geometry=result['geometry'], full=full, cue=cue)
         check_cancelled()
         image, caption = result['image']
-        annotated, label = render_geometry(image, result['geometry'])
+        annotated, label = render_geometry(image, result['geometry'], layers)
         result['annotated'] = annotated, caption + (' · '+label if label else '')
 
     def display_preview(self, panel, result):
+        self.visual_preview(panel,result)
+        if panel=='B' and self.pin:self.pin['preview']=result
         self.preview_images[panel] = result['image'], result['annotated']
         self.images.show(panel, *self.preview_images[panel][int(self.show_geometry.get())])
 
@@ -258,9 +268,7 @@ class Inspector:
 
     def show_detail(self, row, result):
         self.preview_scope = result['scope']
-        self.images.show('A', None, 'Loading crop…')
-        self.image_worker.request(partial(self.load_reference, self.detail_reader, row['kind'],row['id'],result['scope']),
-                                  partial(self.display_preview,'A'),partial(self.image_error,'A'))
+        self.request_selected()
         trace = result['trace']
         self.text(describe_advice(result.get('suggestions')) + describe(trace) + describe_diagnostics(result))
         self.proofs.extend(result.get('recorded_decisions', []))
@@ -275,27 +283,30 @@ class Inspector:
         if labels:
             self.references.current(0)
             self.show_reference()
-        else:
+        elif not self.pin:
             self.images.show('B', None, 'No recorded reference image')
 
     def show_reference(self, _event=None):
+        if self.pin:return
         index = self.references.current()
         if index < 0:
+            self.preview_images.pop('B',None);self.preview_data.pop('B',None)
+            self.images.show('B',None,'No recorded reference image')
             return
         ref = self.refs[index]
         self.preview_images.pop('B', None)
         self.images.show('B', None, 'Loading reference…')
-        self.reference_worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope),
+        self.reference_worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope, layers=dict(self.layers)),
                             partial(self.display_preview, 'B'), partial(self.image_error,'B'))
 
-    def load_reference(self, reader, kind, address, scope):
-        key = (str(reader.config.database),stamp(reader.config.database),scope,kind,address)
+    def load_reference(self, reader, kind, address, scope, *, full=False, cue=None, layers=None):
+        key = (str(reader.config.database),stamp(reader.config.database),scope,kind,address,full,cue,tuple(sorted((layers or {}).items())))
         cache = getattr(self,'image_cache',None)
         result = cache.get(key) if cache else None
         if result is not None:
             return result
         result = reader.preview(kind, address)
-        self.prepare_preview(kind, address, scope, result)
+        self.prepare_preview(kind, address, scope, result, full=full, cue=cue, layers=layers)
         if cache and result['image'][0] is not None and stamp(reader.config.database)==key[1]:
             cache.put(key,result)
         return result
@@ -306,9 +317,7 @@ class Inspector:
     def retry_images(self):
         self.image_cache.clear()
         if self.current_row and self.preview_scope:
-            row=self.current_row
-            self.image_worker.request(partial(self.load_reference,row['reader'],row['kind'],row['id'],self.preview_scope),
-                                      partial(self.display_preview,'A'),partial(self.image_error,'A'))
+            self.request_selected(self.context_cue)
         self.show_reference()
 
     def show_proofs(self):
@@ -332,6 +341,7 @@ class Inspector:
         self.poll_id = self.root.after(30, self.poll)
 
     def close(self):
+        for window in self.visual_windows:window.close()
         self.root.after_cancel(self.poll_id)
         self.image_worker.close()
         self.reference_worker.close()

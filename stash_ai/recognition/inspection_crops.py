@@ -43,8 +43,8 @@ class VttPreviews:
     def fork(self):
         return type(self)(self.config, client_factory=self.client_factory, source_factory=self.source_factory)
 
-    def image(self, kind, address, scope, retained, *, geometry=None):
-        if retained[0] is not None:
+    def image(self, kind, address, scope, retained, *, geometry=None, full=False, cue=None):
+        if retained[0] is not None and not full:
             return retained
         check_cancelled()
         caption = retained[1]
@@ -80,29 +80,43 @@ class VttPreviews:
                     verify_portrait_cue(self.source, row)
                 except ValueError:
                     raise PreviewUnavailable('VTT cue does not match the recorded observation.') from None
+            selected_index=index
+            if cue is not None:
+                if type(cue) is not int or not 0<=cue<len(self.source.cues):
+                    raise PreviewUnavailable('Cue is outside this VTT source.')
+                index=cue
             quality, source_geometry = json.loads(row['quality']), json.loads(row['geometry'])
             with self.source.thumbnail(index) as frame:
                 # PIL crops at rounded integer pixel edges; use that exact
                 # viewport when mapping source geometry onto the preview.
                 check_cancelled()
-                bounds = tuple(round(v) for v in _bounds(kind, source_geometry, quality, frame.size))
-                with frame.crop(bounds) as crop:
-                    image = crop.convert('RGB')
+                bounds = tuple(round(v) for v in _bounds(kind, source_geometry, quality, frame.size)) if index==selected_index else (0,0,*frame.size)
+                with frame.crop(bounds) as crop:image=crop.convert('RGB')
+                full_image=frame.convert('RGB') if full else None
             try:
                 if not image.width or not image.height:
                     raise PreviewUnavailable('Recorded geometry has no source pixels.')
                 expected = (quality.get('evidence_pixel_sha256') if kind == 'face' else
                             (quality.get('quality') or {}).get('pixel_digest'))
-                if expected is not None:
+                if expected is not None and index==selected_index:
                     actual = hashlib.sha256(str(image.size).encode('ascii') + image.tobytes()).hexdigest()
                     if actual != expected:
                         raise PreviewUnavailable('Reconstructed pixels differ from the recorded signature.')
                 verified = 'pixels verified' if expected is not None else 'source verified; original crop signature unavailable'
                 if geometry is not None:
-                    geometry['bounds'] = list(bounds)
+                    geometry['bounds'] = [0,0,*full_image.size] if full else list(bounds)
+                    geometry.update(cue_index=index,cue_count=len(self.source.cues),cue_seconds=self.source.cues[index].start)
+                    if full:
+                        from .inspection_context import cue_geometry
+                        geometry['shapes']=cue_geometry(self.config,row['scan'],index,kind,address)
+                        geometry['notes']=[]
+                if full:
+                    image.close();image=full_image;full_image=None
+                    verified='VTT source verified'+('; selected crop pixels verified' if expected is not None and index==selected_index else '')
                 return image, f"Scene {row['scene']} · cue {index} · {kind} · Reconstructed from VTT · {verified}"
             except BaseException:
                 image.close()
+                if full_image is not None:full_image.close()
                 raise
         except Cancelled:
             self._close_source()

@@ -76,6 +76,12 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         ui.images.fit('A')
         assert .05<=ui.images.panels['A'].zoom<=8.
         assert 'No recorded reference' in ui.images.panels['B'].caption.get()
+        ui.pin_selected()
+        pinned=ui.images.panels['B'].image
+        ui.clear_detail()
+        assert ui.pin is not None and ui.images.panels['B'].image is pinned
+        ui.unpin()
+        assert ui.pin is None and ui.images.panels['B'].image is None
     finally:
         ui.close()
         root.destroy()
