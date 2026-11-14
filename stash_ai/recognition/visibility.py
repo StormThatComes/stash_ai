@@ -6,7 +6,9 @@ import math
 from .config import digest
 from .models import ASSETS, verified_bytes
 
-CONTRACT = {'version': 3, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+MIN_FACE_SOURCE_FRACTION = .85
+
+CONTRACT = {'version': 4, 'partial_source_floor': MIN_FACE_SOURCE_FRACTION, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25-eye-roll-aligned',
             'region': 'source-face-box-ellipse-0.45w-0.48h-inverse-mapped',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
@@ -20,6 +22,14 @@ class VisibilityError(RuntimeError):
 
 class VisibilityGeometryError(ValueError):
     """This observation has no measurable face region in the source image."""
+
+    def __init__(self, message, *, source_pixels=None, face_pixels=None):
+        super().__init__(message)
+        self.diagnostics = {'visibility_geometry_error': message}
+        if face_pixels is not None:
+            self.diagnostics.update(visibility_source_pixels=source_pixels, visibility_face_pixels=face_pixels)
+            if face_pixels:
+                self.diagnostics['visibility_source_fraction'] = source_pixels / face_pixels
 
 
 def required(policy):
@@ -165,7 +175,18 @@ def _constants():
 
 
 def prepare(image, face, *, allow_partial=False):
-    """Remove eye-line roll; sample the source ellipse and real pixels together."""
+    """Return aligned pixels and the real ellipse for geometric sharpness."""
+    blob, region, _ = _prepare(image, face, 0. if allow_partial else 1.)
+    return blob, region
+
+
+def prepare_measurement(image, face):
+    """Face completeness is a scan admission gate. Measure geometry the same way in every stage."""
+    return _prepare(image, face, MIN_FACE_SOURCE_FRACTION)
+
+
+def _prepare(image, face, minimum_source_fraction):
+    """Align real pixels and preserve the full ellipse size for FaceOcc."""
     import numpy as np
     from PIL import Image
     points = np.asarray(face.landmarks, dtype=np.float64)
@@ -197,18 +218,20 @@ def prepare(image, face, *, allow_partial=False):
     # aligned ellipse that could silently discard an occluder near its edges.
     region = ((dx / (width * .45 * 256 / side)) ** 2
               + (dy / (height * .48 * 256 / side)) ** 2 <= 1)
-    # Exclude synthetic padding from the visibility denominator.
+    # Padding cannot contribute to foreground or sharpness.
     source_x, source_y = center_x + dx * scale, center_y + dy * scale
     real = ((source_x >= 0) & (source_x < image.width)
             & (source_y >= 0) & (source_y < image.height))
-    if allow_partial:
-        region = region & real
-    if not region.any() or not real[region].all():
-        raise VisibilityGeometryError('Visibility face region extends beyond the real source.')
-    return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region
+    full_count = int(region.sum())
+    region &= real
+    source_count = int(region.sum())
+    if not source_count or source_count < minimum_source_fraction * full_count:
+        raise VisibilityGeometryError('Insufficient face ellipse coverage in the real source.',
+                                      source_pixels=source_count, face_pixels=full_count)
+    return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region, full_count
 
 
-def measurement(logits, region, device, *, blob=None):
+def measurement(logits, region, device, *, blob=None, face_pixels=None):
     import numpy as np
     values = np.asarray(logits)
     if values.shape != (1, 1, 256, 256) or not np.isfinite(values).all():
@@ -218,22 +241,25 @@ def measurement(logits, region, device, *, blob=None):
         raise ValueError('Visibility face region is empty.')
     foreground = (values[0, 0] > 0) & region
     visible = int(foreground.sum())
-    result = _counts(visible,count,device)
+    result = _counts(visible, count, device, face_pixels)
     if blob is not None:
         from .foreground_quality import face
         result.update(face(blob,foreground,'faceocc_mask'))
     return result
 
 
-def _counts(visible,count,device):
-    if type(visible) is not int or type(count) is not int or count<=0 or not 0<=visible<=count:
+def _counts(visible, source_count, device, face_pixels=None):
+    count = source_count if face_pixels is None else face_pixels
+    if (type(visible) is not int or type(count) is not int or
+            not 0 < source_count <= count or not 0 <= visible <= source_count):
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
-            'visibility': {'contract': CONTRACT_ID, 'method': 'faceocc-ellipse-roll-v2', 'device': device,
+            'visibility': {'contract': CONTRACT_ID, 'method': 'faceocc-ellipse-roll-v3', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
-                           'visible_pixels': visible, 'face_pixels': count}}
+                           'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
+                           'source_fraction': source_count / count}}
 
-def device_measurements(logits,regions,device,*,inputs=None):
+def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None):
     """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
@@ -246,7 +272,9 @@ def device_measurements(logits,regions,device,*,inputs=None):
     mask=torch.from_numpy(np.stack(regions)).to(logits.device)
     foreground=(logits[:,0]>0)&mask
     visible=foreground.sum(dim=(1,2)).cpu().tolist()
-    results=[_counts(int(value),count,device) for value,count in zip(visible,counts)]
+    totals = counts if face_pixels is None else face_pixels
+    results = [_counts(int(value), count, device, total)
+               for value, count, total in zip(visible, counts, totals, strict=True)]
     if inputs is not None:
         from .foreground_quality import device_faces
         for result,quality in zip(results,device_faces(inputs,foreground)):
@@ -287,7 +315,7 @@ class FaceVisibility:
         if len(items)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         prepared=[]
         for image,face in items:
-            try:prepared.append(prepare(image,face))
+            try:prepared.append(prepare_measurement(image,face))
             except VisibilityGeometryError as error:prepared.append(error)
         result=self.measure_prepared_many(prepared)
         if len(items)==1 and isinstance(result[0],Exception):raise result[0]
@@ -297,14 +325,18 @@ class FaceVisibility:
         import numpy as np
         import torch
         if len(prepared)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
-        result=[None]*len(prepared);blobs=[];regions=[];positions=[]
+        result = [None] * len(prepared)
+        blobs, regions, positions, totals = [], [], [], []
         for index,item in enumerate(prepared):
             if isinstance(item,VisibilityGeometryError):
                 result[index]=item;continue
-            blob,region=item
+            blob, region, full_count = item
             if not isinstance(blob,np.ndarray) or blob.shape!=(1,3,256,256) or blob.dtype!=np.float32 or not np.isfinite(blob).all():
                 raise ValueError('Invalid prepared FaceOcc tensor.')
-            blobs.append(blob);regions.append(region);positions.append(index)
+            blobs.append(blob)
+            regions.append(region)
+            positions.append(index)
+            totals.append(full_count)
         if blobs:
             with torch.inference_mode():
                 inputs=torch.from_numpy(blobs[0] if len(blobs)==1 else np.concatenate(blobs)).to(self.device)
@@ -313,9 +345,10 @@ class FaceVisibility:
                     values=logits.cpu().numpy()
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
-                    measurements=[measurement(values[i:i+1],region,self.device,blob=blobs[i]) for i,region in enumerate(regions)]
+                    measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i])
+                                    for i, region in enumerate(regions)]
                 else:
-                    measurements=device_measurements(logits,regions,self.device,inputs=inputs)
+                    measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals)
             for index,value in zip(positions,measurements):result[index]=value
         return result
 

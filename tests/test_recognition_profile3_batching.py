@@ -121,3 +121,74 @@ def test_fused_flip_equals_two_forwards_with_one_model_call():
               for m,fused in zip(models,[False,True])]
     assert models[0].calls==[2,2] and models[1].calls==[4]
     for a,b in zip(rows[0][:2],rows[1][:2]):np.testing.assert_allclose(a,b,atol=1e-5)
+
+
+@pytest.mark.parametrize('batched', [False, True])
+@pytest.mark.parametrize('owned', [False, True])
+def test_drift_keeps_only_owned_quality_mask_and_reports_actual_overlap_peer(batched, owned):
+    from types import SimpleNamespace
+    from threading import get_ident
+    from stash_ai.recognition.body_collection import quality, collect
+    from stash_ai.recognition.body_observations import identifier
+    from stash_ai.recognition.config import defaults as config_defaults
+    from stash_ai.recognition.admission_report import person as person_report
+    from stash_ai.recognition.sapiensid_backend import SapiensIDFaces
+
+    boxes = [[0, 0, 64, 64]] * 2
+    points = np.array([[[8+i%5, 12+i] for i in range(17)],
+                       [[44+i%5, 12+i] for i in range(17)]], dtype='float32')
+    class SplitPose(BatchedPose):
+        def predict_many(self, frames):
+            outputs = []
+            for frame in frames:
+                xy, scores, probabilities = prediction(points.copy())
+                if len(frame) == 3:
+                    xy[1, :, 1] += 24
+                if not owned:
+                    scores[1, [5,6,11,12]] = 0
+                outputs.append((xy, scores, probabilities))
+            return outputs
+    sam = BatchedSegmenter() if batched else Segmenter()
+    def segment(positive, negative=()):
+        columns = np.indices((64,64))[1]
+        return (columns < 32 if positive[0,0] < 32 else columns >= 32), .99
+    sam.predict = segment
+    driver = RefinedPMPose(SplitPose(), sam, dict(defaults(), masked_identity_crop=True))
+    config = SimpleNamespace(data=config_defaults())
+    pose = config.data['sapiensid']['pose']
+    pose.update(backend='pmpose')
+    pose['refinement']['enabled'] = True
+    config.data['execution']['scan_cpu_workers'] = 1
+    model = object.__new__(SapiensIDFaces)
+    model.config = config
+    model.owner = get_ident()
+    collection = config.data['sapiensid']['collection']
+    collection.update(min_person_pixels=1, min_sharpness=1, min_keypoints=1, max_overlap=.65)
+    scan = '00000000-0000-0000-0000-000000000001'
+    rng = np.random.default_rng(11)
+    with Image.fromarray(rng.integers(0, 256, (64,64,3), dtype=np.uint8)) as image:
+        output = driver.predict(image, boxes)
+        people = model._people(boxes, [.99,.99], *output)
+        drift = people[1]['pose_refinement']
+        assert drift['reason'] == 'second_pass_core_drift'
+        assert 'encoder_mask' not in drift
+        np.testing.assert_array_equal(output[0][1], points[1])
+        assert ('overlap_mask' in drift) == owned
+        measurements = [quality(image, p, people, collection) for p in people]
+        assert [reason for _, reason in measurements] == ([None, None] if owned else
+            ['person_overlap','person_sharpness_mask_unavailable'])
+        for q, _ in measurements:
+            assert q['box_overlap'] == 1 and q['overlap'] == (0 if owned else 1)
+        assert bool(measurements[1][0]['sharpness_pixels']) == owned
+        items = []
+        pipeline = SimpleNamespace(collect_items=lambda db,image,rows:items.extend(rows))
+        collect(pipeline, None, model, config, scan, 0, 0., image, [], [], expected='contract',
+                captured=(people, [], measurements))
+        if not owned:
+            record = items[0][0][1]
+            peer_id = identifier(scan,0,people[1],'contract')
+            assert record['quality']['overlap_peer_observation'] == peer_id
+            policies = SimpleNamespace(resolve=lambda *args:(config,'current_configuration'))
+            report = person_report(record, config, policies, 'contract', independent=True)
+            gate = next(c for g in report['groups'] for c in g['checks'] if c['parameter'].endswith('max_overlap'))
+            assert gate['status'] == 'fail' and 'P1' in gate['note'] and 'box' in gate['note'] and peer_id in gate['note']

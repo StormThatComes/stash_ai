@@ -8,6 +8,7 @@ from .config import plain
 from .detection_session import detector_factory as default_detector, load_detector, open_scene
 from .detection_associations import REASON_LABELS, explain_associations, face_label
 from .detection_callouts import draw_leaders, label_height, layout_faces
+from .body_collection import public_person
 from .detection_masks import MaskOptions, append_details, draw_masks, draw_prompts
 from .person_audit import BOX_COLOR, _draw
 from .person_association import policy as association_policy
@@ -73,7 +74,7 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
                                                                  outline=(160, 160, 160), width=1)
                     drawn = _draw(source_overlay, person['bounds'], person['keypoints'],
                                   box_color=color, point_color=color)
-                    record['people'].append(dict(person_index=person_index, **person,
+                    record['people'].append(dict(person_index=person_index, **public_person(person),
                         drawn_indices=drawn, annotation_color=list(color)))
                 for person_index, person in enumerate(people):
                     left, _, _, bottom = person['bounds']

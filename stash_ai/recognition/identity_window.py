@@ -65,6 +65,8 @@ def describe_diagnostics(result):
         for check in group['checks']:
             value = check['measured'] if check['measured'] is not None else 'unknown'
             lines.append(f"[{check['status'].upper()}] {check.get('yaml_parameter', check['parameter'])}: {value} {check['operator']} {check['threshold']}")
+            if check.get('note'):
+                lines.append('    ' + check['note'])
         if group.get('note'):
             lines.append(group['note'])
     return '\n' + '\n'.join(lines)

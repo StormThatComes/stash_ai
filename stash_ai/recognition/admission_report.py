@@ -111,6 +111,11 @@ def face(quality, geometry, config, policies, fingerprint):
     d, c = scan.data['detection'], config.data['clustering']
     visible = quality.get('visible_face_fraction') if cached(quality) else None
     score = geometry[14] if isinstance(geometry, list) and len(geometry) == 15 else None
+    visibility = quality.get('visibility') or {}
+    coverage = visibility.get('source_fraction', quality.get('visibility_source_fraction'))
+    visibility_note = quality.get('visibility_geometry_error', 'Requires a retained valid visibility measurement.')
+    if coverage is not None:
+        visibility_note += f' Face ellipse inside the source: {coverage:.2%}.'
     checks = [
         check('detection.score_threshold', score, d['score_threshold'], '>'),
         check('detection.min_face_pixels', quality.get('pixels'), d['min_face_pixels']),
@@ -119,7 +124,7 @@ def face(quality, geometry, config, policies, fingerprint):
         check('detection.max_pose_deviation', quality.get('pose_deviation'), d['max_pose_deviation'], '<=',
               enabled=d['max_pose_deviation'] is not None),
         check('detection.min_visible_face_fraction', visible, d['min_visible_face_fraction'],
-              enabled=measurement_required(scan), note='Requires a retained valid visibility measurement when enabled.'),
+              enabled=measurement_required(scan), note=visibility_note),
         check('alignment_valid', quality.get('alignment_valid'), True, '==', note='Mandatory geometry gate; no YAML switch.'),
         check('landmarks_inside', quality.get('landmarks_inside'), True, '==',
               enabled=d['max_pose_deviation'] is not None, note='Required when the detection pose limit is enabled.'),
@@ -168,6 +173,20 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
                 ('min_sharpness', quality.get('sharpness'), '>='),
                 ('min_keypoints', quality.get('keypoints'), '>='),
                 ('max_overlap', quality.get('overlap'), '<='))]
+        for row in checks:
+            if row['parameter'].endswith('.max_overlap') and 'overlap_peer_index' in quality:
+                row['note'] = (f"Maximum against P{quality['overlap_peer_index']} in this cue "
+                               f"using {quality['overlap_pair_basis']}. Pair box overlap "
+                               f"{quality['overlap_pair_box_fraction']:.2%}.")
+                if quality.get('overlap_peer_observation'):
+                    row['note'] += f" Peer observation {quality['overlap_peer_observation']}."
+            if row['parameter'].endswith('.min_sharpness') and 'sharpness_pixels' in quality:
+                detail = person.get('pose_refinement', {})
+                row['note'] = (f"Method {quality.get('sharpness_method', 'unknown')}, "
+                               f"{quality['sharpness_pixels']} interior pixels. "
+                               f"Pose {detail.get('status', 'unavailable')}.")
+                if detail.get('reason'):
+                    row['note'] += ' ' + detail['reason'] + '.'
         groups.append(group('independent_person_collection', checks, source=source,
             note='An ambiguous face/person association can also reject the observation.'))
     else:

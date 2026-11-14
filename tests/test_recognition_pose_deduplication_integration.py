@@ -172,7 +172,7 @@ def test_audit_retains_original_candidates_and_remaps_masks_to_survivors(view):
         assert png.getpixel((90, 60)) == (180, 180, 180)  # Removed original D0 box.
         assert details['legend_offset'][1] >= 100
         if view != 'off':
-            assert record['mask_visualization']['people'][0]['displayed_stage'] == 'cleaned'
+            assert record['mask_visualization']['people'][0]['displayed_stage'] == 'quality'
         json.dumps(record, allow_nan=False)
 
 

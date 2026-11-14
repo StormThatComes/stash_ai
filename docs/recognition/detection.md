@@ -61,15 +61,15 @@ When `pose.refinement.enabled: true`, the audit also shows the
 SAM-pose2seg masks already produced during detection. The default is a **25%
 fill in the person's pose color plus a contour**. Masks and white rings around
 SAM's positive head/torso prompts are drawn below pose points and face annotations.
-A legend below the cue gives the person index, mask score, refinement status,
-rejection/skip reason and displayed mask stage. Solid contours mean the refined
-result was accepted; dashed contours mean it was rejected (including a second
-pose pass rejected for core drift). Empty/skipped masks are explicitly reported.
+The legend shows SAM validation, the pose outcome and quality-mask availability.
+A solid contour shows the exact crop-local quality mask used by recognition.
+A dashed contour shows an excluded candidate, including a shared-mask conflict.
+A validated mask can survive second-pass pose drift inside the original crop.
 
 Audit-only display switches (also apply to `--sweep`):
 
-- `--mask-view overlay`: default fill and contour; displays cleaned masks when
-  available, otherwise raw SAM masks, including rejected candidates.
+- `--mask-view overlay`: default fill and contour. Displays the quality mask when available,
+  then the cleaned or raw SAM candidate.
 - `--mask-view contour`: contours without fill, for unobstructed source details.
 - `--mask-view panels`: overlay plus one row per person below the overview,
   showing the **raw SAM mask** on the left and **cleaned mask** on the right.
@@ -325,7 +325,10 @@ measurement. Portrait quality targets remain preferences, not admission gates.
 FaceOcc receives an upright crop based on the eye-line direction, including
 sideways and upside-down faces. Visibility and foreground sharpness use the
 same rotated pixels, source ellipse and padding checks, with one segmentation
-pass per face. The quality/visibility contracts invalidate older measurements:
+pass per face. With partial boxes enabled, at least 85% of the ellipse must lie
+in the VTT cue. Off-frame pixels contribute zero to the visible fraction and are
+excluded from sharpness. Inspect Scene reports the measured source coverage.
+The quality/visibility contracts invalidate older measurements:
 the next `recognition run` reprocesses selected scenes, including faces previously
 rejected as `face_occluded`, without changing YAML thresholds or deleting the
 database. Subsequent runs reuse the updated measurements. This requires detected,

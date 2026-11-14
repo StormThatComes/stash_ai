@@ -1,4 +1,5 @@
 """One pose -> instance mask -> masked pose pass, with bounded box recovery."""
+import base64
 from contextlib import nullcontext
 import math
 
@@ -85,6 +86,13 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
     return mask, union if settings['expand_boxes'] else list(box), None
 
 
+def _retain_quality_mask(record, mask, bounds):
+    left, top, right, bottom = bounds
+    packed = np.packbits(mask[top:bottom, left:right], axis=None)
+    if packed.any():
+        record['overlap_mask'] = base64.b64encode(packed).decode('ascii')
+
+
 class RefinedPMPose:
     def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728):
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
@@ -164,7 +172,7 @@ class RefinedPMPose:
                               prompt_points=prompts.tolist())
                 from .pose_mask_capture import mask_observer
                 mask, box, reason = check_mask(mask, score, prompts, foreign, bounds[i], settings, image.size,
-                                              observe=mask_observer(image, i))
+                                              observe=mask_observer(image, record))
                 record['reason'] = reason
                 if reason:
                     continue
@@ -219,7 +227,13 @@ class RefinedPMPose:
             tolerance = max(3., .15 * math.hypot(old[2]-old[0], old[3]-old[1]))
             keep &= np.linalg.norm(new_points[offset, indices] - original[i, indices], axis=1) <= tolerance
             if keep.sum() < self.settings['min_prompt_points']:
-                records[i]['reason'] = 'second_pass_core_drift'
+                record = records[i]
+                record['reason'] = 'second_pass_core_drift'
+                # The first pose and original crop survive drift. For neighbouring
+                # boxes, reuse SAM only when its torso ownership was established.
+                has_neighbours = 'negative_points' in record
+                if not record.get('mask_conflict') and (not has_neighbours or record['separated']):
+                    _retain_quality_mask(record, mask, old)
                 continue
             # A valid torso does not establish ownership of a distal limb.
             # Check both its endpoint and the segment to its proximal joint.
@@ -232,11 +246,8 @@ class RefinedPMPose:
                     confidence[child] = 0
             # Quality needs the validated mask even when encoder masking is off.
             # Both fields share one packed crop and are stripped before storage.
-            import base64
-            left, top, right, bottom = box
-            packed = np.packbits(mask[top:bottom, left:right], axis=None)
-            records[i]['overlap_mask'] = base64.b64encode(packed).decode('ascii')
-            if records[i].get('separated') and self.settings.get('masked_identity_crop'):
+            _retain_quality_mask(records[i], mask, box)
+            if records[i].get('overlap_mask') and records[i].get('separated') and self.settings.get('masked_identity_crop'):
                 records[i]['encoder_mask'] = records[i]['overlap_mask']
             result[0][i], result[1][i] = joints, confidence
             for key in result[2]:

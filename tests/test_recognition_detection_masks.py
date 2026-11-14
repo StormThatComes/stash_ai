@@ -73,7 +73,7 @@ def test_overlay_keeps_holes_pose_colors_and_coordinates_without_extra_inference
         assert record['source_dimensions'] == [160, 100]
         assert record['source_rect'] == [11, 13, 160, 100]
         assert record['mask_visualization']['people'][0] == dict(
-            person_index=0, available_stages=['raw', 'cleaned'], displayed_stage='cleaned', second_pass_used=True)
+            person_index=0, available_stages=['raw', 'cleaned'], displayed_stage='quality', quality_mask_available=True, second_pass_used=True)
         assert record['people'][0]['pose_refinement']['box_expanded']
         json.dumps(record, allow_nan=False)  # No arrays/bitmaps leak into the manifest.
     assert detector.calls == detector.releases == 1
@@ -93,7 +93,8 @@ def test_contours_do_not_fill_and_off_does_not_capture_or_change_inference(monke
     with render(RefinedDetector(), MaskOptions(view='off')) as (png, record):
         assert png.size == (160, 100)
         assert png.getpixel((62, 60)) == (40, 60, 80)
-        assert record['people'][0]['pose_refinement'] == detector.frame_people[0]['pose_refinement']
+        from stash_ai.recognition.body_collection import public_person
+        assert record['people'][0]['pose_refinement'] == public_person(detector.frame_people[0])['pose_refinement']
         assert record['people'][0]['keypoints'] == detector.frame_people[0]['keypoints']
         assert record['people'][0]['pose_refinement']['status'] == 'refined'
     with Image.new('RGB', (160, 100)) as image:
@@ -123,8 +124,10 @@ def test_rejections_and_skips_are_explicit_and_can_be_hidden(kwargs, stages, use
         assert [p['available'] for p in details['panels']] == ['raw' in stages, 'cleaned' in stages]
     with render(RefinedDetector(**kwargs), MaskOptions(view='panels', show_rejected=False)) as (png, record):
         assert png.getpixel((62, 60)) == (40, 60, 80)
-        assert record['mask_visualization']['people'][0]['displayed_stage'] is None
-        assert not record['mask_visualization']['panels']
+        shown = record['mask_visualization']['people'][0]
+        assert shown['quality_mask_available'] == (reason == 'second_pass_core_drift')
+        assert shown['displayed_stage'] == ('quality' if shown['quality_mask_available'] else None)
+        assert bool(record['mask_visualization']['panels']) == shown['quality_mask_available']
         assert record['people'][0]['pose_refinement']['reason'] == reason
 
 
@@ -183,7 +186,7 @@ def test_captured_masks_do_not_change_results_and_are_released_on_failure():
                 for key in actual[2]:
                     np.testing.assert_array_equal(actual[2][key], expected[2][key])
                 assert actual[3] == expected[3]
-                raw, cleaned = capture.mask(0, 'raw'), capture.mask(0, 'cleaned')
+                raw, cleaned = capture.mask(actual[3][0], 'raw'), capture.mask(actual[3][0], 'cleaned')
                 assert raw[2, 2] and not cleaned[2, 2]
                 assert not cleaned[66, 46]
                 raise RuntimeError('render failed')
@@ -255,3 +258,28 @@ def test_sweep_reuses_mask_renderer_with_correct_panel_offsets_and_no_bitmap_jso
     assert all(d.calls == d.releases == d.pose.segmenter.frames == 1 and d.closed for d in detectors)
     assert not case.stash.writes and not list(tmp_path.glob('*.sqlite3*'))
     assert len(list(case.destination.iterdir())) == 2
+
+
+def test_retry_masks_stay_with_the_selected_record_and_conflicts_are_hidden():
+    detector = RefinedDetector()
+    with Image.new('RGB', (160,100)) as image, pose_mask_capture.capture_masks(image) as capture:
+        # Two attempts for P0, either of which can become the final detection.
+        first = detector.pose.predict(image, [BOX])[3][0]
+        detector.pose.settings['min_mask_score'] = 1
+        retry = detector.pose.predict(image, [BOX])[3][0]
+        assert detection_masks._stage(capture, first) == 'cleaned'
+        assert detection_masks._stage(capture, retry) == 'raw'
+        assert capture.mask(retry, 'cleaned') is None
+    detect = detector.detect
+    def conflict(image, **kwargs):
+        faces = detect(image, **kwargs)
+        record = detector.frame_people[0]['pose_refinement']
+        record.update(mask_conflict=True, reason='shared_mask_pixels')
+        record.pop('overlap_mask', None)
+        return faces
+    detector.pose.settings['min_mask_score'] = .5
+    detector.detect = conflict
+    with render(detector, MaskOptions(view='panels', show_rejected=False)) as (_, record):
+        details = record['mask_visualization']
+        assert not details['people'][0]['quality_mask_available']
+        assert details['people'][0]['displayed_stage'] is None and details['panels'] == []

@@ -30,7 +30,8 @@ face:
     max_pose_deviation: 0.5
     # Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.
     require_complete_face: true
-    # Reject face boxes extending beyond the thumbnail.
+    # Reject face boxes extending beyond the thumbnail. When false, FaceOcc requires at least 85% of its
+    # ellipse inside the frame and counts off-frame pixels as unavailable in the visibility fraction.
   recognizer:
     # Compute identity embeddings for accepted faces.
     backend: sface

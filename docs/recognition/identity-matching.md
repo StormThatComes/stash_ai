@@ -48,11 +48,12 @@ as an uncovered face. Cheap size/sharpness/geometry gates run before segmentatio
 A lazy visibility model is reused within each active phase (or across phases in
 `retain` mode); accepted VTT observations retain the raw measurement so portrait
 ranking does not repeat it.
-If `require_complete_face: false` permits a partial face whose visibility region
-extends outside the real source, that observation is rejected as
-`face_visibility_unmeasurable`, without an embedding/crop. Other valid cues continue.
-This local geometry rejection does not turn a broken or unavailable model into a
-successful scan.
+With `require_complete_face: false`, FaceOcc can measure a partial face when at
+least 85% of its ellipse is inside the source cue. The fraction divides visible
+source pixels by the full ellipse area, so missing pixels reduce the score.
+A smaller in-frame area yields `face_visibility_unmeasurable`. The inspector
+shows the geometry error and source coverage when available. With
+`require_complete_face: true`, the scan rejects incomplete boxes before FaceOcc.
 
 Fresh retained face JPEGs also obey `storage.max_crop_mb` (minimum 0.0009765625 MB).
 Encoding starts at quality 90, then reduces JPEG quality and, if needed, dimensions

@@ -165,7 +165,7 @@ def validate(settings):
 
 
 def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
-             legacy_mask_overlap=False,legacy_foreground_sharpness=False):
+             legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -228,6 +228,8 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
         evidence['body_mask_overlap'] = 'foreground-fraction-box-fallback-v1'
         if not legacy_foreground_sharpness:
             evidence['body_foreground_sharpness'] = 'sam-interior-required-v2'
+            if not legacy_drift_mask:
+                evidence['quality_mask_on_drift'] = 'owned-original-crop-v1'
     return digest(evidence)
 
 

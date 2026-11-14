@@ -222,7 +222,7 @@ class ModelProxy:
             future.cancel();raise
 
     def measure_many(self,items):
-        from .visibility import LazyVisibility,FaceVisibility,prepare,VisibilityGeometryError
+        from .visibility import LazyVisibility,FaceVisibility,prepare_measurement,VisibilityGeometryError
         self.prepare_assets()
         if len(items)>8:raise ValueError('Portrait model microbatch exceeds eight faces.')
         if isinstance(self.model,LazyVisibility) and self.model.factory is FaceVisibility:
@@ -244,7 +244,7 @@ class ModelProxy:
                     for future in futures:future.cancel()
             else:
                 for image,face in items:
-                    try:prepared.append(prepare(image,face))
+                    try:prepared.append(prepare_measurement(image,face))
                     except VisibilityGeometryError as error:prepared.append(error)
             return self.executor.submit(self.model.measure_prepared_many,prepared).result()
         owned=[(image.copy(),face) for image,face in items]

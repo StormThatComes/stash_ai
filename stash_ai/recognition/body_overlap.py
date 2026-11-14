@@ -7,7 +7,8 @@ def foreground_mask(person):
     from .person_geometry import unpack_mask
     details = person.get('pose_refinement', {})
     packed = details.get('overlap_mask')
-    if (not packed or details.get('status') != 'refined' or details.get('mask_conflict')
+    admitted = details.get('status') == 'refined' or details.get('reason') == 'second_pass_core_drift'
+    if (not packed or not admitted or details.get('mask_conflict')
             or details.get('bounds') != list(person['bounds'])):
         return None
     left, top, right, bottom = person['bounds']
@@ -16,7 +17,7 @@ def foreground_mask(person):
     return (mask, area) if area else None
 
 
-def measure(person, people):
+def measure(person, people, *, report_above=None):
     """Use intersection / this person's area, never IoU or summed overlaps.
 
     Masks are crop-local and transient. Align only the shared rectangle in
@@ -29,7 +30,8 @@ def measure(person, people):
     basis = set()
     own = None
     decoded = False
-    for other in people:
+    winning_pair = {}
+    for index, other in enumerate(people):
         if other is person:
             continue
         a, b, c, d = other['bounds']
@@ -46,10 +48,15 @@ def measure(person, people):
             shared = np.count_nonzero(own[0][y0-top:y1-top, x0-left:x1-left] &
                                       peer[0][y0-b:y1-b, x0-a:x1-a])
             fraction = shared / own[1]
-            basis.add('mask')
+            method = 'mask'
         else:
             fraction = box_fraction
-            basis.add('box')
-        overlap = max(overlap, fraction)
+            method = 'box'
+        basis.add(method)
+        if fraction > overlap:
+            overlap = fraction
+            if report_above is not None and fraction > report_above:
+                winning_pair = dict(overlap_peer_index=index, overlap_pair_basis=method,
+                                    overlap_pair_box_fraction=box_fraction)
     return dict(overlap=float(overlap), box_overlap=float(box_overlap),
-                overlap_basis='mixed' if len(basis)>1 else next(iter(basis), 'none'))
+                overlap_basis='mixed' if len(basis)>1 else next(iter(basis), 'none'), **winning_pair)
