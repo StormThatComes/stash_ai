@@ -13,6 +13,8 @@ from .identity_inspection import IdentityReader, PAGE_SIZE, TABLES, _image
 from .inspection_advice import suggest
 from .inspection_overlays import read as overlay_geometry
 from .models import namespace
+from .inspection_policy import selection
+from .scanning import scan_identity
 from .reference_roles import observation_sql
 from .scan_heads import predicate as current_scan
 
@@ -21,15 +23,17 @@ def _accepted(kind):
     return "m.person IS NOT NULL" + (" AND m.status='accepted'" if kind == 'body' else '')
 
 
-def _unassigned_query(kind):
+def _unassigned_query(kind, config, scan):
     """Share membership and displayed-state rules between counts and pages."""
     observations, members = TABLES[kind]
     status = "COALESCE(m.status,'unassigned')" if kind == 'body' else "'unassigned'"
     role = "COALESCE(m.role,'unknown')" if kind == 'body' else "'unknown'"
     state = f"COALESCE(NULLIF(o.rejected,''),CASE WHEN {status}='accepted' THEN {role} ELSE {status} END)"
-    return (f"SELECT '{kind}' AS kind,o.id,? AS scene,o.cue,o.seconds,"
+    current, args = selection(config, kind)
+    return (f"SELECT '{kind}' AS kind,o.id,s.scene,o.cue,o.seconds,"
             f'{status} AS status,{role} AS role,o.rejected,{state} AS state FROM {observations} o '
-            f'LEFT JOIN {members} m ON m.observation=o.id WHERE o.scan=? AND NOT ({_accepted(kind)})')
+            f'JOIN scans s ON s.id=o.scan LEFT JOIN {members} m ON m.observation=o.id '
+            f'WHERE o.scan=? AND NOT ({_accepted(kind)}) AND ' + current, [scan['id'], *args])
 
 
 class SceneReader:
@@ -48,19 +52,23 @@ class SceneReader:
             if len(scans) != 1:
                 raise ValueError('Scene ID occurs in multiple Stash scopes. Start with --scope.')
             scan = dict(scans[0])
+            if scan['policy_sha'] != scan_identity(self.config, self.namespace):
+                raise ValueError('No current scan matches this YAML. Run recognition for this scene, then refresh.')
             groups, unassigned_groups = {}, []
             for kind, (observations, members) in TABLES.items():
                 if kind == 'body' and not bodies_available(db):
                     continue
+                current, args = selection(self.config, kind)
                 for row in db.execute(f'SELECT p.id,p.performer,COUNT(*) AS count FROM {observations} o '
-                    f'JOIN {members} m ON m.observation=o.id JOIN people p ON p.id=m.person '
+                    f'JOIN scans s ON s.id=o.scan JOIN {members} m ON m.observation=o.id JOIN people p ON p.id=m.person '
                     f'WHERE o.scan=? AND {_accepted(kind)} AND p.scope=? AND p.namespace=? '
-                    'GROUP BY p.id,p.performer', (scan['id'], scan['scope'], self.namespace)):
+                    'AND '+current+' GROUP BY p.id,p.performer', (scan['id'], scan['scope'], self.namespace, *args)):
                     group = groups.setdefault(row['id'], dict(identity=row['id'], performer=row['performer'], count=0))
                     group['count'] += row['count']
+                query, args = _unassigned_query(kind, self.config, scan)
                 unassigned_groups.extend(dict(kind=kind, state=row['state'], count=row['count'])
-                    for row in db.execute('SELECT state,COUNT(*) AS count FROM (' + _unassigned_query(kind) +
-                                          ') GROUP BY state ORDER BY state', (scan['scene'], scan['id'])))
+                    for row in db.execute('SELECT state,COUNT(*) AS count FROM (' + query +
+                                          ') GROUP BY state ORDER BY state', args))
             # Count only scene-local metadata. All-scene member pages are loaded on expansion.
             return dict(scan=scan, unassigned=sum(g['count'] for g in unassigned_groups),
                         unassigned_groups=unassigned_groups,
@@ -92,8 +100,9 @@ class UnassignedReader:
                     continue
                 if sample_kind == 'body' and not bodies_available(db):
                     continue
-                queries.append(_unassigned_query(sample_kind))
-                args.extend((self.scan['scene'], self.scan['id']))
+                query, params = _unassigned_query(sample_kind, self.config, self.scan)
+                queries.append(query)
+                args.extend(params)
             if not queries:
                 return [], False
             sql = 'SELECT * FROM ('+' UNION ALL '.join(queries)+')'
@@ -113,10 +122,11 @@ class UnassignedReader:
     def detail(self, kind, address, *, pixels=True):
         with closing(_open_readonly(self.config.database)) as db:
             observations, members = TABLES[kind]
-            row = db.execute(f'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.geometry,o.rejected{',o.face,o.contract' if kind == 'body' else ''} FROM {observations} o LEFT JOIN {members} m ON m.observation=o.id '
-                f'WHERE o.id=? AND o.scan=? AND NOT ({_accepted(kind)})', (address, self.scan['id'])).fetchone()
+            current, args = selection(self.config, kind)
+            row = db.execute(f'SELECT o.id,o.scan,o.cue,o.seconds,o.quality,o.geometry,o.rejected{',o.face,o.contract' if kind == 'body' else ''} FROM {observations} o JOIN scans s ON s.id=o.scan LEFT JOIN {members} m ON m.observation=o.id '
+                f'WHERE o.id=? AND o.scan=? AND NOT ({_accepted(kind)}) AND '+current, (address, self.scan['id'], *args)).fetchone()
             if row is None:
-                raise ValueError('This observation is no longer unassigned in this scan. Refresh the tree.')
+                raise ValueError('This observation is no longer unassigned in the current results for this YAML. Refresh the tree.')
             policies = admission_report.Policies(db, self.config, self.scan['scope'], self.scan['namespace'])
             quality = json.loads(row['quality'])
             decisions, variants, associations = [], [], []
@@ -140,7 +150,7 @@ class UnassignedReader:
                     variants.append(_variant(item, metrics, refs))
                 if bodies_available(db):
                     associations = [dict(kind='body', observation=r[0], label='Linked body in this cue') for r in
-                        db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? ORDER BY id', (row['scan'], address))]
+                        db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? AND contract=? ORDER BY id', (row['scan'], address, contract(self.config)))]
             else:
                 admission = admission_report.person(quality, self.config, policies, row['contract'], independent=True)
                 member = db.execute('SELECT * FROM body_members WHERE observation=?', (address,)).fetchone()

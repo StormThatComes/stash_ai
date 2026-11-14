@@ -40,8 +40,9 @@ class VttPreviews:
         self.source_factory = source_factory
         self.client = self.source = self.selection = None
 
-    def fork(self):
-        return type(self)(self.config, client_factory=self.client_factory, source_factory=self.source_factory)
+    def fork(self, *, config=None):
+        return type(self)(self.config if config is None else config,
+                          client_factory=self.client_factory, source_factory=self.source_factory)
 
     def image(self, kind, address, scope, retained, *, geometry=None, full=False, cue=None):
         if retained[0] is not None and not full:

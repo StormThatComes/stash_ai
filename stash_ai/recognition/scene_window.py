@@ -54,11 +54,16 @@ class SceneInspector(Inspector):
         if not scene.isascii() or not scene.isdecimal() or int(scene)<=0:
             self.status.set('Enter a positive scene ID.')
             return
+        try:
+            config = self.reload_configuration()
+        except (OSError, ValueError) as error:
+            self.error(error)
+            return
         if not self.restoring and self.rows:
             self.restore_state=self.capture()
             self.history.record(self.restore_state)
             if scene!=self.reader.scene:self.restore_state=None
-        self.reader = SceneReader(self.reader.config, str(int(scene)), scope=self.reader.scope)
+        self.reader = SceneReader(config, str(int(scene)), scope=self.reader.scope)
         self.worker.invalidate()
         self.tree_worker.invalidate()
         self.queue.clear()
@@ -76,7 +81,7 @@ class SceneInspector(Inspector):
 
     def show_catalogue(self, result):
         self.scan = result['scan']
-        self.summary.configure(text=f"Scope {self.scan['scope']} · {self.scan['status']} scan")
+        self.summary.configure(text=f"Scope {self.scan['scope']} · {self.scan['status']} scan · Current YAML results")
         if self.view_filters:
             from .inspection_search import SearchReader
             reader=SearchReader(self.reader,self.view_filters,scan=self.scan)
@@ -88,7 +93,7 @@ class SceneInspector(Inspector):
             label = (f"Performer {group['performer']}" if group['performer'] else
                      f"Identity {group['identity'][:12]} · no Stash performer")
             item = self.listing.insert('', 'end', text=label + f" · {group['count']} in scene")
-            description = f"Identity {group['identity']}\nAll retained scenes. Expand Face or Body to load observations."
+            description = f"Identity {group['identity']}\nCurrent results across all scenes. Expand Face or Body to load observations."
             self.groups[item] = description
             reader = self.reader.identity_reader(group['identity'], self.scan['scope'])
             for kind in ('face', 'body'):
@@ -97,7 +102,7 @@ class SceneInspector(Inspector):
         reader = UnassignedReader(self.reader.config, self.scan)
         item = self.listing.insert('', 'end', text=f"Unassigned in this scene · {result['unassigned']}")
         description = ('No accepted face or body membership. Includes provisional body tracks.\n'
-                       'Only retained observations from this scene scan are available.')
+                       'Only the active scan and body collection matching the current YAML are shown.')
         self.groups[item] = description
         for kind in ('face', 'body'):
             kind_item = self.listing.insert(item, 'end', text=kind.capitalize())
@@ -139,7 +144,7 @@ class SceneInspector(Inspector):
             for group in result:
                 self.add_branch(f"{group['state']} · {group['count']}", branch['reader'], False,
                     f"{branch['kind'].capitalize()} observations · State: {group['state']}\n"
-                    'Recorded membership role across all retained scenes; not current quality eligibility.',
+                    'Recorded membership role in current results across all scenes; not current quality eligibility.',
                     parent=item, kind=branch['kind'], state=group['state'])
             if not result:
                 self.listing.insert(item, 'end', text='No observations in this group.')
@@ -278,7 +283,12 @@ class SceneInspector(Inspector):
         selected=state.get('selected')
         if selected and not state.get('selection_requested'):
             state['selection_requested']=True
-            row=state['row'];reader=row['reader']
+            row=state['row'];previous=row['reader']
+            # History holds old readers. Rebind to the reloaded YAML/current scan
+            # before looking up the selection, or refresh resurrects stale rows.
+            reader=(self.reader.identity_reader(previous.selector[1],self.scan['scope'])
+                    if hasattr(previous,'selector') else UnassignedReader(self.reader.config,self.scan))
+            state['row']=dict(row,reader=reader)
             self.worker.request(partial(reader.page,kind=row['kind'],observation=row['id']),
                                 partial(self.restore_selection,state),self.error)
         elif not selected:self.restoring=False

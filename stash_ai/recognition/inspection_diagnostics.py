@@ -17,7 +17,7 @@ def stages(detail):
     """Provenance belongs to every stage: current gates are not historic decisions."""
     result=[]
     for group in detail.get('admission',{}).get('groups',[]):
-        checks=[dict(label=c['parameter'],status=c['status'],value=f"{c['measured'] if c['measured'] is not None else 'unknown'} {c['operator']} {c['threshold']}",
+        checks=[dict(label=c.get('yaml_parameter',c['parameter']),status=c['status'],value=f"{c['measured'] if c['measured'] is not None else 'unknown'} {c['operator']} {c['threshold']}",
                      note=c.get('note','')) for c in group['checks']]
         result.append(dict(label=group['stage'],status=group['status'],source=SOURCES[group['configuration_source']],
                            note=group.get('note',''),children=checks))
@@ -118,8 +118,9 @@ def unassigned_summary(scene_reader):
         policies=Policies(db,config,scan['scope'],scan['namespace'])
         for kind,(observations,_) in TABLES.items():
             if kind=='body' and not available(db):continue
-            query='SELECT r.*,o.quality,o.geometry'+(',o.contract' if kind=='body' else '')+' FROM ('+_unassigned_query(kind)+') r JOIN '+observations+' o ON o.id=r.id'
-            for row in db.execute(query,(scan['scene'],scan['id'])):
+            base,args=_unassigned_query(kind,config,scan)
+            query='SELECT r.*,o.quality,o.geometry'+(',o.contract' if kind=='body' else '')+' FROM ('+base+') r JOIN '+observations+' o ON o.id=r.id'
+            for row in db.execute(query,args):
                 check_cancelled();total+=1;counts[kind,row['state']]+=1
                 quality=json.loads(row['quality'])
                 admission=(face(quality,json.loads(row['geometry']),config,policies,scan['policy_sha']) if kind=='face'
@@ -127,7 +128,7 @@ def unassigned_summary(scene_reader):
                 for group in admission['groups']:
                     for check in group['checks']:
                         key=kind,group['stage'],check['parameter'],group['configuration_source'],str(check['threshold']),check['operator']
-                        item=gates.setdefault(key,dict(kind=kind,stage=group['stage'],parameter=check['parameter'],source=SOURCES[group['configuration_source']],
+                        item=gates.setdefault(key,dict(kind=kind,stage=group['stage'],parameter=check.get('yaml_parameter',check['parameter']),source=SOURCES[group['configuration_source']],
                             threshold=check['threshold'],operator=check['operator'],counts=Counter(),minimum=None,maximum=None,closest_failure=None))
                         item['counts'][check['status']]+=1
                         value=check['measured']

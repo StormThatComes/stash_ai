@@ -42,13 +42,13 @@ class SearchReader:
             pieces=[];args=[]
             for group in catalogue['groups']:
                 person=dict(id=group['identity'],scope=scan['scope'],namespace=scan['namespace'])
-                sql,params=query(person,face_policy,['face','body'] if has_body else ['face'],filters=(None,None,None),accepted_only=True)
+                sql,params=query(person,face_policy,['face','body'] if has_body else ['face'],filters=(None,None,None),accepted_only=True,config=self.config)
                 pieces.append('SELECT r.*,? AS identity,? AS performer FROM ('+sql+') r')
                 args.extend((group['identity'],group['performer'],*params))
             for kind in ('face','body') if has_body else ('face',):
-                sql=_unassigned_query(kind)
+                sql,params=_unassigned_query(kind,self.config,scan)
                 pieces.append('SELECT kind,id,scene,cue,seconds,status,role,state,NULL AS identity,NULL AS performer FROM ('+sql+')')
-                args.extend((scan['scene'],scan['id']))
+                args.extend(params)
             # Restrict accepted proofs to the actual owner/its merged predecessors.
             family=('WITH RECURSIVE family(id) AS (SELECT r.identity UNION SELECT m.source FROM identity_merges m '
                     'JOIN family f ON m.target=f.id JOIN people p ON p.id=m.source '

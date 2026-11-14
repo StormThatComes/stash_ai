@@ -187,8 +187,8 @@ def test_obsolete_body_contracts_keep_current_previous_and_pinned_numerical_evid
                 body = bodies(db, 's0', value, str(i), face='face-s0')
                 if i == 0:
                     db.execute("INSERT INTO body_origins VALUES (?,'p')", (body,))
-            # A second unpinned row in a pinned variant must survive with its
-            # complete body_cues certificate; it is still reusable evidence.
+            # Only the pinned row survives; deleting its unpinned peer must
+            # also invalidate the old variant's completeness certificate.
             db.execute("INSERT INTO body_observations SELECT 'extra',scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,crop "
                        "FROM body_observations WHERE id='body-0'")
             for value in ('old-person', 'previous-person', person_contract(c)):
@@ -198,11 +198,11 @@ def test_obsolete_body_contracts_keep_current_previous_and_pinned_numerical_evid
     with FaceDatabase(c.database) as state:
         db = state.connection
         rows = {r['id']: r for r in db.execute('SELECT * FROM body_observations')}
-        assert set(rows) == {'body-0', 'extra', 'body-2', 'body-3'}
-        assert rows['body-0']['crop'] is rows['extra']['crop'] is None
+        assert set(rows) == {'body-0', 'body-2', 'body-3'}
+        assert rows['body-0']['crop'] is None
         assert rows['body-0']['embedding'] == bytes(16384)
         assert rows['body-2']['crop'] and rows['body-3']['crop']
-        assert {r[0] for r in db.execute('SELECT contract FROM body_cues')} == {'old-pinned', 'previous', contract(c)}
+        assert {r[0] for r in db.execute('SELECT contract FROM body_cues')} == {'previous', contract(c)}
         assert db.execute("SELECT crop FROM person_evidence WHERE contract='old-person'").fetchone()[0] is None
         assert db.execute("SELECT COUNT(*) FROM person_evidence").fetchone()[0] == 3
 
@@ -221,6 +221,50 @@ def test_incomplete_current_person_contract_does_not_prune_old_variants(tmp_path
     before = logical(c.database)
     assert retention.prune_database(c, apply=True)['actions'] == []
     assert_only_retention_index_changed(before,logical(c.database))
+
+
+def test_partial_retirement_preserves_pins_invalidates_reuse_and_later_collects_orphans(tmp_path):
+    from stash_ai.recognition.body_observations import contract, RETIRED_CONTRACT, save_records
+    from stash_ai.recognition.person_collection import PersonCollector
+    c = settings(tmp_path)
+    c.data['sapiensid']['enabled'] = c.data['sapiensid']['collection']['enabled'] = True
+    c.data['storage']['retention']['keep_previous_person_contracts'] = 0
+    old = replace(c, data=plain(c.data))
+    old.data['sapiensid']['collection']['min_keypoints'] = 7
+    old_contract = contract(old)
+    with FaceDatabase(c.database) as state:
+        scans(state, c, count=1)
+        with state.connection as db:
+            db.execute("INSERT INTO people VALUES ('p','scope',?,1,NULL,'token')", (namespace(c),))
+            bodies(db, 's0', old_contract, 'pinned')
+            bodies(db, 's0', contract(c), 'current')
+            db.execute("INSERT INTO body_origins VALUES ('body-pinned','p')")
+            db.execute("INSERT INTO body_observations SELECT 'unreferenced',scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,crop "
+                       "FROM body_observations WHERE id='body-pinned'")
+    retention.prune_database(c, apply=True)
+    with FaceDatabase(c.database) as state:
+        db = state.connection
+        assert {r[0] for r in db.execute('SELECT id FROM body_observations')} == {'body-pinned','body-current'}
+        assert {r[0] for r in db.execute('SELECT contract FROM body_cues')} == {contract(c)}
+        assert db.execute('SELECT 1 FROM metadata WHERE key=?', (RETIRED_CONTRACT+'s0:'+old_contract,)).fetchone()
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+        collector = PersonCollector(old, {})
+        assert collector.missing_cues(db, 's0', 1) == {0}
+        # Recollection is a new attempt. Its completed-cue marker clears the
+        # retirement flag, so interrupted gaps are protected as resumable work.
+        db.execute('SAVEPOINT recollect')
+        save_records(db, old, [(None, {'_body_cue': ('s0',old_contract,0)}, None, None)])
+        assert db.execute('SELECT 1 FROM body_cues WHERE contract=?', (old_contract,)).fetchone()
+        assert not db.execute('SELECT 1 FROM metadata WHERE key=?', (RETIRED_CONTRACT+'s0:'+old_contract,)).fetchone()
+        db.execute('ROLLBACK TO recollect');db.execute('RELEASE recollect')
+        db.execute("DELETE FROM body_origins WHERE observation='body-pinned'")
+        db.commit()
+    # A retired fragment remains eligible for cleanup after its final pin goes away.
+    retention.prune_database(c, apply=True)
+    with FaceDatabase(c.database) as state:
+        db = state.connection
+        assert {r[0] for r in db.execute('SELECT id FROM body_observations')} == {'body-current'}
+        assert not db.execute('SELECT 1 FROM metadata WHERE key LIKE ?', (RETIRED_CONTRACT+'%',)).fetchone()
 
 
 def test_writer_lock_and_failure_rollback(tmp_path, monkeypatch):

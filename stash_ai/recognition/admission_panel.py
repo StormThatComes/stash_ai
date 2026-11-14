@@ -42,11 +42,11 @@ def export(image, admission, directory, name, *, observation, role, rejection):
                       ' | '+SOURCES[group['configuration_source']], '#101828'))
         for row in group['checks']:
             state = row['status']
-            text = (f'[{state.upper()}] {row["parameter"]}: {_value(row["measured"])} '
+            text = (f'[{state.upper()}] {row.get("yaml_parameter", row["parameter"])}: {_value(row["measured"])} '
                     f'{row["operator"]} {_value(row["threshold"])}')
             if state == 'disabled':
                 configured = 'null' if row['threshold'] is None else _value(row['threshold'])
-                text = f'[DISABLED] {row["parameter"]} = {configured} (sample: {_value(row["measured"])})'
+                text = f'[DISABLED] {row.get("yaml_parameter", row["parameter"])} = {configured} (sample: {_value(row["measured"])})'
             if row.get('label'):
                 text = f'{row["label"]} | '+text
             lines.append((text, COLORS[state]))
