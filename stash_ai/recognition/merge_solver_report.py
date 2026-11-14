@@ -210,7 +210,7 @@ def compact_document(result, config):
         refs = [states.add(name, group, evidence.get(group['index'], {})) for group in status['groups']]
         item = fields(trial, 'previous_trial changes_from_previous search_family search_phase search_parent search_strategy '
                       'best_trial best_trial_number elapsed_seconds yaml_patch outside_impact')
-        item['goal_result'] = dict(fields(status, 'fully_solved admissible disjoint strict_disjoint strict_fully_solved'),
+        item['goal_result'] = dict(fields(status, 'fully_solved admissible disjoint strict_disjoint strict_fully_solved assignment_coverage'),
                                    set_states=refs, unmet=unmet_summary(status), construction_status=construction.get('status'))
         if status.get('positive_observations'):
             goals = status['positive_observations']

@@ -280,20 +280,21 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return patches[name] if name in patches else proposal(input_config, {})
     def ranking(name):
         solved = summaries[name]['fully_solved']
-        # Hard goals/exclusions are prerequisites. Once solved, stricter matching
-        # outranks soft attachment retention and distance from a possibly loose
-        # YAML. Collateral damage still precedes threshold strength.
-        safety = ranks[name][-6:-2] if solved else (0,)*4
+        # Hard goals/exclusions and collateral safety precede assignment coverage.
+        # Once solved, recover more retained observations before tightening gates.
+        safety = ranks[name][-7:-3] if solved else (0,)*4
+        coverage = (ranks[name][-3],) if solved else (0,)
         strength = tightening.score(changes_for(name)) if solved else (0.,)*5
         preference = tightening.face_preference(fallback_references[name]) if solved else 0
         strength = strength[:1]+(preference,)+strength[1:]
-        return (solved,)+safety+strength+ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
+        return (solved,)+safety+coverage+strength+ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
     def selected(name):
         status=summaries[name]
         return dict(trial=name,quality=('fully_solved' if status['fully_solved'] else
             'partial_solution' if status['admissible'] else 'best_effort'),
             fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
             goal_diagnostics=goal_diagnostics(status),
+            assignment_coverage=status['assignment_coverage'],
             **input_patch(name))
     outside_comparison = None
     def consume(name, observations, retained, predicted):
@@ -316,12 +317,16 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             if baseline_outsiders is None:baseline_outsiders=attached
             outside['new_outsider_observations']=len(attached-baseline_outsiders)
         apply_outside(status, outside, summaries['baseline'], outside_limits)
+        from .merge_solver_coverage import measure as assignment_coverage
+        status['assignment_coverage'] = coverage = assignment_coverage(
+            baseline, predicted, target_ids, outside, status['groups'])
         status['construction'] = feasibility.assess(status, observations, predicted,
                                                     latest_feedback['provenance']['blocker_trace'])
         patch = patches.get(name, {'changes': []})
         magnitude = mutation_magnitude(patch['changes'])
-        rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
-            -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
+        established_outsiders = sum(g['outsider_observations'] for g in status['groups']) - coverage['recovered_target_attachments']
+        rank = objective(status) + (-established_outsiders, -outside['coverage_lost'], -outside['split_pairs'],
+            -outside['newly_joined_pairs'], -coverage['unassigned'], -len(patch['changes']), -magnitude)
         ranks[name] = rank
         fallback_references[name] = latest_feedback.get('fallback_references', 0)
         if status['fully_solved']:
@@ -737,6 +742,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                             sets=f'{merged}/{len(groups)}', solved=winner['fully_solved'], disjoint=winner['disjoint'],
                             outsiders=sum(g.get('outsider_observations', 0) for g in groups),
                             assigned=sum(g.get('assigned', 0) for g in groups),
+                            replay_unassigned=winner['assignment_coverage']['unassigned'],
                             strength=tuple(round(x, 4) for x in tightening.score(changes_for(best))))
                     if stage == 'complete':
                         event.update(best_trial=best, winner_state=winner_state)
