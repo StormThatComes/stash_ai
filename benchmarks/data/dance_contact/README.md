@@ -1,6 +1,6 @@
 # Dance contact benchmark
 
-Five photographs show ten dancer instances in supported balances, lifts and overlapping poses. Each JPEG is 500 pixels wide, the scale of a typical VTT thumbnail. See [photo credits and reuse terms](CREDITS.md).
+Seventeen photographs cover 34 people in ballet, contemporary dance and pairs skating. The original five duet photos support the calibration below. The [twelve additional photos](#transfer-to-twelve-additional-photographs) test transfer to new poses and sessions. Each JPEG is 500 pixels wide, the scale of a typical VTT thumbnail. See [photo credits and reuse terms](CREDITS.md).
 
 ## Run the sweep
 
@@ -85,3 +85,30 @@ The final profile uses NMS 0.94, allows one to four positive prompts, requires a
 | twisted | 1/2 | 2/2 | None |
 
 The seven available masks covered all 42 sampled own points for those dancers, zero of 42 partner probes and zero of 28 background probes. This fit includes the earlier holdout and measures sparse ownership. Its transfer to unrelated VTT cues is untested.
+
+## Transfer to twelve additional photographs
+
+The [extension](extended/labels.json) adds two solos, eight duets and two trios across ballet, contemporary dance and pairs skating. The sources, crop details and licenses are in the [extension credits](extended/CREDITS.md). Each person has eight foreground probes, including extremities when visible. A clean mask covers at least six of eight and none of the other people's or background probes. An occluded head has a null label and contributes a neutral distance to box matching.
+
+Seven photos (14 people) are used for tuning. Five photos (10 people) from different sessions are reserved for validation. Both photos of the same skating pair at the 2009 Europeans and the images related to the original Paquita and Twisted fixtures are on the tuning side. The original five photos are retained as a separate regression set. Each split reports misses, extras, visible limb joints, available masks, sparse mask errors and candidate rejection reasons.
+
+Run the three fixed references and the [shortlisted settings](extended/profiles.yml) using the recognition backend:
+
+```sh
+python -m benchmarks.benchmark_dance_transfer --device cpu --output dance-transfer.json
+```
+
+Pass `--model-dir PATH` to use existing weights, `--overlays PATH` for the detection tuner overlays, or `--profiles PATH` to supply other named sets of public YAML overrides. Profiles run on the tuning and original photos. Only the stock YAML, the earlier NMS-only profile, the earlier five-photo fit and the tuning winner run on the reserved photos. The [CPU report](../../results/dance_contact_transfer_cpu.json) contains the per-image results for each stage.
+
+The [compressed sweep results](../../results/dance_contact_search_cpu.json.gz) record the 2,260 distinct override sets and their tuning counts. The search varied detector score and NMS, prompt count and reliability, prompt coverage, SAM score and box expansion. It reused image features and identical model inputs. Forty profiles tied at the best new tuning score. The original five broke ties using mask ownership, detections, limb joints and coverage. For otherwise equivalent settings, fewer overrides and tighter expansion bounds were preferred. The shortlisted profiles were measured again without feature caching. No validation image contributed to the search or tie-break.
+
+The [prompt-support diagnostic](extended/prompt_support.yml) can be passed to `--profiles`. A real `missing_prompt_support` rejection occurs on `candy-balance` with `min_prompt_points=1`, `max_prompt_points=4`, `min_keypoint_score=0.6`, `min_visibility=0.3` and `min_mask_score=0.3` under `pose.refinement`. The rejected cleaned mask contains three of the target's eight probes and all eight of its partner's. This photo tests a justified rejection. The suite does not yet contain a verified false rejection of a clean mask for this reason.
+
+| Profile | Clean masks, new tune (14) | Clean masks, new holdout (10) | Clean masks, original (10) | Correct joints, new holdout (36) |
+| --- | ---: | ---: | ---: | ---: |
+| Shipped YAML | 9 | 7 | 4 | 33 |
+| Only detector NMS 0.94 | 9 | 7 | 5 | 33 |
+| Earlier four-and-expand fit | 8 | 6 | 7 | 33 |
+| Single core prompt | 12 | 8 | 7 | 34 |
+
+The single-prompt profile matched all 34 people with zero extra detections. On the twelve new photos it yielded 20 clean masks and 21 available masks for 24 people. The stock YAML gave 16 clean and 16 available. No admitted single-prompt mask hit a partner probe. Two hit a background probe, on the new `floor-trio` and original `airborne`. On the original `penche` both masks were missing, while the previous fit produced one clean mask. On `candy-balance` both masks were still missing. On the holdout `silhouette-solo` SAM fell below the mask score threshold. The public YAML overrides in the profile apply to recognition as a group. The shipped defaults are unchanged.

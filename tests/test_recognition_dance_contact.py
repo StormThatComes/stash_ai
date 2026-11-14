@@ -2,28 +2,39 @@ import base64
 import json
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from benchmarks.benchmark_dance_contact import DATA, assign_people, correct_joints, read_profiles, score
 from stash_ai.recognition.pose_mask_capture import capture_masks
 
 
-def test_real_fixtures_match_annotations():
-    photos = json.loads((DATA / 'labels.json').read_text())
-    assert {f.stem for f in DATA.glob('*.jpg')} == photos.keys()
-    assert sum(p['split'] == 'tune' for p in photos.values()) == 3
-    assert sum(p['split'] == 'holdout' for p in photos.values()) == 2
+@pytest.mark.parametrize('directory,tune,holdout,counts', [
+    (DATA, 3, 2, [2] * 5),
+    (DATA / 'extended', 7, 5, [1] * 2 + [2] * 8 + [3] * 2),
+])
+def test_real_fixtures_match_annotations(directory, tune, holdout, counts):
+    photos = json.loads((directory / 'labels.json').read_text())
+    assert {f.stem for f in directory.glob('*.jpg')} == photos.keys()
+    assert sum(p['split'] == 'tune' for p in photos.values()) == tune
+    assert sum(p['split'] == 'holdout' for p in photos.values()) == holdout
+    assert sorted(len(p['people']) for p in photos.values()) == counts
     for name, photo in photos.items():
-        with Image.open(DATA / f'{name}.jpg') as image:
+        with Image.open(directory / f'{name}.jpg') as image:
             assert list(image.size) == photo['size']
             assert image.width == 500
             image.verify()
-        assert len(photo['people']) == 2
+        assert all(0 <= x < photo['size'][0] and 0 <= y < photo['size'][1] for x, y in photo['background'])
         for person in photo['people']:
             left, top, right, bottom = person['box']
             assert 0 <= left < right <= photo['size'][0] and 0 <= top < bottom <= photo['size'][1]
-            points = [person['head'], *person['foreground'], *sum(person['joints'].values(), [])]
+            points = person['foreground'] + sum(person['joints'].values(), [])
+            if person['head'] is not None:
+                points.append(person['head'])
             assert all(left <= x < right and top <= y < bottom for x, y in points)
+
+
+def test_public_profiles():
     profiles = read_profiles(DATA / 'profiles.yml')
     assert profiles['stock/stock'] == {}
     assert profiles['points/coverage']['pose.estimator.keypoint_score_threshold'] == 0.4
@@ -98,3 +109,17 @@ def test_fit_all_excludes_leakage_and_extra_detections(monkeypatch):
     result = benchmark.fit_all(None, profiles, photos, None)
     assert result['winner'] == 'clean' and result['all_photos'] == measured
     assert benchmark.fit_all(None, {'extra': {}}, photos, None)['winner'] is None
+
+
+def test_transfer_selection_uses_new_tuning_masks_and_checks_original_ties():
+    from benchmarks.benchmark_dance_transfer import select_profile
+
+    stock = dict(clean_masks=7, matched=12, correct_joints=42, own_hits=54,
+                 partner_hits=1, background_hits=0, extra=0)
+    profiles = {'stock': {}, 'simple': {'a': 1}, 'better-original': {'a': 1, 'b': 2}, 'leaks': {'a': 2}}
+    tune = {name: {'totals': {**stock, 'clean_masks': 8}} for name in profiles}
+    tune['stock'] = {'totals': stock}
+    tune['leaks'] = {'totals': {**stock, 'clean_masks': 10, 'partner_hits': 2}}
+    original = {name: {'totals': {**stock, 'partner_hits': 0}} for name in profiles}
+    original['better-original']['totals']['clean_masks'] += 1
+    assert select_profile(profiles, tune, original) == 'better-original'

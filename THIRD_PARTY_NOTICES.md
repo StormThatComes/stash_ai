@@ -93,6 +93,7 @@ and notices provided by each upstream project.
 
 ## Dance contact benchmark photographs
 
-The five resized dance photographs and their coordinate annotations are distributed
-under CC BY-SA 4.0. The [dataset credits](benchmarks/data/dance_contact/CREDITS.md)
-identify each photographer, source and modification.
+The [original five photographs](benchmarks/data/dance_contact/CREDITS.md) use CC BY-SA 4.0.
+The [additional twelve](benchmarks/data/dance_contact/extended/CREDITS.md) use CC BY 2.0
+or CC BY-SA 2.0, 3.0 or 4.0 as listed for each photograph. Both sets of credits identify
+the photographers, sources, modifications and licenses. Coordinate annotations use CC BY-SA 4.0.

@@ -11,3 +11,5 @@ These five JPEG derivatives are distributed under [Creative Commons Attribution-
 | twisted.jpg | © Peter Lodwick (BirdsPL) · Wikimedia Commons | [Dans & Toners performance Twisted 2.jpg](https://commons.wikimedia.org/wiki/File:Dans_%26_Toners_performance_Twisted_2.jpg) |
 
 The manual coordinates in `labels.json` refer to these resized copies and are also distributed under CC BY-SA 4.0.
+
+The [twelve additional photographs](extended/CREDITS.md) have individual attribution and license notices.

@@ -1,0 +1,7 @@
+# Benchmark overrides for the supplied recognition YAML. Run benchmark_dance_transfer to compare.
+single-core:
+  pose.detector.nms_threshold: 0.94
+  pose.refinement.max_box_area_ratio: 3.0
+  pose.refinement.max_prompt_points: 1
+  pose.refinement.max_side_expansion: 1.1
+  pose.refinement.min_prompt_points: 1

@@ -44,7 +44,9 @@ def assign_people(labels, people):
             face = np.asarray(person['keypoints'][:5])
             valid = face[(face >= 0).all(axis=1)]
             # Person boxes can almost coincide in lifts. Use a separate head label to break ties.
-            distance = math.dist(np.median(valid, axis=0), label['head']) / diagonal if len(valid) else 0.5
+            distance = 0.5
+            if len(valid) and label['head'] is not None:
+                distance = math.dist(np.median(valid, axis=0), label['head']) / diagonal
             scores[i, j] = len(labels) + 1 + 0.3 * iou - min(distance, 1)
     rows, cols = linear_sum_assignment(scores, maximize=True)
     return {i: j for i, j in zip(rows, cols) if scores[i, j] > 0}
@@ -149,7 +151,7 @@ def evaluate(config, edits, photos, overlays=None):
                     backend.detect(image, faces=[], force_pose=True)
                     counts, reasons, rejected_masks = score(photo, backend.frame_people, capture)
                     if overlays is not None:
-                        save_overlay(image, backend.frame_people, capture, overlays / f'{name}.png')
+                        save_overlay(image, backend.frame_people, capture, overlays / (Path(name).name + '.png'))
             frames[name] = {'counts': counts, 'missing': reasons, 'rejected_candidates': rejected_masks}
             for key, value in counts.items():
                 totals[key] += value
