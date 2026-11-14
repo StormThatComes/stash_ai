@@ -23,7 +23,7 @@ def reference_profiles():
     )}
 
 
-def select_profile(profiles, tune, original):
+def select_profile(profiles, tune, original, *, clean_original=False):
     stock = tune['stock']['totals']
 
     def rank(name):
@@ -38,7 +38,13 @@ def select_profile(profiles, tune, original):
             -len(profiles[name]),
         )
 
-    return max(profiles, key=rank)
+    eligible = profiles.keys()
+    if clean_original:
+        eligible = [
+            name for name in profiles
+            if all(original[name]['totals'][key] == 0 for key in ('partner_hits', 'background_hits', 'extra'))
+        ]
+    return max(eligible, key=rank, default=None)
 
 
 def main():
@@ -69,11 +75,14 @@ def main():
     results['tune'] = run_split(config, 'tune', profiles, splits['tune'], args.overlays)
     results['original'] = run_split(config, 'original', profiles, original, args.overlays)
     winner = select_profile(profiles, results['tune'], results['original'])
+    strict = select_profile(profiles, results['tune'], results['original'], clean_original=True)
     finalists = {**references, winner: profiles[winner]}
+    if strict is not None:
+        finalists[strict] = profiles[strict]
     results['holdout'] = run_split(config, 'holdout', finalists, splits['holdout'], args.overlays)
     report = dict(device=args.device, config_sha256=sha256(args.config.read_bytes()).hexdigest(),
                   versions={p: version(p) for p in ('torch', 'rfdetr', 'rfdetr-plus')},
-                  profiles=profiles, winner=winner, **results)
+                  profiles=profiles, winner=winner, clean_original_winner=strict, **results)
     args.output.write_text(json.dumps(report, indent=2) + '\n')
 
 

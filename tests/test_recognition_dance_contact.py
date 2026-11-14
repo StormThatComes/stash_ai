@@ -123,3 +123,6 @@ def test_transfer_selection_uses_new_tuning_masks_and_checks_original_ties():
     original = {name: {'totals': {**stock, 'partner_hits': 0}} for name in profiles}
     original['better-original']['totals']['clean_masks'] += 1
     assert select_profile(profiles, tune, original) == 'better-original'
+    original['better-original']['totals']['background_hits'] = 1
+    assert select_profile(profiles, tune, original, clean_original=True) == 'simple'
+    assert select_profile({'stock': {}}, tune, {'stock': {'totals': stock}}, clean_original=True) is None

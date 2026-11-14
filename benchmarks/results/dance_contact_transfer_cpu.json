@@ -26,6 +26,13 @@
       "pose.refinement.max_prompt_points": 1,
       "pose.refinement.max_side_expansion": 1.1,
       "pose.refinement.min_prompt_points": 1
+    },
+    "single-core-strict": {
+      "pose.detector.nms_threshold": 0.94,
+      "pose.refinement.max_prompt_points": 1,
+      "pose.refinement.max_side_expansion": 0.75,
+      "pose.refinement.min_mask_score": 0.7,
+      "pose.refinement.min_prompt_points": 1
     }
   },
   "winner": "single-core",
@@ -344,6 +351,75 @@
           "rejected_candidates": []
         }
       }
+    },
+    "single-core-strict": {
+      "totals": {"people": 14, "matched": 14, "extra": 0, "joints": 59, "correct_joints": 53, "masks": 11, "clean_masks": 11, "own_hits": 87, "own_probes": 112, "partner_hits": 0, "partner_probes": 96, "background_hits": 0, "background_probes": 44},
+      "missing": {
+        "low_mask_score": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "extended/spiral-entry": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 8, "correct_joints": 8, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "extended/spiral-side": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 6, "correct_joints": 6, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "extended/candy-balance": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 8, "correct_joints": 4, "masks": 0, "clean_masks": 0, "own_hits": 0, "own_probes": 16, "partner_hits": 0, "partner_probes": 0, "background_hits": 0, "background_probes": 0},
+          "missing": {
+            "low_mask_score": 1,
+            "no_reliable_prompts": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 8,
+              "partner_hits": 8,
+              "background_hits": 0,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "extended/stage-trio": {
+          "counts": {"people": 3, "matched": 3, "extra": 0, "joints": 13, "correct_joints": 13, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 24, "partner_hits": 0, "partner_probes": 32, "background_hits": 0, "background_probes": 8},
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 2,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 8,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        },
+        "extended/beach-solo": {
+          "counts": {"people": 1, "matched": 1, "extra": 0, "joints": 6, "correct_joints": 6, "masks": 1, "clean_masks": 1, "own_hits": 7, "own_probes": 8, "partner_hits": 0, "partner_probes": 0, "background_hits": 0, "background_probes": 4},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "extended/floor-reach": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 8, "correct_joints": 7, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "extended/paired-arms": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 10, "correct_joints": 9, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
     }
   },
   "original": {
@@ -589,6 +665,65 @@
           "rejected_candidates": []
         }
       }
+    },
+    "single-core-strict": {
+      "totals": {"people": 10, "matched": 10, "extra": 0, "joints": 43, "correct_joints": 37, "masks": 7, "clean_masks": 7, "own_hits": 42, "own_probes": 60, "partner_hits": 0, "partner_probes": 42, "background_hits": 0, "background_probes": 28},
+      "missing": {
+        "no_reliable_prompts": 1,
+        "low_mask_score": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 9, "correct_joints": 7, "masks": 2, "clean_masks": 2, "own_hits": 12, "own_probes": 12, "partner_hits": 0, "partner_probes": 12, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 10, "correct_joints": 6, "masks": 0, "clean_masks": 0, "own_hits": 0, "own_probes": 12, "partner_hits": 0, "partner_probes": 0, "background_hits": 0, "background_probes": 0},
+          "missing": {
+            "no_reliable_prompts": 1,
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 1,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 1,
+              "background_hits": 0,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "paquita": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 11, "correct_joints": 11, "masks": 2, "clean_masks": 2, "own_hits": 12, "own_probes": 12, "partner_hits": 0, "partner_probes": 12, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "airborne": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 7, "correct_joints": 7, "masks": 1, "clean_masks": 1, "own_hits": 6, "own_probes": 12, "partner_hits": 0, "partner_probes": 6, "background_hits": 0, "background_probes": 4},
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 1,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 1,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "twisted": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 6, "correct_joints": 6, "masks": 2, "clean_masks": 2, "own_hits": 12, "own_probes": 12, "partner_hits": 0, "partner_probes": 12, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
     }
   },
   "holdout": {
@@ -820,6 +955,77 @@
           "rejected_candidates": []
         }
       }
+    },
+    "single-core-strict": {
+      "totals": {"people": 10, "matched": 10, "extra": 0, "joints": 36, "correct_joints": 33, "masks": 7, "clean_masks": 6, "own_hits": 55, "own_probes": 80, "partner_hits": 0, "partner_probes": 72, "background_hits": 1, "background_probes": 28},
+      "missing": {
+        "excessive_expansion": 1,
+        "low_mask_score": 2
+      },
+      "frames": {
+        "extended/floor-trio": {
+          "counts": {"people": 3, "matched": 3, "extra": 0, "joints": 10, "correct_joints": 8, "masks": 2, "clean_masks": 1, "own_hits": 16, "own_probes": 24, "partner_hits": 0, "partner_probes": 32, "background_hits": 1, "background_probes": 8},
+          "missing": {
+            "excessive_expansion": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "excessive_expansion",
+              "stage": "cleaned",
+              "own_hits": 8,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        },
+        "extended/pointe-rear": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 5, "correct_joints": 4, "masks": 1, "clean_masks": 1, "own_hits": 7, "own_probes": 16, "partner_hits": 0, "partner_probes": 8, "background_hits": 0, "background_probes": 4},
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 7,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        },
+        "extended/parallel-jump": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 8, "correct_joints": 8, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        },
+        "extended/silhouette-solo": {
+          "counts": {"people": 1, "matched": 1, "extra": 0, "joints": 4, "correct_joints": 4, "masks": 0, "clean_masks": 0, "own_hits": 0, "own_probes": 8, "partner_hits": 0, "partner_probes": 0, "background_hits": 0, "background_probes": 0},
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 1,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "extended/low-spiral": {
+          "counts": {"people": 2, "matched": 2, "extra": 0, "joints": 9, "correct_joints": 9, "masks": 2, "clean_masks": 2, "own_hits": 16, "own_probes": 16, "partner_hits": 0, "partner_probes": 16, "background_hits": 0, "background_probes": 8},
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
     }
-  }
+  },
+  "clean_original_winner": "single-core-strict"
 }
