@@ -538,8 +538,13 @@ face is uncovered and do not block its portrait.
 
 The application reports the fraction of mask-positive pixels (`logit > 0`) within
 a fixed elliptical face region derived from the detector box, excluding artificial
-padding. The model input is a fixed square crop around that box, resized to RGB
-256x256 with ImageNet normalization. Portrait `margin`, aspect ratio and JPEG
+padding. The model input is a fixed square crop around that box, rotated upright
+using the semantic eye landmarks and resized to RGB 256x256 in one resampling
+pass with ImageNet normalization. This removes in-plane roll, including 90/180/270
+degrees; it does not turn a profile into a frontal face. The original source-box
+ellipse and real-source coverage are mapped through the same transform, so
+rotation cannot remove an occluder from the denominator or count padded pixels.
+Portrait `margin`, aspect ratio and JPEG
 encoding do not change this denominator. This is a model estimate of visible
 surface, not an exact anatomical percentage or an occluder type classifier. Hair,
 beards, glasses, pose, box/alignment error and low-resolution thumbnails can affect it;

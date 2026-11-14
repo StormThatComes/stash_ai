@@ -77,7 +77,7 @@ def pose_measurements(landmarks):
 def assess(image,detection):
     from .inference_cache import many,current
     if current() is None:return _assess(image,detection)
-    return many('face_quality','face-quality-v2-foreground',[(image,tuple(detection.row))],
+    return many('face_quality','face-quality-v3-roll-foreground',[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
