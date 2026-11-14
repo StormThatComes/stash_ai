@@ -254,7 +254,7 @@ def test_scene_tree_partitions_memberships_and_pages_all_identity_scenes(tmp_pat
     assert detail['trace']['status'] == 'unassigned'
     assert any(c['parameter']=='detection.min_sharpness' and c['status']=='fail'
                for g in detail['admission']['groups'] for c in g['checks'])
-    assert detail['admission']['groups'][0]['configuration_source']=='current_configuration_only_historical_unavailable'
+    assert detail['admission']['groups'][0]['configuration_source']=='current_configuration_hash_verified'
     detail = unassigned.detail('face','unmatched-face')
     assert detail['recorded_decisions'][0]['recorded']['compared_references']
     assert detail['recorded_decisions'][0]['current'] is False
@@ -487,6 +487,11 @@ def vtt_fixture(tmp_path):
     data['detection']['min_face_pixels'] = 256  # Rejected before embedding/crop encoding.
     data['execution']['media_cache_bytes'] = 0
     config = replace(config, data=data)
+    # The desktop refresh now reloads the real YAML, so persist this fixture's
+    # scan settings just as an operator does before recognition.
+    import yaml
+    config.source_path.write_text(yaml.safe_dump(data))
+    config = config.reload()
     media, backend = MediaClient(count=1), Backend()
     scope = instance_scope(media.url)
     with FaceDatabase(config.database) as state, SpriteInput(media, media.scene, config) as source:

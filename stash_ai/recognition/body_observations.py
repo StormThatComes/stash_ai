@@ -3,6 +3,8 @@ import uuid
 
 from .config import digest, plain
 
+RETIRED_CONTRACT = 'recognition-retired-body-contract:'
+
 SCHEMA = '''
 CREATE TABLE body_observations (
  id TEXT PRIMARY KEY, scan TEXT NOT NULL REFERENCES scans(id), cue INTEGER NOT NULL,
@@ -83,6 +85,8 @@ def save_records(db, config, records):
         marker=metadata.get('_body_cue')
         if marker is not None:
             db.execute('INSERT OR IGNORE INTO body_cues VALUES (?,?,?)',tuple(marker))
+            # A new collection attempt makes any remaining gaps resumable again.
+            db.execute('DELETE FROM metadata WHERE key=?', (RETIRED_CONTRACT + marker[0] + ':' + marker[1],))
             continue
         body=metadata.get('_body')
         if body is None:

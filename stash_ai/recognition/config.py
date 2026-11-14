@@ -345,6 +345,11 @@ class FaceConfig:
     model_dir: Path
     names_path: Path | None
     document_version: int = 1
+    overrides: tuple = ()
+
+    def reload(self):
+        """Reload the selected YAML while preserving explicit CLI overrides."""
+        return load(self.source_path, **dict(self.overrides)) if self.source_path is not None else self
 
     def snapshot(self):
         baseline = defaults()
@@ -414,4 +419,7 @@ def load(path=None, *, database=None, device=None, root=None):
     return FaceConfig(_freeze(data), raw, selected,
                       Path(database).expanduser().resolve() if database is not None else resolve(data['storage']['database']),
                       resolve(data['models']['directory']),
-                      resolve(data['names']['file']) if data['names']['file'] else None, version)
+                      resolve(data['names']['file']) if data['names']['file'] else None, version,
+                      tuple((key, value) for key, value in (
+                          ('database', Path(database).expanduser().resolve() if database is not None else None),
+                          ('device', device)) if value is not None))

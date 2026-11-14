@@ -215,7 +215,7 @@ def _pin_json(db, table, column, condition, image):
 
 def _select_contracts(db, config):
     from .person_signal import contract as person_contract
-    from .body_observations import contract as body_contract, enabled
+    from .body_observations import contract as body_contract, enabled, RETIRED_CONTRACT
     if not config.data['sapiensid']['enabled']:
         return
     settings = config.data['storage']['retention']
@@ -235,6 +235,11 @@ def _select_contracts(db, config):
                         continue
                     variants = [r[0] for r in db.execute('SELECT contract FROM body_cues WHERE scan=? '
                                 'GROUP BY contract ORDER BY MAX(rowid) DESC', (scan,))]
+                    # Retired variants no longer have completeness certificates,
+                    # but their last pinned rows may become removable later.
+                    known = set(variants)
+                    variants.extend(r[0] for r in db.execute('SELECT DISTINCT contract FROM body_observations '
+                                    'WHERE scan=?', (scan,)) if r[0] not in known)
                 else:
                     if not db.execute('SELECT 1 FROM person_evidence p JOIN observations o ON o.id=p.observation '
                                       'WHERE o.scan=? AND p.contract=? LIMIT 1', (scan, expected)).fetchone():
@@ -250,16 +255,19 @@ def _select_contracts(db, config):
                 for variant in variants:
                     if variant == expected:
                         continue
+                    retired = False
                     if kind == 'body':
+                        retired = bool(db.execute('SELECT 1 FROM metadata WHERE key=?',
+                            (RETIRED_CONTRACT + scan + ':' + variant,)).fetchone())
                         coverage = db.execute('SELECT COUNT(*),MIN(cue),MAX(cue) FROM body_cues '
                                               'WHERE scan=? AND contract=?', (scan, variant)).fetchone()
-                        if tuple(coverage) != (total, 0, total - 1):
+                        if not retired and tuple(coverage) != (total, 0, total - 1):
                             continue  # resumable partial variants do not consume rollback slots
                     elif db.execute('SELECT 1 FROM observations o WHERE o.scan=? AND o.rejected IS NULL AND NOT EXISTS '
                                     '(SELECT 1 FROM person_evidence p WHERE p.observation=o.id AND p.contract=?) LIMIT 1',
                                     (scan, variant)).fetchone():
                         continue
-                    if previous:
+                    if previous and not retired:
                         previous -= 1
                         continue
                     db.execute('INSERT INTO retention_contracts VALUES (?,?,?)', (scan, kind, variant))
@@ -272,10 +280,9 @@ def _contracts(db, config):
             source = 'body_observations o'
             where = 'o.scan=? AND o.contract=?'
             address, contract, table = 'o.id', "''", 'body_observations'
-            # body_cues certifies the complete variant, so never delete
-            # just some detections behind a still-complete certificate.
-            deletable = not db.execute('SELECT 1 FROM body_observations b JOIN retention_pins p ON p.id=b.id '
-                                       'WHERE b.scan=? AND b.contract=? LIMIT 1', (scan, variant)).fetchone()
+            # Retention invalidates body_cues atomically with row deletion.
+            # One referenced observation must not pin the entire old variant.
+            deletable = True
         else:
             source = 'person_evidence o JOIN observations f ON f.id=o.observation'
             where = 'f.scan=? AND o.contract=?'

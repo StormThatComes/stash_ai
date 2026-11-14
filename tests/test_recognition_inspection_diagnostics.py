@@ -25,7 +25,7 @@ def test_decision_chain_provenance_reference_selection_and_unknown_rival(tmp_pat
         state.connection.commit()
     detail=reader.detail('face',address,pixels=False)
     result=stages(detail)
-    assert any('historical settings unavailable' in stage['source'] for stage in result)
+    assert any(stage['source']=='Settings verified against retained policy' for stage in result)
     assert result[-1]['label']=='Membership' and result[-1]['status']=='accepted'
     text=contribution(detail)
     assert 'bank selection yes' in text and 'not a count of later comparisons' in text

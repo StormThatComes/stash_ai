@@ -60,17 +60,25 @@ def _apply(db):
     # Delete references before their parents. Pins include SQL and JSON roots.
     add('Delete obsolete candidates', "DELETE FROM candidates WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
     add('Delete obsolete body cues', "DELETE FROM body_cues WHERE scan IN (SELECT id FROM retention_scans WHERE action='delete')")
+    from .body_observations import RETIRED_CONTRACT
+    add('Remember retired body contracts', "INSERT OR REPLACE INTO metadata SELECT ?||scan||':'||contract,'true' "
+        "FROM retention_contracts WHERE kind='body'", (RETIRED_CONTRACT,))
+    # A retained pinned row is an audit reference, not a complete reusable cue.
+    # Clear certificates in the same transaction, even for partially pinned sets.
     add('Delete obsolete body contracts', "DELETE FROM body_cues WHERE (scan,contract) IN ("
-        "SELECT c.scan,c.contract FROM retention_contracts c WHERE c.kind='body' "
-        "AND NOT EXISTS (SELECT 1 FROM body_observations b WHERE b.scan=c.scan AND b.contract=c.contract "
-        "AND NOT EXISTS (SELECT 1 FROM retention_actions a WHERE a.table_name='body_observations' "
-        "AND a.id=b.id AND a.action='delete')))")
+        "SELECT scan,contract FROM retention_contracts WHERE kind='body')")
+    add('Delete retired markers from obsolete scans', "DELETE FROM metadata WHERE key IN "
+        "(SELECT ?||b.scan||':'||b.contract FROM body_observations b JOIN retention_scans s ON s.id=b.scan "
+        "WHERE s.action='delete')", (RETIRED_CONTRACT,))
     for table, address in (('person_evidence', 'observation'), ('body_observations', 'id'), ('observations', 'id')):
         match = f'a.id={table}.{address}' + (f' AND a.contract={table}.contract' if table == 'person_evidence' else '')
         add(f'Delete obsolete evidence: {table}', f'DELETE FROM {table} WHERE {address} IN (SELECT id FROM retention_actions '
                    f"WHERE table_name=? AND action='delete') AND EXISTS (SELECT 1 FROM retention_actions a "
                    f"WHERE a.table_name=? AND a.action='delete' AND {match})", (table,table))
     add('Delete obsolete scans', "DELETE FROM scans WHERE id IN (SELECT id FROM retention_scans WHERE action='delete')")
+    add('Delete empty retired body markers', "DELETE FROM metadata WHERE key IN "
+        "(SELECT ?||c.scan||':'||c.contract FROM retention_contracts c WHERE c.kind='body' AND NOT EXISTS "
+        "(SELECT 1 FROM body_observations b WHERE b.scan=c.scan AND b.contract=c.contract))", (RETIRED_CONTRACT,))
     # Only collect thumbnails made unreferenced by this plan, including sharing
     # with other scenes/model namespaces. Never touch matching RGB signatures.
     add('Delete unreferenced thumbnails', 'DELETE FROM evidence_thumbnails WHERE id IN (SELECT id FROM retention_thumbnails) '

@@ -14,6 +14,7 @@ from stash_ai.recognition.config import load
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.identity_report import export
 from stash_ai.recognition.models import namespace
+from stash_ai.recognition.scanning import scan_identity
 from tests.helpers.recognition import FACE
 
 
@@ -34,7 +35,7 @@ def seed(tmp_path, count=5):
         for scene in ('2', '10'):
             scan = scans[scene] = str(uuid.uuid4())
             db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                       (scan, 'scope', scene, namespace(config), 'input', 'detection', '{}', '{}', count, count, 'complete'))
+                       (scan, 'scope', scene, namespace(config), 'input', scan_identity(config, namespace(config)), '{}', '{}', count, count, 'complete'))
         for index in range(count):
             scene, cue = ('2' if index < (count + 1) // 2 else '10'), index // 2
             observation = str(uuid.uuid4())

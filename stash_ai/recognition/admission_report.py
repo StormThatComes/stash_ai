@@ -39,6 +39,24 @@ def group(name, checks, *, source='current_configuration', note=None, context=No
                 **({'note': note} if note else {}), **({'context': context} if context else {}))
 
 
+def report(config, **result):
+    """Keep internal keys for advice, and public names for every presentation."""
+    from .config_layout import public_path
+    def name(path):
+        if getattr(config, 'document_version', 1) == 2:
+            try:
+                return public_path(path)
+            except KeyError:
+                pass  # Mandatory geometry checks have no YAML parameter.
+        return path
+    for stage in result['groups']:
+        for row in stage['checks']:
+            row['yaml_parameter'] = name(row['parameter'])
+        if 'context' in stage:
+            stage['context'] = {name(k): v for k, v in stage['context'].items()}
+    return result
+
+
 class Policies:
     """Resolve hashes against saved effective configurations, once per report.
 
@@ -125,7 +143,7 @@ def face(quality, geometry, config, policies, fingerprint):
                                 enabled=maximum is not None))
         groups.append(group('face_'+role+'_quality', checks,
             note='Additional current quality gates after scan admission; passing does not establish identity membership.'))
-    return dict(evidence_kind='face', groups=groups)
+    return report(config, evidence_kind='face', groups=groups)
 
 
 def person(metadata, config, policies, fingerprint, *, independent=False):
@@ -181,5 +199,5 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
         elif mode == 'any':
             summary['status'] = 'unknown' if any(row['measured'] is None for row in rows) else 'fail'
         groups.append(summary)
-    return dict(evidence_kind='person', route='independent' if independent else 'face_associated',
+    return report(config, evidence_kind='person', route='independent' if independent else 'face_associated',
                 groups=groups, anchor_gate=gate)

@@ -64,7 +64,7 @@ def describe_diagnostics(result):
         lines.extend(('', group['stage'] + ' · ' + group['status'].upper(), SOURCES[group['configuration_source']]))
         for check in group['checks']:
             value = check['measured'] if check['measured'] is not None else 'unknown'
-            lines.append(f"[{check['status'].upper()}] {check['parameter']}: {value} {check['operator']} {check['threshold']}")
+            lines.append(f"[{check['status'].upper()}] {check.get('yaml_parameter', check['parameter'])}: {value} {check['operator']} {check['threshold']}")
         if group.get('note'):
             lines.append(group['note'])
     return '\n' + '\n'.join(lines)
@@ -191,6 +191,23 @@ class Inspector(Visual, Diagnostics):
         self.proof_button.state(['disabled'])
         self.text('')
 
+    def reload_configuration(self):
+        config = self.reader.config.reload()
+        self.worker.invalidate()
+        for window in list(self.visual_windows):
+            window.close()
+        self.image_cache.clear()
+        self.unpin()
+        if self.previews is not None and config != self.reader.config:
+            self.image_worker.close()
+            self.reference_worker.close()
+            previous = self.previews
+            self.previews = previous.fork(config=config)
+            previous.close()
+            self.image_worker = Worker('inspector-image', workers=2, resource=self.previews.fork)
+            self.reference_worker = Worker('inspector-reference', workers=2, resource=self.previews.fork)
+        return config
+
     def search(self):
         filters = {k: entry.get().strip() or None for k,entry in self.entries.items()}
         for key in ('scene','cue'):
@@ -200,6 +217,13 @@ class Inspector(Visual, Diagnostics):
                     self.status.set('Enter a positive scene ID and a nonnegative cue index.')
                     return
                 filters[key] = int(value) if key=='cue' else str(int(value))
+        try:
+            config = self.reload_configuration()
+        except (OSError, ValueError) as error:
+            self.error(error)
+            return
+        _, identity, performer, scope = self.reader.selector
+        self.reader = self.detail_reader = IdentityReader(config, identity_id=identity, performer_id=performer, scope=scope)
         self.offset, self.filters = 0, filters
         self.page(0)
 

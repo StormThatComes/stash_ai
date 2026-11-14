@@ -277,6 +277,10 @@ python stash_ai.py recognition inspect-identity --identity-id ID --observation-i
 
 The scene and zero-based cue filters can be combined with an exact observation
 ID. Select a result to see its stored crop, explanation and related merge.
+Both desktop inspectors list only observations from each scene's active scan
+matching the loaded YAML's detection settings, and body observations matching
+its current collection settings. Retained historical evidence remains available
+to reports and recorded reference images, but is not a current result.
 The reference selector steps through recorded witnesses and track endpoints.
 Each action uses a short read-only snapshot. Paging retrieves metadata only;
 selecting a row reads its images on demand. Nothing is exported. Missing crops
@@ -305,7 +309,7 @@ identity with accepted face or body membership in the entry scene has a branch
 labelled with its Stash performer ID. Each identity contains separate collapsible
 `Face` and `Body` groups. Expanding either group loads its recorded membership
 states: `anchor`, `auxiliary`, `attachment` or `unknown`, where present. State
-counts cover **retained member observations across all scenes**, and each state
+counts cover **current member observations across all scenes**, and each state
 loads independent pages of 80 on expansion. Filtering happens before pagination.
 Face states use the same decision categories as the detail panel: accepted
 current-policy evidence takes precedence, merged predecessors are included, and
@@ -315,13 +319,24 @@ without a linked Stash performer are explicitly labelled `no Stash performer`.
 The number in each branch title counts its observations in the entry scene only. Blue rows mark
 that scene. The remaining rows provide the performer's wider recognition context.
 
-`Unassigned in this scene` includes every retained face without membership and
-every retained body without accepted membership, including withheld and
+`Unassigned in this scene` includes every current face without membership and
+every current body without accepted membership, including withheld and
 provisional tracks. An accepted auxiliary or attachment is already assigned
 and does not enter this group. Accepted internal identities without a Stash ID
 remain in their labelled identity branches. The unassigned group is local to
-the entry scene, with all retained body collection contracts included. Historical
-contracts are marked in the detail panel.
+the entry scene, with only the configured body collection contract included.
+Counts, search, review queues, summaries and direct observation navigation use
+the same current-result filter. Changing YAML without rerunning recognition does
+not make older observations current: incompatible face scans require a rerun,
+and bodies collected under older settings are omitted.
+
+`Load / refresh` rereads the selected YAML and validates it, preserving explicit
+`--faces-db` and device overrides. Restored selections use the new configuration;
+an obsolete selection is not reopened. Decision-chain and quality-gate labels
+use the loaded YAML version's paths: for example, v2 shows
+`body.collection.min_keypoints` rather than the internal
+`sapiensid.collection.min_keypoints`. Numerical and non-configurable geometry
+checks remain unchanged.
 
 The unassigned tree is grouped as `Face` / `Body`, then by the displayed `State`.
 State groups use the retained rejection reason (such as `blurred` or

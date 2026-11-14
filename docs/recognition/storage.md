@@ -196,8 +196,17 @@ membership/portrait/publication images remain protected. Retention does not alte
 people, origins, memberships, merges, publications or run history. Shared matching
 thumbnails are removed only when their deleted observations leave no references.
 
+Within an obsolete body collection variant, only the individually referenced
+observations are pinned. Unreferenced peers are deleted even when they share the
+same cue or contract. Retention atomically removes that variant's completed-cue
+markers, so its surviving audit references cannot masquerade as a complete
+collection. Selecting it again requires recollection. Retired fragments remain
+eligible for cleanup if their final references disappear; genuinely interrupted
+collection attempts remain protected for resume. The configured previous-variant
+allowance and opt-in `auto_prune` setting still apply.
+
 Returning to a completely removed variant requires detection again. Returning
-to an archived variant reuses its numerical evidence and restores missing crops
+to an intact archived variant reuses its numerical evidence and restores missing crops
 from verified VTT input without model inference. Until then, historical image
 exports may report missing crops. Active and retained previous variants keep
 their images. Existing body-crop retention and byte limits still apply.

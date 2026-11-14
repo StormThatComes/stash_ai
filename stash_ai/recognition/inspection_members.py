@@ -1,9 +1,10 @@
 """Metadata-only member roles matching the identity report's assignment rules."""
 from .decision_evidence import REASONS
+from .inspection_policy import selection
 from .reference_roles import observation_sql
 
 
-def query(person, policy, kinds, *, filters, accepted_only):
+def query(person, policy, kinds, *, filters, accepted_only, config):
     ctes, queries, args = [], [], []
     for kind in kinds:
         body = kind == 'body'
@@ -13,7 +14,9 @@ def query(person, policy, kinds, *, filters, accepted_only):
                 + (',m.role' if body else '') + f' FROM {members} m '
                 f'JOIN {observations} o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
                 'WHERE m.person=? AND s.scope=? AND s.namespace=?')
-        base_args = [person['id'], person['scope'], person['namespace']]
+        current, current_args = selection(config, kind)
+        base += ' AND ' + current
+        base_args = [person['id'], person['scope'], person['namespace'], *current_args]
         if accepted_only and body:
             base += " AND m.status='accepted'"
         for column, value in zip(('s.scene', 'o.cue', 'o.id'), filters):
