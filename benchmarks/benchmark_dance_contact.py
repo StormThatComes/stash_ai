@@ -1,4 +1,4 @@
-"""Measure person detection, pose and SAM mask ownership on five labelled dance duets."""
+"""Measure person detection, pose and SAM mask ownership on labelled dance and skating photographs."""
 import argparse
 from collections import Counter
 from contextlib import closing
@@ -25,7 +25,6 @@ from stash_ai.recognition.sapiensid_backend import SapiensIDFaces
 
 DATA = Path(__file__).with_name('data') / 'dance_contact'
 JOINTS = {'elbow': (7, 8), 'wrist': (9, 10), 'knee': (13, 14), 'ankle': (15, 16)}
-BASELINE = 'stock/stock'
 COUNTS = ('people', 'matched', 'extra', 'joints', 'correct_joints', 'masks', 'clean_masks',
           'own_hits', 'own_probes', 'partner_hits', 'partner_probes', 'background_hits', 'background_probes')
 
@@ -151,7 +150,7 @@ def evaluate(config, edits, photos, overlays=None):
                     backend.detect(image, faces=[], force_pose=True)
                     counts, reasons, rejected_masks = score(photo, backend.frame_people, capture)
                     if overlays is not None:
-                        save_overlay(image, backend.frame_people, capture, overlays / (Path(name).name + '.png'))
+                        save_overlay(image, backend.frame_people, capture, overlays / f'{name}.png')
             frames[name] = {'counts': counts, 'missing': reasons, 'rejected_candidates': rejected_masks}
             for key, value in counts.items():
                 totals[key] += value
@@ -159,57 +158,69 @@ def evaluate(config, edits, photos, overlays=None):
     return {'totals': totals, 'missing': dict(rejected), 'frames': frames}
 
 
-def rank(counts, edits):
-    return (counts['clean_masks'], -counts['partner_hits'], -counts['background_hits'],
-            counts['correct_joints'], counts['matched'], -counts['extra'], -len(edits))
-
-
 def read_profiles(path):
-    groups = yaml.safe_load(path.read_text())
-    for kind in ('pose', 'mask'):
-        if groups[kind].get('stock') != {}:
-            raise ValueError(f'{kind}.stock must be an empty mapping for the baseline')
-    profiles = {}
-    for pose_name, pose in groups['pose'].items():
-        for mask_name, mask in groups['mask'].items():
-            if pose.keys() & mask.keys():
-                raise ValueError('A setting appears in both profile groups')
-            profiles[f'{pose_name}/{mask_name}'] = {**pose, **mask}
+    profiles = yaml.safe_load(path.read_text())
+    if isinstance(profiles, dict) and set(profiles) == {'pose', 'mask'}:
+        # Accept sweep files created for the original dance-contact CLI.
+        pose, mask = profiles['pose'], profiles['mask']
+        if any(not isinstance(group, dict) or group.get('stock') != {} for group in (pose, mask)):
+            raise ValueError('Both sweep axes must include an empty stock mapping')
+        crossed = {}
+        for pose_name, pose_edits in pose.items():
+            for mask_name, mask_edits in mask.items():
+                if pose_edits.keys() & mask_edits.keys():
+                    raise ValueError('A setting appears in both profile groups')
+                name = 'stock' if pose_name == mask_name == 'stock' else f'{pose_name}/{mask_name}'
+                crossed[name] = {**pose_edits, **mask_edits}
+        return crossed
+    if not isinstance(profiles, dict) or profiles.get('stock') != {}:
+        raise ValueError('Profiles must include an empty stock mapping for the supplied recognition YAML')
+    for name, edits in profiles.items():
+        if not isinstance(name, str) or not isinstance(edits, dict):
+            raise ValueError('Expected named mappings of recognition YAML overrides')
     return profiles
 
 
-def run_split(config, split, profiles, photos, overlays):
+def coverage(frames):
+    counts = [f['counts'] for f in frames.values()]
+    return dict(photos=len(counts), with_clean_mask=sum(c['clean_masks'] > 0 for c in counts),
+                fully_clean=sum(c['clean_masks'] == c['people'] for c in counts))
+
+
+def select_profile(results, profiles):
+    def rank(name):
+        result = results[name]
+        counts = result['totals']
+        # Compare the worst photo first. A solo and a trio each get one vote.
+        per_photo = sorted(f['counts']['clean_masks'] / f['counts']['people'] for f in result['frames'].values())
+        return (per_photo, counts['clean_masks'], counts['matched'], counts['correct_joints'],
+                counts['own_hits'], -len(profiles[name]))
+
+    eligible = [name for name, result in results.items()
+                if all(result['totals'][key] == 0 for key in ('partner_hits', 'background_hits', 'extra'))]
+    return max(eligible, key=rank, default=None)
+
+
+def run(config, profiles, photos, overlays=None):
     results = {}
     for index, (name, edits) in enumerate(profiles.items()):
-        print(f'{split} {name}', file=sys.stderr, flush=True)
-        directory = overlays / f'{split}-{index:02d}' if overlays else None
+        print(name, file=sys.stderr, flush=True)
+        directory = overlays / f'profile-{index:02d}' if overlays else None
         result = evaluate(config, edits, photos, directory)
+        result['coverage'] = coverage(result['frames'])
         if directory:
             result['overlay_directory'] = directory.name
         results[name] = result
-    return results
-
-
-def fit_all(config, profiles, photos, overlays):
-    """Calibrate on the entire fixture set. Keep profiles with measured leakage or extra people out of contention."""
-    results = run_split(config, 'all', profiles, photos, overlays)
-    eligible = {}
-    for name, result in results.items():
-        counts = result['totals']
-        if counts['partner_hits'] == counts['background_hits'] == counts['extra'] == 0:
-            eligible[name] = (counts['clean_masks'], counts['matched'], counts['correct_joints'],
-                              counts['own_hits'], -len(profiles[name]))
-    return dict(selection='all_five_calibration', winner=max(eligible, key=eligible.get) if eligible else None,
-                all_photos=results)
+    return dict(selection='all_photos', winner=select_profile(results, profiles), results=results)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=DATA.parents[2] / 'facial_recognition.yml')
     parser.add_argument('--model-dir', type=Path, help='Override execution.models.directory')
-    parser.add_argument('--profiles', type=Path, default=DATA / 'profiles.yml', help='Pose and mask sweep YAML')
+    parser.add_argument('--profiles', type=Path, default=DATA / 'profiles.yml', help='Named sets of recognition YAML overrides')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
-    parser.add_argument('--fit-all', action='store_true', help='Fit to all five photos, with no holdout validation')
+    parser.add_argument('--fit-all', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--overlays', type=Path, help='Optional directory for detection tuner-style PNGs')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -218,16 +229,7 @@ def main():
         config = replace(config, model_dir=args.model_dir.resolve())
     photos = json.loads((DATA / 'labels.json').read_text())
     profiles = read_profiles(args.profiles)
-    if args.fit_all:
-        results = fit_all(config, profiles, photos, args.overlays)
-    else:
-        tune = {k: v for k, v in photos.items() if v['split'] == 'tune'}
-        holdout = {k: v for k, v in photos.items() if v['split'] == 'holdout'}
-        tuned = run_split(config, 'tune', profiles, tune, args.overlays)
-        winner = max(profiles, key=lambda name: rank(tuned[name]['totals'], profiles[name]))
-        finalists = {name: profiles[name] for name in (BASELINE, winner)}
-        validation = run_split(config, 'holdout', finalists, holdout, args.overlays)
-        results = dict(winner=winner, tune=tuned, holdout=validation)
+    results = run(config, profiles, photos, args.overlays)
     report = dict(device=args.device, versions={p: version(p) for p in ('torch', 'rfdetr', 'rfdetr-plus')},
                   config_sha256=sha256(args.config.read_bytes()).hexdigest(), profiles=profiles, **results)
     args.output.write_text(json.dumps(report, indent=2) + '\n')

@@ -1,15 +1,23 @@
-# Dance duet photographs
+# Dance and skating photographs
 
-These five JPEG derivatives are distributed under [Creative Commons Attribution-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-sa/4.0/). Each was oriented for display, converted to RGB, resized proportionally to 500 pixels wide with Lanczos resampling and re-encoded as JPEG without the original metadata. The following credits and links accompany the copies.
+Each derivative is distributed under the license in its row. The photographs were oriented for display, converted to RGB, resized proportionally to 500 pixels wide and re-encoded as JPEG without their original metadata. Two images were also cropped before resizing. For `spiral-side` the upper 73% of the original was retained. For `candy-balance` the crop extends from (600, 1000) to (2350, 3350) in the oriented original. The manual coordinates in [labels.json](labels.json) are available under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
-| Repository file | Photographer and attribution | Original on Wikimedia Commons |
-| --- | --- | --- |
-| attitude.jpg | Jim Lamberson \| Wikimedia Commons (Lambtron) | [1NutcrackerGrandPasDeDeux.jpg](https://commons.wikimedia.org/wiki/File:1NutcrackerGrandPasDeDeux.jpg) |
-| penche.jpg | Jim Lamberson \| Wikimedia Commons (Lambtron) | [NWFusion7.jpg](https://commons.wikimedia.org/wiki/File:NWFusion7.jpg) |
-| paquita.jpg | Jim Lamberson \| Wikimedia Commons (Lambtron) | [NWFusionPaquitaPas1.jpg](https://commons.wikimedia.org/wiki/File:NWFusionPaquitaPas1.jpg) |
-| airborne.jpg | Jim Lamberson \| Wikimedia Commons (Lambtron) | [ContemporaryBalletPasDeDeux.jpg](https://commons.wikimedia.org/wiki/File:ContemporaryBalletPasDeDeux.jpg) |
-| twisted.jpg | © Peter Lodwick (BirdsPL) · Wikimedia Commons | [Dans & Toners performance Twisted 2.jpg](https://commons.wikimedia.org/wiki/File:Dans_%26_Toners_performance_Twisted_2.jpg) |
-
-The manual coordinates in `labels.json` refer to these resized copies and are also distributed under CC BY-SA 4.0.
-
-The [twelve additional photographs](extended/CREDITS.md) have individual attribution and license notices.
+| Derivative | Photographer / attribution | Wikimedia Commons source | License |
+| --- | --- | --- | --- |
+| [attitude.jpg](attitude.jpg) | Jim Lamberson \| Wikimedia Commons (Lambtron) | [1NutcrackerGrandPasDeDeux.jpg](https://commons.wikimedia.org/wiki/File:1NutcrackerGrandPasDeDeux.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [penche.jpg](penche.jpg) | Jim Lamberson \| Wikimedia Commons (Lambtron) | [NWFusion7.jpg](https://commons.wikimedia.org/wiki/File:NWFusion7.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [paquita.jpg](paquita.jpg) | Jim Lamberson \| Wikimedia Commons (Lambtron) | [NWFusionPaquitaPas1.jpg](https://commons.wikimedia.org/wiki/File:NWFusionPaquitaPas1.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [airborne.jpg](airborne.jpg) | Jim Lamberson \| Wikimedia Commons (Lambtron) | [ContemporaryBalletPasDeDeux.jpg](https://commons.wikimedia.org/wiki/File:ContemporaryBalletPasDeDeux.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [twisted.jpg](twisted.jpg) | © Peter Lodwick (BirdsPL) · Wikimedia Commons | [Dans & Toners performance Twisted 2.jpg](https://commons.wikimedia.org/wiki/File:Dans_%26_Toners_performance_Twisted_2.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [spiral-entry.jpg](spiral-entry.jpg) | David W. Carmichael – davecskatingphoto.com | [Aliona Savchenko & Robin Szolkowy Death Spiral 2009 Europeans.jpg](https://commons.wikimedia.org/wiki/File:Aliona_Savchenko_%26_Robin_Szolkowy_Death_Spiral_2009_Europeans.jpg) | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| [spiral-side.jpg](spiral-side.jpg) | David W. Carmichael – davecskatingphoto.com | [Aliona Savchenko & Robin Szolkowy Spiral 2009 Europeans.jpg](https://commons.wikimedia.org/wiki/File:Aliona_Savchenko_%26_Robin_Szolkowy_Spiral_2009_Europeans.jpg) | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| [candy-balance.jpg](candy-balance.jpg) | Jim Lamberson &#124; Wikimedia Commons (Lambtron) | [CandylandPasDeDeux.jpg](https://commons.wikimedia.org/wiki/File:CandylandPasDeDeux.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [floor-trio.jpg](floor-trio.jpg) | Koyaanisqatsi12 | [Contact Improvisation Trio Dojo Florence.jpg](https://commons.wikimedia.org/wiki/File:Contact_Improvisation_Trio_Dojo_Florence.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [stage-trio.jpg](stage-trio.jpg) | Michael Cairns 2022 (image credit), GFF2023 (Commons author field) | [Contemporary Dance.jpg](https://commons.wikimedia.org/wiki/File:Contemporary_Dance.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [beach-solo.jpg](beach-solo.jpg) | Danieljksn | [Contemporary ballet dancer.jpg](https://commons.wikimedia.org/wiki/File:Contemporary_ballet_dancer.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [floor-reach.jpg](floor-reach.jpg) | © Peter Lodwick (BirdsPL) · Wikimedia Commons | [Dans & Toners performance Twisted 1.jpg](https://commons.wikimedia.org/wiki/File:Dans_%26_Toners_performance_Twisted_1.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [pointe-rear.jpg](pointe-rear.jpg) | Parksy1964, Buxton, Derbyshire, UK | [Duet en Pointe.jpg](https://commons.wikimedia.org/wiki/File:Duet_en_Pointe.jpg) | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/) |
+| [parallel-jump.jpg](parallel-jump.jpg) | Alexandre Machado | [Joinville Dance Festival.jpg](https://commons.wikimedia.org/wiki/File:Joinville_Dance_Festival.jpg) | [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/) |
+| [paired-arms.jpg](paired-arms.jpg) | Jim Lamberson &#124; Wikimedia Commons (Lambtron) | [NWFusionPaquitaPas2.jpg](https://commons.wikimedia.org/wiki/File:NWFusionPaquitaPas2.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [silhouette-solo.jpg](silhouette-solo.jpg) | MarylandGeoffrey | [Silhouette Ballet Dancer.jpg](https://commons.wikimedia.org/wiki/File:Silhouette_Ballet_Dancer.jpg) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| [low-spiral.jpg](low-spiral.jpg) | Caroline Paré – everythingskating.com | [Siudek & Siudek Death Spiral - 2006 Skate America.jpg](https://commons.wikimedia.org/wiki/File:Siudek_%26_Siudek_Death_Spiral_-_2006_Skate_America.jpg) | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |

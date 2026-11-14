@@ -2,25 +2,18 @@ import base64
 import json
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from benchmarks.benchmark_dance_contact import DATA, assign_people, correct_joints, read_profiles, score
 from stash_ai.recognition.pose_mask_capture import capture_masks
 
 
-@pytest.mark.parametrize('directory,tune,holdout,counts', [
-    (DATA, 3, 2, [2] * 5),
-    (DATA / 'extended', 7, 5, [1] * 2 + [2] * 8 + [3] * 2),
-])
-def test_real_fixtures_match_annotations(directory, tune, holdout, counts):
-    photos = json.loads((directory / 'labels.json').read_text())
-    assert {f.stem for f in directory.glob('*.jpg')} == photos.keys()
-    assert sum(p['split'] == 'tune' for p in photos.values()) == tune
-    assert sum(p['split'] == 'holdout' for p in photos.values()) == holdout
-    assert sorted(len(p['people']) for p in photos.values()) == counts
+def test_real_fixtures_match_annotations():
+    photos = json.loads((DATA / 'labels.json').read_text())
+    assert {f.stem for f in DATA.glob('*.jpg')} == photos.keys()
+    assert sorted(len(p['people']) for p in photos.values()) == [1] * 2 + [2] * 13 + [3] * 2
     for name, photo in photos.items():
-        with Image.open(directory / f'{name}.jpg') as image:
+        with Image.open(DATA / f'{name}.jpg') as image:
             assert list(image.size) == photo['size']
             assert image.width == 500
             image.verify()
@@ -34,10 +27,13 @@ def test_real_fixtures_match_annotations(directory, tune, holdout, counts):
             assert all(left <= x < right and top <= y < bottom for x, y in points)
 
 
-def test_public_profiles():
+def test_public_profiles(tmp_path):
     profiles = read_profiles(DATA / 'profiles.yml')
-    assert profiles['stock/stock'] == {}
-    assert profiles['points/coverage']['pose.estimator.keypoint_score_threshold'] == 0.4
+    assert profiles['stock'] == {}
+    assert profiles['single-prompt']['pose.refinement.max_prompt_points'] == 1
+    sweep = tmp_path / 'sweep.yml'
+    sweep.write_text('pose: {stock: {}, nms: {pose.detector.nms_threshold: 0.9}}\nmask: {stock: {}}')
+    assert read_profiles(sweep) == {'stock': {}, 'nms/stock': {'pose.detector.nms_threshold': 0.9}}
 
 
 def test_shared_boxes_match_heads_and_each_joint_is_used_once():
@@ -89,40 +85,30 @@ def test_admitted_and_rejected_masks_use_separate_scores(tmp_path):
         assert overlay.height > photo['size'][1]
 
 
-def test_fit_all_excludes_leakage_and_extra_detections(monkeypatch):
+def test_one_profile_for_all_photos(monkeypatch, tmp_path):
     from benchmarks import benchmark_dance_contact as benchmark
 
-    clean = dict(clean_masks=6, matched=10, correct_joints=37, own_hits=36,
-                 partner_hits=0, background_hits=0, extra=0)
-    measured = {'clean': {'totals': clean}, 'more-edits': {'totals': clean}}
-    for issue in ('partner_hits', 'background_hits', 'extra'):
-        measured[issue] = {'totals': {**clean, 'clean_masks': 7, issue: 1}}
-    photos = {'tuning-photo': {'split': 'tune'}, 'reserved-photo': {'split': 'holdout'}}
+    profiles = {name: {} for name in ('many', 'balanced', 'leaks', 'background', 'extra')}
+    annotations = {'hard': {}, 'easy1': {}, 'easy2': {}}
+    distributions = {'many': [0, 3, 3], 'balanced': [1, 2, 2],
+                     'leaks': [3, 3, 3], 'background': [3, 3, 3], 'extra': [3, 3, 3]}
+    seen = []
 
-    def run(config, split, profiles, selected, overlays):
-        assert split == 'all' and selected == photos
-        return {name: measured[name] for name in profiles}
+    def evaluate(config, edits, photos, directory):
+        assert photos is annotations
+        name = list(profiles)[len(seen)]
+        seen.append(name)
+        frames = {n: {'counts': {'people': 3, 'clean_masks': count}}
+                  for n, count in zip(photos, distributions[name], strict=True)}
+        totals = dict(clean_masks=sum(distributions[name]), matched=9, correct_joints=20, own_hits=27,
+                      partner_hits=int(name == 'leaks'), background_hits=int(name == 'background'),
+                      extra=int(name == 'extra'))
+        return dict(frames=frames, totals=totals)
 
-    monkeypatch.setattr(benchmark, 'run_split', run)
-    profiles = {name: {} for name in measured}
-    profiles['more-edits'] = {'pose.detector.nms_threshold': 0.9}
-    result = benchmark.fit_all(None, profiles, photos, None)
-    assert result['winner'] == 'clean' and result['all_photos'] == measured
-    assert benchmark.fit_all(None, {'extra': {}}, photos, None)['winner'] is None
-
-
-def test_transfer_selection_uses_new_tuning_masks_and_checks_original_ties():
-    from benchmarks.benchmark_dance_transfer import select_profile
-
-    stock = dict(clean_masks=7, matched=12, correct_joints=42, own_hits=54,
-                 partner_hits=1, background_hits=0, extra=0)
-    profiles = {'stock': {}, 'simple': {'a': 1}, 'better-original': {'a': 1, 'b': 2}, 'leaks': {'a': 2}}
-    tune = {name: {'totals': {**stock, 'clean_masks': 8}} for name in profiles}
-    tune['stock'] = {'totals': stock}
-    tune['leaks'] = {'totals': {**stock, 'clean_masks': 10, 'partner_hits': 2}}
-    original = {name: {'totals': {**stock, 'partner_hits': 0}} for name in profiles}
-    original['better-original']['totals']['clean_masks'] += 1
-    assert select_profile(profiles, tune, original) == 'better-original'
-    original['better-original']['totals']['background_hits'] = 1
-    assert select_profile(profiles, tune, original, clean_original=True) == 'simple'
-    assert select_profile({'stock': {}}, tune, {'stock': {'totals': stock}}, clean_original=True) is None
+    monkeypatch.setattr(benchmark, 'evaluate', evaluate)
+    report = benchmark.run(None, profiles, annotations, tmp_path)
+    assert seen == list(profiles)
+    assert report['winner'] == 'balanced'
+    assert report['results']['balanced']['coverage'] == dict(photos=3, with_clean_mask=3, fully_clean=0)
+    assert report['results']['many']['coverage'] == dict(photos=3, with_clean_mask=2, fully_clean=2)
+    assert benchmark.select_profile({'leaks': report['results']['leaks']}, profiles) is None

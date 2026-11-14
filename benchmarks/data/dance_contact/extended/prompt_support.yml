@@ -1,7 +1,0 @@
-# Diagnostic override set for the candy-balance photo.
-candy-prompt-check:
-  pose.refinement.max_prompt_points: 4
-  pose.refinement.min_keypoint_score: 0.6
-  pose.refinement.min_mask_score: 0.3
-  pose.refinement.min_prompt_points: 1
-  pose.refinement.min_visibility: 0.3
