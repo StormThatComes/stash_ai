@@ -50,6 +50,9 @@ def verbose_progress(maximum):
                       f"performers={json.dumps(target['performers'])} blockers={json.dumps(target['blockers'])}",
                       file=sys.stderr, flush=True)
         elif stage == 'complete':
+            if coverage := item['goal_result'].get('assignment_coverage'):
+                from .merge_solver_coverage import summary
+                print('  ' + summary(coverage), file=sys.stderr, flush=True)
             for group in item['goal_result']['groups']:
                 print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
             from .merge_scene_exclusions import summary_lines

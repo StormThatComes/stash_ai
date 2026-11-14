@@ -48,8 +48,10 @@ solution instead of treating unchanged fragmentation as stagnation. The best
 completed configuration is still saved immediately; interruption or a failed
 probe cannot replace it with an unverified boundary.
 
-Among fully solved configurations the ranking preserves the existing collateral
-impact priorities, then prefers restoring relaxed admission requirements,
+Among fully solved configurations the ranking preserves collateral impact
+priorities, then **minimizes unassigned observations across the whole replay
+selection**, including observations outside the requested sets. At equal coverage
+it prefers restoring relaxed admission requirements,
 preserving face support of frozen face references, stronger face-core matching, face views/attachments, the hybrid face floor, and
 body matching, in that order. Within each tier, bounded normalized strengths are
 summed (integer support uses `value / (value + baseline_scale)`). Switching more
@@ -60,6 +62,29 @@ quality, local stability and smaller YAML changes break remaining ties. Thus a
 loose input YAML does not win merely because it needs fewer edits. All positive
 sets, negative scene/observation constraints and explicit outside limits still
 have to pass the full production rebuild.
+
+Coverage counts each retained face/body observation address once, on a fixed
+population of compatible selected scans. A face and a body are separate evidence
+observations; this is not a count of physical people. Rejected or unavailable
+rows cannot improve the score by disappearing from the denominator. Production
+matching still decides every assignment. Existing set goals, exclusions and
+explicit outside limits take precedence; among unsolved trials their original
+goal quality and collateral ranking still precede coverage.
+
+Recovering a previously unassigned observation into a target set does not incur
+the automatic established-outsider penalty. That penalty still protects rows
+assigned in the baseline replay, and `--max-new-outsider-observations` still
+counts **all** new target attachments, including recoveries. Outside assignment
+losses, splits and joins retain their priority over coverage. At equal collateral
+impact a stricter solved configuration cannot win by leaving more rows unassigned.
+
+Full and compact JSON expose `goal_result.assignment_coverage` per trial and
+`best_result.assignment_coverage` for the winner: `total`, `assigned`, `unassigned`,
+`gained`, `lost` (relative to baseline replay), and `recovered_target_attachments`
+(target-set links exempted from the automatic outsider penalty). Console summaries
+show the same global counts separately from set-only `assigned` counters. Coverage
+is a ranking preference, not a requirement for zero unassigned observations or an
+accuracy estimate; the solver still selects only among completed production replays.
 
 The first feasible replay's accepted production routes determine which matching
 gates receive a strength reward. Unused changed gates are restored towards the

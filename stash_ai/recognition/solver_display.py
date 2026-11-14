@@ -216,6 +216,9 @@ class SolverDisplay:
                 f' · Solver {attempted}/{search.get("max_trials", self.maximum)} · fresh {attempted-restored}'
                 f' · restored {restored} · failed {search.get("failed_trials", 0)}'
                 )
+        if best and (coverage := best.get('assignment_coverage')):
+            from .merge_solver_coverage import summary
+            line += '\n  ' + summary(coverage)
         if best and best['unmet_conditions']:
             from collections import Counter
             reasons = Counter()

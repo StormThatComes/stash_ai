@@ -213,6 +213,9 @@ def summary(result):
     if goal.get('goal_policy', {}).get('name') == 'identity':
         lines.append(f"  Goal policy: identity; strict_disjoint={goal['strict_disjoint']}; "
                      f"strict_fully_solved={goal['strict_fully_solved']}; largest_complete counts all original samples.")
+    if coverage := goal.get('assignment_coverage'):
+        from .merge_solver_coverage import summary as coverage_summary
+        lines.append('  ' + coverage_summary(coverage))
     lines.extend(line for group in goal['groups'] for line in group_summary_lines(group))
     from .merge_scene_exclusions import summary_lines
     lines.extend(summary_lines(goal))
