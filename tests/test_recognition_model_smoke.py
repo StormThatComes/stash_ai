@@ -69,6 +69,7 @@ def test_ort_contract_matches_cpu_sface_and_handles_non_square_yunet(tmp_path):
 
 @pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned visibility-model smoke')
 def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrait(tmp_path):
+    from contextlib import ExitStack
     import hashlib
     from io import BytesIO
     import requests
@@ -76,6 +77,7 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
     from stash_ai.recognition.config import load
     from stash_ai.recognition.models import checked_detection, ensure_assets
     from stash_ai.recognition.visibility import FaceVisibility
+    from tests.test_recognition_visibility_rotation import quarter_turn
     # Grace Hopper, US Navy/public domain; immutable content checked independently
     # of the matplotlib tag. Download only in the explicit model smoke jobs.
     url = 'https://raw.githubusercontent.com/matplotlib/matplotlib/v3.10.1/lib/matplotlib/mpl-data/sample_data/grace_hopper.jpg'
@@ -84,7 +86,7 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
         data = response.content
     assert hashlib.sha256(data).hexdigest() == 'a8ca6d734765703b09728ab47fe59f473d93ae3967fc24c7c0288c3c7adb7130'
     config = load(root=tmp_path, device='cpu')
-    model = FaceVisibility(config, ensure_assets(config))
+    model = FaceVisibility(config, ensure_assets(config, keys=['faceocc']))
     face = checked_detection([182.86642, 120.47789, 170.25731, 212.48526, 227.11728, 193.32774,
                               307.84845, 195.3718, 266.4793, 240.008, 228.50974, 267.86563,
                               302.18546, 269.56985, .94316435])
@@ -98,6 +100,19 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
             assert [v['visibility']['face_pixels'] for v in batched]==[visible['visibility']['face_pixels']]*2
             assert [v['visible_face_fraction'] for v in batched]==pytest.approx(
                 [visible['visible_face_fraction'],occluded['visible_face_fraction']],abs=.001)
+            with ExitStack() as images:
+                rotated = []
+                for turns in (1, 2, 3):
+                    for source in (image, covered):
+                        pixels, detection = quarter_turn(source, face, turns)
+                        rotated.append((images.enter_context(pixels), detection))
+                results = model.measure_many(rotated)
+            for uncovered, hidden in zip(results[::2], results[1::2]):
+                assert uncovered['visible_face_fraction'] > .8
+                assert hidden['visible_face_fraction'] < .8
+                assert uncovered['visible_face_fraction']-hidden['visible_face_fraction'] > .2
+                assert uncovered['visible_face_fraction'] == pytest.approx(visible['visible_face_fraction'], abs=.04)
+                assert hidden['visible_face_fraction'] == pytest.approx(occluded['visible_face_fraction'], abs=.04)
         assert visible['visible_face_fraction'] > .8
         assert occluded['visible_face_fraction'] < .8
         assert visible['visible_face_fraction'] - occluded['visible_face_fraction'] > .2

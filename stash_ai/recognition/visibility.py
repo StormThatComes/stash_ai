@@ -6,8 +6,9 @@ import math
 from .config import digest
 from .models import ASSETS, verified_bytes
 
-CONTRACT = {'version': 2, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
-            'crop': 'square-face-box-padding-0.25', 'region': 'face-box-ellipse-0.45w-0.48h',
+CONTRACT = {'version': 3, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+            'crop': 'square-face-box-padding-0.25-eye-roll-aligned',
+            'region': 'source-face-box-ellipse-0.45w-0.48h-inverse-mapped',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
             'sharpness': 'foreground-interior-laplacian-256-v1'}
 CONTRACT_ID = digest(CONTRACT)
@@ -164,24 +165,42 @@ def _constants():
 
 
 def prepare(image, face, *, allow_partial=False):
-    """Fixed crop and elliptical face ROI; portrait padding never affects ratio."""
+    """Remove eye-line roll; sample the source ellipse and real pixels together."""
     import numpy as np
     from PIL import Image
+    points = np.asarray(face.landmarks, dtype=np.float64)
+    if points.shape != (5, 2) or not np.isfinite(points).all():
+        raise VisibilityGeometryError('Visibility alignment requires five finite landmarks.')
+    eye = points[1] - points[0]
+    distance = float(np.linalg.norm(eye))
+    if not math.isfinite(distance) or distance <= 1:
+        raise VisibilityGeometryError('Visibility alignment requires distinct eye landmarks.')
+    cosine, sine = (float(value) for value in eye / distance)
     x, y, width, height = face.box
     side = max(width, height) * 1.5
-    left, top = x + width / 2 - side / 2, y + height / 2 - side / 2
+    center_x, center_y = x + width / 2, y + height / 2
+    scale = side / 256
+    # PIL maps output coordinates back into the source. Rotate in this single
+    # resampling pass, including upside-down faces; never mirror eye ordering.
+    transform = (scale * cosine, -scale * sine, center_x - side / 2 * (cosine - sine),
+                 scale * sine, scale * cosine, center_y - side / 2 * (sine + cosine))
     with image.convert('RGB') as rgb, rgb.transform((256, 256), Image.Transform.AFFINE,
-            (side / 256, 0, left, 0, side / 256, top), resample=Image.Resampling.BILINEAR) as crop:
+            transform, resample=Image.Resampling.BILINEAR) as crop:
         data = np.array(crop,dtype=np.float32,copy=True)
         np.divide(data,255.,out=data)
     mean,std,rows,columns=_constants()
     np.subtract(data,mean,out=data)
     np.divide(data,std,out=data)
-    region = (((columns + .5 - 128) / (width * .45 * 256 / side)) ** 2
-              + ((rows + .5 - 128) / (height * .48 * 256 / side)) ** 2 <= 1)
+    dx = cosine * (columns + .5 - 128) - sine * (rows + .5 - 128)
+    dy = sine * (columns + .5 - 128) + cosine * (rows + .5 - 128)
+    # Keep the original physical ROI, rather than replacing it with a smaller
+    # aligned ellipse that could silently discard an occluder near its edges.
+    region = ((dx / (width * .45 * 256 / side)) ** 2
+              + (dy / (height * .48 * 256 / side)) ** 2 <= 1)
     # Exclude synthetic padding from the visibility denominator.
-    real = ((left + (columns + .5) * side / 256 >= 0) & (left + (columns + .5) * side / 256 < image.width)
-            & (top + (rows + .5) * side / 256 >= 0) & (top + (rows + .5) * side / 256 < image.height))
+    source_x, source_y = center_x + dx * scale, center_y + dy * scale
+    real = ((source_x >= 0) & (source_x < image.width)
+            & (source_y >= 0) & (source_y < image.height))
     if allow_partial:
         region = region & real
     if not region.any() or not real[region].all():
@@ -210,7 +229,7 @@ def _counts(visible,count,device):
     if type(visible) is not int or type(count) is not int or count<=0 or not 0<=visible<=count:
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
-            'visibility': {'contract': CONTRACT_ID, 'method': 'faceocc-ellipse-v1', 'device': device,
+            'visibility': {'contract': CONTRACT_ID, 'method': 'faceocc-ellipse-roll-v2', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count}}
 

@@ -322,6 +322,15 @@ the same measured value. Active portrait sharpness weighting with a positive
 quality target likewise requires visibility weighting, or anchor-only visibility
 measurement. Portrait quality targets remain preferences, not admission gates.
 
+FaceOcc receives an upright crop based on the eye-line direction, including
+sideways and upside-down faces. Visibility and foreground sharpness use the
+same rotated pixels, source ellipse and padding checks, with one segmentation
+pass per face. The quality/visibility contracts invalidate older measurements:
+the next `recognition run` reprocesses selected scenes, including faces previously
+rejected as `face_occluded`, without changing YAML thresholds or deleting the
+database. Subsequent runs reuse the updated measurements. This requires detected,
+usable landmarks; it does not recover a face that the detector never found.
+
 Quality records include `sharpness_method` (`faceocc_mask`, `face_ellipse`, or
 `unavailable`), `sharpness_pixels`, and the previous rectangular measurement as
 `crop_sharpness` for comparison. These scores differ from the old 112px crop
