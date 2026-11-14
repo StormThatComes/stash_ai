@@ -124,7 +124,11 @@ def test_bad_second_pose_keeps_both_original_box_and_original_points():
     with Image.new('RGB', (160,100)) as image:
         result = model.predict(image,[BOX])
     assert result[3][0]['reason'] == 'second_pass_core_drift'
-    assert 'overlap_mask' not in result[3][0]
+    from stash_ai.recognition.body_overlap import foreground_mask
+    record = result[3][0]
+    mask, area = foreground_mask(dict(bounds=BOX, pose_refinement=record))
+    assert mask.shape == (80, 40) and area == 80 * 40
+    assert 'encoder_mask' not in record
     assert result[3][0]['bounds'] == BOX
     np.testing.assert_array_equal(result[0][0], pose_points())
 

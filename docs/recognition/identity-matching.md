@@ -24,6 +24,7 @@ progress, and includes `observations_rejected` in its summary, including reused 
 | `min_sharpness` | 10 | Minimum Laplacian variance on the normalized grayscale crop; 0 disables |
 | `max_pose_deviation` | 0.50 | Maximum five-landmark pose estimate in `[0, 1]`; `null` disables this gate |
 | `min_visible_face_fraction` | 0.80 | Minimum FaceOcc visible-face estimate in `[0, 1]`; 0 disables recognition segmentation |
+| `min_face_source_fraction` | 0.85 | Minimum fraction of the face ellipse inside the image for a FaceOcc measurement |
 | `require_complete_face` | true | Reject face boxes extending beyond the source thumbnail |
 
 The shipped [YAML template](../../facial_recognition.yml) can override these built-in
@@ -48,11 +49,14 @@ as an uncovered face. Cheap size/sharpness/geometry gates run before segmentatio
 A lazy visibility model is reused within each active phase (or across phases in
 `retain` mode); accepted VTT observations retain the raw measurement so portrait
 ranking does not repeat it.
-If `require_complete_face: false` permits a partial face whose visibility region
-extends outside the real source, that observation is rejected as
-`face_visibility_unmeasurable`, without an embedding/crop. Other valid cues continue.
-This local geometry rejection does not turn a broken or unavailable model into a
-successful scan.
+With `require_complete_face: false`, FaceOcc can measure a partial face when its
+in-frame ellipse fraction reaches `min_face_source_fraction` (range 0–1).
+Zero allows any nonempty source region and one requires the full ellipse.
+The visibility score divides visible
+source pixels by the full ellipse area, so missing pixels reduce the score.
+A smaller in-frame area yields `face_visibility_unmeasurable`. The inspector
+shows the geometry error and source coverage when available. With
+`require_complete_face: true`, the scan rejects incomplete boxes before FaceOcc.
 
 Fresh retained face JPEGs also obey `storage.max_crop_mb` (minimum 0.0009765625 MB).
 Encoding starts at quality 90, then reduces JPEG quality and, if needed, dimensions

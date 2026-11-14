@@ -45,6 +45,14 @@ def test_reject_bad_configuration_before_work(tmp_path, text):
     assert not (tmp_path / 'faces_state.sqlite3').exists()
 
 
+@pytest.mark.parametrize('value', ['-0.01', '1.01', 'true', '.nan', '.inf'])
+def test_source_coverage_rejects_invalid_yaml(tmp_path, value):
+    path = tmp_path / 'bad.yml'
+    path.write_text(f'version: 2\nface:\n  quality: {{min_face_source_fraction: {value}}}\n')
+    with pytest.raises(ValueError, match='min_face_source_fraction'):
+        load(path)
+
+
 @pytest.mark.parametrize('limit', [1073741825, 8589934592, 68719476736])
 def test_large_reference_budget_loads_and_remains_enforced(tmp_path, limit):
     from stash_ai.recognition.reference_usage import ReferenceUsage

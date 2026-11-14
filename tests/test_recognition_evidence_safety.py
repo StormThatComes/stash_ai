@@ -59,40 +59,75 @@ def test_normal_crop_budget_preserves_original_jpeg_bytes_and_borrowed_pixels():
         assert image.getpixel((0, 0))
 
 
-def test_unmeasurable_partial_face_is_rejected_without_losing_other_valid_cues(tmp_path):
+@pytest.mark.parametrize('strict', [False, True])
+def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
+    import torch
+    from stash_ai.recognition.visibility import FaceVisibility
+    from stash_ai.recognition.admission_report import Policies, face as face_report
+    from stash_ai.recognition.scanning import scan_identity
     path = tmp_path / 'faces.yml'
-    path.write_text('version: 1\ndetection: {min_sharpness: 0, require_complete_face: false}\n'
-                    'execution: {checkpoint_cues: 1}\n')
+    path.write_text(f'version: 1\ndetection: {{min_sharpness: 0, require_complete_face: {str(strict).lower()}}}\n')
     config, client, backend = load(path), MediaClient(count=4), Backend()
-    row = list(FACE.row)
-    # Keep enough real source pixels for embedding alignment, but let the
-    # FaceOcc visibility ellipse still cross the left image boundary.
-    for index in (0, 4, 6, 8, 10, 12):
-        row[index] -= 40
-    detections = iter([FACE, replace(FACE, row=tuple(row)), FACE, FACE])
-    backend.detect = lambda image: [next(detections)]
-    class Visibility:
-        def __init__(self, *args): pass
-        def measure(self, image, face):
-            _, region = prepare(image, face)
-            return measurement(np.ones((1, 1, 256, 256)), region, 'cpu')
-        def close(self): pass
-    visibility = LazyVisibility(config, {}, Visibility)
-    try:
-        with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
-            identifier, _ = scan_scene(db, 'scope', client.scene, config, 'ns', source,
-                                        lambda: backend, visibility=visibility)
-            assert db.connection.execute('SELECT cursor,status FROM scans').fetchone()[:] == (4, 'complete')
-            rows = db.connection.execute('SELECT * FROM observations ORDER BY cue').fetchall()
-            assert backend.calls == 3 and len(rows) == 4
-            assert rows[1]['rejected'] == 'face_visibility_unmeasurable'
-            assert json.loads(rows[1]['quality'])['alignment_valid'] is True
-            assert rows[1]['embedding'] is rows[1]['crop'] is None
-            assert not json.loads(rows[1]['quality'])['complete']
-            assert all(rows[i]['rejected'] is None for i in (0, 2, 3))
-            assert cluster_scene(db, identifier, config)[0]['observations'] == 3
-    finally:
-        visibility.close()
+    detections = []
+    for shift in (0, 23, 47, 0):
+        row = list(FACE.row)
+        for index in (0, 4, 6, 8, 10, 12):
+            row[index] -= shift
+        detections.append(replace(FACE, row=tuple(row)))
+    frames = iter(detections)
+    backend.detect = lambda image: [next(frames)]
+
+    # Positive logits even over padding expose a cropped-denominator regression.
+    model = object.__new__(FaceVisibility)
+    model.device = 'cpu'
+    model.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
+    model.model = lambda inputs: torch.ones_like(inputs[:, :1])
+    with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
+        scan, _ = scan_scene(db, 'scope', client.scene, config, 'ns', source, lambda: backend, visibility=model)
+        rows = db.connection.execute('SELECT * FROM observations WHERE scan=? ORDER BY cue', (scan,)).fetchall()
+        reasons = [None, 'face_incomplete', 'face_incomplete', None] if strict else [
+            None, None, 'face_visibility_unmeasurable', None]
+        assert [r['rejected'] for r in rows] == reasons
+        assert all((r['embedding'] is not None) == (r['rejected'] is None) for r in rows)
+        assert cluster_scene(db, scan, config)[0]['observations'] == reasons.count(None)
+        if not strict:
+            quality = json.loads(rows[1]['quality'])
+            assert quality['visible_face_fraction'] == pytest.approx(19766/19780)
+            assert quality['visibility']['source_fraction'] == quality['visible_face_fraction']
+            rejected = json.loads(rows[2]['quality'])
+            assert rejected['alignment_valid'] and .84 < rejected['visibility_source_fraction'] < .85
+            assert 'visible_face_fraction' not in rejected
+            report = face_report(rejected, list(detections[2].row), config, Policies(db.connection,config,'scope','ns'),
+                                 scan_identity(config,'ns'))
+            gate = next(c for c in report['groups'][0]['checks'] if c['parameter'].endswith('min_visible_face_fraction'))
+            assert 'real source' in gate['note'] and '84.36%' in gate['note']
+            coverage_gate = next(c for c in report['groups'][0]['checks']
+                                 if c['parameter'].endswith('min_face_source_fraction'))
+            assert coverage_gate['status'] == 'fail' and coverage_gate['threshold'] == .85
+            assert coverage_gate['measured'] == rejected['visibility_source_fraction']
+
+            # Retune the same scene and database using the public v2 YAML setting.
+            path.write_text('version: 2\nface:\n  quality: {min_sharpness: 0, require_complete_face: false, '
+                            'min_face_source_fraction: 0.8}\n')
+            relaxed = load(path)
+            frames = iter(detections)
+            model.minimum_source_fraction = relaxed.data['detection']['min_face_source_fraction']
+            new_scan, reused = scan_scene(db, 'scope', client.scene, relaxed, 'ns', source, lambda: backend, visibility=model)
+            assert new_scan != scan and not reused
+            admitted = db.connection.execute('SELECT * FROM observations WHERE scan=? AND cue=?',
+                                             (new_scan, rows[2]['cue'])).fetchone()
+            assert admitted['rejected'] is None and admitted['embedding'] is not None
+            evidence = json.loads(admitted['quality'])
+            assert evidence['visible_face_fraction'] == rejected['visibility_source_fraction']
+
+            from stash_ai.recognition.reference_compatibility import fallback_sql
+            for policy, expected in [(relaxed, 1), (config, 0)]:
+                condition = fallback_sql(db.connection, policy, 'ns')
+                assert db.connection.execute('SELECT '+condition+' FROM observations o WHERE id=?',
+                                             (admitted['id'],)).fetchone()[0] == expected
+            assert scan_scene(db, 'scope', client.scene, relaxed, 'ns', source,
+                              lambda: pytest.fail('unchanged threshold should reuse scan')) == (new_scan, True)
+
 
 
 def test_generic_visibility_failure_still_aborts_with_a_durable_checkpoint(tmp_path):

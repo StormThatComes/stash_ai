@@ -107,7 +107,7 @@ def test_contract_refreshes_old_overlap_but_keeps_legacy_banks_recognizable(mask
     pose['refinement'].update(enabled=True,masked_identity_crop=masked_crop)
     config=SimpleNamespace(data=data)
     previous=person_contract(config,legacy_mask_overlap=True)
-    assert pose_contract(config)[1]['quality_mask'] == 'crop-bits-v1'
+    assert pose_contract(config)[1]['quality_mask'] == 'owned-crop-bits-v2'
     collection=plain(data['sapiensid']['collection']);collection.pop('enabled')
     old_body=digest(['independent-person-v4-independent-torso',previous,collection])
     assert person_contract(config) != previous
@@ -124,7 +124,7 @@ def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_p
     import json
     from tests.test_recognition_body_collection import Persons, settings
     from tests.helpers.recognition import Backend, MediaClient
-    from stash_ai.recognition.body_observations import _contract, contract, coverage
+    from stash_ai.recognition.body_observations import _contract, compatible_contracts, contract, coverage
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.media import SpriteInput
     from stash_ai.recognition.person_collection import PersonCollector
@@ -148,8 +148,10 @@ def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_p
         with FaceDatabase(config.database) as state,SpriteInput(client,client.scene,config) as source:
             db=state.connection
             scan,_=scan_scene(state,'scope',client.scene,config,'ns',source,lambda:backend)
-            legacy=_contract(config,'independent-person-v4-independent-torso')
+            legacy=_contract(config,'independent-person-v4-independent-torso',
+                             legacy_mask_overlap=False,legacy_foreground_sharpness=False)
             assert legacy!=contract(config)
+            assert legacy in compatible_contracts(config)[1:]
             db.executemany('INSERT INTO body_cues VALUES (?,?,?)',[(scan,legacy,i) for i in range(3)])
             db.commit()
             collector.enrich(db,scan,source)

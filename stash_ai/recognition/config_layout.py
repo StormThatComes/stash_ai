@@ -13,7 +13,7 @@ _GROUPS = (
     ('face.detector', 'models', 'backend=detector'),
     ('face.detector', 'detection', 'score_threshold nms_threshold max_faces_per_frame'),
     ('face.quality', 'detection',
-     'min_face_pixels min_sharpness min_visible_face_fraction max_pose_deviation require_complete_face'),
+     'min_face_pixels min_sharpness min_visible_face_fraction min_face_source_fraction max_pose_deviation require_complete_face'),
     ('face.recognizer', 'models', 'backend=recognizer'),
 
     ('pose.detector', 'sapiensid.pose',

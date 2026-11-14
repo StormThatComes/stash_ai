@@ -43,7 +43,7 @@ def quality(image,person,people,settings):
     sharpness=sharp['sharpness']
     sharp['sharpness_method']='sam_mask' if mask is not None else 'unavailable'
     from .body_overlap import measure
-    overlaps=measure(person,people)
+    overlaps=measure(person,people,report_above=settings['max_overlap'])
     overlap=overlaps['overlap']
     from .person_geometry import used_keypoints
     detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
@@ -134,6 +134,9 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
         face=faces[associated] if associated is not None else None
         row=rows[associated] if associated is not None else None
         measured,reason=measurements[index]
+        if 'overlap_peer_index' in measured:
+            peer = people[measured['overlap_peer_index']]
+            measured['overlap_peer_observation'] = identifier(scan, cue, peer, expected)
         ambiguous=associated is None and any(index in candidates for candidates in choices)
         refinement = person.get('pose_refinement', {})
         separated = refinement.get('status') == 'refined' and refinement.get('separated')

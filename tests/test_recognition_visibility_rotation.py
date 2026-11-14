@@ -84,6 +84,49 @@ def test_rotated_source_coverage_cannot_count_padding_as_visible(turns):
             assert np.all(rgb[region] > .99)
 
 
+@pytest.mark.parametrize('turns', [0, 1, 2, 3])
+def test_partial_ellipse_real_foreground_full_denominator_on_both_reductions(turns):
+    import torch
+    from stash_ai.recognition.visibility import prepare_measurement, measurement, device_measurements
+    row = list(FACE.row)
+    for index in (0, 4, 6, 8, 10, 12):
+        row[index] -= 40
+    with Image.new('RGB', (160, 160), 'white') as image:
+        rotated, face = quarter_turn(image, checked_detection(row), turns)
+        with rotated:
+            blob, real, total = prepare_measurement(rotated, face, minimum_source_fraction=0.0)
+    logits = np.ones((1, 1, 256, 256), dtype='float32')
+    logits[..., 128:] = -1
+    expected = np.count_nonzero(real[:, :128]) / total
+    cpu = measurement(logits, real, 'cpu', blob=blob, face_pixels=total)
+    device = device_measurements(torch.from_numpy(logits), [real], 'cpu', inputs=torch.from_numpy(blob),
+                                 face_pixels=[total])[0]
+    assert 0 < expected < real.sum() / total < 1
+    assert cpu['visible_face_fraction'] == device['visible_face_fraction'] == expected
+    assert cpu['visibility'] == device['visibility']
+    assert cpu['sharpness_pixels'] == device['sharpness_pixels']
+
+
+def test_configured_source_coverage_endpoints_and_exact_boundary():
+    from stash_ai.recognition.visibility import prepare_measurement
+    row = list(FACE.row)
+    for index in (0, 4, 6, 8, 10, 12):
+        row[index] -= 40
+    face = checked_detection(row)
+    with textured_image() as image:
+        _, region, total = prepare_measurement(image, face, 0.)
+        coverage = int(region.sum()) / total
+        assert 0 < coverage < 1
+        prepare_measurement(image, face, coverage)
+        with pytest.raises(VisibilityGeometryError):
+            prepare_measurement(image, face, np.nextafter(coverage, 1.))
+        with pytest.raises(VisibilityGeometryError):
+            prepare_measurement(image, face, 1.)
+        prepare_measurement(image, FACE, 1.)
+    with Image.new('RGB', (1, 1)) as image, pytest.raises(VisibilityGeometryError):
+        prepare_measurement(image, FACE, 0.)
+
+
 def test_degenerate_eye_line_is_an_observation_local_geometry_error():
     row = list(FACE.row)
     row[6:8] = row[4:6]
@@ -117,6 +160,7 @@ def upright_mask_model():
             return torch.where(foreground & upright[:, None, None], 1., -1.)[:, None]
     model = object.__new__(FaceVisibility)
     model.device, model.model = 'cpu', Model()
+    model.minimum_source_fraction = 1.0
     return model
 
 

@@ -40,12 +40,14 @@ def _policy_value(config):
     from .portrait_admission import extra_measurements
     from .body_identity import enabled as bodies_enabled, policy as body_policy
     from .portrait_precedence import pose_contract
+    uses_visibility = visibility_required(policy) or bool(extra_measurements(config))
     return {'version': 10, 'portraits': policy,
                    'pose_contract': pose_contract(config) if policy['kind'] == 'auto' else None,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
-                   'visibility_contract': CONTRACT_ID if visibility_required(policy) or extra_measurements(config) else None,
+                   'visibility_contract': CONTRACT_ID if uses_visibility else None,
+                   'min_face_source_fraction': config.data['detection']['min_face_source_fraction'] if uses_visibility else None,
                    'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None}
 
 
@@ -256,6 +258,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                             'selection_category': 'face',
                             'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
+                            'min_face_source_fraction': config.data['detection']['min_face_source_fraction'],
                             'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
                             'person': target['person'], 'performer': target['performer'],
                             'namespace': person['namespace'], 'requested_seconds': seconds}

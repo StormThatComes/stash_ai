@@ -265,7 +265,14 @@ rejected or conflicting, that pair uses the original box intersection divided by
 this person's box area. Quality records expose `overlap`, `box_overlap` and
 `overlap_basis` (`mask`, `box`, `mixed`, or `none` for no intersecting boxes).
 
-Masks come from successful PMPose/SAM refinement, independently of
+On `second_pass_core_drift`, an isolated person can keep a validated SAM mask
+inside the original detector box. Overlapping neighbours additionally require
+the torso separation check. Collection uses the mask for sharpness and overlap
+and keeps the first pose. A shared mask conflict excludes both masks. When a
+pair exceeds the configured overlap limit, the inspector shows the peer
+observation and whether the comparison used masks or boxes.
+
+Quality masks are available independently of
 `pose.refinement.masked_identity_crop`. No extra segmentation pass is run.
 Without refinement, collection continues to use boxes. The pre-segmentation
 `pose.refinement.overlap_threshold` still uses boxes to decide when to run SAM;

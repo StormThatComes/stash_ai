@@ -200,7 +200,7 @@ class CueVisibility:
 
 def cue_visibility(frames,prepared,visibility,config,stage):
     from .pose_policy import measurement_required
-    from .visibility import prepare,VisibilityGeometryError,VisibilityError
+    from .visibility import prepare_measurement,VisibilityGeometryError,VisibilityError
     if not measurement_required(config) or visibility is None:return visibility
     requests=[(image,e['face']) for (_,_,image),entries in zip(frames,prepared) for e in entries if e['reason'] is None]
     if not requests:return visibility
@@ -211,8 +211,10 @@ def cue_visibility(frames,prepared,visibility,config,stage):
     use_prepared=callable(prepared_many) and (not callable(supports) or supports())
     step=max(1,min(8,stage.limit//(4*256*256*4+4096)))
     def pixels(image,face):
-        try:return prepare(image,face)
-        except VisibilityGeometryError as error:return error
+        try:
+            return prepare_measurement(image, face, config.data['detection']['min_face_source_fraction'])
+        except VisibilityGeometryError as error:
+            return error
     for start in range(0,len(requests),step):
         chunk=requests[start:start+step]
         if use_prepared:
@@ -252,9 +254,9 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
         return prepare_record(pixels,pair,config,cue,assess,rejection,geometry_contract)
 
     def visibility_pixels(pixels, entry):
-        from .visibility import prepare as prepare_visibility
+        from .visibility import prepare_measurement
         try:
-            entry['visibility_input'] = prepare_visibility(pixels,entry['face'])
+            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'])
         except VisibilityGeometryError as error:
             entry['visibility_input'] = error
         return entry
@@ -326,6 +328,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                             entry['visibility_input'] = None
                             if isinstance(measurement,VisibilityGeometryError):
                                 entry['reason'] = 'face_visibility_unmeasurable'
+                                entry['quality'].update(measurement.diagnostics)
                                 continue
                             if isinstance(measurement,BaseException):
                                 raise measurement

@@ -28,7 +28,7 @@ class MaskOptions:
     def metadata(self):
         return dict(view=self.view, opacity=self.opacity, show_rejected=self.show_rejected,
                     colors='Same person palette as pose; colors do not identify people across cues/trials.',
-                    contours='Solid for refined results; dashed for rejected results.',
+                    contours='Solid for an available quality mask, dashed for an unavailable mask.',
                     prompts='White rings mark positive head/torso prompts sent to SAM.',
                     stages='raw: SAM output; cleaned: after speckle removal. Cleaned masks reach PMPose '
                            'only for refined or second_pass_core_drift results.',
@@ -37,13 +37,17 @@ class MaskOptions:
                                 'frame source_offset to obtain combined PNG coordinates.')
 
 
-def _stage(capture, index):
-    stages = capture.people.get(index, {}) if capture is not None else {}
+def _stage(capture, record):
+    stages = capture.stages(record) if capture is not None else {}
     return 'cleaned' if 'cleaned' in stages else 'raw' if 'raw' in stages else None
 
 
+def _available(record):
+    return bool(record.get('overlap_mask')) and not record.get('mask_conflict')
+
+
 def _shown(record, options):
-    return options.show_rejected or record.get('status') == 'refined'
+    return options.show_rejected or _available(record)
 
 
 def paint_mask(image, mask, color, *, opacity, rejected=False):
@@ -79,11 +83,20 @@ def draw_masks(image, people, capture, options, color_for):
         return
     for index, person in enumerate(people):
         record = person.get('pose_refinement', {})
-        stage = _stage(capture, index)
-        if stage is not None and _shown(record, options):
-            paint_mask(image, capture.mask(index, stage), color_for(index),
-                       opacity=0 if options.view == 'contour' else options.opacity,
-                       rejected=record.get('status') != 'refined')
+        available = _available(record)
+        if available:
+            from .person_geometry import unpack_mask
+            left, top, right, bottom = person['bounds']
+            mask = unpack_mask(record['overlap_mask'], right-left, bottom-top)
+            with image.crop(person['bounds']) as crop:
+                paint_mask(crop, mask, color_for(index),
+                           opacity=0 if options.view == 'contour' else options.opacity)
+                image.paste(crop, (left, top))
+        elif options.show_rejected:
+            stage = _stage(capture, record)
+            if stage is not None:
+                paint_mask(image, capture.mask(record, stage), color_for(index),
+                           opacity=0 if options.view == 'contour' else options.opacity, rejected=True)
 
 
 def draw_prompts(image, people, options):
@@ -102,7 +115,10 @@ def draw_prompts(image, people, options):
 
 def _caption(index, record):
     status = record.get('status', 'unavailable')
-    text = f'P{index} | SAM {status}'
+    validated = 'mask_pixels' in record
+    sam = 'conflict' if record.get('mask_conflict') else 'validated' if validated else status
+    text = f'P{index} | SAM {sam} | pose {status}'
+    text += ' | quality mask available' if _available(record) else ' | quality mask unavailable'
     if 'mask_score' in record:
         text += f' | score={record["mask_score"]:.3f}'
     if record.get('reason'):
@@ -125,26 +141,26 @@ def append_details(image, annotated, people, capture, options, color_for):
     width = max(annotated.width, 360, 2 * image.width if options.view == 'panels' else 0)
     line_height = font.getbbox('Ag')[3] - font.getbbox('Ag')[1] + 6
     descriptions = [((245, 245, 245), _wrap([
-        'SAM masks: solid=accepted, dashed=rejected; white rings=prompt points.'
+        'Solid: recognition quality mask. Dashed: excluded SAM candidate. White rings: prompts.'
     ], font, width-16))]
     metadata = []
     for index, record in rows:
-        stage = _stage(capture, index)
+        stage = 'quality' if _available(record) else _stage(capture, record)
         shown = stage is not None and _shown(record, options)
         label = _caption(index, record)
         label += f' | {stage}' if shown else ' | mask hidden' if stage else ' | no mask'
         descriptions.append((color_for(index), _wrap([label], font, width-16)))
-        metadata.append(dict(person_index=index, available_stages=list(capture.people.get(index, {}))
+        metadata.append(dict(person_index=index, available_stages=list(capture.stages(record))
                              if capture is not None else [], displayed_stage=stage if shown else None,
-                             second_pass_used=record.get('status') == 'refined' or
-                             record.get('reason') == 'second_pass_core_drift'))
+                             quality_mask_available=_available(record),
+                             second_pass_used='mask_pixels' in record))
     height = annotated.height + 12 + sum(len(lines) * line_height for _, lines in descriptions)
     panels = []
     if options.view == 'panels':
         for index, record in rows:
             if not _shown(record, options):
                 continue
-            used = record.get('status') == 'refined' or record.get('reason') == 'second_pass_core_drift'
+            used = 'mask_pixels' in record
             labels = ['Raw SAM mask', 'Cleaned mask | ' + ('used by PMPose' if used else 'not used by PMPose')]
             headers = [_wrap([f'P{index} | ' + label], font, image.width-12) for label in labels]
             header_height = max(map(len, headers)) * line_height + 12
@@ -153,7 +169,7 @@ def append_details(image, annotated, people, capture, options, color_for):
                                    offset=[column * image.width, height + header_height],
                                    header_offset=[column * image.width, height], header_lines=headers[column],
                                    source_dimensions=list(image.size),
-                                   available=capture is not None and stage in capture.people.get(index, {})))
+                                   available=capture is not None and stage in capture.stages(record)))
             height += header_height + image.height + 12
     if width * height > MAX_PIXELS:
         raise ValueError('Detection mask PNG exceeds 40,000,000 pixels; use --mask-view overlay or off.')
@@ -177,8 +193,8 @@ def append_details(image, annotated, people, capture, options, color_for):
                 painter.text((x+6, y+6), 'No mask for this stage', font=font, fill=(200, 200, 200))
                 continue
             with image.convert('RGB') as detail:
-                paint_mask(detail, capture.mask(index, panel['stage']), color_for(index),
-                           opacity=options.opacity, rejected=record.get('status') != 'refined')
+                paint_mask(detail, capture.mask(record, panel['stage']), color_for(index),
+                           opacity=options.opacity, rejected=not _available(record))
                 draw_prompts(detail, [people[index]], options)
                 ImageDraw.Draw(detail).rectangle(record['detector_bounds'], outline=(160, 160, 160), width=1)
                 _draw(detail, people[index]['bounds'], people[index]['keypoints'],

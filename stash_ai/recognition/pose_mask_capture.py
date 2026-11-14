@@ -13,20 +13,27 @@ class FrameMasks:
         self.people = {}
         self.bytes = 0
 
-    def save(self, index, stage, mask):
+    def save(self, record, stage, mask):
         import numpy as np
+        key = id(record)
         size = (mask.size + 7) // 8
         if self.bytes + size > MAX_BYTES:
             raise ValueError('Detection audit masks exceed 16 MiB; use --mask-view off.')
         # Pack before retaining: full-frame boolean arrays otherwise multiply
         # peak RAM by the number of people and stages. No GPU tensors survive.
         packed = np.packbits(mask, axis=None).tobytes()
-        self.people.setdefault(index, {})[stage] = (mask.shape, packed)
+        # A retry can reuse a person index and later be discarded.
+        _, stages = self.people.setdefault(key, (record, {}))
+        stages[stage] = (mask.shape, packed)
         self.bytes += len(packed)
 
-    def mask(self, index, stage):
+    def stages(self, record):
+        entry = self.people.get(id(record))
+        return entry[1] if entry is not None else {}
+
+    def mask(self, record, stage):
         import numpy as np
-        item = self.people.get(index, {}).get(stage)
+        item = self.stages(record).get(stage)
         if item is None:
             return None
         shape, packed = item
@@ -48,8 +55,8 @@ def capture_masks(image, *, enabled=True):
             capture.image = None
 
 
-def mask_observer(image, index):
+def mask_observer(image, record):
     capture = _CURRENT.get()
     if capture is None or capture.image is not image:
         return None
-    return lambda stage, mask: capture.save(index, stage, mask)
+    return lambda stage, mask: capture.save(record, stage, mask)
