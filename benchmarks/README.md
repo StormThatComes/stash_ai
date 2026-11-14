@@ -1,5 +1,8 @@
 # Offline benchmarks
 
+For real-model mask and pose tuning on licensed, 500-pixel dance photographs, see the
+[dance contact benchmark](data/dance_contact/README.md).
+
 Run these scripts from the repository root after installing
 `requirements-cpu.txt` plus `requirements-dev.txt`. In CI, all twelve scripts pass smoke tests
 against small datasets. Fixtures use the current analysis format

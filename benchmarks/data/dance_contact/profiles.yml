@@ -1,0 +1,27 @@
+# Each pose profile runs with each mask profile. Empty 'stock' uses the supplied recognition YAML.
+pose:
+  stock: {}
+  score:
+    pose.detector.score_threshold: 0.35
+  nms:
+    pose.detector.nms_threshold: 0.85
+  points:
+    pose.estimator.keypoint_score_threshold: 0.4
+  boxes:
+    pose.detector.score_threshold: 0.35
+    pose.detector.nms_threshold: 0.85
+  boxes-points:
+    pose.detector.score_threshold: 0.35
+    pose.detector.nms_threshold: 0.85
+    pose.estimator.keypoint_score_threshold: 0.4
+mask:
+  stock: {}
+  coverage:
+    pose.refinement.min_prompt_coverage: 0.66
+  prompts:
+    pose.refinement.max_prompt_points: 8
+    pose.refinement.min_prompt_coverage: 0.875
+  foreign:
+    pose.refinement.max_prompt_points: 8
+    pose.refinement.min_prompt_coverage: 0.875
+    pose.refinement.max_foreign_coverage: 0.15

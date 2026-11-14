@@ -90,3 +90,9 @@ This repository's GPL license does not replace their licenses.
 This notice provides attribution and identifies relevant external
 licenses; it is not a substitute for reading the current license text
 and notices provided by each upstream project.
+
+## Dance contact benchmark photographs
+
+The five resized dance photographs and their coordinate annotations are distributed
+under CC BY-SA 4.0. The [dataset credits](benchmarks/data/dance_contact/CREDITS.md)
+identify each photographer, source and modification.

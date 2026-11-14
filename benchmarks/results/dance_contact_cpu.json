@@ -1,0 +1,2505 @@
+{
+  "device": "cpu",
+  "versions": {
+    "torch": "2.14.0+cpu",
+    "rfdetr": "1.11.2",
+    "rfdetr-plus": "1.1.0"
+  },
+  "config_sha256": "ff92ef86941b5f8fe05913f00c72fe21d91f815e3412fa8cd929c7d5985a064a",
+  "profiles": {
+    "stock/stock": {},
+    "stock/coverage": {
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "stock/prompts": {
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "stock/foreign": {
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    },
+    "score/stock": {
+      "pose.detector.score_threshold": 0.35
+    },
+    "score/coverage": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "score/prompts": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "score/foreign": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    },
+    "nms/stock": {
+      "pose.detector.nms_threshold": 0.85
+    },
+    "nms/coverage": {
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "nms/prompts": {
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "nms/foreign": {
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    },
+    "points/stock": {
+      "pose.estimator.keypoint_score_threshold": 0.4
+    },
+    "points/coverage": {
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "points/prompts": {
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "points/foreign": {
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    },
+    "boxes/stock": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85
+    },
+    "boxes/coverage": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "boxes/prompts": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "boxes/foreign": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    },
+    "boxes-points/stock": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.estimator.keypoint_score_threshold": 0.4
+    },
+    "boxes-points/coverage": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.min_prompt_coverage": 0.66
+    },
+    "boxes-points/prompts": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875
+    },
+    "boxes-points/foreign": {
+      "pose.detector.score_threshold": 0.35,
+      "pose.detector.nms_threshold": 0.85,
+      "pose.estimator.keypoint_score_threshold": 0.4,
+      "pose.refinement.max_prompt_points": 8,
+      "pose.refinement.min_prompt_coverage": 0.875,
+      "pose.refinement.max_foreign_coverage": 0.15
+    }
+  },
+  "winner": "nms/stock",
+  "tune": {
+    "stock/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "stock/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "stock/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "stock/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "score/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "score/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "score/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "score/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "nms/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "nms/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "nms/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "nms/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "points/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "points/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 14,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "points/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "points/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 4,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 15,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 2,
+        "no_reliable_prompts": 1,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 1,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 1,
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "boxes/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "boxes/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "boxes/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "boxes/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "boxes-points/stock": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "boxes-points/coverage": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 19,
+        "masks": 3,
+        "clean_masks": 3,
+        "own_hits": 18,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 18,
+        "background_hits": 0,
+        "background_probes": 12
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 2,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 2,
+            "clean_masks": 2,
+            "own_hits": 12,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 12,
+            "background_hits": 0,
+            "background_probes": 8
+          },
+          "missing": {},
+          "rejected_candidates": []
+        }
+      }
+    },
+    "boxes-points/prompts": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "boxes-points/foreign": {
+      "totals": {
+        "people": 6,
+        "matched": 5,
+        "extra": 0,
+        "joints": 30,
+        "correct_joints": 20,
+        "masks": 2,
+        "clean_masks": 2,
+        "own_hits": 12,
+        "own_probes": 36,
+        "partner_hits": 0,
+        "partner_probes": 12,
+        "background_hits": 0,
+        "background_probes": 8
+      },
+      "missing": {
+        "person_missing": 1,
+        "no_reliable_prompts": 2,
+        "low_mask_score": 1
+      },
+      "frames": {
+        "attitude": {
+          "counts": {
+            "people": 2,
+            "matched": 1,
+            "extra": 0,
+            "joints": 9,
+            "correct_joints": 3,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "person_missing": 1
+          },
+          "rejected_candidates": []
+        },
+        "penche": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 10,
+            "correct_joints": 6,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "no_reliable_prompts": 2
+          },
+          "rejected_candidates": []
+        },
+        "paquita": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 11,
+            "correct_joints": 11,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "low_mask_score": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "low_mask_score",
+              "stage": "raw",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "holdout": {
+    "stock/stock": {
+      "totals": {
+        "people": 4,
+        "matched": 4,
+        "extra": 0,
+        "joints": 13,
+        "correct_joints": 13,
+        "masks": 1,
+        "clean_masks": 1,
+        "own_hits": 6,
+        "own_probes": 24,
+        "partner_hits": 0,
+        "partner_probes": 6,
+        "background_hits": 0,
+        "background_probes": 4
+      },
+      "missing": {
+        "excessive_expansion": 2,
+        "foreign_core_in_mask": 1
+      },
+      "frames": {
+        "airborne": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 7,
+            "correct_joints": 7,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "excessive_expansion": 1,
+            "foreign_core_in_mask": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "excessive_expansion",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 1,
+              "background_hits": 0,
+              "clean_masks": 0
+            },
+            {
+              "person": 1,
+              "reason": "foreign_core_in_mask",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 4,
+              "background_hits": 1,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "twisted": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 6,
+            "correct_joints": 6,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "excessive_expansion": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "excessive_expansion",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    },
+    "nms/stock": {
+      "totals": {
+        "people": 4,
+        "matched": 4,
+        "extra": 0,
+        "joints": 13,
+        "correct_joints": 13,
+        "masks": 1,
+        "clean_masks": 1,
+        "own_hits": 6,
+        "own_probes": 24,
+        "partner_hits": 0,
+        "partner_probes": 6,
+        "background_hits": 0,
+        "background_probes": 4
+      },
+      "missing": {
+        "excessive_expansion": 2,
+        "foreign_core_in_mask": 1
+      },
+      "frames": {
+        "airborne": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 7,
+            "correct_joints": 7,
+            "masks": 0,
+            "clean_masks": 0,
+            "own_hits": 0,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 0,
+            "background_hits": 0,
+            "background_probes": 0
+          },
+          "missing": {
+            "excessive_expansion": 1,
+            "foreign_core_in_mask": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "excessive_expansion",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 1,
+              "background_hits": 0,
+              "clean_masks": 0
+            },
+            {
+              "person": 1,
+              "reason": "foreign_core_in_mask",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 4,
+              "background_hits": 1,
+              "clean_masks": 0
+            }
+          ]
+        },
+        "twisted": {
+          "counts": {
+            "people": 2,
+            "matched": 2,
+            "extra": 0,
+            "joints": 6,
+            "correct_joints": 6,
+            "masks": 1,
+            "clean_masks": 1,
+            "own_hits": 6,
+            "own_probes": 12,
+            "partner_hits": 0,
+            "partner_probes": 6,
+            "background_hits": 0,
+            "background_probes": 4
+          },
+          "missing": {
+            "excessive_expansion": 1
+          },
+          "rejected_candidates": [
+            {
+              "person": 0,
+              "reason": "excessive_expansion",
+              "stage": "cleaned",
+              "own_hits": 6,
+              "partner_hits": 0,
+              "background_hits": 0,
+              "clean_masks": 1
+            }
+          ]
+        }
+      }
+    }
+  }
+}
