@@ -1,5 +1,5 @@
 """Offline native-write tracing fixture. Run in a subprocess under strace/Procmon."""
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 import io
 import os
 from pathlib import Path
@@ -23,6 +23,16 @@ def probe(root):
         assert main(argv, services=services) == 0
         assert main(argv, services=services) == 0
     cfg, goals = fixture(root/'solver','disjoint')
+    # Materialize a real, file-backed TEMP database before the longer solver runs.
+    # An ORDER BY may complete entirely in SQLite's sorter buffers.
+    with invocation(cfg), closing(sqlite3.connect(':memory:')) as db:
+        db.execute('PRAGMA temp_store=FILE')
+        db.execute('PRAGMA temp.cache_size=4')
+        db.execute('CREATE TEMP TABLE spill(value BLOB)')
+        db.executemany('INSERT INTO temp.spill VALUES (zeroblob(4096))', (() for _ in range(2048)))
+        db.commit()
+        assert db.execute('PRAGMA temp.page_count').fetchone()[0] > 4
+        assert db.execute('SELECT count(*) FROM temp.spill').fetchone()[0] == 2048
     checkpoint = root/'checkpoint.json'
     argv = arguments(cfg,goals,checkpoint,maximum=6)
     argv[argv.index('--yaml-output')] = '--checkpoint'
@@ -32,14 +42,6 @@ def probe(root):
         patch.setattr(os, 'process_cpu_count', lambda:4, raising=False)
         assert main(argv) == 0
         assert main(argv+['--resume']) == 0
-    with invocation(cfg):
-        with sqlite3.connect(root/'sort.sqlite') as db:
-            db.execute('PRAGMA temp_store=FILE')
-            db.execute('PRAGMA cache_size=4')
-            db.execute('CREATE TABLE data(value BLOB)')
-            db.executemany('INSERT INTO data VALUES (?)', ((os.urandom(1024),) for _ in range(8192)))
-            assert sum(1 for _ in db.execute('SELECT value FROM data ORDER BY value')) == 8192
-        db.close()
 
 
 if __name__ == '__main__':
