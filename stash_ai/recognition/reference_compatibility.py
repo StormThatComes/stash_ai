@@ -10,14 +10,16 @@ from types import SimpleNamespace
 
 from .config import digest
 from .models import checked_detection
+from .pose_policy import measurement_required
 from .quality import rejection
 from .scanning import geometry_contract
-from .visibility import cached as visibility_cached
+from .visibility import cached as visibility_cached, valid_fraction
 
 
 def fallback_sql(db,config,namespace,*,observation='o'):
     policy=config.data['detection']
-    name='reference_quality_'+digest([namespace,policy,'retained-quality-v1'])[:24]
+    needs_visibility = measurement_required(config)
+    name='reference_quality_'+digest([namespace,policy,needs_visibility,'retained-quality-v2'])[:24]
     if not any(row[0]==name for row in db.execute('PRAGMA function_list')):
         def admissible(raw,geometry,rect):
             try:
@@ -37,9 +39,13 @@ def fallback_sql(db,config,namespace,*,observation='o'):
                     return 0
                 if rejection(quality,policy) is not None:
                     return 0
-                if policy['min_visible_face_fraction']>0:
-                    return int(visibility_cached(quality) and
-                               quality['visible_face_fraction']>=policy['min_visible_face_fraction'])
+                if needs_visibility:
+                    if not visibility_cached(quality):
+                        return 0
+                    coverage = quality['visibility'].get('source_fraction', 1. if quality['complete'] else None)
+                    return int(valid_fraction(coverage) and coverage > 0 and
+                               coverage >= policy['min_face_source_fraction'] and
+                               quality['visible_face_fraction'] >= policy['min_visible_face_fraction'])
                 return 1
             except (ValueError,TypeError,KeyError,AttributeError,IndexError,OverflowError):
                 return 0

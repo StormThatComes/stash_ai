@@ -27,11 +27,13 @@ face:
     # require an active face visibility floor; 0 disables this gate. Range: 0..100000.
     min_visible_face_fraction: 0.5
     # Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.
+    min_face_source_fraction: 0.85
+    # Minimum fraction of the face ellipse inside the source image for a FaceOcc measurement. Range: 0..1. Zero
+    # still requires some real pixels; 1 requires the full ellipse.
     max_pose_deviation: 0.5
     # Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.
     require_complete_face: true
-    # Reject face boxes extending beyond the thumbnail. When false, FaceOcc requires at least 85% of its
-    # ellipse inside the frame and counts off-frame pixels as unavailable in the visibility fraction.
+    # Reject face boxes extending beyond the thumbnail before FaceOcc. Set false to allow partial boxes.
   recognizer:
     # Compute identity embeddings for accepted faces.
     backend: sface

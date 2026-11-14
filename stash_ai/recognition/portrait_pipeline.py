@@ -226,6 +226,7 @@ class ModelProxy:
         self.prepare_assets()
         if len(items)>8:raise ValueError('Portrait model microbatch exceeds eight faces.')
         if isinstance(self.model,LazyVisibility) and self.model.factory is FaceVisibility:
+            minimum = self.model.config.data['detection']['min_face_source_fraction']
             prepared=[]
             size=sum(image.width*image.height*3*8 + 1048576 for image,_ in items)
             if self.cpu is not None and len(items)>1 and size<=self.cpu_limit:
@@ -234,7 +235,7 @@ class ModelProxy:
                 try:
                     for image,face in items:
                         owned=image.copy()
-                        try:future=self.cpu.submit(visibility_input,owned,face)
+                        try:future=self.cpu.submit(visibility_input, owned, face, minimum)
                         except BaseException:
                             owned.close();raise
                         future.add_done_callback(lambda f,owned=owned:owned.close() if f.cancelled() else None)
@@ -244,7 +245,7 @@ class ModelProxy:
                     for future in futures:future.cancel()
             else:
                 for image,face in items:
-                    try:prepared.append(prepare_measurement(image,face))
+                    try:prepared.append(prepare_measurement(image, face, minimum))
                     except VisibilityGeometryError as error:prepared.append(error)
             return self.executor.submit(self.model.measure_prepared_many,prepared).result()
         owned=[(image.copy(),face) for image,face in items]

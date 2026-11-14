@@ -325,8 +325,8 @@ measurement. Portrait quality targets remain preferences, not admission gates.
 FaceOcc receives an upright crop based on the eye-line direction, including
 sideways and upside-down faces. Visibility and foreground sharpness use the
 same rotated pixels, source ellipse and padding checks, with one segmentation
-pass per face. With partial boxes enabled, at least 85% of the ellipse must lie
-in the VTT cue. Off-frame pixels contribute zero to the visible fraction and are
+pass per face. With partial boxes enabled, `face.quality.min_face_source_fraction`
+sets how much of the face ellipse must lie in the VTT cue (default 0.85). Off-frame pixels contribute zero to the visible fraction and are
 excluded from sharpness. Inspect Scene reports the measured source coverage.
 The quality/visibility contracts invalidate older measurements:
 the next `recognition run` reprocesses selected scenes, including faces previously

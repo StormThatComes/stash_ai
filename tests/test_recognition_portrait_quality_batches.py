@@ -57,6 +57,7 @@ def test_visibility_batches_keep_geometry_local_and_equal_scalar_masks():
     class Model:
         def __call__(self,value):calls.append(len(value));return value[:,:1]
     model=object.__new__(FaceVisibility);model.model=Model();model.device='cpu'
+    model.minimum_source_fraction = 1.0
     with Image.new('RGB',(500,350),(200,90,60)) as first,Image.new('RGB',(500,350),(20,50,90)) as second:
         expected=[model.measure(first,FACE),model.measure(second,FACE)]
         calls.clear()
@@ -64,6 +65,21 @@ def test_visibility_batches_keep_geometry_local_and_equal_scalar_masks():
         with Image.new('RGB',(8,8)) as invalid:
             values=model.measure_many([(invalid,FACE),(first,FACE)])
             assert isinstance(values[0],VisibilityGeometryError) and values[1]==expected[0]
+
+
+def test_portrait_policy_rechecks_observed_source_fraction_without_changing_scan(tmp_path):
+    from stash_ai.recognition.portrait_admission import ranking_quality
+    from stash_ai.recognition.portraits import policy_identity
+    from tests.test_recognition_identity_merges import changed
+    config = setup(tmp_path)
+    relaxed = changed(config, detection={'min_face_source_fraction': .8})
+    evidence = dict(visibility=dict(contract=CONTRACT_ID, source_fraction=.84),
+                    visible_face_fraction=.82, sharpness=30., sharpness_method='faceocc_mask')
+    assert policy_identity(relaxed) != policy_identity(config)
+    assert ranking_quality(evidence, relaxed) is evidence
+    stricter = ranking_quality(evidence, config)
+    assert 'visible_face_fraction' not in stricter and stricter['sharpness_method'] == 'unavailable'
+    assert evidence['visible_face_fraction'] == .82 and evidence['sharpness'] == 30.
 
 
 def test_lazy_batch_failure_disables_batch_and_retains_scalar_recovery(tmp_path):

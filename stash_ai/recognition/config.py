@@ -9,6 +9,9 @@ from pathlib import Path
 from types import MappingProxyType
 
 
+DEFAULT_MIN_FACE_SOURCE_FRACTION = 0.85
+
+
 def defaults():
     # Conservative starting policies; these are not calibrated probabilities or
     # claims about accuracy on an operator's VTT thumbnails.
@@ -21,6 +24,7 @@ def defaults():
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
+                      'min_face_source_fraction': DEFAULT_MIN_FACE_SOURCE_FRACTION,
                       'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
@@ -160,7 +164,7 @@ def validate(data):
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
     for section, names in {
-        'detection': ('score_threshold', 'nms_threshold', 'min_visible_face_fraction'),
+        'detection': ('score_threshold', 'nms_threshold', 'min_visible_face_fraction', 'min_face_source_fraction'),
         'recognition': ('match_threshold', 'ambiguity_margin', 'cooccurrence_merge_threshold'),
         'clustering': ('cohesion_threshold',),
         'portraits': ('max_pose_deviation', 'max_clipped_fraction', 'margin', 'min_visible_face_fraction'),

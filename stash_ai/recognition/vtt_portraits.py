@@ -16,7 +16,7 @@ from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
 from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes, measurement_basis
 from .visibility import cached as cached_visibility, required as visibility_required
-from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements
+from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements,ranking_quality
 from .expression import cached as cached_expression, required as expression_required
 from .progress import tracking
 from .portrait_availability import candidate_observations, crop_row
@@ -225,6 +225,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         source_types = {basis['source_type'] for name, basis in bases.items() if name in required}
                         if source_types:
                             metadata['quality_source'] = next(iter(source_types)) if len(source_types) == 1 else 'mixed'
+                        quality = ranking_quality(quality, config)
+                        metadata['quality'] = quality
                         reason=reason or anchor_reason(quality,config)
                         if reason:
                             metadata['reason'] = reason

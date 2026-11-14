@@ -6,9 +6,7 @@ import math
 from .config import digest
 from .models import ASSETS, verified_bytes
 
-MIN_FACE_SOURCE_FRACTION = .85
-
-CONTRACT = {'version': 4, 'partial_source_floor': MIN_FACE_SOURCE_FRACTION, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+CONTRACT = {'version': 5, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25-eye-roll-aligned',
             'region': 'source-face-box-ellipse-0.45w-0.48h-inverse-mapped',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
@@ -180,9 +178,9 @@ def prepare(image, face, *, allow_partial=False):
     return blob, region
 
 
-def prepare_measurement(image, face):
-    """Face completeness is a scan admission gate. Measure geometry the same way in every stage."""
-    return _prepare(image, face, MIN_FACE_SOURCE_FRACTION)
+def prepare_measurement(image, face, minimum_source_fraction):
+    """Prepare FaceOcc input only when the source covers the configured fraction of its ellipse."""
+    return _prepare(image, face, minimum_source_fraction)
 
 
 def _prepare(image, face, minimum_source_fraction):
@@ -225,7 +223,7 @@ def _prepare(image, face, minimum_source_fraction):
     full_count = int(region.sum())
     region &= real
     source_count = int(region.sum())
-    if not source_count or source_count < minimum_source_fraction * full_count:
+    if not source_count or source_count / full_count < minimum_source_fraction:
         raise VisibilityGeometryError('Insufficient face ellipse coverage in the real source.',
                                       source_pixels=source_count, face_pixels=full_count)
     return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region, full_count
@@ -285,6 +283,7 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None):
 
 class FaceVisibility:
     def __init__(self, config, paths):
+        self.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
         import torch
         from safetensors.torch import load
         from .faceocc import build_model
@@ -315,7 +314,7 @@ class FaceVisibility:
         if len(items)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         prepared=[]
         for image,face in items:
-            try:prepared.append(prepare_measurement(image,face))
+            try:prepared.append(prepare_measurement(image, face, self.minimum_source_fraction))
             except VisibilityGeometryError as error:prepared.append(error)
         result=self.measure_prepared_many(prepared)
         if len(items)==1 and isinstance(result[0],Exception):raise result[0]

@@ -116,6 +116,7 @@ def face(quality, geometry, config, policies, fingerprint):
     visibility_note = quality.get('visibility_geometry_error', 'Requires a retained valid visibility measurement.')
     if coverage is not None:
         visibility_note += f' Face ellipse inside the source: {coverage:.2%}.'
+    source_floor = d.get('min_face_source_fraction')
     checks = [
         check('detection.score_threshold', score, d['score_threshold'], '>'),
         check('detection.min_face_pixels', quality.get('pixels'), d['min_face_pixels']),
@@ -123,6 +124,9 @@ def face(quality, geometry, config, policies, fingerprint):
         check('detection.require_complete_face', quality.get('complete'), d['require_complete_face'], '==', enabled=d['require_complete_face']),
         check('detection.max_pose_deviation', quality.get('pose_deviation'), d['max_pose_deviation'], '<=',
               enabled=d['max_pose_deviation'] is not None),
+        check('detection.min_face_source_fraction', coverage, source_floor, '>' if source_floor == 0 else '>=',
+              enabled=measurement_required(scan) and source_floor is not None,
+              note='A nonempty source ellipse is required even at zero.'),
         check('detection.min_visible_face_fraction', visible, d['min_visible_face_fraction'],
               enabled=measurement_required(scan), note=visibility_note),
         check('alignment_valid', quality.get('alignment_valid'), True, '==', note='Mandatory geometry gate; no YAML switch.'),

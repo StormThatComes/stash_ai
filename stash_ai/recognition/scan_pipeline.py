@@ -212,7 +212,7 @@ def cue_visibility(frames,prepared,visibility,config,stage):
     step=max(1,min(8,stage.limit//(4*256*256*4+4096)))
     def pixels(image,face):
         try:
-            return prepare_measurement(image, face)
+            return prepare_measurement(image, face, config.data['detection']['min_face_source_fraction'])
         except VisibilityGeometryError as error:
             return error
     for start in range(0,len(requests),step):
@@ -256,7 +256,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
     def visibility_pixels(pixels, entry):
         from .visibility import prepare_measurement
         try:
-            entry['visibility_input'] = prepare_measurement(pixels,entry['face'])
+            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'])
         except VisibilityGeometryError as error:
             entry['visibility_input'] = error
         return entry
