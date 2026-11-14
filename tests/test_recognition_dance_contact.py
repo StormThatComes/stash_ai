@@ -76,3 +76,25 @@ def test_admitted_and_rejected_masks_use_separate_scores(tmp_path):
         save_overlay(image, people, capture, tmp_path / 'overlay.png')
     with Image.open(tmp_path / 'overlay.png') as overlay:
         assert overlay.height > photo['size'][1]
+
+
+def test_fit_all_excludes_leakage_and_extra_detections(monkeypatch):
+    from benchmarks import benchmark_dance_contact as benchmark
+
+    clean = dict(clean_masks=6, matched=10, correct_joints=37, own_hits=36,
+                 partner_hits=0, background_hits=0, extra=0)
+    measured = {'clean': {'totals': clean}, 'more-edits': {'totals': clean}}
+    for issue in ('partner_hits', 'background_hits', 'extra'):
+        measured[issue] = {'totals': {**clean, 'clean_masks': 7, issue: 1}}
+    photos = {'tuning-photo': {'split': 'tune'}, 'reserved-photo': {'split': 'holdout'}}
+
+    def run(config, split, profiles, selected, overlays):
+        assert split == 'all' and selected == photos
+        return {name: measured[name] for name in profiles}
+
+    monkeypatch.setattr(benchmark, 'run_split', run)
+    profiles = {name: {} for name in measured}
+    profiles['more-edits'] = {'pose.detector.nms_threshold': 0.9}
+    result = benchmark.fit_all(None, profiles, photos, None)
+    assert result['winner'] == 'clean' and result['all_photos'] == measured
+    assert benchmark.fit_all(None, {'extra': {}}, photos, None)['winner'] is None

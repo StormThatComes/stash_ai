@@ -188,12 +188,26 @@ def run_split(config, split, profiles, photos, overlays):
     return results
 
 
+def fit_all(config, profiles, photos, overlays):
+    """Calibrate on the entire fixture set. Keep profiles with measured leakage or extra people out of contention."""
+    results = run_split(config, 'all', profiles, photos, overlays)
+    eligible = {}
+    for name, result in results.items():
+        counts = result['totals']
+        if counts['partner_hits'] == counts['background_hits'] == counts['extra'] == 0:
+            eligible[name] = (counts['clean_masks'], counts['matched'], counts['correct_joints'],
+                              counts['own_hits'], -len(profiles[name]))
+    return dict(selection='all_five_calibration', winner=max(eligible, key=eligible.get) if eligible else None,
+                all_photos=results)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=DATA.parents[2] / 'facial_recognition.yml')
     parser.add_argument('--model-dir', type=Path, help='Override execution.models.directory')
     parser.add_argument('--profiles', type=Path, default=DATA / 'profiles.yml', help='Pose and mask sweep YAML')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
+    parser.add_argument('--fit-all', action='store_true', help='Fit to all five photos, with no holdout validation')
     parser.add_argument('--overlays', type=Path, help='Optional directory for detection tuner-style PNGs')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -201,16 +215,19 @@ def main():
     if args.model_dir:
         config = replace(config, model_dir=args.model_dir.resolve())
     photos = json.loads((DATA / 'labels.json').read_text())
-    tune = {k: v for k, v in photos.items() if v['split'] == 'tune'}
-    holdout = {k: v for k, v in photos.items() if v['split'] == 'holdout'}
     profiles = read_profiles(args.profiles)
-    results = run_split(config, 'tune', profiles, tune, args.overlays)
-    winner = max(profiles, key=lambda name: rank(results[name]['totals'], profiles[name]))
-    finalists = {name: profiles[name] for name in (BASELINE, winner)}
-    validation = run_split(config, 'holdout', finalists, holdout, args.overlays)
+    if args.fit_all:
+        results = fit_all(config, profiles, photos, args.overlays)
+    else:
+        tune = {k: v for k, v in photos.items() if v['split'] == 'tune'}
+        holdout = {k: v for k, v in photos.items() if v['split'] == 'holdout'}
+        tuned = run_split(config, 'tune', profiles, tune, args.overlays)
+        winner = max(profiles, key=lambda name: rank(tuned[name]['totals'], profiles[name]))
+        finalists = {name: profiles[name] for name in (BASELINE, winner)}
+        validation = run_split(config, 'holdout', finalists, holdout, args.overlays)
+        results = dict(winner=winner, tune=tuned, holdout=validation)
     report = dict(device=args.device, versions={p: version(p) for p in ('torch', 'rfdetr', 'rfdetr-plus')},
-                  config_sha256=sha256(args.config.read_bytes()).hexdigest(), profiles=profiles,
-                  winner=winner, tune=results, holdout=validation)
+                  config_sha256=sha256(args.config.read_bytes()).hexdigest(), profiles=profiles, **results)
     args.output.write_text(json.dumps(report, indent=2) + '\n')
 
 

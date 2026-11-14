@@ -52,3 +52,36 @@ The [second sweep](../../results/dance_contact_prompts_cpu.json) tested ten prof
 | Both changes | 5/6 | 19/30 | 3/6 | — |
 
 A single reliable prompt recovered a clean mask on `penche` when the detector returned one dancer. With two detections, the segmenter used different prompts and the combination lost that gain. Lowering only `pose.refinement.min_visibility` to 0.30 admitted a mask covering all six partner probes on the tuning set. The holdout showed identical results for stock and each selected profile. These settings are candidates for cue-level testing. Neither sweep reproduced `missing_prompt_support` or `shared_mask_pixels` on these photographs.
+
+## Calibration on all five examples
+
+Use `--fit-all` to find settings specifically for these photographs. This mode uses all ten annotated dancers for selection, including the four dancers reserved in the earlier sweeps. It requires zero partner hits, zero background hits and zero extra detections, then prefers more clean masks, matched people, correct joints, own hits and fewer overrides, in that order. If every profile fails the three gates, the report records a null winner.
+
+The [finalist settings](calibration_profiles.yml) can be rerun directly with the recognition backend:
+
+```sh
+python -m benchmarks.benchmark_dance_contact --fit-all --profiles benchmarks/data/dance_contact/calibration_profiles.yml --device cpu --output dance-calibration.json
+```
+
+Add `--overlays dance-calibration-png` to inspect each admitted mask and rejected SAM candidate. The [CPU reference run](../../results/dance_contact_calibration_cpu.json) includes counts and reasons for each photo.
+
+The expanded search scored 1,766 distinct profiles on all five images, reusing image features and identical model inputs. The reference report reruns the shortlisted profiles through the ordinary uncached backend. Both detector and mask parameters were common to all photographs. The trade-off between selecting the most reliable prompts and preserving enough distinct prompts mattered more than lowering the detector score.
+
+| Profile | Matched dancers | Correct limb joints | Clean masks |
+| --- | ---: | ---: | ---: |
+| Stock | 8/10 | 27/43 | 4/10 |
+| Detector NMS 0.94 alone | 10/10 | 38/43 | 5/10 |
+| NMS 0.94 and one-or-two prompts | 10/10 | 37/43 | 7/10 |
+| NMS 0.94 and four-and-expand | 10/10 | 38/43 | 7/10 |
+
+The final profile uses NMS 0.94, allows one to four positive prompts, requires a 0.65 prompt keypoint score and a 0.45 SAM mask score, and permits union area up to 2.1 times the detector box and side expansion up to 1.1 times the original side. Full positive prompt coverage (1.0), zero allowed foreign-core coverage and duplicate-pose suppression stay enabled. On `attitude`, 0.93 still suppressed the second box while 0.94 kept it. An NMS change alone found both dancers on every photo.
+
+| Photo | Stock clean masks | Final clean masks | Missing masks in the final run |
+| --- | ---: | ---: | --- |
+| attitude | 1/2 | 1/2 | One pose lacked reliable prompts |
+| penche | 0/2 | 1/2 | One pose lacked reliable prompts |
+| paquita | 2/2 | 2/2 | None |
+| airborne | 0/2 | 1/2 | One candidate contained foreign core points |
+| twisted | 1/2 | 2/2 | None |
+
+The seven available masks covered all 42 sampled own points for those dancers, zero of 42 partner probes and zero of 28 background probes. This fit includes the earlier holdout and measures sparse ownership. Its transfer to unrelated VTT cues is untested.
