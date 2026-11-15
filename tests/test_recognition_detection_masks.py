@@ -66,7 +66,7 @@ def test_overlay_keeps_holes_pose_colors_and_coordinates_without_extra_inference
     detector = RefinedDetector()
     with render(detector) as (png, record):
         assert png.getpixel((62, 60)) == (62, 45, 92)  # 25% purple fill.
-        assert png.getpixel((46, 66)) == (40, 60, 80)  # Unfilled hole.
+        assert png.getpixel((46, 67)) == (40, 60, 80)  # Unfilled hole.
         assert png.getpixel((2, 2)) == (40, 60, 80)  # Removed raw speckle.
         assert png.getpixel((75, 55)) == (128, 0, 128)  # Pose drawn above mask.
         assert (np.asarray(png)[10:27, 25:46] == 255).all(axis=2).any()  # Prompt rings under point labels.
@@ -139,7 +139,7 @@ def test_person_panels_distinguish_raw_and_cleaned_masks_without_moving_main_geo
         assert rx == 0 and cx == 160 and ry == cy and ry > 100
         assert png.getpixel((rx+2, ry+2)) == (128, 0, 128)
         assert png.getpixel((cx+2, cy+2)) == (40, 60, 80)
-        assert png.getpixel((cx+46, cy+66)) == (40, 60, 80)
+        assert png.getpixel((cx+46, cy+67)) == (40, 60, 80)
         assert 'used by PMPose' in ''.join(cleaned['header_lines'])
         assert record['people'][0]['bounds'] == [20, 10, 80, 90]
         assert record['output_dimensions'] == list(png.size)

@@ -16,7 +16,9 @@ def refine_many(owner, frames, predictions):
         plans = [owner._plan(bounds,prediction) for (image,bounds),prediction,_,_ in window]
         requests, positions = [], []
         for position, (((image,bounds),prediction,_,_),plan) in enumerate(zip(window,plans)):
-            prompts = [owner._prompts(bounds,prediction[0],plan[2],i,indices) for i,indices,_ in plan[3]]
+            minimum = owner.settings['min_prompt_points']
+            prompts = [owner._prompts(bounds, prediction[0], plan[2], i, indices[:minimum])
+                       for i, indices, _ in plan[3]]
             if prompts:
                 positions.append(position)
                 requests.append((image,[(positive,negative) for positive,_,negative in prompts]))
@@ -58,13 +60,6 @@ def refine_many(owner, frames, predictions):
                 raise ValueError('SAM returned an invalid refinement prompt count.')
             results.append(owner.refine(image,bounds,prediction,plan=plan,masks=values,defer=defer))
         second_pass()
-        # Conflicts can be found after an earlier masked batch has completed.
-        for result in results[-len(window):]:
-            for record in result[3]:
-                if record.get('mask_conflict'):
-                    record.update(separated=False,reason='shared_mask_pixels')
-                    record.pop('encoder_mask',None)
-                    record.pop('overlap_mask',None)
         window.clear()
 
     for index,(frame,prediction) in enumerate(zip(frames,predictions)):

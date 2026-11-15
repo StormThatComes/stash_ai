@@ -4,7 +4,7 @@
 def defaults():
     return dict(enabled=False, directory='', mode='all', overlap_threshold=.2,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
-                min_prompt_points=2, max_prompt_points=3, min_mask_score=.5,
+                min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
                 min_prompt_coverage=1., max_foreign_coverage=0.,
                 masked_identity_crop=False, expand_boxes=True, max_box_area_ratio=2., max_side_expansion=.5)
 
@@ -27,6 +27,7 @@ def validate(pose):
         _number(settings[key], prefix + key, 0, 1)
     for key in ('min_prompt_points', 'max_prompt_points'):
         _number(settings[key], prefix + key, 1, 8, integer=True)
+    _number(settings['max_negative_prompt_points_per_neighbor'], prefix + 'max_negative_prompt_points_per_neighbor', 0, 8, integer=True)
     if settings['min_prompt_points'] > settings['max_prompt_points']:
         raise ValueError(prefix + 'min_prompt_points exceeds max_prompt_points.')
     _number(settings['max_box_area_ratio'], prefix + 'max_box_area_ratio', 1, 10)
@@ -38,7 +39,7 @@ def validate(pose):
 
 def contract(settings):
     from . import sam_pose2seg_registry as registry
-    return dict(version='pmpose-sam-pose2seg-refinement-v3',
+    return dict(version='pmpose-sam-pose2seg-refinement-v4',
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,
                 **{k: v for k, v in settings.items() if k != 'directory'})
