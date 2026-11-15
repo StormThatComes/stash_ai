@@ -12,6 +12,7 @@ HELP = {
     'face.quality.min_face_pixels': 'Minimum shorter face-box side in source thumbnail pixels. Range: 8..4096.',
     'face.quality.min_sharpness': 'Minimum sharpness inside the FaceOcc mask at 256px input scale; mask edges excluded. Positive values require an active face visibility floor; 0 disables this gate. Range: 0..100000.',
     'face.quality.min_visible_face_fraction': "Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.",
+    'face.detector.pose_guided_rotation': 'Retry one rotated head crop when a measured sideways head has no face. Requires SCRFD and body collection. Range: true or false.',
     'face.quality.faceocc_logit_threshold': 'Count a pixel inside the face ellipse when its raw FaceOcc logit is strictly above this value. Lower values include more pixels in visibility and masked sharpness. Range: finite float32; default 0.0.',
     'face.quality.min_face_source_fraction': 'Minimum fraction of the face ellipse inside the source image for a FaceOcc measurement. Range: 0..1. Zero still requires some real pixels; 1 requires the full ellipse.',
     'face.quality.max_pose_deviation': 'Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.',

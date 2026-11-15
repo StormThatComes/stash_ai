@@ -38,6 +38,10 @@ class Pose:
         def calculate(values):
             method=getattr(self.model,'predict_many',None)
             return method(values) if callable(method) else [self.model.predict(*value) for value in values]
+        frames = list(frames)
+        if self.face_prompts and any(hasattr(f[0], '_recognition_scan') for f in frames):
+            # Raw inference remains cached. The temporal mask plan consumes cues in order.
+            return calculate(frames)
         from .inference_cache import fingerprint
         from .prompt_recovery import faces_for
         def key(frame):

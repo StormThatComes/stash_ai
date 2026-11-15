@@ -214,7 +214,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 # A limb/face-assisted or below-minimum seed can describe only part
                 # of the body. Require stronger SAM confirmation for these rescues.
                 rescued = (record.get('prompt_minimum', minimum) < minimum or
-                           any(k in (7,8,13,14) for k in indices) or 'face_prompt' in record)
+                           any(k in (7,8,13,14) for k in indices) or 'face_prompt' in record or 'temporal_prompts' in record)
                 recovery_floor = settings.get('min_recovery_mask_score')
                 if recovery_floor is None:
                     recovery_floor = (1 + settings['min_mask_score']) / 2

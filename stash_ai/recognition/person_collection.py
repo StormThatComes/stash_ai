@@ -175,6 +175,7 @@ class PersonCollector:
 
     def collect_records(self,db,scan,index,image,rows,*,seconds=0.,frame_owner=None,defer=True,fresh=True):
         """Prepare fresh faces without rereading or committing them per cue."""
+        image._recognition_scan = scan
         if defer and self.deferred is None:self.deferred=[]
         try:
             if self.config.data['sapiensid']['enabled']:
@@ -186,6 +187,7 @@ class PersonCollector:
                     if size <= limit:
                         from .frame_ownership import Lease
                         lease = frame_owner.retain(image) if frame_owner is not None else Lease(image.copy())
+                        lease.image._recognition_scan = scan
                         if lease.image is not image and hasattr(image,'_recognition_cue_signature'):
                             lease.image._recognition_cue_signature = image._recognition_cue_signature
                         self.pose_frames.append((db, scan, index, lease.image, rows, seconds, fresh, lease))

@@ -18,6 +18,8 @@ face:
     # Box IoU threshold for suppressing duplicate face detections; lower suppresses more. Range: 0..1.
     max_faces_per_frame: 100
     # Maximum face detections processed per VTT thumbnail. Range: 1..1000.
+    pose_guided_rotation: true
+    # Retry one SCRFD head crop for a sideways pose without a face. Requires body collection.
   quality:
     # Scan admission. Rejected faces cannot seed or attach to identities.
     min_face_pixels: 32
