@@ -16,6 +16,35 @@ from .visibility import (FaceVisibility, VisibilityGeometryError, cached, ellips
                          prepare_aligned, valid_fraction)
 
 
+def profile_roi(face, source_size, affine):
+    """Diagnostic landmark-scaled ellipse on the same aligned score grid."""
+    reverse = np.linalg.inv([affine[:3], affine[3:], (0,0,1)])
+    landmarks = np.c_[face.landmarks, np.ones(5)] @ reverse.T
+    x,y,width,height = face.box
+    scale = np.hypot(*affine[:2])
+    size = min(width,height) / scale
+    eyes = landmarks[:2,:2].mean(axis=0)
+    mouth = landmarks[3:,:2].mean(axis=0)
+    nose = landmarks[2,:2]
+    # Center the projected facial surface on supporting features. The scale
+    # floor keeps a narrow eye projection from collapsing the ROI onto the nose.
+    center = (eyes + mouth + nose) / 3
+    center = np.clip(center, 128 - .18*size, 128 + .18*size)
+    spread = np.ptp(landmarks[:,0])
+    rx = np.clip(.9*spread, .24*size, .45*size)
+    ry = np.clip(.95*abs(mouth[1]-eyes[1]), .36*size, .48*size)
+    yy,xx = np.ogrid[:256,:256]
+    region = (((xx+.5-center[0])/rx)**2 + ((yy+.5-center[1])/ry)**2) <= 1
+    total = int(region.sum())
+    sx = affine[0]*(xx+.5) + affine[1]*(yy+.5) + affine[2]
+    sy = affine[3]*(xx+.5) + affine[4]*(yy+.5) + affine[5]
+    region &= (sx>=0) & (sx<source_size[0]) & (sy>=0) & (sy<source_size[1])
+    angles = np.linspace(0,2*np.pi,97)
+    aligned = np.stack((center[0]+rx*np.cos(angles),center[1]+ry*np.sin(angles),np.ones(len(angles))))
+    outline = (np.array(affine).reshape(2,3) @ aligned).T
+    return region, total, [tuple(p) for p in outline]
+
+
 @dataclass
 class FaceReplay:
     image: Image.Image | None
@@ -26,21 +55,34 @@ class FaceReplay:
     total: int = 0
     source_to_model: tuple = ()
 
-    def render(self, threshold):
+    comparison: tuple | None = None
+
+    def render(self, threshold, use_profile=False):
         if self.ellipse is None:
             return None, self.caption
         annotated = self.image.copy()
         caption = self.caption
         if self.logits is not None:
-            foreground = foreground_mask(self.logits, self.region, threshold)
+            region, total = self.region, self.total
+            if use_profile and self.comparison:
+                region, total, _ = self.comparison
+            foreground = foreground_mask(self.logits, region, threshold)
             with Image.fromarray(foreground.astype('uint8') * 110) as mask:
                 with mask.transform(annotated.size, Image.Transform.AFFINE, self.source_to_model,
                                     resample=Image.Resampling.NEAREST) as alpha:
                     annotated.paste((0, 240, 120), (0, 0, *annotated.size), alpha)
-            visible, source = int(foreground.sum()), int(self.region.sum())
-            caption += (f' · Replay {visible / self.total:.3f} ({visible:,} visible / {self.total:,} ellipse pixels)'
-                        f' · Source coverage {source / self.total:.1%}')
-        ImageDraw.Draw(annotated).ellipse(self.ellipse, outline='gold', width=1)
+            visible, source = int(foreground.sum()), int(region.sum())
+            caption += (f' · Replay {visible / total:.3f} ({visible:,} visible / {total:,} ellipse pixels)'
+                        f' · Source coverage {source / total:.1%}')
+            if self.comparison:
+                alternate, denominator, _ = self.comparison
+                base_score = foreground_mask(self.logits,self.region,threshold).sum() / self.total
+                alternate_score = foreground_mask(self.logits,alternate,threshold).sum() / denominator
+                caption += f' · Box ellipse {base_score:.3f} · Landmark ROI {alternate_score:.3f}'
+        if use_profile and self.comparison:
+            ImageDraw.Draw(annotated).line(self.comparison[2], fill='gold', width=1)
+        else:
+            ImageDraw.Draw(annotated).ellipse(self.ellipse, outline='gold', width=1)
         return annotated, caption
 
     def slider_range(self, configured):
@@ -100,6 +142,7 @@ def replay(previews, address, scope):
     # Pillow maps each displayed source pixel back into the aligned score map.
     result.source_to_model = tuple(np.linalg.inv([affine[:3], affine[3:], (0, 0, 1)])[:2].ravel())
     result.logits, result.region, result.total = logits, region, total
+    result.comparison = profile_roi(face, image.size, affine)
     return result
 
 
@@ -118,6 +161,9 @@ class FaceVisibilityWindow:
         ttk.Button(bar, text='Fit', command=lambda: self.images.fit('A')).pack(side='left')
         ttk.Button(bar, text='100%', command=lambda: self.images.set_zoom('A', 1.)).pack(side='left')
         ttk.Label(bar, text='Gold outline: measurement ellipse    Green: pixels counted as visible').pack(side='left')
+        self.use_profile = tk.BooleanVar(master=self.window, value=False)
+        ttk.Checkbutton(bar,text='Landmark ROI (preview)',variable=self.use_profile,
+                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
         controls = ttk.Frame(self.window)
         controls.pack(fill='x', padx=8)
         ttk.Label(controls, text='Pixel logit threshold (preview)').pack(side='left')
@@ -177,7 +223,8 @@ class FaceVisibilityWindow:
         self.value_label.configure(text=str(threshold))
         if self.result is not None:
             result = self.result
-            self.worker.request(lambda: result.render(threshold), self.display_overlay, self.failed)
+            use_profile = self.use_profile.get()
+            self.worker.request(lambda: result.render(threshold, True) if use_profile else result.render(threshold), self.display_overlay, self.failed)
 
     def display_overlay(self, overlay):
         image, caption = overlay
