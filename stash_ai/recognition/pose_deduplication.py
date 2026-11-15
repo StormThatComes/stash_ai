@@ -169,14 +169,14 @@ class DeduplicatedPMPose:
                 from .contact_pose import recover_pair
                 recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
                 if recovered_pair is not None:
-                    owner, reserve = recovered_pair
+                    owner, primary, reserve = recovered_pair
                     if reserves:
                         prediction, confirmed = recovered, {reserve}
                     else:
                         # Both slots already passed NMS. Preserve the original SAM
                         # decision for both and offer the recovered pose only to a
                         # slot which would otherwise use maskless fallback.
-                        fallback = owner,recovered
+                        fallback = owner,(reserve if owner==primary else primary),recovered
             fallbacks.append(fallback)
             report = select(bounds, prediction, self.settings, audit=active(image), reserves=reserves,
                             confirmed=confirmed)
@@ -197,15 +197,30 @@ class DeduplicatedPMPose:
         for fallback, report, final, (image,bounds) in zip(fallbacks,reports,finals,frames):
             if fallback is None:
                 continue
-            owner,recovered = fallback
+            owner,other,recovered = fallback
             keep = report['kept_indices']
             if owner not in keep:
                 continue
             slot = keep.index(owner)
             record = final[3][slot]
-            if record.get('overlap_mask') or record.get('status') == 'refined':
-                continue
-            l,t,r,b = bounds[owner]
+            if record.get('overlap_mask'):
+                if other not in keep:
+                    continue
+                alternate_slot = keep.index(other)
+                if final[3][alternate_slot].get('overlap_mask'):
+                    continue
+                from .person_geometry import unpack_mask
+                from .mask_candidates import inside
+                l,t,r,b = record['bounds']
+                mask = unpack_mask(record['overlap_mask'],r-l,b-t)
+                established = final[0][slot] - [l,t]
+                proposal = recovered[0][owner] - [l,t]
+                if (inside(mask,established[:7]).sum() < 2 or inside(mask,proposal[:5]).any()
+                        or np.linalg.norm(np.median(established[:5],axis=0)-np.median(proposal[:5],axis=0)) < 4):
+                    continue
+                slot = alternate_slot
+                record = final[3][slot]
+            l,t,r,b = bounds[keep[slot]]
             xy = recovered[0][owner]
             usable = ((xy >= [l,t]) & (xy < [r,b])).all(axis=1)
             final[0][slot] = np.where(usable[:,None],xy,-1)

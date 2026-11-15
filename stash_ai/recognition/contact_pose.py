@@ -58,7 +58,7 @@ def recover_pair(pose,image,bounds,prediction,reserves,settings):
             output[0][owner],output[1][owner]=result[0][offset],result[1][offset]
             for key in output[2]:
                 output[2][key][owner]=result[2][key][offset]
-            return output, (owner,j)
+            return output, (owner,i,j)
         # The counterfactual pass is bounded to one pair per cue.
         break
     return prediction, None
