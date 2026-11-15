@@ -210,7 +210,7 @@ class SapiensIDFaces(YuNetDetector):
                 or np.any((confidences<0)|(confidences>1))):
             raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
         if settings.get('backend') == 'pmpose':
-            if (not isinstance(probabilities, dict) or set(probabilities) != {'presence', 'visibility'} or
+            if (not isinstance(probabilities, dict) or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'}) or
                     any(not isinstance(v, np.ndarray) or v.shape != (len(bounds), 17)
                         or not np.isfinite(v).all() or np.any((v < 0) | (v > 1))
                         for v in probabilities.values())):

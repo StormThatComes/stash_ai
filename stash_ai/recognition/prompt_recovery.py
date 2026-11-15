@@ -48,6 +48,8 @@ def eligible(points, scores, probabilities, bounds, settings):
                  score=scores > settings['min_keypoint_score'],
                  presence=probabilities['presence'] > settings['min_presence'],
                  visibility=probabilities['visibility'] > settings['min_visibility'])
+    if 'flip_agreement' in probabilities:
+        tests['flip'] = probabilities['flip_agreement'] >= .5
     return np.logical_and.reduce(list(tests.values())), tests
 
 

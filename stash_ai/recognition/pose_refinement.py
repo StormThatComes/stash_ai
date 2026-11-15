@@ -21,6 +21,8 @@ def reliable_core(points, scores, probabilities, box, settings):
              (scores[indices] > settings['min_keypoint_score']) &
              (probabilities['presence'][indices] > settings['min_presence']) &
              (probabilities['visibility'][indices] > settings['min_visibility']))
+    if 'flip_agreement' in probabilities:
+        valid &= probabilities['flip_agreement'][indices] >= .5
     indices = indices[valid]
     # Stable ordering makes tied predictions independent of batching.
     return indices[np.argsort(-probabilities['visibility'][indices], kind='stable')]
@@ -133,10 +135,10 @@ class RefinedPMPose:
         for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks):
             pending.append(candidate)
             if len(pending) >= self.pose.batch_size:
-                second_pass(image, pending, result, records, points)
+                second_pass(image, pending, result, records, prediction)
                 pending.clear()
         if pending:
-            second_pass(image, pending, result, records, points)
+            second_pass(image, pending, result, records, prediction)
         return (*result, records)
 
     @pipeline_stage('pmpose_masked_second_pass')
@@ -150,10 +152,11 @@ class RefinedPMPose:
             new_points, new_scores, probabilities = refined
             keep = ((new_scores[offset, indices] > self.settings['min_keypoint_score']) &
                     (probabilities['presence'][offset, indices] > self.settings['min_presence']) &
+                    (probabilities['visibility'][offset, indices] > self.settings['min_visibility']) &
                     inside(mask, new_points[offset, indices]))
             old = records[i]['detector_bounds']
             tolerance = max(3., .15 * math.hypot(old[2]-old[0], old[3]-old[1]))
-            keep &= np.linalg.norm(new_points[offset, indices] - records[i].get('prompt_points', original[i, indices]), axis=1) <= tolerance
+            keep &= np.linalg.norm(new_points[offset, indices] - records[i].get('prompt_points', original[0][i, indices]), axis=1) <= tolerance
             if keep.sum() < records[i].get('prompt_minimum', self.settings['min_prompt_points']):
                 record = records[i]
                 record['reason'] = 'second_pass_core_drift'
@@ -163,15 +166,10 @@ class RefinedPMPose:
                 if not has_neighbours or record['separated']:
                     _retain_quality_mask(record, mask, old)
                 continue
-            # A valid torso does not establish ownership of a distal limb.
-            # Check both its endpoint and the segment to its proximal joint.
-            joints = new_points[offset].copy()
-            confidence = new_scores[offset].copy()
-            for parent, child in ((5,7),(7,9),(6,8),(8,10),(11,13),(13,15),(12,14),(14,16)):
-                if not inside(mask, [joints[child]])[0] or (confidence[parent] > 0 and
-                        not inside(mask, [(joints[parent] + joints[child]) / 2])[0]):
-                    joints[child] = -1
-                    confidence[child] = 0
+            from .limb_ownership import fuse
+            joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.settings)
+            if restored:
+                records[i]['restored_first_pass_joints'] = restored
             # Quality needs the validated mask even when encoder masking is off.
             # Both fields share one packed crop. Collection stores the quality mask separately from JSON.
             _retain_quality_mask(records[i], mask, box)
@@ -179,6 +177,6 @@ class RefinedPMPose:
                 records[i]['encoder_mask'] = records[i]['overlap_mask']
             result[0][i], result[1][i] = joints, confidence
             for key in result[2]:
-                result[2][key][i] = probabilities[key][offset]
+                result[2][key][i] = evidence[key]
             records[i].update(status='refined', reason=None, bounds=box,
                               box_expanded=box != records[i]['detector_bounds'])
