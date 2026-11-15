@@ -17,7 +17,7 @@ def _measurements(bounds, prediction, settings):
     n = len(bounds)
     boxes = np.asarray(bounds, dtype=np.float64).reshape(n, 4)
     if (points.shape != (n, 17, 2) or scores.shape != (n, 17)
-            or set(probabilities) != {'presence', 'visibility'}
+            or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'})
             or any(v.shape != (n, 17) for v in probabilities.values())
             or not np.isfinite(boxes).all() or np.any(boxes[:, 2:] <= boxes[:, :2])
             or not np.isfinite(points).all()

@@ -13,16 +13,34 @@ def refine_many(owner, frames, predictions):
         if not window:
             return
         pipeline_max('refinement_window_bytes', sum(item[3] for item in window))
-        plans = [owner._plan(bounds,prediction) for (image,bounds),prediction,_,_ in window]
+        plans = [owner._plan(bounds,prediction,image) for (image,bounds),prediction,_,_ in window]
         requests, positions = [], []
         for position, (((image,bounds),prediction,_,_),plan) in enumerate(zip(window,plans)):
             minimum = owner.settings['min_prompt_points']
-            prompts = [owner._prompts(bounds, prediction[0], plan[2], i, indices[:minimum])
+            from .prompt_recovery import prompt_points
+            xy = prompt_points(prediction[0], plan[1])
+            prompts = [owner._prompts(bounds, xy, plan[2], i, indices[:plan[1][i].get('prompt_minimum', minimum)])
                        for i, indices, _ in plan[3]]
             if prompts:
                 positions.append(position)
                 requests.append((image,[(positive,negative) for positive,_,negative in prompts]))
-        masks = owner.segmenter.predict_frames(requests) if requests else []
+        reuse = getattr(owner.segmenter, 'refine_frames', None)
+        use_features = bool(requests and callable(reuse))
+        if use_features:
+            by_request = {id(item[1]): pos for item, pos in zip(requests, positions)}
+            def process(prompts, initial, decoder):
+                pos = by_request[id(prompts)]
+                (image,bounds),prediction,_,_ = window[pos]
+                # A retried encoder batch must start from pristine decision records.
+                old = plans[pos]
+                from copy import deepcopy
+                plan = (old[0],deepcopy(old[1]),old[2],old[3])
+                if len(initial) != len(plan[3]):
+                    raise ValueError('SAM returned an invalid refinement prompt count.')
+                return plan, list(owner.candidates(image,bounds,prediction,plan,initial,decoder))
+            masks = reuse(requests,process)
+        else:
+            masks = owner.segmenter.predict_frames(requests) if requests else []
         if len(masks) != len(requests):
             raise ValueError('SAM returned an invalid refinement frame count.')
         by_frame = dict(zip(positions,masks))
@@ -56,6 +74,10 @@ def refine_many(owner, frames, predictions):
 
         for position,(((image,bounds),prediction,_,_),plan) in enumerate(zip(window,plans)):
             values=by_frame.pop(position,[])
+            if use_features and position in positions:
+                plan, selected = values
+                results.append(owner.refine(image,bounds,prediction,plan=plan,selected=selected,defer=defer))
+                continue
             if len(values)!=len(plan[3]):
                 raise ValueError('SAM returned an invalid refinement prompt count.')
             results.append(owner.refine(image,bounds,prediction,plan=plan,masks=values,defer=defer))

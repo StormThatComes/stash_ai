@@ -30,20 +30,28 @@ class Pose:
     def __init__(self,model,config,device):
         from .inference_contracts import pose
         self.model=model;self.contract=pose(config),str(device)
+        refinement = config.data['sapiensid']['pose'].get('refinement', {})
+        self.face_prompts = refinement.get('enabled') and refinement.get('recover_prompt_points')
     def __getattr__(self,name):return getattr(self.model,name)
     def predict(self,image,bounds):return self.predict_many([(image,bounds)])[0]
     def predict_many(self,frames):
         def calculate(values):
             method=getattr(self.model,'predict_many',None)
             return method(values) if callable(method) else [self.model.predict(*value) for value in values]
-        return many('pose',self.contract,list(frames),calculate)
+        from .inference_cache import fingerprint
+        from .prompt_recovery import faces_for
+        def key(frame):
+            faces = faces_for(frame[0]) if self.face_prompts else ()
+            return fingerprint((frame, [list(f.row) for f in faces])) if faces else fingerprint(frame)
+        return many('pose',self.contract,list(frames),calculate,key=key)
 
 
 class RawPMPose(Pose):
     """Cache raw first and masked passes by their exact pixels, boxes and masks."""
-    def __init__(self,model,device,*,precision='fp32'):
+    def __init__(self,model,device,*,precision='fp32', check_flip=False):
         from .pmpose_registry import SHA256,INFERENCE
         self.model=model;self.contract=[SHA256,INFERENCE,str(device)]
+        if check_flip:self.contract.append('flip-peak-agreement-v1')
         if precision!='fp32':self.contract.append({'precision':precision})
 
     def predict(self,image,bounds,masks=None):

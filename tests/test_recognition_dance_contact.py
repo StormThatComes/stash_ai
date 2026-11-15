@@ -112,3 +112,12 @@ def test_one_profile_for_all_photos(monkeypatch, tmp_path):
     assert report['results']['balanced']['coverage'] == dict(photos=3, with_clean_mask=3, fully_clean=0)
     assert report['results']['many']['coverage'] == dict(photos=3, with_clean_mask=2, fully_clean=2)
     assert benchmark.select_profile({'leaks': report['results']['leaks']}, profiles) is None
+
+
+def test_partner_wrist_and_anatomical_swap_are_separate_errors():
+    from benchmarks.benchmark_dance_contact import joint_ownership
+    xy = [[-1,-1]]*17
+    xy[9], xy[10] = [10,10], [85,90]
+    label = dict(box=[0,0,100,100],joints={'wrist':[[10,10],[55,60]]},
+                 sides={'wrist':['right','left']})
+    assert joint_ownership(label,[dict(joints={'wrist':[[86,90]]})],xy) == (1,0,1)

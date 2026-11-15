@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 
+from . import prompt_recovery
 from .mask_candidates import check_mask, inside, select_masks, spread_indices
 from .profiling import pipeline_stage, pipeline_timing
 
@@ -20,6 +21,8 @@ def reliable_core(points, scores, probabilities, box, settings):
              (scores[indices] > settings['min_keypoint_score']) &
              (probabilities['presence'][indices] > settings['min_presence']) &
              (probabilities['visibility'][indices] > settings['min_visibility']))
+    if 'flip_agreement' in probabilities:
+        valid &= probabilities['flip_agreement'][indices] >= .5
     indices = indices[valid]
     # Stable ordering makes tied predictions independent of batching.
     return indices[np.argsort(-probabilities['visibility'][indices], kind='stable')]
@@ -41,9 +44,11 @@ def retain_quality_mask(record, mask, bounds):
 
 
 class RefinedPMPose:
-    def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728):
+    def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728, joint_quality=None):
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
         self.frame_batch_size, self.queue_bytes = frame_batch_size, queue_bytes
+        # Prompt confidence is intentionally stricter than output joint eligibility.
+        self.joint_quality = dict(settings, **(joint_quality or {}))
 
     def close(self):
         from .resident_models import release
@@ -64,7 +69,7 @@ class RefinedPMPose:
             raise ValueError('PMPose returned an invalid refinement frame count.')
         return self.refine_many(frames, predictions)
 
-    def _plan(self, bounds, prediction):
+    def _plan(self, bounds, prediction, image=None):
         points, scores, probabilities = prediction
         settings = self.settings
         result = (points.copy(), scores.copy(), {k: v.copy() for k, v in probabilities.items()})
@@ -72,6 +77,10 @@ class RefinedPMPose:
                         detector_bounds=list(box), bounds=list(box)) for box in bounds]
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
+        recovery = settings.get('recover_prompt_points', False)
+        if recovery:
+            valid, tests = prompt_recovery.eligible(points, scores, probabilities, bounds, settings)
+            faces = prompt_recovery.assigned_faces(prompt_recovery.faces_for(image), bounds, points, valid)
         jobs = []
         for i, box in enumerate(bounds):
             if settings['mode'] == 'overlap' and not any(
@@ -84,13 +93,29 @@ class RefinedPMPose:
                 # Coincident head/torso estimates do not establish ownership.
                 distance = np.linalg.norm(points[i, indices, None] - foreign[None], axis=2).min(axis=1)
                 indices = indices[distance > max(2., .02 * math.hypot(box[2]-box[0], box[3]-box[1]))]
-            if len(indices) >= settings['min_prompt_points']:
-                indices = spread_indices(points[i], indices, settings['max_prompt_points'],
-                                         initial=settings['min_prompt_points'])
+            minimum = settings['min_prompt_points']
+            if recovery:
+                counts = {name: int((~passed[i, CORE]).sum()) for name, passed in tests.items()}
+                counts['near_peer'] = len(cores[i]) - len(indices)
+                records[i]['prompt_rejections'] = counts
+                indices, minimum = prompt_recovery.recover(i, indices, points, valid, scores,
+                    probabilities, bounds, faces.get(i), foreign, settings, records[i])
+                records[i]['prompt_minimum'] = minimum
+                # On contact prioritize distinct torso/head regions over adjacent facial points.
+                if len(indices) >= minimum and any(j != i and overlaps(box, b, settings['overlap_threshold'])
+                                                   for j, b in enumerate(bounds)):
+                    xy = prompt_recovery.prompt_points(points, records)[i]
+                    indices = spread_indices(xy, indices, len(indices), initial=1)
+                records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
+            if len(indices) >= minimum:
+                limit = len(indices) if settings.get('adaptive_decoder_retries') else settings['max_prompt_points']
+                geometry = prompt_recovery.prompt_points(points, records)[i] if 'face_prompt' in records[i] else points[i]
+                indices = spread_indices(geometry, indices, limit,
+                                         initial=minimum)
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs
 
-    def _prompts(self, bounds, points, cores, i, indices):
+    def _prompts(self, bounds, points, cores, i, indices, leaks=None):
         prompts = points[i, indices]
         neighbours = [j for j, other in enumerate(bounds) if j != i
                       and overlaps(bounds[i], other, self.settings['overlap_threshold'])]
@@ -100,6 +125,8 @@ class RefinedPMPose:
             tolerance = max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))
             for j in neighbours:
                 usable = [k for k in cores[j] if np.linalg.norm(prompts - points[j,k], axis=1).min() > tolerance]
+                if leaks and j in leaks:
+                    usable.sort(key=lambda k: k not in leaks[j])
                 negatives.extend(points[j, spread_indices(points[j], usable, limit)])
         return prompts, neighbours, negatives
 
@@ -107,19 +134,28 @@ class RefinedPMPose:
         from .refinement_batches import refine_many
         return refine_many(self, frames, predictions)
 
+    def candidates(self, image, bounds, prediction, plan, masks, decoder=None):
+        _, records, cores, jobs = plan
+        points = prompt_recovery.prompt_points(prediction[0], records)
+        valid, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
+        evidence = [xy[ok] for xy, ok in zip(prediction[0], valid)]
+        return select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence, decoder)
+
     @pipeline_stage('pmpose_mask_refinement')
-    def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None):
-        points = prediction[0]
-        result, records, cores, jobs = plan or self._plan(bounds, prediction)
+    def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None, selected=None):
+        plan = plan or self._plan(bounds, prediction, image)
+        result, records = plan[:2]
         second_pass = defer or self._second_pass
         pending = []
-        for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks):
+        if selected is None:
+            selected = self.candidates(image, bounds, prediction, plan, masks)
+        for candidate in selected:
             pending.append(candidate)
             if len(pending) >= self.pose.batch_size:
-                second_pass(image, pending, result, records, points)
+                second_pass(image, pending, result, records, prediction)
                 pending.clear()
         if pending:
-            second_pass(image, pending, result, records, points)
+            second_pass(image, pending, result, records, prediction)
         return (*result, records)
 
     @pipeline_stage('pmpose_masked_second_pass')
@@ -133,11 +169,12 @@ class RefinedPMPose:
             new_points, new_scores, probabilities = refined
             keep = ((new_scores[offset, indices] > self.settings['min_keypoint_score']) &
                     (probabilities['presence'][offset, indices] > self.settings['min_presence']) &
+                    (probabilities['visibility'][offset, indices] > self.settings['min_visibility']) &
                     inside(mask, new_points[offset, indices]))
             old = records[i]['detector_bounds']
             tolerance = max(3., .15 * math.hypot(old[2]-old[0], old[3]-old[1]))
-            keep &= np.linalg.norm(new_points[offset, indices] - original[i, indices], axis=1) <= tolerance
-            if keep.sum() < self.settings['min_prompt_points']:
+            keep &= np.linalg.norm(new_points[offset, indices] - records[i].get('prompt_points', original[0][i, indices]), axis=1) <= tolerance
+            if keep.sum() < records[i].get('prompt_minimum', self.settings['min_prompt_points']):
                 record = records[i]
                 record['reason'] = 'second_pass_core_drift'
                 # The first pose and original crop survive drift. For neighbouring
@@ -146,15 +183,10 @@ class RefinedPMPose:
                 if not has_neighbours or record['separated']:
                     retain_quality_mask(record, mask, old)
                 continue
-            # A valid torso does not establish ownership of a distal limb.
-            # Check both its endpoint and the segment to its proximal joint.
-            joints = new_points[offset].copy()
-            confidence = new_scores[offset].copy()
-            for parent, child in ((5,7),(7,9),(6,8),(8,10),(11,13),(13,15),(12,14),(14,16)):
-                if not inside(mask, [joints[child]])[0] or (confidence[parent] > 0 and
-                        not inside(mask, [(joints[parent] + joints[child]) / 2])[0]):
-                    joints[child] = -1
-                    confidence[child] = 0
+            from .limb_ownership import fuse
+            joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.joint_quality)
+            if restored:
+                records[i]['restored_first_pass_joints'] = restored
             # Quality needs the validated mask even when encoder masking is off.
             # Both fields share one packed crop. Collection stores the quality mask separately from JSON.
             retain_quality_mask(records[i], mask, box)
@@ -162,6 +194,6 @@ class RefinedPMPose:
                 records[i]['encoder_mask'] = records[i]['overlap_mask']
             result[0][i], result[1][i] = joints, confidence
             for key in result[2]:
-                result[2][key][i] = probabilities[key][offset]
+                result[2][key][i] = evidence[key]
             records[i].update(status='refined', reason=None, bounds=box,
                               box_expanded=box != records[i]['detector_bounds'])
