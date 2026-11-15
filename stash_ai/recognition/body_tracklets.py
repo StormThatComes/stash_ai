@@ -277,7 +277,7 @@ def claim_fragments(rows,anonymous,decisions,frozen,guard,settings):
         options = []
         for owner in sorted(common):
             matches = [rankings[r['id']][owner] for r in queries]
-            if any(v[1]<settings['cohesion_threshold'] or frozen.support[id(v[3])]<settings['attach_min_support']
+            if any(v[1]<settings['cohesion_threshold'] or frozen.support.get(id(v[3]),len(v[3]))<settings['attach_min_support']
                    for v in matches):
                 continue
             def rival(oid):

@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v47-contact-bridge',contract(config),matching_policy(config),
+    return digest(['body-local-v48-independent-looks',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -66,31 +66,40 @@ def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:Non
     """At most one witness per scan/cue; repeated pixels cannot add support."""
     from .independent_evidence import body_vote,unit,Votes,stamp
     from .paged_references import rows as page_rows
-    from .appearance_index import AppearanceIndex
-    votes=Votes();hashes=AppearanceIndex();pixels={};seen=set()
+    votes=Votes();seen=set()
     save=page_rows if paged else list
+    distance=settings['min_appearance_distance']
+    class_bytes=0
+    if distance:
+        # Freeze fingerprint classes before cue matching. A bridge hash must not
+        # consume two otherwise independent observations just because it came first.
+        rows=save(rows)
+        by_pixel={}
+        for row in rows:
+            value=quality(row).get('appearance_hash')
+            if value:
+                pixel=unit(body_vote(row))
+                number=int(value,16)
+                by_pixel[pixel]=min(number,by_pixel.get(pixel,number))
+        from .appearance_index import canonical_buckets
+        classes=canonical_buckets(set(by_pixel.values()),distance)
+        from .memory_size import size
+        class_bytes=size([by_pixel,classes])
+        reserve(class_bytes)
     def candidates():
         charge=0;count=0
         for row in (rows if presorted else sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id']))):
             if row['id'] in seen:continue
             seen.add(row['id'])
-            q=quality(row)
             vote=body_vote(row);physical=unit(vote)
-            hashed=q.get('appearance_hash')
-            hashed=int(hashed,16) if hashed else None
-            fingerprint=pixels.get(physical)
-            if fingerprint is None and hashed is not None:
-                fingerprint=hashes.first(hashed,settings['min_appearance_distance'])
-            if fingerprint is None:
-                fingerprint=encoded(physical)
-                if hashed is not None and settings['min_appearance_distance']>0:hashes.add(hashed,fingerprint)
-            pixels[physical]=fingerprint
+            fingerprint=(f'appearance:{classes[by_pixel[physical]]:016x}' if distance and physical in by_pixel
+                         else encoded(physical))
             # Retain every cue edge of an appearance. A greedy representative can
             # consume the sole cue of a different, otherwise independent crop.
             vote=dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}}))
             votes.add(vote);count+=1
             from .memory_size import size
-            charge=size([vars(votes),hashes.nodes,pixels,seen]) if count & (count-1)==0 else charge+2048
+            charge=class_bytes+size([vars(votes),seen]) if count & (count-1)==0 else charge+2048
             reserve(charge)
             yield dict(row=row,pixel=unit(vote),stamp=stamp(vote))
     candidates=save(candidates())
@@ -382,6 +391,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold']))
     borderline = [r for r in borderline if decisions[r['id']]['status']=='withheld']
     groups=[];weak=[]
+    from .body_seed_modes import paired_order
+    if settings.get('body_first_matching'):
+        remaining=paired_order(remaining,settings,scores,guard)
     for row in remaining:
         if not anchor(row,settings):weak.append(row);continue
         # With one possible owner there is no rival ordering to approximate.

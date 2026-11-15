@@ -24,3 +24,30 @@ class AppearanceIndex:
             pending.extend(child for edge,child in children.items()
                 if child<best and delta-distance<edge<delta+distance)
         return self.nodes[best][1] if best<len(self.nodes) else None
+
+
+def canonical_buckets(values, distance):
+    """Use farthest-first exemplars on small banks, stable BK lookup on large banks."""
+    ordered=sorted(values)
+    index=AppearanceIndex()
+    if 1<len(ordered)<=64:
+        first=max(ordered,key=lambda v:((v^ordered[0]).bit_count(),-v))
+        nearest={v:(v^first).bit_count() for v in ordered}
+        order=[first]
+        while nearest:
+            value=max(nearest,key=lambda v:(nearest[v],-v))
+            if nearest[value]<distance:
+                break
+            order.append(value)
+            del nearest[value]
+            for v in nearest:
+                nearest[v]=min(nearest[v],(v^value).bit_count())
+        return {v:min(order,key=lambda ref:((ref^v).bit_count(),ref)) for v in ordered}
+    result={}
+    for value in ordered:
+        representative=index.first(value,distance)
+        if representative is None:
+            representative=value
+            index.add(value,value)
+        result[value]=representative
+    return result
