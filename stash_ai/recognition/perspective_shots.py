@@ -33,15 +33,25 @@ def change(previous, current, adjacent):
     return 'continuous' if adjacent and difference <= 20 else 'uncertain'
 
 
-def advance(image, cue, previous):
+def advance(image, cue, previous, *, evidence=False):
     from .body_perspectives import frame_signature
     signature = frame_signature(image)
     shot = 0 if cue == 0 else None
+    fine = None
+    verified = False
+    if evidence:
+        with image.resize((48,48)) as small, small.convert('L') as grey:
+            fine = grey.tobytes().hex()
     if previous and previous[0] == cue-1:
         before = np.frombuffer(bytes.fromhex(previous[2]),dtype='uint8').astype(float).reshape(-1,3)
         current = np.frombuffer(bytes.fromhex(signature),dtype='uint8').astype(float).reshape(-1,3)
-        shot = cue if change(before,current,True)=='cut' else previous[1]
-    return cue,shot,signature
+        kind = change(before,current,True)
+        verified = kind=='continuous'
+        if not verified and fine and len(previous)>3 and previous[3]:
+            from .cue_gaps import camera_continuity
+            verified = camera_continuity(previous[3],fine)
+        shot = cue if kind=='cut' and not verified else previous[1]
+    return (cue,shot,signature,fine,verified) if evidence else (cue,shot,signature)
 
 
 def boundaries(by_cue, geometry):

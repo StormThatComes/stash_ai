@@ -144,5 +144,6 @@ def body_key(db, scan, config):
             "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))],'owner',owner))
     local=signed('body-scene-input',digest([scan,expected]),queries,'scene',scene_key(db,scan))
     shot_map = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
-    return digest([scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,
+    motion = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-continuity:'+scan,)).fetchone()
+    return digest([motion[0] if motion else None,scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,
                    shot_map[0] if shot_map else None])
