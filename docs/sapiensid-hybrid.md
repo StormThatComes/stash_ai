@@ -285,8 +285,9 @@ Quality masks are available independently of
 `pose.refinement.masked_identity_crop`. No extra segmentation pass is run.
 Without refinement, collection continues to use boxes. The pre-segmentation
 `pose.refinement.overlap_threshold` still uses boxes to decide when to run SAM;
-mask-conflict and face-association safeguards remain active. Packed overlap
-masks are frame-local and are not stored in observation metadata.
+mask-conflict and face-association safeguards remain active. With
+`storage.retain_body_masks` enabled, recognition saves the validated quality
+mask once per body observation in a separate SQLite table for Inspect Scene.
 
 The changed quality contract recollects body evidence on the next recognition
 run with refinement enabled. A rebuild/solver alone cannot recompute masks from

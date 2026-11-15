@@ -504,7 +504,12 @@ full frame. Offline mode keeps retained crops available.
 `Unpin` restores recorded references. Pinned user comparisons are labeled separately
 from decision evidence. `Open observation…` resolves an ID only within the active
 scope/model. Geometry layers independently control boxes, facial landmarks, pose
-points, skeletons and available retained masks. Hover over points for source
+points and skeletons. Enable **Body mask** in **Geometry layers…** to overlay the
+recorded SAM quality mask on the crop or full cue. This works for accepted and
+rejected body observations, including a body linked to a selected face. Each
+body caption identifies its mask or gives the recorded reason it was unavailable.
+**Mask not retained** means the pixels are absent, for example for an earlier
+run or when `storage.retain_body_masks` was disabled. Hover over points for source
 coordinates and retained confidence. Missing masks or point confidence are
 explicitly unavailable; browsing never runs models or changes recognition data.
 

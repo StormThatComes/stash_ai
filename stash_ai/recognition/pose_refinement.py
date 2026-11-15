@@ -153,7 +153,7 @@ class RefinedPMPose:
                     joints[child] = -1
                     confidence[child] = 0
             # Quality needs the validated mask even when encoder masking is off.
-            # Both fields share one packed crop and are stripped before storage.
+            # Both fields share one packed crop. Collection stores the quality mask separately from JSON.
             _retain_quality_mask(records[i], mask, box)
             if records[i].get('overlap_mask') and records[i].get('separated') and self.settings.get('masked_identity_crop'):
                 records[i]['encoder_mask'] = records[i]['overlap_mask']

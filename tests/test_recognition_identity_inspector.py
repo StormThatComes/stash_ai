@@ -646,6 +646,11 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
     from stash_ai.recognition.scene_inspection import SceneReader
     from stash_ai.recognition.scene_window import SceneInspector
     config, reader, client, media, face, backend, closed=vtt_fixture(tmp_path)
+    from stash_ai.recognition.database import FaceDatabase
+    import zlib
+    with FaceDatabase(config.database) as state, state.connection as db:
+        db.execute("INSERT INTO body_quality_masks VALUES ('rejected-body', ?)",
+                   (zlib.compress(b'\xff' * ((70 * 110 + 7) // 8)),))
     main_thread=get_ident()
     started, release = Event(), Event()
     from stash_ai.recognition import inspection_face_visibility
@@ -680,8 +685,23 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         body=next(k for k,v in ui.rows.items() if v['id']=='rejected-body')
         ui.listing.selection_set(body)
         root.update()
+        def toggle_body_mask():
+            ui.layer_dialog()
+            dialog = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.title() == 'Geometry layers')
+            controls = {w.cget('text'): w for w in dialog.winfo_children()}
+            controls['Body mask'].invoke()
+            controls['Apply'].invoke()
+
+        ui.show_geometry.set(False)
+        toggle_body_mask()
         release.set()
         wait_for(lambda: 'Reconstructed from VTT' in ui.images.panels['A'].caption.get())
+        panel = ui.images.panels['A']
+        wait_for(lambda: 'Recorded quality mask' in panel.caption.get())
+        raw = ui.preview_data['A']['image'][0].getpixel((10, 10))
+        assert panel.image.getpixel((10, 10)) != raw
+        toggle_body_mask()
+        wait_for(lambda: panel.image.getpixel((10, 10)) == raw)
         assert ui.images.panels['A'].image.size==(70,110)
         assert ui.face_visibility_button.instate(['disabled'])
         assert 'rejected-body' in ui.status.get()

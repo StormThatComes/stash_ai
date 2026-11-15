@@ -61,7 +61,7 @@ class Crops:
         geometry=json.loads(row['geometry']);quality=json.loads(row['quality']).get('quality',{})
         with image,image.crop(geometry['bounds']) as crop,crop.convert('RGB') as rgb:
             digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
-            if quality.get('pixel_digest')!=digest:
+            if quality.get('source_pixel_digest', quality.get('pixel_digest'))!=digest:
                 raise ValueError('Reconstructed person pixels differ from retained evidence.')
             output=BytesIO();rgb.save(output,format='PNG')
             return output.getvalue() if output.tell()<=self.config.data['storage']['max_crop_bytes'] else None

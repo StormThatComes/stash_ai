@@ -108,6 +108,11 @@ def save_records(db, config, records):
             'quality=excluded.quality,rejected=excluded.rejected,embedding=excluded.embedding,crop=excluded.crop',
             (identity,body['scan'],body['cue'],body['seconds'],body['contract'],body['face'],
              encoded(metadata['person']),encoded(public),body['rejected'],feature,put(db,crop,supported=cold)))
+        mask = metadata.get('_quality_mask')
+        if mask is None:
+            db.execute('DELETE FROM body_quality_masks WHERE observation=?', (identity,))
+        else:
+            db.execute('INSERT OR REPLACE INTO body_quality_masks(observation, mask) VALUES (?,?)', (identity, mask))
         if body['face_accepted']:
             # Compatibility projection uses the SAME inferred feature. Never
             # invoke the encoder again for a face-associated person.

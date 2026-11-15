@@ -53,6 +53,9 @@ def quality(image,person,people,settings):
                   keypoints=points,detected_keypoints=detected,border_edges=border,**sharp,**overlaps)
     if packed:
         measured['foreground_hash'] = appearance_hash
+        # Matching uses the masked input digest. VTT inspection verifies the original pixels.
+        with image.crop(bounds) as crop, crop.convert('RGB') as raw:
+            measured['source_pixel_digest'] = hashlib.sha256(str(raw.size).encode('ascii') + raw.tobytes()).hexdigest()
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
             'person_sharpness_mask_unavailable' if settings['min_sharpness']>0 and not sharp['sharpness_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
@@ -170,6 +173,9 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             _body=dict(scan=scan,cue=cue,seconds=seconds,contract=expected,
                        face=row['id'] if row is not None else None,
                        face_accepted=face_accepted,rejected=reason))
+        if measured.get('sharpness_method') == 'sam_mask' and config.data['sapiensid']['storage']['retain_body_masks']:
+            from .retained_body_masks import compress_mask
+            metadata['_quality_mask'] = compress_mask(refinement['overlap_mask'])
         record=[identifier(scan,cue,person,expected),metadata,None,None]
         value=model.person_geometry(image,person,usable_face) if reason is None else None
         if value is not None and refinement.get('encoder_mask'):

@@ -13,7 +13,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -147,6 +147,10 @@ SCHEMA_V16,TABLES_V16=SCHEMA,TABLES
 from .alias_scene_index import SCHEMA as ALIAS_SCHEMA,TABLES as ALIAS_TABLES
 SCHEMA+=ALIAS_SCHEMA
 TABLES+=ALIAS_TABLES
+SCHEMA_V17, TABLES_V17 = SCHEMA, TABLES
+from .retained_body_masks import SCHEMA as BODY_MASK_SCHEMA
+SCHEMA += BODY_MASK_SCHEMA
+TABLES += ('body_quality_masks',)
 
 
 def encoded(value):
@@ -273,9 +277,10 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12),13: (SCHEMA_V13,TABLES_V13),14: (SCHEMA_V14,TABLES_V14),15: (SCHEMA_V15,TABLES_V15),16: (SCHEMA_V16,TABLES_V16)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6),7: (SCHEMA_V7,TABLES_V7),8: (SCHEMA_V8,TABLES_V8),9: (SCHEMA_V9,TABLES_V9),10: (SCHEMA_V10,TABLES_V10),11: (SCHEMA_V11,TABLES_V11),12: (SCHEMA_V12,TABLES_V12),13: (SCHEMA_V13,TABLES_V13),14: (SCHEMA_V14,TABLES_V14),15: (SCHEMA_V15,TABLES_V15),16: (SCHEMA_V16,TABLES_V16),
+                               17: (SCHEMA_V17,TABLES_V17)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
@@ -309,9 +314,11 @@ class FaceDatabase(AbstractContextManager):
                 if version<=15:
                     for sql in (*table_statements,*rear_triggers.values()):db.execute(sql)
                 from . import alias_scene_index
-                for sql in (*alias_scene_index.STATEMENTS,*alias_scene_index.TRIGGERS.values()):
-                    db.execute(sql)
-                alias_scene_index.populate(db)
+                if version <= 16:
+                    for sql in (*alias_scene_index.STATEMENTS,*alias_scene_index.TRIGGERS.values()):
+                        db.execute(sql)
+                    alias_scene_index.populate(db)
+                db.execute(BODY_MASK_SCHEMA)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:

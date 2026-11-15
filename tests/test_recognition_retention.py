@@ -191,6 +191,7 @@ def test_obsolete_body_contracts_keep_current_previous_and_pinned_numerical_evid
             # also invalidate the old variant's completeness certificate.
             db.execute("INSERT INTO body_observations SELECT 'extra',scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,crop "
                        "FROM body_observations WHERE id='body-0'")
+            db.execute("INSERT INTO body_quality_masks SELECT id, X'1234' FROM body_observations")
             for value in ('old-person', 'previous-person', person_contract(c)):
                 db.execute("INSERT INTO person_evidence VALUES ('face-s0',?,'ready','{}',?,?)", (value, bytes(16384), b'person-pixels'))
     result = retention.prune_database(c, apply=True)
@@ -199,6 +200,7 @@ def test_obsolete_body_contracts_keep_current_previous_and_pinned_numerical_evid
         db = state.connection
         rows = {r['id']: r for r in db.execute('SELECT * FROM body_observations')}
         assert set(rows) == {'body-0', 'body-2', 'body-3'}
+        assert {r[0] for r in db.execute('SELECT observation FROM body_quality_masks')} == set(rows)
         assert rows['body-0']['crop'] is None
         assert rows['body-0']['embedding'] == bytes(16384)
         assert rows['body-2']['crop'] and rows['body-3']['crop']

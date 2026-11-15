@@ -25,7 +25,7 @@ def admission_overlap(quality):
 def measure(person, people, *, report_above=None):
     """Use intersection / this person's area, never IoU or summed overlaps.
 
-    Masks are crop-local and transient. Align only the shared rectangle in
+    Masks are crop-local. Align only the shared rectangle in
     source coordinates; never allocate a full-frame mask for each comparison.
     A masked target skips maskless peers for admission. Keep the box fallback
     in the crowding measurement consumed by tracking and identity ranking.

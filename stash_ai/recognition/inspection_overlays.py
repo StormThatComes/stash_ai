@@ -1,6 +1,8 @@
 """Selected and linked geometry on preview copies; no inference or pixel writes."""
+from contextlib import closing
 import json
 import math
+import zlib
 
 from PIL import Image, ImageDraw
 
@@ -44,11 +46,11 @@ def read(db, config, selector, kind, address):
         rows = []
         current = body_contract(config)
         if available(db):
-            rows = db.execute('SELECT geometry,contract FROM body_observations WHERE face=? AND scan=? AND cue=? '
+            rows = db.execute('SELECT id,geometry,contract FROM body_observations WHERE face=? AND scan=? AND cue=? '
                 'ORDER BY (contract=?) DESC,id LIMIT 2', (address,row['scan'],row['cue'],current)).fetchall()
         linked = _unique(rows, current)
         if linked is not None:
-            shapes.append(dict(kind='body', selected=False, geometry=_json(linked['geometry'], {})))
+            shapes.append(dict(kind='body', id=linked['id'], selected=False, geometry=_json(linked['geometry'], {})))
         elif not rows and db.execute("SELECT 1 FROM sqlite_master WHERE name='person_evidence'").fetchone():
             current = person_contract(config)
             rows = db.execute('SELECT metadata,contract FROM person_evidence WHERE observation=? '
@@ -63,7 +65,7 @@ def read(db, config, selector, kind, address):
     else:
         body = _json(row['geometry'], {})
         bounds = body.get('bounds')
-        shapes.append(dict(kind='body', selected=True, geometry=body))
+        shapes.append(dict(kind='body', id=address, selected=True, geometry=body))
         face = db.execute('SELECT geometry FROM observations WHERE id=? AND scan=? AND cue=?',
                           (row['face'],row['scan'],row['cue'])).fetchone()
         if face is not None:
@@ -76,7 +78,40 @@ def _numbers(value, count):
         type(v) in (int,float) and math.isfinite(v) for v in value)
 
 
-def render(image, geometry, layers=None):
+def _read_masks(database, shapes):
+    from .inspection_runtime import open_readonly
+    ids = [shape['id'] for shape in shapes if shape['kind'] == 'body' and shape.get('id')]
+    if database is None or not ids:
+        return {}
+    with closing(open_readonly(database)) as db:
+        if db.execute('PRAGMA user_version').fetchone()[0] < 18:
+            return {}
+        rows = db.execute("SELECT b.id, m.mask, json_extract(b.quality,'$.quality.sharpness_method') "
+                          "FROM body_observations b LEFT JOIN body_quality_masks m ON m.observation=b.id "
+                          "WHERE b.id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
+        return {address: (mask, method) for address, mask, method in rows}
+
+
+def _draw_mask(image, data, record, transform):
+    from .retained_body_masks import mask_image
+    payload, method = record
+    if payload is None:
+        if method == 'unavailable':
+            refinement = data.get('pose_refinement') or {}
+            reason = 'mask_conflict' if refinement.get('mask_conflict') else refinement.get('reason')
+            return 'No quality mask' + (f' ({reason})' if reason else '')
+        return 'Mask not retained'
+    x, y, right, bottom = data['bounds']
+    try:
+        with mask_image(payload, round(right-x), round(bottom-y)) as mask:
+            with mask.transform(image.size, Image.Transform.AFFINE, transform) as alpha:
+                image.paste(COLORS['body'], (0, 0, *image.size), alpha)
+    except (ValueError, TypeError, OverflowError, zlib.error):
+        return 'Stored mask unreadable'
+    return 'Recorded quality mask'
+
+
+def render(image, geometry, layers=None, *, database=None):
     """Return an annotated copy and a caption; source bounds must be known."""
     if image is None:
         return image, ''
@@ -88,7 +123,8 @@ def render(image, geometry, layers=None):
     sx, sy = image.width/(right-left), image.height/(bottom-top)
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
-    shown = [];masks_shown=0
+    masks = _read_masks(database, geometry['shapes']) if layers.get('masks') else {}
+    shown = []
     # Smaller face markers on top of larger pose markers keep coincident points
     # distinguishable. Selection is indicated by box width and caption.
     for shape in sorted(geometry['shapes'], key=lambda s: (s['kind'] == 'face', s['selected'])):
@@ -113,19 +149,10 @@ def render(image, geometry, layers=None):
                   left <= p[0] < right and top <= p[1] < bottom else None for p in points]
         color = COLORS[kind]
         if shape.get('context') and not shape['selected']:color=tuple(c//2 for c in color)
-        if kind=='body' and layers.get('masks'):
-            refinement=data.get('pose_refinement')
-            packed=refinement.get('encoder_mask') if isinstance(refinement,dict) else None
-            if packed:
-                try:
-                    from .person_geometry import unpack_mask
-                    w,h=round(box[2]-box[0]),round(box[3]-box[1])
-                    if not 0<w*h<=4000000:raise ValueError('Mask too large')
-                    with Image.fromarray(unpack_mask(packed,w,h).astype('uint8')*70) as mask:
-                        with mask.transform(image.size,Image.Transform.AFFINE,(1/sx,0,left-box[0],0,1/sy,top-box[1])) as alpha:
-                            annotated.paste(COLORS['body'],(0,0,*image.size),alpha)
-                            masks_shown+=1
-                except (ValueError,TypeError,OverflowError):pass
+        mask_label = ''
+        if kind == 'body' and layers.get('masks'):
+            transform = (1/sx, 0, left-box[0], 0, 1/sy, top-box[1])
+            mask_label = ' · ' + _draw_mask(annotated, data, masks.get(shape.get('id'), (None, None)), transform)
         if kind == 'body' and len(mapped) == 17 and layers.get('skeleton'):
             for a,b in SKELETON:
                 if mapped[a] is not None and mapped[b] is not None:
@@ -139,9 +166,10 @@ def render(image, geometry, layers=None):
                 x,y = point
                 radius = 2 if kind == 'face' else 3
                 draw.ellipse((x-radius,y-radius,x+radius,y+radius), fill=color)
-        shown.append(f"{'Selected' if shape['selected'] else ('Context' if shape.get('context') else 'Linked')} {kind}: {'yellow' if kind=='face' else 'green'} ({sum(p is not None for p in mapped)} points)")
+        shown.append(f"{'Selected' if shape['selected'] else ('Context' if shape.get('context') else 'Linked')} {kind}: {'yellow' if kind=='face' else 'green'} ({sum(p is not None for p in mapped)} points)" + mask_label)
     caption = '; '.join(shown) if shown else 'No retained geometry intersects this crop.'
-    if layers.get('masks') and not masks_shown:caption+=' · No usable retained mask in this viewport.'
+    if layers.get('masks') and not any(s['kind'] == 'body' for s in geometry['shapes']):
+        caption += ' · No linked body mask in this view.'
     return annotated, caption + ((' · '+' '.join(geometry['notes'])) if geometry['notes'] else '')
 
 
