@@ -33,33 +33,61 @@ def borrow(previous, current, i, indices, minimum, record):
     if len(indices)>=minimum or not adjacent(previous,current):
         return indices
     box, joints = current[1][i]
-    peers = [other for j,(other,_) in enumerate(current[1]) if j!=i]
-    old_people = previous[1]
-    def intersects(a,b):
-        return min(a[2],b[2])>max(a[0],b[0]) and min(a[3],b[3])>max(a[1],b[1])
-    # A crowded or interleaved torso cannot determine which way to transport a joint.
-    if any(intersects(box,b) for b in peers):
-        return indices
-    paths = [(b,old) for b,old in old_people if intersects(box,b)]
-    if len(paths)!=1:
-        return indices
-    old_box,old = paths[0]
-    stable = [k for k in joints if k in old and k in indices]
-    if not stable or len(old)<2:
-        return indices
+    peers = [other for j,(other,_) in enumerate(current[1]) if j != i]
     tolerance = max(3., .09*math.hypot(box[2]-box[0],box[3]-box[1]))
-    delta = np.median([joints[k]-old[k] for k in stable],axis=0)
-    if (any(np.linalg.norm(joints[k]-old[k]-delta)>tolerance for k in stable) or
-            max(abs(np.asarray(old_box)+np.tile(delta,2)-box))>tolerance):
-        return indices
-    added = []
-    for k in TORSO:
-        if k in old and k not in indices:
-            x,y = old[k]+delta
-            if box[0]<x<box[2] and box[1]<y<box[3]:
-                added.append((k,[float(x),float(y)]))
-                if len(indices)+len(added)>=minimum:
-                    record['temporal_prompts'] = added
-                    record['temporal_source_cue'] = previous[0][1]
-                    return np.append(indices,[k for k,_ in added])
+    def inside(point, rect, pad=0):
+        x,y = point
+        return rect[0]-pad <= x <= rect[2]+pad and rect[1]-pad <= y <= rect[3]+pad
+
+    def transport(owner, old_box, old):
+        stable = [k for k in joints if k in old and k in indices and
+                  not any(inside(joints[k],b,2) for b in peers)]
+        if not stable or len(old)<2:
+            return None
+        before = np.array([old[k] for k in stable])
+        after = np.array([joints[k] for k in stable])
+        origin, destination = before.mean(axis=0), after.mean(axis=0)
+        matrix = np.eye(2)
+        if len(stable) >= 2:
+            u,v = before-origin, after-destination
+            length = (u*u).sum()
+            if length < tolerance**2/2:
+                return None
+            a = (u*v).sum()/length
+            b = (u[:,0]*v[:,1]-u[:,1]*v[:,0]).sum()/length
+            if not .72 <= np.hypot(a,b) <= 1.4 or abs(math.atan2(b,a)) > math.pi/4:
+                return None
+            matrix = np.array([[a,b],[-b,a]])
+        def move(xy):
+            return (xy-origin) @ matrix + destination
+        if np.max(np.linalg.norm(move(before)-after,axis=1)) > tolerance:
+            return None
+        left,top,right,bottom = old_box
+        corners = move(np.array([[left,top],[right,top],[left,bottom],[right,bottom]]))
+        predicted = np.r_[corners.min(axis=0),corners.max(axis=0)]
+        if np.max(abs(predicted-np.array(box))) > tolerance:
+            return None
+        added = []
+        for joint in TORSO:
+            if joint not in old or joint in indices:
+                continue
+            point = move(old[joint])
+            path = np.linspace(old[joint],point,5)
+            if (inside(point,box,-.01) and not any(inside(p,b,2) for p in path for b in peers)
+                    and not any(inside(old[joint],b,2) for j,(b,_) in enumerate(previous[1]) if j != owner)):
+                added.append((joint,point.tolist()))
+            if len(indices)+len(added)>=minimum:
+                return added
+        return None
+
+    paths = []
+    for owner,(old_box,old) in enumerate(previous[1]):
+        if min(box[2],old_box[2])>max(box[0],old_box[0]) and min(box[3],old_box[3])>max(box[1],old_box[1]):
+            added = transport(owner,old_box,old)
+            if added:
+                paths.append(added)
+    if len(paths) == 1:
+        record['temporal_prompts'] = paths[0]
+        record['temporal_source_cue'] = previous[0][1]
+        return np.append(indices,[k for k,_ in paths[0]])
     return indices

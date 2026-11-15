@@ -103,6 +103,31 @@ def mask_samples(mask, bounds, own, partner, background):
                 clean_masks=int(hits >= 0.75 * len(own) and foreign == 0 and stray == 0))
 
 
+def contour_pixels(photo, people, contours):
+    from PIL import Image, ImageDraw
+    assigned = assign_people(photo['people'],people)
+    full = {}
+    for owner, index in assigned.items():
+        person = people[index]
+        admitted = foreground_mask(person)
+        if admitted is not None:
+            mask = np.zeros(photo['size'][::-1],bool)
+            l,t,r,b = person['bounds']
+            mask[t:b,l:r] = admitted[0]
+            full[owner] = mask
+    results = []
+    for outline in contours:
+        owner = outline['person']
+        with Image.new('1',tuple(photo['size'])) as region:
+            ImageDraw.Draw(region).polygon([tuple(p) for p in outline['points']],fill=1)
+            pixels = np.asarray(region)
+            rivals = [mask for key,mask in full.items() if key!=owner]
+            results.append(dict(person=owner,limb=outline['limb'],labelled=int(pixels.sum()),
+                covered=int(np.count_nonzero(pixels & full[owner])) if owner in full else 0,
+                claimed_by_partner=int(np.count_nonzero(pixels & np.logical_or.reduce(rivals))) if rivals else 0))
+    return results
+
+
 def score(photo, people, capture=None):
     labels = photo['people']
     assigned = assign_people(labels, people)
@@ -179,6 +204,7 @@ def evaluate(config, edits, photos, overlays=None):
     rejected = Counter()
     if overlays is not None:
         overlays.mkdir(parents=True, exist_ok=True)
+    contours = json.loads((DATA/'limb_contours.json').read_text())
     with closing(SapiensIDFaces(adjusted, {}, load_detector=False, load_identity=False)) as backend:
         for name, photo in photos.items():
             with Image.open(DATA / f'{name}.jpg') as image:
@@ -190,6 +216,8 @@ def evaluate(config, edits, photos, overlays=None):
                     if overlays is not None:
                         save_overlay(image, backend.frame_people, capture, overlays / f'{name}.png')
             frames[name] = {'counts': counts, 'missing': reasons, 'rejected_candidates': rejected_masks}
+            if name in contours:
+                frames[name]['limb_contours'] = contour_pixels(photo, backend.frame_people, contours[name])
             for key, value in counts.items():
                 totals[key] += value
             rejected.update(reasons)

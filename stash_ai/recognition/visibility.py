@@ -6,7 +6,7 @@ import math
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 
-CONTRACT = {'version': 6, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+CONTRACT = {'version': 7, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25-profile-roll-aligned',
             'region': 'source-face-box-ellipse-0.45w-0.48h-inverse-mapped',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
@@ -204,13 +204,14 @@ def prepare_aligned(image, face, minimum_source_fraction):
         raise VisibilityGeometryError('Visibility alignment requires five finite landmarks.')
     eye = points[1] - points[0]
     distance = float(np.linalg.norm(eye))
-    if not math.isfinite(distance) or distance <= 1:
+    if not math.isfinite(distance) or distance <= 1e-6:
         raise VisibilityGeometryError('Visibility alignment requires distinct eye landmarks.')
     x, y, width, height = face.box
     axis = eye / distance
     # At a narrow eye baseline, a one-pixel error can rotate the entire crop.
     # Use the longer vertical facial axis only when both nose and mouth agree.
     minimum = max(2., .16 * min(width, height))
+    supported_axis = False
     if distance < minimum:
         eyes = points[:2].mean(axis=0)
         mouth = points[3:].mean(axis=0)
@@ -225,6 +226,9 @@ def prepare_aligned(image, face, minimum_source_fraction):
                 mixed = (1-weight)*axis + weight*horizontal
                 if np.linalg.norm(mixed) > .25:
                     axis = mixed / np.linalg.norm(mixed)
+                    supported_axis = True
+    if distance <= 1 and not supported_axis:
+        raise VisibilityGeometryError('Visibility alignment requires distinct eye landmarks or a supported profile axis.')
     cosine, sine = map(float, axis)
     side = max(width, height) * 1.5
     center_x, center_y = x + width / 2, y + height / 2
