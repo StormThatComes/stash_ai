@@ -355,7 +355,8 @@ matching:
       # Minimum SAM-mask sharpness for body/hybrid anchors. Positive values require PMPose, refinement.enabled:
       # true and mode: all; missing masks cannot qualify. 0 disables this floor. Range: 0..1000000.
       keypoint_rules:
-        # COCO17 regional rules. Each rule uses a group or a list of named points and a minimum count.
+        # Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop
+        # before the SapiensID nose and eye filter.
         all: []
         # Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].
         any: []

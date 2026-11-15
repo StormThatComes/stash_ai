@@ -586,11 +586,13 @@ this COCO17 vocabulary; dense Sapiens points do not add extra rule points.
 Groups may overlap, but each physical point counts only once in the global total.
 No head/eye requirement is added by default, so back views remain eligible.
 
-Left/right means the detector's anatomical label, even after SapiensID swaps
-paired points into image-side order. Counts include only points surviving the
-confidence, crop-boundary and encoder head-outlier filters. No missing point is
-invented. Existing coordinates suffice for offline rule changes; this does not
-change the embedding/collection contract. Legacy rows with only a scalar count
+Regional rules count detector landmarks that passed the pose confidence filter
+and fall inside the source person crop, using the detector's anatomical labels.
+For example, a detected nose outside the horizontal span of the ears and shoulders
+counts toward `points: [nose]` when it is inside the crop. SapiensID can omit that
+nose from its embedding input. The global anchor `min_keypoints` floor still uses
+the encoder's usable point count. Matching can reapply the regional rules to
+existing coordinates and reuse the stored embeddings. Legacy rows with only a scalar count
 cannot satisfy positive regional minima: reports mark their regional measurement
 unknown, and they need recollection to provide the missing geometry (or an
 explicitly relaxed rule). Matching and body reference caches include these rules.
