@@ -160,13 +160,24 @@ class DeduplicatedPMPose:
             predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
             raise ValueError('PMPose returned an invalid deduplication frame count.')
-        selected_frames, selected_predictions, reports = [], [], []
+        selected_frames, selected_predictions, reports, fallbacks = [], [], [], []
         for (image, bounds), prediction in zip(frames, predictions):
             reserves = getattr(image, '_pose_reserves', {})
             confirmed = set()
+            fallback = None
             if self.refined and getattr(self.pose,'supports_rival_mask',False):
                 from .contact_pose import recover_pair
-                prediction,confirmed = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
+                recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
+                if recovered_pair is not None:
+                    owner, reserve = recovered_pair
+                    if reserves:
+                        prediction, confirmed = recovered, {reserve}
+                    else:
+                        # Both slots already passed NMS. Preserve the original SAM
+                        # decision for both and offer the recovered pose only to a
+                        # slot which would otherwise use maskless fallback.
+                        fallback = owner,recovered
+            fallbacks.append(fallback)
             report = select(bounds, prediction, self.settings, audit=active(image), reserves=reserves,
                             confirmed=confirmed)
             keep = np.asarray(report['kept_indices'], dtype=np.int64)
@@ -183,6 +194,25 @@ class DeduplicatedPMPose:
                       for (image,bounds),prediction in zip(selected_frames,selected_predictions)]
         else:
             finals = [(*prediction,None) for prediction in selected_predictions]
+        for fallback, report, final, (image,bounds) in zip(fallbacks,reports,finals,frames):
+            if fallback is None:
+                continue
+            owner,recovered = fallback
+            keep = report['kept_indices']
+            if owner not in keep:
+                continue
+            slot = keep.index(owner)
+            record = final[3][slot]
+            if record.get('overlap_mask') or record.get('status') == 'refined':
+                continue
+            l,t,r,b = bounds[owner]
+            xy = recovered[0][owner]
+            usable = ((xy >= [l,t]) & (xy < [r,b])).all(axis=1)
+            final[0][slot] = np.where(usable[:,None],xy,-1)
+            final[1][slot] = np.where(usable,recovered[1][owner],0)
+            for key in final[2]:
+                final[2][key][slot] = np.where(usable,recovered[2][key][owner],0)
+            record['contact_pose_recovered'] = True
         for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))
         return [(*final,report) for final,report in zip(finals,reports)]

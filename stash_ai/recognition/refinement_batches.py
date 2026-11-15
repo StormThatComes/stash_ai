@@ -82,6 +82,8 @@ def refine_many(owner, frames, predictions):
                 raise ValueError('SAM returned an invalid refinement prompt count.')
             results.append(owner.refine(image,bounds,prediction,plan=plan,masks=values,defer=defer))
         second_pass()
+        for ((image,bounds),original,_,_),result in zip(window,results[-len(window):]):
+            owner.finish_maskless(image,bounds,original,result[:3],result[3])
         window.clear()
 
     for index,(frame,prediction) in enumerate(zip(frames,predictions)):
