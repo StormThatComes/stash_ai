@@ -292,6 +292,7 @@ HELP = {
     'storage.database': 'Recognition SQLite database path, relative to this YAML.',
     'storage.crop_policy': 'all retains every eligible crop; selected skips image encoding until portrait/report demand. Reports need --restore-crops for omitted images. Values: all, selected.',
     'storage.max_crop_mb': 'Maximum MB per stored JPEG crop; encoding reduces quality/size to fit. Range: 0.0009765625..8 MB; fractions allowed.',
+    'storage.retain_body_masks': 'Store the compressed SAM quality mask for each newly collected body, including rejected observations.',
     'storage.retain_person_crops': 'Keep body crops for inspection/portraits, subject to storage.max_crop_mb.',
     'storage.retention': 'Evidence pruning after successful recognition runs.',
     'storage.retention.auto_prune': 'Prune obsolete evidence for selected scenes after a successful run.',

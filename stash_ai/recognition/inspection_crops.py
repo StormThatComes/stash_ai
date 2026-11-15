@@ -99,8 +99,9 @@ class VttPreviews:
             try:
                 if not image.width or not image.height:
                     raise PreviewUnavailable('Recorded geometry has no source pixels.')
+                body_quality = quality.get('quality') or {}
                 expected = (quality.get('evidence_pixel_sha256') if kind == 'face' else
-                            (quality.get('quality') or {}).get('pixel_digest'))
+                            body_quality.get('source_pixel_digest', body_quality.get('pixel_digest')))
                 if expected is not None and index==selected_index:
                     actual = hashlib.sha256(str(image.size).encode('ascii') + image.tobytes()).hexdigest()
                     if actual != expected:

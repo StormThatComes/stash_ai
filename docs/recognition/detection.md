@@ -92,8 +92,9 @@ Display switches never enable refinement or override its YAML gates: `no_overlap
 and `no_reliable_prompts` mean SAM did not run. The audit reuses the original
 inference masks without extra model calls, preserves source pixels/coordinates,
 and releases packed mask data after each cue/trial, including failed exports.
-No masks are stored in the recognition database or as arrays in JSON. The
-manifest records options in `annotations.sam_masks` and stage availability,
+The audit writes its mask visualizations to PNG. During normal recognition,
+`storage.retain_body_masks` controls storage of validated body masks for Inspect
+Scene. The audit manifest records options in `annotations.sam_masks` and stage availability,
 second-pass use and panel offsets in each frame's `mask_visualization`.
 Panel offsets are frame-local; for sweeps add the frame's `source_offset`.
 Capture is limited to 16 MiB of packed masks per frame and extended PNGs to

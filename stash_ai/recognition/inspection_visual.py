@@ -135,22 +135,33 @@ class Visual:
         # Reusing the selected context row does not always emit a Tk selection event.
         self.select()
 
+    @staticmethod
+    def annotate_preview(result, layers):
+        image, caption = result['image']
+        annotated, label = render(image, result['geometry'], layers, database=result['mask_database'])
+        result['annotated'] = annotated, caption + (' · ' + label if label else '')
+        result['layers'] = dict(layers or DEFAULT_LAYERS)
+        return result
+
+    def repaint_preview(self, panel, result):
+        worker = self.image_worker if panel == 'A' else self.reference_worker
+        worker.request(partial(self.annotate_preview, dict(result), dict(self.layers)),
+                       partial(self.display_preview, panel), partial(self.image_error, panel))
+
     def layer_dialog(self):
         window=tk.Toplevel(self.root);window.title('Geometry layers')
         variables={}
         for key,value in self.layers.items():
             v=variables[key]=tk.BooleanVar(master=window,value=value)
-            ttk.Checkbutton(window,text=key.replace('_',' ').capitalize(),variable=v).pack(anchor='w')
+            label = 'Body mask' if key == 'masks' else key.replace('_', ' ').capitalize()
+            ttk.Checkbutton(window, text=label, variable=v).pack(anchor='w')
         ttk.Label(window,text='Only retained geometry/masks can be shown.\nPoint confidence may not have been retained.').pack()
         def apply():
+            if variables['masks'].get() and not self.layers['masks']:
+                self.show_geometry.set(True)
             self.layers={k:v.get() for k,v in variables.items()};window.destroy()
             for panel,data in list(self.preview_data.items()):
-                def repaint(data=data,layers=dict(self.layers)):
-                    result=dict(data);image,caption=data['image'];annotated,label=render(image,data['geometry'],layers)
-                    result['annotated']=annotated,caption+' · '+label
-                    return result
-                worker=self.image_worker if panel=='A' else self.reference_worker
-                worker.request(repaint,partial(self.display_preview,panel),partial(self.image_error,panel))
+                self.repaint_preview(panel, data)
         ttk.Button(window,text='Apply',command=apply).pack()
 
     def gallery(self):

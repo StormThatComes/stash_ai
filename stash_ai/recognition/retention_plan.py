@@ -307,6 +307,8 @@ def summarize(db):
         join = f'a.id=o.{address}' + (' AND a.contract=o.contract' if table == 'person_evidence' else '')
         columns = [r[1] for r in db.execute(f'PRAGMA table_info({table})')]
         size = '+'.join(f'COALESCE(length(CAST(o.{c} AS BLOB)),0)' for c in columns)
+        if table == 'body_observations':
+            size += '+COALESCE((SELECT length(mask) FROM body_quality_masks WHERE observation=o.id),0)'
         for action, count, size in db.execute(
                 f'SELECT a.action,COUNT(*),SUM(CASE WHEN a.action=\'clear_crop\' THEN {crop_size} ELSE {size} END) '
                 f'FROM {table} o JOIN retention_actions a ON {join} WHERE a.table_name=? GROUP BY a.action', (table,)):

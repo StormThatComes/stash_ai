@@ -113,7 +113,7 @@ _GROUPS = (
      'ranking_cache_mb=portrait_ranking_cache_bytes prefetch=prefetch_portraits'),
 
     ('storage', 'storage', 'output_directory database max_crop_mb=max_crop_bytes crop_policy'),
-    ('storage', 'sapiensid.storage', 'retain_person_crops'),
+    ('storage', 'sapiensid.storage', 'retain_person_crops retain_body_masks'),
     ('storage.retention', 'storage.retention',
      'auto_prune keep_previous_scans keep_previous_person_contracts prune_obsolete_crops'),
     ('names', 'names', 'file'),

@@ -44,7 +44,7 @@ def defaults():
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,
                        max_candidate_pairs=100000,max_witness_comparisons=1000000),
         consolidation=dict(scope='selected',scene_ids=[],max_scenes=1000),
-        storage=dict(retain_person_crops=True))
+        storage=dict(retain_person_crops=True, retain_body_masks=True))
 
 
 def validate(settings):
@@ -137,8 +137,9 @@ def validate(settings):
     for key in ('enabled',):
         if type(settings[key]) is not bool:
             raise ValueError('sapiensid.'+key+' must be boolean.')
-    if type(settings['storage']['retain_person_crops']) is not bool:
-        raise ValueError('sapiensid.storage.retain_person_crops must be boolean.')
+    for key in ('retain_person_crops', 'retain_body_masks'):
+        if type(settings['storage'][key]) is not bool:
+            raise ValueError(f'storage.{key} must be boolean.')
     for section,keys in (('pose',('score_threshold','keypoint_score_threshold','nms_threshold')),
                          ('matching',('face_floor','person_threshold','ambiguity_margin'))):
         for key in keys:

@@ -291,3 +291,16 @@ A changed or unavailable source cannot substitute new pixels for old evidence.
 Supplementary collection checkpoints completed cues together using
 `execution.scan.checkpoint_cues` and the scan queue byte budget. If a later cue
 fails, only earlier completely inferred cues are committed and reused on retry.
+
+
+### Body quality masks
+
+`storage.retain_body_masks` defaults to `true`. When recognition collects a body
+observation with a validated SAM quality mask, it saves the crop-local mask as
+a compressed 1-bit bitmap in `body_quality_masks`. Collection saves masks for
+rejected observations as well as accepted ones, independently of crop retention
+and encoder masking. Inspect Scene reads them when the Body mask layer is enabled.
+Deleting a body observation also deletes its mask.
+
+Existing databases upgrade on the next writable open. Cached cues keep their
+original evidence. Setting this option affects newly collected observations.

@@ -76,18 +76,45 @@ def test_layers_independent_and_point_info_does_not_invent_confidence():
     assert 'nose' in point_info(geometry,image.size,20,20) and '0.8' in point_info(geometry,image.size,20,20)
     assert 'not retained' in point_info(geometry,image.size,10,40)
     _,caption=render(image,geometry,dict(masks=True))
-    assert 'No usable retained mask' in caption
+    assert 'Mask not retained' in caption
     geometry['shapes'][0]['geometry']['keypoints']=None
     assert not point_info(geometry,image.size,10,40)
 
 
-def test_retained_mask_maps_to_viewport_without_modifying_raw_pixels():
-    import base64
+def test_retained_mask_maps_to_viewport_without_modifying_raw_pixels(tmp_path):
+    import zlib
     import numpy as np
-    mask=base64.b64encode(np.packbits(np.ones((10,10),dtype=bool)).tobytes()).decode()
-    image=Image.new('RGB',(30,30),'black')
-    geometry=dict(bounds=[0,0,30,30],notes=[],shapes=[dict(kind='body',selected=True,
-        geometry=dict(bounds=[10,10,20,20],pose_refinement=dict(encoder_mask=mask)))])
-    annotated,caption=render(image,geometry,dict(masks=True))
-    assert annotated.getpixel((15,15))!=(0,0,0) and annotated.getpixel((5,5))==(0,0,0)
-    assert image.getpixel((15,15))==(0,0,0) and 'No usable retained mask' not in caption
+    config, reader, client, _, face, backend, _ = vtt_fixture(tmp_path)
+    bounds = [11, 20, 22, 33]  # Non-byte-aligned rows and a partial last byte.
+    bits = np.zeros((13, 11), dtype=bool)
+    bits[2:8, 3:9] = True
+    with FaceDatabase(config.database) as state, state.connection as db:
+        db.execute("UPDATE body_observations SET geometry=?, face=? WHERE id='rejected-body'",
+                   (json.dumps(dict(bounds=bounds)), face))
+        db.execute("INSERT INTO body_quality_masks VALUES ('rejected-body', ?)",
+                   (zlib.compress(np.packbits(bits).tobytes()),))
+    from stash_ai.recognition.identity_window import Inspector
+    inspector = object.__new__(Inspector)
+    inspector.previews = VttPreviews(config, client_factory=lambda: client)
+    try:
+        for kind, address, full, inside, outside in (
+            ('body', 'rejected-body', False, (4, 3), (1, 1)),
+            ('body', 'rejected-body', True, (15, 23), (12, 21)),
+            ('face', face, True, (15, 23), (12, 21)),
+        ):
+            result = inspector.load_reference(reader, kind, address, reader.scan['scope'], full=full, layers=dict(masks=True))
+            image = result['image'][0]
+            overlay, caption = result['annotated']
+            assert 'Recorded quality mask' in caption and backend.calls == 0
+            assert overlay.getpixel(inside) != image.getpixel(inside)
+            assert overlay.getpixel(outside) == image.getpixel(outside)
+        # The crop of a face uses only its linked body's mask.
+        geometry = reader.preview('face', face)['geometry']
+        geometry['bounds'] = [0, 0, 160, 160]
+        raw = Image.new('RGB', (160, 160), 'black')
+        shown, _ = render(raw, geometry, dict(masks=True), database=config.database)
+        assert shown.getpixel((15, 23)) != raw.getpixel((15, 23))
+        hidden, _ = render(raw, geometry, dict(masks=False), database=config.database)
+        assert hidden.tobytes() == raw.tobytes()
+    finally:
+        inspector.previews.close()

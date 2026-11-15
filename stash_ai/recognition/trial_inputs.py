@@ -50,7 +50,7 @@ def _copy_private(target):
         # Bulk copies retain row order and all mutable history, but no vectors
         # or images. A trial cannot write through the read-only evidence views.
         for table in TABLES:
-            if table in ('person_evidence', 'evidence_thumbnails', 'evidence_versions', 'evidence_fingerprints'):
+            if table in ('person_evidence', 'evidence_thumbnails', 'body_quality_masks', 'evidence_versions', 'evidence_fingerprints'):
                 continue
             columns = [r[1] for r in target.execute(f'PRAGMA table_info({table})')]
             minimal = dict(embedding='NULL', crop='NULL', geometry="'[]'", quality="'{}'", source="''", rect="'[]'")

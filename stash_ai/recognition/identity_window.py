@@ -7,7 +7,6 @@ from functools import partial
 
 from .identity_inspection import IdentityReader, PAGE_SIZE
 from .inspection_advice import describe as describe_advice
-from .inspection_overlays import render as render_geometry
 from .inspection_images import InspectorImages as ImagePair
 from .inspection_runtime import Worker, Cache, stamp, local, check_cancelled
 from .inspection_visual import Visual
@@ -269,19 +268,22 @@ class Inspector(Visual, Diagnostics):
 
     def load_detail(self, reader, kind, address):
         result = reader.detail(kind, address)
-        self.prepare_preview(kind, address, result['scope'], result)
+        self.prepare_preview(kind, address, result['scope'], result, database=reader.config.database)
         return result
 
-    def prepare_preview(self, kind, address, scope, result, *, full=False, cue=None, layers=None):
+    def prepare_preview(self, kind, address, scope, result, *, database, full=False, cue=None, layers=None):
         previews = getattr(local, 'preview', None) or self.previews
         if previews is not None:
             result['image'] = previews.image(kind, address, scope, result['image'], geometry=result['geometry'], full=full, cue=cue)
         check_cancelled()
-        image, caption = result['image']
-        annotated, label = render_geometry(image, result['geometry'], layers)
-        result['annotated'] = annotated, caption + (' · '+label if label else '')
+        result['mask_database'] = database
+        self.annotate_preview(result, layers)
 
     def display_preview(self, panel, result):
+        # Layer controls may change while a VTT crop is still loading.
+        if result['layers'] != self.layers:
+            self.repaint_preview(panel, result)
+            return
         self.visual_preview(panel,result)
         if panel=='B' and self.pin:self.pin['preview']=result
         self.preview_images[panel] = result['image'], result['annotated']
@@ -329,6 +331,7 @@ class Inspector(Visual, Diagnostics):
             return
         ref = self.refs[index]
         self.preview_images.pop('B', None)
+        self.preview_data.pop('B', None)
         self.images.show('B', None, 'Loading reference…')
         self.reference_worker.request(partial(self.load_reference, self.detail_reader, ref['kind'], ref['observation'], self.preview_scope, layers=dict(self.layers)),
                             partial(self.display_preview, 'B'), partial(self.image_error,'B'))
@@ -340,7 +343,7 @@ class Inspector(Visual, Diagnostics):
         if result is not None:
             return result
         result = reader.preview(kind, address)
-        self.prepare_preview(kind, address, scope, result, full=full, cue=cue, layers=layers)
+        self.prepare_preview(kind, address, scope, result, database=reader.config.database, full=full, cue=cue, layers=layers)
         if cache and result['image'][0] is not None and stamp(reader.config.database)==key[1]:
             cache.put(key,result)
         return result
