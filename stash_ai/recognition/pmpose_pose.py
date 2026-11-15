@@ -83,7 +83,10 @@ def _pipeline(pose, config, device):
         from .resident_models import current as model_pool,Stage
         segmenter=(Stage('pmpose_segmenter',lambda:load_segmenter(config,device),device)
                    if model_pool() is not None else load_segmenter(config,device))
+        pose_settings = config.data['sapiensid']['pose']
         refined = RefinedPMPose(pose,segmenter,settings,
+            joint_quality=dict(min_keypoint_score=pose_settings['keypoint_score_threshold'],
+                               min_presence=pose_settings['pmpose_presence_threshold']),
             frame_batch_size=config.data['execution']['sam_frame_batch_size'],
             queue_bytes=config.data['execution']['refinement_queue_bytes'])
     deduplication = config.data['sapiensid']['pose'].get('deduplication', {})
