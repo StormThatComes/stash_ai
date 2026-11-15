@@ -4,7 +4,7 @@
 def defaults():
     return dict(enabled=False, directory='', mode='all', overlap_threshold=.2,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
-                adaptive_decoder_retries=False, recover_prompt_points=False, min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
+                min_recovery_mask_score=None, adaptive_decoder_retries=False, recover_prompt_points=False, min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
                 min_prompt_coverage=1., max_foreign_coverage=0.,
                 masked_identity_crop=False, expand_boxes=True, max_box_area_ratio=2., max_side_expansion=.5)
 
@@ -25,6 +25,8 @@ def validate(pose):
     for key in ('overlap_threshold', 'min_keypoint_score', 'min_presence', 'min_visibility',
                 'min_mask_score', 'min_prompt_coverage', 'max_foreign_coverage'):
         _number(settings[key], prefix + key, 0, 1)
+    if settings['min_recovery_mask_score'] is not None:
+        _number(settings['min_recovery_mask_score'], prefix+'min_recovery_mask_score', 0, 1)
     for key in ('min_prompt_points', 'max_prompt_points'):
         _number(settings[key], prefix + key, 1, 8, integer=True)
     _number(settings['max_negative_prompt_points_per_neighbor'], prefix + 'max_negative_prompt_points_per_neighbor', 0, 8, integer=True)

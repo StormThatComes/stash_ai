@@ -60,6 +60,7 @@ HELP = {
     'pose.refinement.min_presence': 'Minimum prompt probability of being inside the PMPose crop. Null inherits pose.point_quality. Range: 0..1 or null.',
     'pose.refinement.min_visibility': 'Minimum prompt visibility. Null inherits pose.point_quality. Range: 0..1 or null.',
     'pose.refinement.adaptive_decoder_retries': 'Try up to two ownership-guided SAM retries per rejected person using the same image features.',
+    'pose.refinement.min_recovery_mask_score': 'Minimum SAM score for a limb, face or below-minimum seed rescue. Null uses the midpoint between min_mask_score and 1. Range: 0..1 or null.',
     'pose.refinement.recover_prompt_points': 'Recover sparse SAM prompts with distinct limbs, matched face landmarks or a single strong point.',
     'pose.refinement.min_prompt_points': 'Reliable head/torso points required for the first SAM attempt. Range: 1..8.',
     'pose.refinement.max_prompt_points': 'Maximum own points. Add one spread-out point after mask rejection or conflict. Range: 1..8.',

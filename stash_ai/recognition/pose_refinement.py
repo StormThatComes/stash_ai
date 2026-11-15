@@ -106,7 +106,8 @@ class RefinedPMPose:
                 records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
             if len(indices) >= minimum:
                 limit = len(indices) if settings.get('adaptive_decoder_retries') else settings['max_prompt_points']
-                indices = spread_indices(points[i], indices, limit,
+                geometry = prompt_recovery.prompt_points(points, records)[i] if 'face_prompt' in records[i] else points[i]
+                indices = spread_indices(geometry, indices, limit,
                                          initial=minimum)
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs

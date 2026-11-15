@@ -150,7 +150,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
     conflicts = set()
     rejected = set()
     adaptive = settings.get('adaptive_decoder_retries', False)
-    leaks = {}
+    leaks, tried, exhausted = {}, {}, set()
     packed_bytes = 0
     supplied = iter(initial_masks) if initial_masks is not None else None
     with ExitStack() as stack:
@@ -171,6 +171,13 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                     if unused:
                         indices = np.asarray((unused + kept)[:count], dtype=np.intp)
                 positive, peers, negative = owner._prompts(bounds, points, cores, i, indices, leaks.get(i))
+                if adaptive:
+                    signature = (tuple(indices), tuple(map(tuple, negative)), attempt > 1)
+                    previous = tried.setdefault(i, set())
+                    if signature in previous:
+                        exhausted.add(i)
+                        continue
+                    previous.add(signature)
                 if supplied is not None:
                     mask, score = next(supplied)
                 else:
@@ -208,7 +215,10 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 # of the body. Require stronger SAM confirmation for these rescues.
                 rescued = (record.get('prompt_minimum', minimum) < minimum or
                            any(k in (7,8,13,14) for k in indices) or 'face_prompt' in record)
-                if reason is None and rescued and score < (1 + settings['min_mask_score']) / 2:
+                recovery_floor = settings.get('min_recovery_mask_score')
+                if recovery_floor is None:
+                    recovery_floor = (1 + settings['min_mask_score']) / 2
+                if reason is None and rescued and score < recovery_floor:
                     reason = 'weak_recovery_mask'
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
@@ -241,7 +251,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             supplied = None
             conflicts = shared_masks(candidates, evidence) | blocked
             active = [(i, available, foreign) for i, available, foreign in jobs
-                      if i not in blocked and (i in rejected or i in conflicts)
+                      if i not in blocked and i not in exhausted and (i in rejected or i in conflicts)
                       and ((adaptive and records[i]['mask_attempts'] < 3) or
                            (not adaptive and len(records[i]['prompt_indices']) < len(available)))]
 

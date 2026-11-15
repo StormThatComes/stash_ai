@@ -248,7 +248,8 @@ def run(config, profiles, photos, overlays=None):
             stats = pipeline_snapshot()
         result['runtime'] = dict(seconds=stats['elapsed_seconds'],
             sam_encoder_forwards=stats['stages'].get('sam_image_embedding', {}).get('calls',0),
-            sam_decoder_forwards=stats['counts'].get('sam_decoder_forwards',0))
+            sam_decoder_forwards=stats['counts'].get('sam_decoder_forwards',
+                stats['stages'].get('sam_mask_prediction', {}).get('calls',0)))
         result['coverage'] = coverage(result['frames'])
         if directory:
             result['overlay_directory'] = directory.name
