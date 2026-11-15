@@ -23,10 +23,12 @@ def faces_for(image):
 
 
 def prompt_points(points, records):
-    if not any('face_prompt' in r for r in records):
+    if not any('face_prompt' in r or 'temporal_prompts' in r for r in records):
         return points
     points = points.copy()
     for i, record in enumerate(records):
+        for index,xy in record.get('temporal_prompts', ()):
+            points[i,index] = xy
         if 'face_prompt' in record:
             index, xy = record['face_prompt']
             points[i, index] = xy
