@@ -9,7 +9,7 @@ from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png
 from .config import parse_yaml
 from .detection_parameters import apply_edits
-from .detection_session import load_detector, read_cue
+from .detection_session import load_detector, read_cue, trial_image as prepared_trial
 
 
 MAX_VARIANTS = 64  # In addition to the baseline.
@@ -138,7 +138,7 @@ def audit_sweep(source, variants, scene_id, cue_index, directory, services, dete
                     detector = load_detector(services, current, detector_factory, report.write)
                 with closing(detector, name='close sweep detectors'), activity(report, f'Detect {label}'):
                     # Isolate even a backend that mutates its input.
-                    with frame.image.copy() as trial_image, render_frame(
+                    with prepared_trial(frame,detector) as trial_image, render_frame(
                             trial_image, detector, scene_id, frame.index, frame.cue,
                             mask_options=mask_options) as (annotated, record):
                         record.update(metadata, file=filename)

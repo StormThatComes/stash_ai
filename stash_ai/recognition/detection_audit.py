@@ -5,7 +5,7 @@ from pathlib import Path
 from stash_ai.runtime.cleanup import closing
 from .alignment_audit import _png, _private_directory, _write_json
 from .config import plain
-from .detection_session import detector_factory as default_detector, load_detector, open_scene
+from .detection_session import detector_factory as default_detector, load_detector, open_scene, audit_context, temporal_enabled
 from .detection_associations import REASON_LABELS, explain_associations, face_label
 from .detection_callouts import draw_leaders, label_height, layout_faces
 from .body_collection import public_person
@@ -51,7 +51,7 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
                            faces, detector.face_matches, explanations))]
         layouts, output_size = layout_faces(image, faces, people, face_labels)
         name = f'scene-{scene_id}_cue-{index:06d}.png'
-        record = dict(cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
+        record = dict(shot=getattr(image,'_recognition_cue_signature',(None,None))[1], previous_cue_available=bool(getattr(image,'_previous_cue_available',False)),cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
                       source_rect=list(cue.rect), source_dimensions=list(image.size),
                       output_dimensions=list(output_size), file=name, faces=[], people=[])
         from PIL import Image, ImageDraw
@@ -107,18 +107,20 @@ def audit_scene(source, detector, scene_id, directory, *, progress=None, cue_ind
     """Keep full source coordinates and all post-NMS detections, including faceless people."""
     frames = []
     counts = dict(cues_exported=0, faces_detected=0, people_detected=0, cues_without_detections=0)
-    selected = source.frames() if cue_index is None else source.frames_indices([cue_index])
-    from .perspective_shots import advance
-    from .crowd_context import attach_context
+    temporal = temporal_enabled(getattr(detector,'config',None))
+    indices = ([cue_index-1,cue_index] if temporal and cue_index else [cue_index])
+    selected = source.frames() if cue_index is None else source.frames_indices(indices)
     shot = None
     with closing(selected, name='close detection audit frames') as images:
         for index, cue, image in images:
             # SpriteInput owns its images; the nested close also supports injected
             # sources and covers detection/export failures before the next yield.
             with closing(image, name='close detection audit image'):
-                shot = advance(image,index,shot)
-                image._recognition_cue_signature = shot
-                attach_context(detector,image,scene_id,index,cue.start)
+                shot = audit_context(image,detector,scene_id,index,cue,shot)
+                if cue_index is not None and index != cue_index:
+                    with detector.prepared_frame(image):
+                        detector.detect(image,force_pose=True)
+                    continue
                 with render_frame(image, detector, scene_id, index, cue, mask_options=mask_options) as (annotated, record):
                     _png(annotated, directory / record['file'])
                 frames.append(record)

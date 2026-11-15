@@ -30,21 +30,60 @@ class CueFrame:
     index: int
     cue: object
     image: object
+    previous: tuple | None = None
 
 
 def read_cue(source, scene_id, index):
     """Return an owned copy of one original crop. Reading never loads a model."""
     if type(index) is not int or not 0 <= index < len(source.cues):
         raise ValueError(f'Cue index {index} is outside this scene; valid indices: 0..{len(source.cues)-1}.')
-    with closing(source.frames_indices([index])) as frames:
-        try:
-            actual, cue, image = next(frames)
-        except StopIteration:
-            raise ValueError('The selected VTT cue is missing.') from None
-        with closing(image):
-            if actual != index:
-                raise ValueError('The VTT source returned a different cue index.')
-            return CueFrame(scene_id, index, cue, image.copy())
+    indices = [index-1,index] if index and temporal_enabled(getattr(source,'config',None)) else [index]
+    previous = None
+    with closing(source.frames_indices(indices)) as frames:
+        for actual,cue,image in frames:
+            with closing(image):
+                if actual == index-1 and len(indices)==2:
+                    with image.convert('RGB') as rgb:
+                        previous = (actual,cue,rgb.size,rgb.tobytes())
+                elif actual == index:
+                    return CueFrame(scene_id,index,cue,image.copy(),previous)
+                else:
+                    raise ValueError('The VTT source returned a different cue index.')
+    raise ValueError('The selected VTT cue is missing.')
+
+
+def temporal_enabled(config):
+    pose = config.data.get('sapiensid',{}).get('pose',{}) if config is not None else {}
+    refinement = pose.get('refinement',{})
+    return pose.get('backend')=='pmpose' and refinement.get('enabled') and refinement.get('recover_prompt_points')
+
+
+def audit_context(image,detector,scene_id,index,cue,previous):
+    from .perspective_shots import advance
+    from .crowd_context import attach_context
+    shot = advance(image,index,previous,evidence=True)
+    # A single-cue replay knows its local shot even if the scene's first cue was skipped.
+    if previous is None and shot[1] is None:
+        shot = (shot[0],index,*shot[2:])
+    image._recognition_scan = scene_id
+    image._recognition_cue_signature = shot[:3]
+    image._previous_cue_available = bool(previous and previous[0]==index-1)
+    attach_context(detector,image,scene_id,index,cue.start)
+    return shot
+
+
+@contextmanager
+def trial_image(frame, detector):
+    from PIL import Image
+    previous = None
+    if frame.previous and temporal_enabled(getattr(detector,'config',None)):
+        index,cue,size,pixels = frame.previous
+        with Image.frombytes('RGB',size,pixels) as image, detector.prepared_frame(image):
+            previous = audit_context(image,detector,frame.scene_id,index,cue,None)
+            detector.detect(image,force_pose=True)
+    with frame.image.copy() as image:
+        audit_context(image,detector,frame.scene_id,frame.index,frame.cue,previous)
+        yield image
 
 
 def detector_factory(config, paths):
@@ -82,7 +121,7 @@ class CueDetector:
             self.config = config
         try:
             # A fresh image also isolates single-cue inference from browsing history.
-            with frame.image.copy() as image, render_frame(
+            with trial_image(frame,self.detector) as image, render_frame(
                     image, self.detector, frame.scene_id, frame.index, frame.cue,
                     mask_options=mask_options) as (result, record):
                 return result.copy(), record
