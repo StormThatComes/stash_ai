@@ -149,10 +149,15 @@ def append_details(image, annotated, people, capture, options, color_for):
         shown = stage is not None and _shown(record, options)
         label = _caption(index, record)
         label += f' | {stage}' if shown else ' | mask hidden' if stage else ' | no mask'
-        descriptions.append((color_for(index), _wrap([label], font, width-16)))
+        attempts = capture.history(record) if capture is not None else []
+        lines = [label]
+        for trial in attempts:
+            choices = ', '.join(f"{v['score']:.2f} {v['reason'] or 'accepted'}" for v in trial['variants'])
+            lines.append(f"Attempt {trial['attempt']} | {choices} | selected {trial.get('paired_choice', trial['chosen'])}")
+        descriptions.append((color_for(index), _wrap(lines, font, width-16)))
         metadata.append(dict(person_index=index, available_stages=list(capture.stages(record))
                              if capture is not None else [], displayed_stage=stage if shown else None,
-                             quality_mask_available=_available(record),
+                             quality_mask_available=_available(record), attempts=list(attempts),
                              second_pass_used='mask_pixels' in record))
     height = annotated.height + 12 + sum(len(lines) * line_height for _, lines in descriptions)
     panels = []

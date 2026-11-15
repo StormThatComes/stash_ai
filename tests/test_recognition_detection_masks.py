@@ -73,7 +73,10 @@ def test_overlay_keeps_holes_pose_colors_and_coordinates_without_extra_inference
         assert record['source_dimensions'] == [160, 100]
         assert record['source_rect'] == [11, 13, 160, 100]
         assert record['mask_visualization']['people'][0] == dict(
-            person_index=0, available_stages=['raw', 'cleaned'], displayed_stage='quality', quality_mask_available=True, second_pass_used=True)
+            person_index=0, available_stages=['raw', 'cleaned'], displayed_stage='quality',
+            quality_mask_available=True, second_pass_used=True, attempts=[
+                dict(attempt=1, positive=[[35.,20.],[32.,18.]], negative=[], chosen=0,
+                     variants=[dict(score=.95,reason=None)])])
         assert record['people'][0]['pose_refinement']['box_expanded']
         json.dumps(record, allow_nan=False)  # No arrays/bitmaps leak into the manifest.
     assert detector.calls == detector.releases == 1
