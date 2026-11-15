@@ -52,3 +52,13 @@ def test_rotated_face_becomes_normal_observation_once(tmp_path):
         assert db.execute('SELECT count(*) FROM person_evidence WHERE observation=?',(row['id'],)).fetchone()[0]==1
         rotated_faces.recover(db,item['scan'],source,cfg,lambda:1/0,None,lambda:None)
         assert db.execute('SELECT count(*) FROM observations').fetchone()[0]==1
+
+
+def test_only_active_guided_rotation_versions_face_scan(tmp_path):
+    from stash_ai.recognition.scanning import scan_identity
+    cfg=configuration(tmp_path)
+    old=scan_identity(cfg,'ns')
+    cfg.data['detection']['pose_guided_rotation']=True
+    assert scan_identity(cfg,'ns')!=old
+    cfg.data['sapiensid']['collection']['enabled']=False
+    assert scan_identity(cfg,'ns')==old
