@@ -189,19 +189,24 @@ pose:
 ```
 
 `SAM-pose2seg` is the pose-guided segmenter from BMPv2, built on SAM2.1. It is
-not a new pose estimator and does not replace D-FINE. This adapter performs one
-initial PMPose pass, one segmentation per eligible person, then one masked
-PMPose pass. It does not run the full BMP detector loop or 3D estimation.
+not a new pose estimator and does not replace D-FINE. The first PMPose pass supplies reliable head, shoulder and hip landmarks.
+SAM receives the full RGB cue and starts with `min_prompt_points` own points.
+The initial set contains the most visible points. Each retry prioritizes
+unrepresented body regions and distance from the selected points. Points must pass the presence,
+localization and visibility gates and be distinct from another person's core.
 
-SAM receives the full RGB cue and up to three reliable, visible head/torso
-points from the initial pose. Elbows, wrists, knees and ankles are deliberately
-excluded from prompts because limb ownership is the problem being corrected.
-Presence, localization quality and visibility have independent prompt gates;
-points coinciding with another person's reliable core are excluded. The
-segmenter receives no box prompt and no image crop, so it can recover an arm
-outside a tight D-FINE box. People need at least two usable prompts by default.
-SAM's image features are computed once per eligible cue and released even on
-errors. Accepted masks are queued in batches bounded by `pmpose_batch_size`.
+After mask rejection or shared pixels with a neighbour, SAM retries that person
+with one more own point, up to `max_prompt_points` or the number available.
+Setting both limits to the same value makes one attempt. With limits of 1 and 2,
+an uncontested mask that passes validation needs only the first point.
+Each overlapping neighbour can independently supply up to
+`max_negative_prompt_points_per_neighbor` exclusion points (default 1, 0 disables).
+Foreign-core validation still checks all reliable foreign core points.
+
+The first attempts can be batched across cues. A batched cue that needs retries
+opens one additional SAM image context shared by those retries. The masked
+PMPose pass runs only after the mask clears admission and conflicts. If two
+people still share too many pixels, both keep their original poses and boxes.
 
 The second PMPose pass uses upstream `MaskBackground(alpha=0.25)` preprocessing:
 instance pixels are unchanged, background RGB is reduced to 75%, then affine
@@ -235,7 +240,7 @@ second pose but keeps the original point/crop boundaries. All tuning parameters
 and their short descriptions are in `facial_recognition.yml`.
 
 Detection audit JSON includes `pose_refinement` for every person: status/reason,
-original and final bounds, prompt indices/points, mask score and mask area when
+original and final bounds, SAM attempt count, final prompt indices/points, mask score and mask area when
 admitted. Gray outlines in PNGs show the old box when it was expanded; the
 normal person color shows the final box/pose. No masks are retained in the DB.
 Pipeline profiling separates `pmpose_mask_refinement` (total, including nested

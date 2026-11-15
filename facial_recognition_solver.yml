@@ -127,9 +127,12 @@ pose:
     min_visibility: null
     # Minimum prompt visibility. Null inherits pose.point_quality. Range: 0..1 or null.
     min_prompt_points: 2
-    # Minimum reliable, nonconflicting head/torso prompts; otherwise retain the first pose. Range: 1..8.
+    # Reliable head/torso points required for the first SAM attempt. Range: 1..8.
     max_prompt_points: 3
-    # Maximum positive prompts, ordered by visibility (1..8).
+    # Maximum own points. Add one spread-out point after mask rejection or conflict. Range: 1..8.
+    max_negative_prompt_points_per_neighbor: 1
+    # Maximum exclusion points from each overlapping person per attempt. 0 disables negative prompts. Range:
+    # 0..8.
     min_mask_score: 0.5
     # Reject masks below SAM's predicted mask quality. Range: 0..1.
     min_prompt_coverage: 1.0

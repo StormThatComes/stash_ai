@@ -165,7 +165,7 @@ def validate(settings):
 
 
 def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
-             legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False):
+             legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -191,6 +191,12 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     elif s['pose'].get('backend', 'yolo') == 'pmpose':
         from .pmpose_registry import contract as pmpose_contract
         evidence['pose_refiner'] = pmpose_contract(s['pose'])
+        historical = (legacy_mask_prompts or legacy_drift_mask or legacy_foreground_sharpness or
+                      legacy_mask_overlap or legacy_mask_quality or legacy_association or legacy_boundaries)
+        if historical and 'refinement' in evidence['pose_refiner']:
+            old = evidence['pose_refiner']['refinement']
+            old['version'] = 'pmpose-sam-pose2seg-refinement-v3'
+            old.pop('max_negative_prompt_points_per_neighbor', None)
     if variant=='wb4m' and model['sha256']==WB4M_SHA256:
         # Keep the historical format identifiable for conservative legacy rivals.
         evidence['format']='sapiensid-wb4m-person-v2' if legacy_boundaries else 'sapiensid-wb4m-person-v3'

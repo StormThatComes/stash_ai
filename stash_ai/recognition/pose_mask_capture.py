@@ -17,6 +17,10 @@ class FrameMasks:
         import numpy as np
         key = id(record)
         size = (mask.size + 7) // 8
+        if stage == 'raw':
+            previous = self.people.pop(key, None)
+            if previous:
+                self.bytes -= sum(len(data) for _, data in previous[1].values())
         if self.bytes + size > MAX_BYTES:
             raise ValueError('Detection audit masks exceed 16 MiB; use --mask-view off.')
         # Pack before retaining: full-frame boolean arrays otherwise multiply
