@@ -44,9 +44,11 @@ def _retain_quality_mask(record, mask, bounds):
 
 
 class RefinedPMPose:
-    def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728):
+    def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728, joint_quality=None):
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
         self.frame_batch_size, self.queue_bytes = frame_batch_size, queue_bytes
+        # Prompt confidence is intentionally stricter than output joint eligibility.
+        self.joint_quality = dict(settings, **(joint_quality or {}))
 
     def close(self):
         from .resident_models import release
@@ -178,7 +180,7 @@ class RefinedPMPose:
                     _retain_quality_mask(record, mask, old)
                 continue
             from .limb_ownership import fuse
-            joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.settings)
+            joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.joint_quality)
             if restored:
                 records[i]['restored_first_pass_joints'] = restored
             # Quality needs the validated mask even when encoder masking is off.

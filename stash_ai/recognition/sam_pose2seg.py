@@ -151,10 +151,12 @@ class Segmenter:
             labels = np.concatenate((labels, np.zeros(len(negative), dtype=np.int32)))
         if self.precision!='fp32':
             mask_input,coords,label,boxes=self.predictor._prep_prompts(points,labels,None,None,True)
+            pipeline_count('sam_decoder_forwards')
             with pipeline_cuda_timing('sam_prompt_decoder',self.device):
                 masks,scores,_=self.predictor._predict(coords,label,boxes,mask_input,multimask_output=False)
             masks=masks[0].cpu().numpy();scores=scores[0].float().cpu().numpy()
         else:
+            pipeline_count('sam_decoder_forwards')
             with pipeline_cuda_timing('sam_prompt_decoder',self.device):
                 masks, scores, _ = self.predictor.predict(point_coords=points, point_labels=labels,
                     box=None, multimask_output=False)
@@ -171,6 +173,7 @@ class Segmenter:
         labels = np.r_[np.ones(len(positive), dtype=np.int32), np.zeros(len(negative), dtype=np.int32)]
         mask_input, coords, label, boxes = self.predictor._prep_prompts(
             points, labels, None, None, True, img_idx=image_index)
+        pipeline_count('sam_decoder_forwards')
         with pipeline_cuda_timing('sam_prompt_decoder', self.device):
             masks, scores, _ = self.predictor._predict(coords, label, boxes, mask_input,
                 multimask_output=multi, return_logits=False, img_idx=image_index)
@@ -215,6 +218,7 @@ class Segmenter:
                     def decode(group):
                         coordinates=np.stack([np.concatenate((p,np.asarray(n).reshape(-1,2))) for _,p,n in group])
                         labels=np.stack([np.r_[np.ones(len(p),dtype=np.int32),np.zeros(len(n),dtype=np.int32)] for _,p,n in group])
+                        pipeline_count('sam_decoder_forwards')
                         with pipeline_timing('sam_mask_prediction'), pipeline_cuda_timing('sam_prompt_decoder',self.device):
                             # Private API is pinned by the verified source manifest.
                             mask_input,coords,label,boxes=self.predictor._prep_prompts(

@@ -34,3 +34,17 @@ def test_invisible_seed_cannot_confirm_a_masked_pose():
     records = [dict(detector_bounds=BOX, separated=False)]
     model._apply_second_pass([(0, BOX, np.ones((100,160),bool), [0,1])],result,records,raw,refined)
     assert records[0]['reason'] == 'second_pass_core_drift'
+
+
+def test_reliable_output_joint_can_be_below_the_sam_seed_floor():
+    from stash_ai.recognition.pose_refinement import RefinedPMPose
+    from stash_ai.recognition.pose_refinement_config import defaults
+    model = RefinedPMPose(None,None,dict(defaults(), min_keypoint_score=.85),
+                          joint_quality={'min_keypoint_score':.5, 'min_presence':.5})
+    raw = prediction([pose_points()])
+    refined = prediction([pose_points()])
+    refined[1][0,9] = .70
+    result = prediction([pose_points()])
+    records = [dict(detector_bounds=BOX, separated=False)]
+    model._apply_second_pass([(0,BOX,np.ones((100,160),bool),[0,1])],result,records,raw,refined)
+    assert result[1][0,9] == refined[1][0,9]

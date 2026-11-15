@@ -78,3 +78,5 @@ pose:
 | `twisted` | 2 | 1 | 2 | — |
 
 On `candy-balance` a further 2,016 detector/prompt combinations yielded no clean mask. One frequent rejected candidate covered all eight target probes and all eight partner probes. Loosening the foreign-core threshold to accept that candidate would merge the two people in the mask.
+
+The report also counts predicted joints near a labelled partner joint when every annotated target joint of that type is outside tolerance. Eleven manually sided wrist landmarks provide a separate anatomical check. A sided landmark counts as correct or swapped only when exactly one predicted wrist is within tolerance. Reported runtime includes model loading. Encoder and decoder counts include initial and recovery forwards.

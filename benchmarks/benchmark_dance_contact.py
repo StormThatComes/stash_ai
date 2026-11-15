@@ -26,6 +26,7 @@ from stash_ai.recognition.sapiensid_backend import SapiensIDFaces
 DATA = Path(__file__).with_name('data') / 'dance_contact'
 JOINTS = {'elbow': (7, 8), 'wrist': (9, 10), 'knee': (13, 14), 'ankle': (15, 16)}
 COUNTS = ('people', 'matched', 'extra', 'joints', 'correct_joints', 'masks', 'clean_masks',
+          'partner_joint_hits', 'sided_joints', 'correct_side', 'wrong_side',
           'own_hits', 'own_probes', 'partner_hits', 'partner_probes', 'background_hits', 'background_probes')
 
 
@@ -65,6 +66,30 @@ def correct_joints(label, keypoints):
     return correct
 
 
+def joint_ownership(label, others, keypoints):
+    """Score unambiguous partner matches and manually sided anatomical landmarks."""
+    left, top, right, bottom = label['box']
+    tolerance = .08 * math.hypot(right-left, bottom-top)
+    partner = right_side = wrong_side = 0
+    for kind, reference in label['joints'].items():
+        pair = JOINTS[kind]
+        foreign = [xy for other in others for xy in other['joints'].get(kind, [])]
+        for joint in pair:
+            xy = keypoints[joint]
+            if min(xy) >= 0 and foreign and reference:
+                own_distance = min(math.dist(xy, p) for p in reference)
+                other_distance = min(math.dist(xy, p) for p in foreign)
+                partner += int(other_distance <= tolerance and own_distance > tolerance)
+        sides = label.get('sides', {}).get(kind, [])
+        for point, side in zip(reference, sides):
+            expected, opposite = pair if side == 'left' else pair[::-1]
+            distances = [math.dist(point,keypoints[k]) if min(keypoints[k])>=0 else math.inf
+                         for k in (expected,opposite)]
+            right_side += int(distances[0] <= tolerance and distances[1] > tolerance)
+            wrong_side += int(distances[1] <= tolerance and distances[0] > tolerance)
+    return partner, right_side, wrong_side
+
+
 def count_hits(points, mask, bounds):
     left, top, right, bottom = bounds
     return sum(int(mask[y-top, x-left]) for x, y in points if left <= x < right and top <= y < bottom)
@@ -89,11 +114,16 @@ def score(photo, people, capture=None):
         own = label['foreground']
         counts['own_probes'] += len(own)
         counts['joints'] += sum(map(len, label['joints'].values()))
+        counts['sided_joints'] += sum(map(len, label.get('sides', {}).values()))
         if index not in assigned:
             reasons['person_missing'] += 1
             continue
         person = people[assigned[index]]
         counts['correct_joints'] += correct_joints(label, person['keypoints'])
+        others = [other for j,other in enumerate(labels) if j != index]
+        hits = joint_ownership(label, others, person['keypoints'])
+        for key,value in zip(('partner_joint_hits', 'correct_side', 'wrong_side'), hits):
+            counts[key] += value
         partner = [p for i, other in enumerate(labels) if i != index for p in other['foreground']]
         admitted = foreground_mask(person)
         if admitted is None:
@@ -136,6 +166,11 @@ def save_overlay(image, people, capture, path):
 
 def evaluate(config, edits, photos, overlays=None):
     adjusted, _ = apply_edits(config, edits)
+    device = adjusted.data['models']['device']
+    cuda = str(device).startswith('cuda')
+    if cuda:
+        import torch
+        torch.cuda.reset_peak_memory_stats(device)
     totals = dict.fromkeys(COUNTS, 0)
     frames = {}
     rejected = Counter()
@@ -155,7 +190,8 @@ def evaluate(config, edits, photos, overlays=None):
             for key, value in counts.items():
                 totals[key] += value
             rejected.update(reasons)
-    return {'totals': totals, 'missing': dict(rejected), 'frames': frames}
+    return {'totals': totals, 'missing': dict(rejected), 'frames': frames,
+            'peak_cuda_allocated_bytes': torch.cuda.max_memory_allocated(device) if cuda else None}
 
 
 def read_profiles(path):
@@ -206,7 +242,13 @@ def run(config, profiles, photos, overlays=None):
     for index, (name, edits) in enumerate(profiles.items()):
         print(name, file=sys.stderr, flush=True)
         directory = overlays / f'profile-{index:02d}' if overlays else None
-        result = evaluate(config, edits, photos, directory)
+        from stash_ai.recognition.profiling import pipeline_scope, pipeline_snapshot
+        with pipeline_scope(True):
+            result = evaluate(config, edits, photos, directory)
+            stats = pipeline_snapshot()
+        result['runtime'] = dict(seconds=stats['elapsed_seconds'],
+            sam_encoder_forwards=stats['stages'].get('sam_image_embedding', {}).get('calls',0),
+            sam_decoder_forwards=stats['counts'].get('sam_decoder_forwards',0))
         result['coverage'] = coverage(result['frames'])
         if directory:
             result['overlay_directory'] = directory.name

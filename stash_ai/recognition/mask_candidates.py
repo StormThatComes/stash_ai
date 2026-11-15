@@ -204,6 +204,12 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 holdout = [k for k in record.get('support_indices', ()) if k not in indices]
                 if reason is None and holdout and not inside(mask, points[i, holdout]).any():
                     reason = 'missing_independent_support'
+                # A limb/face-assisted or below-minimum seed can describe only part
+                # of the body. Require stronger SAM confirmation for these rescues.
+                rescued = (record.get('prompt_minimum', minimum) < minimum or
+                           any(k in (7,8,13,14) for k in indices) or 'face_prompt' in record)
+                if reason is None and rescued and score < (1 + settings['min_mask_score']) / 2:
+                    reason = 'weak_recovery_mask'
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
                 record['separated'] = False
