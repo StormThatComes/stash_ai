@@ -26,7 +26,7 @@ from stash_ai.recognition.sapiensid_backend import SapiensIDFaces
 DATA = Path(__file__).with_name('data') / 'dance_contact'
 JOINTS = {'elbow': (7, 8), 'wrist': (9, 10), 'knee': (13, 14), 'ankle': (15, 16)}
 COUNTS = ('people', 'matched', 'extra', 'joints', 'correct_joints', 'masks', 'clean_masks',
-          'partner_joint_hits', 'sided_joints', 'correct_side', 'wrong_side',
+          'partner_joint_hits','maskless_partner_joints','maskless_correct_joints','maskless_labelled_joints', 'sided_joints', 'correct_side', 'wrong_side',
           'own_hits', 'own_probes', 'partner_hits', 'partner_probes', 'background_hits', 'background_probes')
 
 
@@ -127,6 +127,9 @@ def score(photo, people, capture=None):
         partner = [p for i, other in enumerate(labels) if i != index for p in other['foreground']]
         admitted = foreground_mask(person)
         if admitted is None:
+            counts['maskless_partner_joints'] += hits[0]
+            counts['maskless_correct_joints'] += correct_joints(label,person['keypoints'])
+            counts['maskless_labelled_joints'] += sum(map(len,label['joints'].values()))
             details = person.get('pose_refinement', {})
             reason = details.get('reason') or details.get('status') or 'mask_unavailable'
             reasons[reason] += 1
@@ -230,6 +233,8 @@ def select_profile(results, profiles):
         # Compare the worst photo first. A solo and a trio each get one vote.
         per_photo = sorted(f['counts']['clean_masks'] / f['counts']['people'] for f in result['frames'].values())
         return (per_photo, counts['clean_masks'], counts['matched'], counts['correct_joints'],
+                -counts.get('partner_joint_hits',0), -counts.get('wrong_side',0), counts.get('correct_side',0),
+                -counts.get('maskless_partner_joints',0),
                 counts['own_hits'], -len(profiles[name]))
 
     eligible = [name for name, result in results.items()

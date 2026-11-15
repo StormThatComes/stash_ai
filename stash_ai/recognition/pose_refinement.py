@@ -163,12 +163,28 @@ class RefinedPMPose:
                 pending.clear()
         if pending:
             second_pass(image, pending, result, records, prediction)
+        if defer is None:
+            self.finish_maskless(image,bounds,prediction,result,records)
         return (*result, records)
+
+    def finish_maskless(self,image,bounds,prediction,result,records):
+        from .limb_ownership import maskless
+        for i, record in enumerate(records):
+            if not record.get('overlap_mask') and record.get('status') != 'refined':
+                removed = maskless(prediction,i,bounds[i],image.size,result,self.joint_quality)
+                if removed:
+                    record['withheld_rival_joints'] = removed
+
+    def masked_inputs(self, image, jobs, original):
+        if getattr(self.pose,'supports_rival_mask',False):
+            from .limb_ownership import conditioning
+            return conditioning(image,jobs,original)
+        return [mask for _,_,mask,_ in jobs]
 
     @pipeline_stage('pmpose_masked_second_pass')
     def _second_pass(self, image, pending, result, records, original):
         refined = self.pose.predict(image, [box for _, box, _, _ in pending],
-                                    masks=[mask for _, _, mask, _ in pending])
+                                    masks=self.masked_inputs(image,pending,original))
         self._apply_second_pass(pending, result, records, original, refined)
 
     def _apply_second_pass(self, pending, result, records, original, refined):

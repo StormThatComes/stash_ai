@@ -27,6 +27,7 @@ def prepare(image, box, mask=None):
     with image.convert('RGB') as rgb:
         pixels = np.asarray(rgb)
         if mask is not None:
+            mask, rival = mask if isinstance(mask, tuple) else (mask, None)
             mask = np.asarray(mask)
             if mask.shape != (image.height, image.width) or mask.dtype != np.bool_:
                 raise ValueError('PMPose mask must be a full-frame boolean instance mask.')
@@ -34,6 +35,8 @@ def prepare(image, box, mask=None):
             # normalization. Keep 75% background context; do not black it out.
             masked = pixels * mask[:, :, None]
             pixels = cv2.addWeighted(pixels, .75, masked, .25, 0)
+            if rival is not None:
+                pixels[rival & ~mask] //= 3
         crop = cv2.warpAffine(pixels, matrix, (width, height), flags=cv2.INTER_LINEAR)
     crop = (crop.astype(np.float32) - np.asarray(registry.MEAN, dtype=np.float32))
     crop /= np.asarray(registry.STD, dtype=np.float32)

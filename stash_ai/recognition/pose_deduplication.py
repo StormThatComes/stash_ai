@@ -17,7 +17,8 @@ def _measurements(bounds, prediction, settings):
     n = len(bounds)
     boxes = np.asarray(bounds, dtype=np.float64).reshape(n, 4)
     if (points.shape != (n, 17, 2) or scores.shape != (n, 17)
-            or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'})
+            or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'},
+                    {'presence','visibility','flip_agreement','alt_x','alt_y','alt_strength'})
             or any(v.shape != (n, 17) for v in probabilities.values())
             or not np.isfinite(boxes).all() or np.any(boxes[:, 2:] <= boxes[:, :2])
             or not np.isfinite(points).all()
@@ -78,13 +79,29 @@ def _compare(a, b, boxes, points, valid, settings):
 
 
 @pipeline_stage('pmpose_pose_deduplication')
-def select(bounds, prediction, settings, *, audit=False):
+def select(bounds, prediction, settings, *, audit=False, reserves=None, confirmed=()):
     boxes, valid, quality = _measurements(bounds, prediction, settings)
     points = prediction[0]
     order = sorted(range(len(boxes)), key=lambda i: (-quality[i], -int(valid[i].sum()), i))
+    reserves = reserves or {}
+    # The first-pass primary always gets evaluated before its reserve.
+    order.sort(key=lambda i: i in reserves)
     kept, suppressed, comparisons, reasons = [], [None] * len(boxes), [], Counter()
     total = omitted = retained_records = 0
     for candidate in order:
+        if candidate in reserves:
+            primary = reserves[candidate]
+            primary = primary if suppressed[primary] is None else suppressed[primary]
+            if primary not in kept:
+                continue
+            reason, detail = _compare(primary,candidate,boxes,points,valid,settings)
+            if candidate not in confirmed and reason not in ('distinct_heads','distinct_torsos'):
+                suppressed[candidate] = primary
+                reasons['unconfirmed_reserve'] += 1
+                if audit:
+                    comparisons.append(dict(detail, reason='unconfirmed_reserve', decision='suppress',
+                                            representative_index=primary))
+                continue
         for representative in kept:
             total += 1
             if total > MAX_COMPARISONS:
@@ -143,9 +160,26 @@ class DeduplicatedPMPose:
             predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
             raise ValueError('PMPose returned an invalid deduplication frame count.')
-        selected_frames, selected_predictions, reports = [], [], []
+        selected_frames, selected_predictions, reports, fallbacks = [], [], [], []
         for (image, bounds), prediction in zip(frames, predictions):
-            report = select(bounds, prediction, self.settings, audit=active(image))
+            reserves = getattr(image, '_pose_reserves', {})
+            confirmed = set()
+            fallback = None
+            if self.refined and getattr(self.pose,'supports_rival_mask',False):
+                from .contact_pose import recover_pair
+                recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
+                if recovered_pair is not None:
+                    owner, primary, reserve = recovered_pair
+                    if reserves:
+                        prediction, confirmed = recovered, {reserve}
+                    else:
+                        # Both slots already passed NMS. Preserve the original SAM
+                        # decision for both and offer the recovered pose only to a
+                        # slot which would otherwise use maskless fallback.
+                        fallback = owner,(reserve if owner==primary else primary),recovered
+            fallbacks.append(fallback)
+            report = select(bounds, prediction, self.settings, audit=active(image), reserves=reserves,
+                            confirmed=confirmed)
             keep = np.asarray(report['kept_indices'], dtype=np.int64)
             points, scores, probabilities = prediction
             selected = points[keep], scores[keep], {k: v[keep] for k, v in probabilities.items()}
@@ -160,6 +194,40 @@ class DeduplicatedPMPose:
                       for (image,bounds),prediction in zip(selected_frames,selected_predictions)]
         else:
             finals = [(*prediction,None) for prediction in selected_predictions]
+        for fallback, report, final, (image,bounds) in zip(fallbacks,reports,finals,frames):
+            if fallback is None:
+                continue
+            owner,other,recovered = fallback
+            keep = report['kept_indices']
+            if owner not in keep:
+                continue
+            slot = keep.index(owner)
+            record = final[3][slot]
+            if record.get('overlap_mask'):
+                if other not in keep:
+                    continue
+                alternate_slot = keep.index(other)
+                if final[3][alternate_slot].get('overlap_mask'):
+                    continue
+                from .person_geometry import unpack_mask
+                from .mask_candidates import inside
+                l,t,r,b = record['bounds']
+                mask = unpack_mask(record['overlap_mask'],r-l,b-t)
+                established = final[0][slot] - [l,t]
+                proposal = recovered[0][owner] - [l,t]
+                if (inside(mask,established[:7]).sum() < 2 or inside(mask,proposal[:5]).any()
+                        or np.linalg.norm(np.median(established[:5],axis=0)-np.median(proposal[:5],axis=0)) < 4):
+                    continue
+                slot = alternate_slot
+                record = final[3][slot]
+            l,t,r,b = bounds[keep[slot]]
+            xy = recovered[0][owner]
+            usable = ((xy >= [l,t]) & (xy < [r,b])).all(axis=1)
+            final[0][slot] = np.where(usable[:,None],xy,-1)
+            final[1][slot] = np.where(usable,recovered[1][owner],0)
+            for key in final[2]:
+                final[2][key][slot] = np.where(usable,recovered[2][key][owner],0)
+            record['contact_pose_recovered'] = True
         for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))
         return [(*final,report) for final,report in zip(finals,reports)]

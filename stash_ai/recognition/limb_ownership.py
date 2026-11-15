@@ -66,7 +66,19 @@ def fuse(i, offset, original, refined, mask, box, settings):
     for joint in range(17):
         masked = {k:v[offset,joint] for k,v in new_probs.items()}
         first = {k:v[i,joint] for k,v in raw_probs.items()}
-        if qualifies(joints[joint], confidence[joint], masked, joint, 'masked'):
+        contested = (joint in PARENT and rival_chain(original,i,joint,joints[joint],tolerance) <= tolerance)
+        own_first = (contested and np.linalg.norm(raw_xy[i,joint]-joints[joint]) > tolerance
+                     and rival_chain(original,i,joint,raw_xy[i,joint],tolerance) > tolerance
+                     and qualifies(raw_xy[i,joint],raw_scores[i,joint],first,joint,'first'))
+        if contested and not own_first:
+            other = alternate(refined,offset,joint,(mask.shape[1],mask.shape[0]))
+            if (other is not None and confidence[PARENT[joint]] > 0
+                    and rival_chain(original,i,joint,other,tolerance) > tolerance
+                    and np.linalg.norm(other-joints[PARENT[joint]]) < np.linalg.norm(joints[joint]-joints[PARENT[joint]])
+                    and qualifies(other,confidence[joint]*masked['alt_strength'],masked,joint,'masked')):
+                joints[joint] = other
+                confidence[joint] *= masked['alt_strength']
+        if not own_first and qualifies(joints[joint], confidence[joint], masked, joint, 'masked'):
             continue
         if qualifies(raw_xy[i,joint], raw_scores[i,joint], first, joint, 'first'):
             joints[joint] = raw_xy[i,joint]
@@ -79,3 +91,80 @@ def fuse(i, offset, original, refined, mask, box, settings):
             for values in evidence.values():
                 values[joint] = 0
     return joints, confidence, evidence, choices
+
+
+def rival_chain(original, owner, joint, point, tolerance):
+    """Return the nearest endpoint supported by a visible, distinct rival chain."""
+    xy, scores, probs = original
+    parent = PARENT[joint]
+    best = np.inf
+    for other in range(len(xy)):
+        if other == owner:
+            continue
+        for side in (joint, OPPOSITE[joint]):
+            root = PARENT[side]
+            if (min(scores[other,side], scores[other,root], probs['visibility'][other,side],
+                    probs['presence'][other,side], probs['presence'][other,root]) <= .5
+                    or np.linalg.norm(xy[owner,parent]-xy[other,root]) <= 2*tolerance):
+                continue
+            best = min(best, np.linalg.norm(point-xy[other,side]))
+    return best
+
+
+def alternate(original, i, joint, size):
+    evidence = original[2]
+    if 'alt_strength' not in evidence or evidence['alt_strength'][i,joint] < .55:
+        return None
+    return np.array([evidence['alt_x'][i,joint]*size[0],evidence['alt_y'][i,joint]*size[1]])
+
+
+def maskless(original, i, box, size, result, settings):
+    xy, scores, probs = original
+    if len(xy) < 2:
+        return []
+    limit = max(2., .035*np.hypot(box[2]-box[0],box[3]-box[1]))
+    withheld = []
+    for k,parent in PARENT.items():
+        point = xy[i,k]
+        if scores[i,k] <= 0 or rival_chain(original,i,k,point,limit) > limit:
+            continue
+        root = xy[i,parent]
+        tip_distance = np.linalg.norm(point-root)
+        # Retain credible contact when both people can anatomically reach it.
+        if scores[i,parent] > settings['min_keypoint_score'] and tip_distance <= limit*5:
+            continue
+        other = alternate(original,i,k,size)
+        if (other is not None and scores[i,parent] > settings['min_keypoint_score'] and
+                box[0]<=other[0]<box[2] and box[1]<=other[1]<box[3] and
+                np.linalg.norm(other-root) < tip_distance and rival_chain(original,i,k,other,limit)>limit):
+            result[0][i,k] = other
+            result[1][i,k] *= probs['alt_strength'][i,k]
+        else:
+            result[0][i,k],result[1][i,k] = -1,0
+            for values in result[2].values():
+                values[i,k] = 0
+            withheld.append(k)
+    return withheld
+
+
+def conditioning(image, jobs, original):
+    """Darken confirmed rival limb pixels outside our validated foreground."""
+    import cv2
+    xy, scores, probs = original
+    result = []
+    for i,box,mask,_ in jobs:
+        foreign = np.zeros(mask.shape,np.uint8) if len(xy)>1 else None
+        width = max(2,round(.03*np.hypot(box[2]-box[0],box[3]-box[1])))
+        for j in range(len(xy)):
+            if i==j:
+                continue
+            for k,p in PARENT.items():
+                if (min(scores[j,k],scores[j,p],probs['visibility'][j,k],probs['visibility'][j,p])>.75
+                        and np.isfinite(xy[j,[p,k]]).all() and (xy[j,[p,k]]>=0).all()
+                        and not inside(mask,xy[j,[p,k]]).any()):
+                    cv2.line(foreign,tuple(xy[j,p].round().astype(int)),tuple(xy[j,k].round().astype(int)),1,width)
+        if foreign is not None:
+            # Crop preparation uses only pixels near this person's crop.
+            foreign[mask] = 0
+        result.append((mask,foreign.astype(bool)) if foreign is not None and foreign.any() else mask)
+    return result

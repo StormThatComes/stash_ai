@@ -88,14 +88,17 @@ def load(config):
     model.register_buffer('_kp_active_mask', mask, persistent=False)
     load_verified_weights(model, path, expected_size=registry.SIZE, expected_sha256=registry.SHA256)
     return RFDETRDetector(model.float().to(device).eval(), device=device,
-                          batch_size=config.data['sapiensid']['pose']['batch_size'],precision=precision)
+                          batch_size=config.data['sapiensid']['pose']['batch_size'],precision=precision,
+                          reserve=config.data['sapiensid']['pose']['deduplication']['enabled']
+                              and config.data['sapiensid']['pose']['backend'] == 'pmpose')
 
 
 class RFDETRDetector:
     """Person-only result tensors in original-image coordinates, on the CPU."""
     task = 'detect'
 
-    def __init__(self, model, *, device, batch_size,precision='fp32'):
+    def __init__(self, model, *, device, batch_size,precision='fp32', reserve=False):
+        self.reserve = reserve
         from .inference_precision import validate
         validate(device,precision)
         self.precision=precision
@@ -111,7 +114,7 @@ class RFDETRDetector:
         def calculate(batch):
             outputs=self._forward([image for _,image in batch])
             return self._decode(outputs,[image.size for _,image in batch],conf,iou,max_det,nms,
-                                frame_offset=batch[0][0])
+                                frame_offset=batch[0][0], reserve=self.reserve)
         with torch.inference_mode():
             return self.batches.run(list(enumerate(images)),calculate,self.device)
 
@@ -141,7 +144,7 @@ class RFDETRDetector:
                 return self.model(inputs.float())
 
     @staticmethod
-    def _decode(outputs, sizes, threshold, iou, maximum, suppress, *, frame_offset=0):
+    def _decode(outputs, sizes, threshold, iou, maximum, suppress, *, frame_offset=0, reserve=False):
         import torch
         from torchvision.ops import nms
         logits = outputs['pred_logits'].detach().float()
@@ -182,5 +185,24 @@ class RFDETRDetector:
             order = torch.argsort(confidence, descending=True, stable=True)
             box, confidence = box[order], confidence[order]
             selected = nms(box, confidence, iou)[:maximum] if suppress else slice(None, maximum)
-            results.append(SimpleNamespace(boxes=SimpleNamespace(xyxy=box[selected], conf=confidence[selected])))
+            parents = None
+            if reserve and suppress and iou < .94 and 0 < len(selected) < maximum:
+                from torchvision.ops import box_iou
+                extra = nms(box, confidence, .94)
+                extra = extra[~torch.isin(extra, selected)]
+                if len(extra):
+                    overlaps = box_iou(box[extra], box[selected])
+                    values, closest = overlaps.max(dim=1)
+                    used, pending = set(), []
+                    for idx, parent, overlap in zip(extra.tolist(), closest.tolist(), values.tolist()):
+                        if parent not in used and iou < overlap < .94:
+                            pending.append((idx, parent))
+                            used.add(parent)
+                            if len(pending) + len(selected) == maximum:
+                                break
+                    if pending:
+                        parents = torch.tensor([-1]*len(selected) + [p for _,p in pending])
+                        selected = torch.cat((selected, selected.new_tensor([idx for idx,_ in pending])))
+            results.append(SimpleNamespace(boxes=SimpleNamespace(xyxy=box[selected], conf=confidence[selected]),
+                                           reserve_parents=parents))
         return results
