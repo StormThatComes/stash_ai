@@ -19,7 +19,8 @@ face:
     max_faces_per_frame: 100
     # Maximum face detections processed per VTT thumbnail. Range: 1..1000.
     pose_guided_rotation: true
-    # Retry one SCRFD head crop for a sideways pose without a face. Requires body collection.
+    # Retry one rotated head crop when a measured sideways head has no face. Requires SCRFD and body collection.
+    # Range: true or false.
   quality:
     # Scan admission. Rejected faces cannot seed or attach to identities.
     min_face_pixels: 32
@@ -137,7 +138,8 @@ pose:
     adaptive_decoder_retries: true
     # Try up to two ownership-guided SAM retries per rejected person using the same image features.
     recover_prompt_points: true
-    # Recover sparse SAM prompts with distinct limbs, matched face landmarks or a single strong point.
+    # Recover sparse SAM prompts from distinct limbs, an associated face, a strong joint or a verified torso in
+    # the preceding VTT cue.
     min_prompt_points: 2
     # Reliable head/torso points required for the first SAM attempt. Range: 1..8.
     max_prompt_points: 3
