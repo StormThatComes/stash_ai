@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v46-spatial-gaps',contract(config),matching_policy(config),
+    return digest(['body-local-v47-contact-bridge',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -322,7 +322,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph'), gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
     seeds={};decisions={}
     from .contact_anchors import questionable_links
-    uncertain = questionable_links(rows,settings,scores)
+    uncertain = questionable_links(rows,settings,scores,graph)
     for row in rows:
         if row['face_person'] is None:continue
         person=roots[row['face_person']]
@@ -334,6 +334,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
                                   reason='measured_face_association')
         if strong:seeds.setdefault(person,[]).append(row)
+    if graph:
+        from .contact_anchors import bridge_faces
+        bridge_faces(graph,decisions,settings,uncertain,guard)
     # Face-linked bodies are frozen before processing faceless queries.
     for row in rows:
         if quality(row).get('query_only_reason') == 'unresolved_partner' and row['id'] not in decisions:

@@ -10,7 +10,7 @@ def crowded_link(q):
     return q.get('detected_people',1)>1 and q.get('overlap',0)>=.25
 
 
-def questionable_links(rows,settings,scores):
+def questionable_links(rows,settings,scores,graph=()):
     clean = defaultdict(list)
     crowded = []
     for row in rows:
@@ -22,6 +22,7 @@ def questionable_links(rows,settings,scores):
         elif row.get('face_anchor'):
             clean[row['cue']].append((row,quality))
     questionable = set()
+    contradicted = set()
     for row,q in crowded:
         data = json.loads(row['geometry'])
         points = torso_points(data)
@@ -51,8 +52,29 @@ def questionable_links(rows,settings,scores):
                     supported = True
                 if rival>=settings['cohesion_threshold'] and own-rival<settings['ambiguity_margin']:
                     conflicted = True
+        if conflicted:
+            contradicted.add(row['id'])
         if not supported or conflicted:
             questionable.add(row['id'])
+    # Two independent clean endpoints can corroborate a longer contact. Each
+    # intervening edge already competed against the other physical lane.
+    from .independent_evidence import count
+    for chain,_ in graph or ():
+        previous = None
+        for i,r in enumerate(chain):
+            if not r.get('face_anchor') or crowded_link(json.loads(r['quality'])['quality']):
+                continue
+            if previous is not None and i-previous<=12:
+                first = chain[previous]
+                owner = r['face_person']
+                middle = chain[previous+1:i]
+                witnesses = [dict(scan=k['scan'],seconds=k['seconds'],quality=k.get('face_quality') or '{}')
+                             for k in (first,r)]
+                if (first.get('face_person')==owner and count(witnesses)>=2 and
+                    all(k.get('face_person') in (None,owner) for k in middle)):
+                    questionable.difference_update(k['id'] for k in middle if k.get('face_person')==owner
+                                                   and k['id'] not in contradicted)
+            previous = i
     return questionable
 
 
@@ -121,3 +143,30 @@ def joint_body_claims(rows, decisions, rankings, settings, *, reflection_thresho
                 else:
                     target.update(person=owner,status='accepted',role='auxiliary',reason='joint_body_claim',
                                   score=score,witness_ids=[r['id'] for r in bank[:8]])
+
+
+def bridge_faces(graph, decisions, settings, uncertain, guard):
+    """Attach strong bodies between independent strict facial observations."""
+    from .body_identity import anchor, quality
+    from .independent_evidence import count
+    for chain,strengths in graph:
+        last = None
+        for i,row in enumerate(chain):
+            if not row.get('face_anchor') or row['id'] in uncertain:
+                continue
+            if last is not None and 1<i-last<=6:
+                first = chain[last]
+                owner = decisions[row['id']]['person']
+                between = chain[last+1:i]
+                refs = [dict(scan=k['scan'],seconds=k['seconds'],quality=k.get('face_quality') or '{}')
+                        for k in (first,row)]
+                if (owner and decisions[first['id']]['person']==owner and count(refs)>=2
+                    and min(strengths[last:i])>=settings['match_threshold']
+                    and all(k['id'] not in uncertain and not quality(k).get('query_only')
+                            and decisions.get(k['id'],{}).get('person',owner)==owner for k in between)):
+                    for k in between:
+                        if (k['id'] not in decisions and anchor(k,settings)
+                            and guard.allows(k,[first,row],owner)):
+                            decisions[k['id']] = dict(person=owner,status='accepted',role='auxiliary',
+                                reason='adjacent_face_body_bridge',witness_ids=[first['id'],row['id']])
+            last = i

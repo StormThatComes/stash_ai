@@ -140,7 +140,7 @@ def planned(db, items, config, *, ids_only=False):
         if room:
             from .body_identity import anchor
             owners = {frozen[2][row['face_person']] for row in rows if row['face_person'] is not None
-                      and row['face_anchor'] and anchor(row,settings)}
+                      and row['face_anchor']}
             faces, admitted = _witnesses(db, owners, room, cache, witness_generation, charge)
             if faces is None:
                 _prepare_vectors(rows)
