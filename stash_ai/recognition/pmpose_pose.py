@@ -64,7 +64,8 @@ def _load_model(config, device):
     model = model.float().to(device).eval()
     pose = PMPose(model, device=device, batch_size=config.data['sapiensid']['pose']['pmpose_batch_size'],
                   fused_flip=config.data['execution']['pmpose_fused_flip'],
-                  precision=config.data['execution']['pmpose_precision'])
+                  precision=config.data['execution']['pmpose_precision'],
+                  check_flip=config.data['sapiensid']['pose']['refinement']['enabled'])
     return pose
 
 
@@ -74,7 +75,7 @@ def _pipeline(pose, config, device):
     settings = config.data['sapiensid']['pose'].get('refinement', {})
     from .inference_cache import current
     if current() is not None:
-        pose=RawPMPose(pose,device,precision=config.data['execution']['pmpose_precision'])
+        pose=RawPMPose(pose,device,precision=config.data['execution']['pmpose_precision'], check_flip=settings.get('enabled', False))
     refined = None
     if settings.get('enabled', False):
         from .sam_pose2seg import load as load_segmenter
@@ -94,13 +95,14 @@ def _pipeline(pose, config, device):
 
 class PMPose:
     supports_masked_batches = True
-    def __init__(self, model, *, device, batch_size, fused_flip=True, precision='fp32'):
+    def __init__(self, model, *, device, batch_size, fused_flip=True, precision='fp32', check_flip=False):
         from .adaptive_gpu import Batches
         self.model, self.device, self.batch_size = model, device, batch_size
         self.batches=Batches(batch_size,'PMPose')
         from .inference_precision import validate
         validate(device,precision)
         self.fused_flip=fused_flip
+        self.check_flip = check_flip
         self.precision=precision
 
     def resident_modules(self):return [self.model]
@@ -122,7 +124,8 @@ class PMPose:
             count = len(bounds)
             result.append((np.empty((count, 17, 2), dtype=np.float32),
                            np.empty((count, 17), dtype=np.float32),
-                           {key: np.empty((count, 17), dtype=np.float32) for key in ('presence', 'visibility')}))
+                           {key: np.empty((count, 17), dtype=np.float32) for key in (('presence', 'visibility', 'flip_agreement')
+                                       if self.check_flip else ('presence', 'visibility'))}))
             if not count:
                 continue
             boxes = np.asarray(bounds, dtype=np.float32)
@@ -158,7 +161,16 @@ class PMPose:
                 points=[decode(h,c,s) for h,c,s in zip(values[0].cpu().numpy(),centers,scales)]
             with pipeline_timing('pmpose_probability_readback'):
                 scores,presence,visibility=torch.stack(values[1:]).cpu().numpy()
-            return list(zip(points,scores,presence,visibility))
+            extras = []
+            if self.check_flip:
+                # Compare peak locations after restoring anatomical labels and image orientation.
+                maps = output[0]
+                mirrored = flipped[0][:, registry.FLIP].flip(-1)
+                width, height = maps.shape[-1], maps.shape[-2]
+                a, b = maps.flatten(2).argmax(-1), mirrored.flatten(2).argmax(-1)
+                dx, dy = ((a % width)-(b % width))/width, ((a // width)-(b // width))/height
+                extras.append((1 - torch.hypot(dx, dy) / .20).clamp(0,1).cpu().numpy())
+            return list(zip(points,scores,presence,visibility,*extras))
 
         # A single future owns at most one additional batch of CPU crops.
         if not jobs:return result
@@ -175,7 +187,9 @@ class PMPose:
                 queued=jobs[position:position+self.batches.maximum]
                 pending=pool.submit(pipeline_bind(prepare_batch),queued) if pool is not None and queued else None
                 outputs=self.batches.run(prepared,infer,self.device)
-                for ((frame,index,_,_),_), (points,scores,presence,visibility) in zip(prepared,outputs):
+                for ((frame,index,_,_),_), (points,scores,presence,visibility,*extra) in zip(prepared,outputs):
+                    if extra:
+                        result[frame][2]['flip_agreement'][index] = extra[0]
                     result[frame][0][index]=points;result[frame][1][index]=scores
                     result[frame][2]['presence'][index]=presence;result[frame][2]['visibility'][index]=visibility
         return result
