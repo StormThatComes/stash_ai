@@ -381,6 +381,44 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 
+def competing_claims(db, proposals, config):
+    from itertools import combinations
+    from .independent_evidence import Votes
+    from .pose_policy import anchor_sql
+    from .reference_roles import strict_sql
+    from functools import lru_cache
+    settings = config.data['recognition']
+    @lru_cache(maxsize=256)
+    def supported(source):
+        votes = Votes()
+        for row in db.execute("SELECT o.scan,o.seconds,o.quality FROM members m JOIN observations o ON o.id=m.observation "
+                "WHERE m.person=? AND o.rejected IS NULL AND "+anchor_sql('o',config.data['clustering'])+
+                " AND "+strict_sql(),(source,)):
+            votes.add(row)
+            if len(votes)>=max(2,settings['min_identity_support']):
+                return True
+        return False
+    blocked = set()
+    by_target = {}
+    for source,(target,_) in proposals.items():
+        by_target.setdefault(target,[]).append(source)
+    for sources in by_target.values():
+        for left,right in combinations(sorted(sources),2):
+            if not _cooccurs(db,left,right,config):
+                continue
+            a,b = proposals[left][1],proposals[right][1]
+            if a.get('mode')!=b.get('mode') or 'mean_score' not in a or 'mean_score' not in b:
+                blocked.update((left,right))
+                continue
+            winner,loser = (left,right) if a['mean_score']>b['mean_score'] else (right,left)
+            margin = max(settings['ambiguity_margin'],a.get('ambiguity_margin',0),b.get('ambiguity_margin',0))
+            blocked.add(loser)
+            gap = abs(a['mean_score']-b['mean_score'])
+            if gap==0 or gap<margin or not supported(winner):
+                blocked.add(winner)
+    return blocked
+
+
 def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=(),excluded_views=()):
     """Freeze global proposals; durable changes wait for the final transaction."""
     history=history or capture(database.connection,selected,config,scope,namespace,fingerprint,resolve_aliases=False)
@@ -441,15 +479,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             proposals[group.identifier]=result
     groups=[group for group in groups if group.identifier not in deferred]
     # Two distinct co-present faces cannot both adopt the same historical label.
-    blocked=set()
-    by_target={}
-    for source,(target,_) in proposals.items():
-        by_target.setdefault(target,[]).append(source)
-    for sources in by_target.values():
-        for offset,left in enumerate(sources):
-            for right in sources[offset+1:]:
-                if _cooccurs(replay,left,right,config):
-                    blocked.update((left,right))
+    blocked = competing_claims(replay,proposals,config)
     bindings={}
     for source,(target,proof) in proposals.items():
         if source in blocked:

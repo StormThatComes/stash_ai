@@ -58,7 +58,7 @@ def orientation(person):
     return orientation_measurement(person)['label']
 
 
-def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut_starts=(), entrants=None, graph=None):
+def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut_starts=(), entrants=None, graph=None, motion=''):
     """Build one generation of auxiliary claims. No recovered sample becomes an anchor."""
     from .body_identity import quality
     if not seeds and not any(quality(r).get('orientation') in ('side','unknown') for r in rows):
@@ -130,6 +130,9 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                           (np.abs(sa-sb).mean() <= 8 or camera_offsets[pair] is not None))
         else:
             continuous = shot_ids[a['cue']]==shot_ids[b['cue']] and boundary[b['cue']] == 'continuous'
+        if (not continuous and qa.get('view_shot') is not None and qa['view_shot']==qb.get('view_shot')
+                and 0<=a['cue']<b['cue']<len(motion)):
+            continuous = all(bit=='1' for bit in motion[a['cue']+1:b['cue']+1])
         if not continuous:
             if not diagnose:
                 return None
