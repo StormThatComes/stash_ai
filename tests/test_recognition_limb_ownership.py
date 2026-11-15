@@ -48,3 +48,12 @@ def test_reliable_output_joint_can_be_below_the_sam_seed_floor():
     records = [dict(detector_bounds=BOX, separated=False)]
     model._apply_second_pass([(0,BOX,np.ones((100,160),bool),[0,1])],result,records,raw,refined)
     assert result[1][0,9] == refined[1][0,9]
+
+
+def test_occluded_hip_does_not_drop_a_supported_knee_and_ankle():
+    raw = prediction([pose_points(),pose_points()])
+    refined = prediction([pose_points()])
+    mask = np.ones((100,160),bool)
+    mask[59:62,29:32] = False
+    xy,scores,_,_ = fuse(0,0,raw,refined,mask,BOX,wrapper().settings)
+    assert scores[11] == 0 and scores[13] > 0 and scores[15] > 0

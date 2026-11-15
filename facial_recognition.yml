@@ -132,8 +132,8 @@ pose:
     adaptive_decoder_retries: true
     # Try up to two ownership-guided SAM retries per rejected person using the same image features.
     min_recovery_mask_score: null
-    # Minimum SAM score for a limb, face or below-minimum seed rescue. Null uses the midpoint between min_mask_score
-    # and 1. Range: 0..1 or null.
+    # Minimum SAM score for sparse seed recovery or contact expansions without independent core support.
+    # Null uses the midpoint between min_mask_score and 1. Range: 0..1 or null.
     recover_prompt_points: true
     # Recover sparse SAM prompts with distinct limbs, matched face landmarks or a single strong point.
     min_prompt_points: 2

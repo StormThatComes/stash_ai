@@ -43,6 +43,16 @@ def fuse(i, offset, original, refined, mask, box, settings):
         if confidence[parent] > 0:
             samples = np.linspace(joints[parent], point, 7)[1:-1]
             return inside(mask, samples).sum() >= 4
+        if parent in (5,6,11,12):
+            # At contact a hip or shoulder can fall just outside its own mask.
+            # Two agreeing roots and an uninterrupted foreground segment support
+            # the next joint even if the root itself was withheld.
+            root = new_xy[offset,parent]
+            if (new_scores[offset,parent] > settings['min_keypoint_score']
+                    and raw_scores[i,parent] > settings['min_keypoint_score']
+                    and np.linalg.norm(raw_xy[i,parent]-root) <= tolerance
+                    and inside(mask,np.linspace(root,point,7)[1:]).all()):
+                return True
         # A disconnected endpoint requires agreement of two independent crops.
         other_xy = raw_xy[i,joint] if source == 'masked' else new_xy[offset,joint]
         other_score = raw_scores[i,joint] if source == 'masked' else new_scores[offset,joint]

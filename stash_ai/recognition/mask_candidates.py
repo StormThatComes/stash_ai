@@ -218,6 +218,11 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 recovery_floor = settings.get('min_recovery_mask_score')
                 if recovery_floor is None:
                     recovery_floor = (1 + settings['min_mask_score']) / 2
+                if reason is None and peers and box != list(bounds[i]):
+                    # An expanded mask in contact can be supported only by the
+                    # very seeds that generated it. Treat it like a sparse rescue.
+                    unused = [k for k in record.get('support_indices', cores[i]) if k not in indices]
+                    rescued |= not inside(mask, points[i, unused]).any()
                 if reason is None and rescued and score < recovery_floor:
                     reason = 'weak_recovery_mask'
                 record['reason'] = reason
