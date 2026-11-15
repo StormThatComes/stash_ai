@@ -686,22 +686,28 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         body=next(k for k,v in ui.rows.items() if v['id']=='rejected-body')
         ui.listing.selection_set(body)
         root.update()
-        def toggle_body_mask():
+        def apply_mask_layers(*, toggle=False):
             ui.layer_dialog()
             dialog = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.title() == 'Geometry layers')
             controls = {w.cget('text'): w for w in dialog.winfo_children()}
-            controls['Body mask'].invoke()
+            if toggle:
+                controls['Body mask'].invoke()
             controls['Apply'].invoke()
 
         ui.show_geometry.set(False)
-        toggle_body_mask()
+        apply_mask_layers(toggle=True)
         release.set()
         wait_for(lambda: 'Reconstructed from VTT' in ui.images.panels['A'].caption.get())
         panel = ui.images.panels['A']
         wait_for(lambda: 'Recorded quality mask' in panel.caption.get())
         raw = ui.preview_data['A']['image'][0].getpixel((10, 10))
         assert panel.image.getpixel((10, 10)) != raw
-        toggle_body_mask()
+        ui.show_geometry.set(False)
+        ui.toggle_geometry()
+        assert panel.image.getpixel((10, 10)) == raw
+        apply_mask_layers()
+        wait_for(lambda: panel.image.getpixel((10, 10)) != raw)
+        apply_mask_layers(toggle=True)
         wait_for(lambda: panel.image.getpixel((10, 10)) == raw)
         assert ui.images.panels['A'].image.size==(70,110)
         assert ui.face_visibility_button.instate(['disabled'])

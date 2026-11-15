@@ -87,22 +87,27 @@ def _read_masks(database, shapes):
     if database is None or not ids:
         return {}
     with closing(open_readonly(database)) as db:
-        if db.execute('PRAGMA user_version').fetchone()[0] < 18:
-            return {}
-        rows = db.execute("SELECT b.id, m.mask, json_extract(b.quality,'$.quality.sharpness_method') "
-                          "FROM body_observations b LEFT JOIN body_quality_masks m ON m.observation=b.id "
+        masks_available = db.execute('PRAGMA user_version').fetchone()[0] >= 18
+        payload = 'm.mask' if masks_available else 'NULL'
+        join = 'LEFT JOIN body_quality_masks m ON m.observation=b.id' if masks_available else ''
+        rows = db.execute(f"SELECT b.id, {payload}, json_extract(b.quality,'$.quality.sharpness_method'), "
+                          f"json_extract(b.quality,'$.mask_replay') FROM body_observations b {join} "
                           "WHERE b.id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
-        return {address: (mask, method) for address, mask, method in rows}
+        return {address: (mask, method, replay) for address, mask, method, replay in rows}
 
 
 def _draw_mask(image, data, record, transform):
     from .retained_body_masks import mask_image
-    payload, method = record
+    payload, method, replay = record
     if payload is None:
         if method == 'unavailable':
             refinement = data.get('pose_refinement') or {}
             reason = 'mask_conflict' if refinement.get('mask_conflict') else refinement.get('reason')
             return 'No quality mask' + (f' ({reason})' if reason else '')
+        if replay == 'measurement_mismatch':
+            return 'Mask not retained · SAM replay differed from the recorded measurement'
+        if method == 'sam_mask' and (data.get('pose_refinement') or {}).get('prompt_points'):
+            return 'Mask not retained · rerun recognition for this scene with storage.retain_body_masks enabled'
         return 'Mask not retained'
     x, y, right, bottom = data['bounds']
     try:
@@ -111,7 +116,7 @@ def _draw_mask(image, data, record, transform):
                 image.paste(COLORS['body'], (0, 0, *image.size), alpha)
     except (ValueError, TypeError, OverflowError, zlib.error):
         return 'Stored mask unreadable'
-    return 'Recorded quality mask'
+    return 'Replayed quality mask' if replay == 'verified' else 'Recorded quality mask'
 
 
 def render(image, geometry, layers=None, *, database=None):
@@ -155,7 +160,7 @@ def render(image, geometry, layers=None, *, database=None):
         mask_label = ''
         if kind == 'body' and layers.get('masks'):
             transform = (1/sx, 0, left-box[0], 0, 1/sy, top-box[1])
-            mask_label = ' · ' + _draw_mask(annotated, data, masks.get(shape.get('id'), (None, None)), transform)
+            mask_label = ' · ' + _draw_mask(annotated, data, masks.get(shape.get('id'), (None, None, None)), transform)
         if kind == 'body' and len(mapped) == 17 and layers.get('skeleton'):
             for a,b in SKELETON:
                 if mapped[a] is not None and mapped[b] is not None:

@@ -302,5 +302,9 @@ rejected observations as well as accepted ones, independently of crop retention
 and encoder masking. Inspect Scene reads them when the Body mask layer is enabled.
 Deleting a body observation also deletes its mask.
 
-Existing databases upgrade on the next writable open. Cached cues keep their
-original evidence. Setting this option affects newly collected observations.
+For an earlier run with a measured mask but no bitmap, run recognition for
+the affected scene with this option enabled. The **Restore SAM body masks**
+stage reuses the recorded positive and negative prompts on the verified VTT
+cue. It saves the replay when the foreground area, body crop digest and masked
+sharpness measurements agree. A mismatch is recorded once and the bitmap
+stays absent. Cues with stored masks or no measured mask need no replay.

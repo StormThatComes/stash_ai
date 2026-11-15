@@ -36,7 +36,7 @@ def overlaps(box, other, threshold):
     return intersection > 0 and intersection / area >= threshold
 
 
-def _retain_quality_mask(record, mask, bounds):
+def retain_quality_mask(record, mask, bounds):
     left, top, right, bottom = bounds
     packed = np.packbits(mask[top:bottom, left:right], axis=None)
     if packed.any():
@@ -55,6 +55,9 @@ class RefinedPMPose:
         from .resident_models import release
         from stash_ai.runtime.cleanup import cleanup
         cleanup([('close raw pose',lambda:release(self.pose)),('close segmenter',lambda:release(self.segmenter))])
+
+    def mask_frame(self, image):
+        return self.segmenter.frame(image)
 
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
@@ -185,7 +188,7 @@ class RefinedPMPose:
                 # boxes, reuse SAM only when its torso ownership was established.
                 has_neighbours = 'negative_points' in record
                 if 'temporal_prompts' not in record and (not has_neighbours or record['separated']):
-                    _retain_quality_mask(record, mask, old)
+                    retain_quality_mask(record, mask, old)
                 continue
             from .limb_ownership import fuse
             joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.joint_quality)
@@ -193,7 +196,7 @@ class RefinedPMPose:
                 records[i]['restored_first_pass_joints'] = restored
             # Quality needs the validated mask even when encoder masking is off.
             # Both fields share one packed crop. Collection stores the quality mask separately from JSON.
-            _retain_quality_mask(records[i], mask, box)
+            retain_quality_mask(records[i], mask, box)
             if records[i].get('overlap_mask') and records[i].get('separated') and self.settings.get('masked_identity_crop'):
                 records[i]['encoder_mask'] = records[i]['overlap_mask']
             result[0][i], result[1][i] = joints, confidence

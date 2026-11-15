@@ -102,6 +102,7 @@ class Stage:
     def predict_frames(self,frames):return self.invoke('predict_frames',frames)
     def refine_frames(self,frames,process):return self.invoke('refine_frames',frames,process)
     def predict_options(self,positive,negative):return self.invoke('predict_options',positive,negative)
+    def mask_frame(self,image):return self.invoke('mask_frame',image)
     def frame(self,image):return self.invoke('frame',image)
 
     def close(self):

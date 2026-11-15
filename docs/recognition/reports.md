@@ -516,8 +516,11 @@ points and skeletons. Enable **Body mask** in **Geometry layers…** to overlay 
 recorded SAM quality mask on the crop or full cue. This works for accepted and
 rejected body observations, including a body linked to a selected face. Each
 body caption identifies its mask or gives the recorded reason it was unavailable.
-**Mask not retained** means the pixels are absent, for example for an earlier
-run or when `storage.retain_body_masks` was disabled. Hover over points for source
+**Mask not retained** means the pixels are absent. If that observation has
+recorded SAM prompts and a mask measurement, enable `storage.retain_body_masks`,
+run recognition for that scene, then choose **Load / refresh**. A recovered bitmap
+is labeled **Replayed quality mask**. **No quality mask (no_reliable_prompts)**
+means SAM had no usable prompts for that pose. Hover over points for source
 coordinates and retained confidence. Missing masks or point confidence are
 explicitly unavailable; browsing never runs models or changes recognition data.
 
