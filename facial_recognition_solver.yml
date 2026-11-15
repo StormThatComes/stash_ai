@@ -129,6 +129,8 @@ pose:
     # or null.
     min_visibility: null
     # Minimum prompt visibility. Null inherits pose.point_quality. Range: 0..1 or null.
+    recover_prompt_points: true
+    # Recover sparse SAM prompts with distinct limbs, matched face landmarks or a single strong point.
     min_prompt_points: 2
     # Reliable head/torso points required for the first SAM attempt. Range: 1..8.
     max_prompt_points: 3

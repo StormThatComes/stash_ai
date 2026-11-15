@@ -4,7 +4,7 @@
 def defaults():
     return dict(enabled=False, directory='', mode='all', overlap_threshold=.2,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
-                min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
+                recover_prompt_points=False, min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
                 min_prompt_coverage=1., max_foreign_coverage=0.,
                 masked_identity_crop=False, expand_boxes=True, max_box_area_ratio=2., max_side_expansion=.5)
 
@@ -13,7 +13,7 @@ def validate(pose):
     from .config import _number
     settings = pose['refinement']
     prefix = 'sapiensid.pose.refinement.'
-    for key in ('enabled', 'expand_boxes', 'masked_identity_crop'):
+    for key in ('enabled', 'expand_boxes', 'masked_identity_crop', 'recover_prompt_points'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
     if settings['masked_identity_crop'] and not settings['enabled']:
@@ -39,7 +39,7 @@ def validate(pose):
 
 def contract(settings):
     from . import sam_pose2seg_registry as registry
-    return dict(version='pmpose-sam-pose2seg-refinement-v4',
+    return dict(version='pmpose-sam-pose2seg-refinement-v5',
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,
                 **{k: v for k, v in settings.items() if k != 'directory'})

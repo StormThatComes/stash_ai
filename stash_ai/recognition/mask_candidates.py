@@ -123,7 +123,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             for i, available, foreign in active:
                 record = records[i]
                 attempt = record.get('mask_attempts', 0) + 1
-                indices = available[:minimum + attempt - 1]
+                indices = available[:record.get('prompt_minimum', minimum) + attempt - 1]
                 positive, peers, negative = owner._prompts(bounds, points, cores, i, indices)
                 neighbours[i] = peers
                 if supplied is not None:
@@ -138,6 +138,9 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                     record['negative_points'] = np.asarray(negative).tolist()
                 mask, box, reason = check_mask(mask, score, positive, foreign, bounds[i], settings,
                                               image.size, observe=mask_observer(image, record))
+                holdout = [k for k in record.get('support_indices', ()) if k not in indices]
+                if reason is None and holdout and not inside(mask, points[i, holdout]).any():
+                    reason = 'missing_independent_support'
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
                 record['separated'] = False

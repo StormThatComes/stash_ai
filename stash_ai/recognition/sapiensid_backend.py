@@ -169,7 +169,8 @@ class SapiensIDFaces(YuNetDetector):
                 if _defer is not None:
                     _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))
                     return faces
-                with pipeline_timing('pose_estimation'):
+                from .prompt_recovery import face_inputs
+                with pipeline_timing('pose_estimation'), face_inputs([(image, faces)]):
                     prediction = self.pose_refiner.predict(image, bounds)
             else:
                 points = result.keypoints.xy.detach().cpu().numpy()
@@ -299,7 +300,8 @@ class SapiensIDFaces(YuNetDetector):
             self.detect(image,faces=faces,_result=detections.get(id(image)),_defer=deferred if batched else None)
             if not batched:prepared[id(image)]=image,faces,self.frame_people
         if batched:
-            with pipeline_timing('pose_estimation'):
+            from .prompt_recovery import face_inputs
+            with pipeline_timing('pose_estimation'), face_inputs((image, faces) for image, faces, _, _ in deferred):
                 predictions=self.pose_refiner.predict_many([(image,bounds) for image,_,bounds,_ in deferred])
             if len(predictions)!=len(deferred):
                 raise ValueError('Pose refiner returned an invalid frame count.')
