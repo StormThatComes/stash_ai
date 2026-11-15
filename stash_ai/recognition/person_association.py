@@ -4,7 +4,7 @@ import math
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='contact-head-ownership-v7', containment_tolerance=.05,
+    return dict(version='contact-head-ownership-v8', containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -70,7 +70,9 @@ def association_rejection(face, person):
 
 
 def confirmed_in_contact(face, person, people):
-    left, top, right, bottom = person['bounds']
+    x,y,w,h = face.box
+    # A peer must encroach on the head to challenge ownership of this face.
+    left, top, right, bottom = x,y,x+w,y+h
     contact = any(min(right, p['bounds'][2]) > max(left, p['bounds'][0]) and
                   min(bottom, p['bounds'][3]) > max(top, p['bounds'][1])
                   for p in people if p is not person)

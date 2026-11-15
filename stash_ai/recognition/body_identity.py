@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v45-turn-episodes',contract(config),matching_policy(config),
+    return digest(['body-local-v49-rival-recovery',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -66,31 +66,40 @@ def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:Non
     """At most one witness per scan/cue; repeated pixels cannot add support."""
     from .independent_evidence import body_vote,unit,Votes,stamp
     from .paged_references import rows as page_rows
-    from .appearance_index import AppearanceIndex
-    votes=Votes();hashes=AppearanceIndex();pixels={};seen=set()
+    votes=Votes();seen=set()
     save=page_rows if paged else list
+    distance=settings['min_appearance_distance']
+    class_bytes=0
+    if distance:
+        # Freeze fingerprint classes before cue matching. A bridge hash must not
+        # consume two otherwise independent observations just because it came first.
+        rows=save(rows)
+        by_pixel={}
+        for row in rows:
+            value=quality(row).get('appearance_hash')
+            if value:
+                pixel=unit(body_vote(row))
+                number=int(value,16)
+                by_pixel[pixel]=min(number,by_pixel.get(pixel,number))
+        from .appearance_index import canonical_buckets
+        classes=canonical_buckets(set(by_pixel.values()),distance)
+        from .memory_size import size
+        class_bytes=size([by_pixel,classes])
+        reserve(class_bytes)
     def candidates():
         charge=0;count=0
         for row in (rows if presorted else sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id']))):
             if row['id'] in seen:continue
             seen.add(row['id'])
-            q=quality(row)
             vote=body_vote(row);physical=unit(vote)
-            hashed=q.get('appearance_hash')
-            hashed=int(hashed,16) if hashed else None
-            fingerprint=pixels.get(physical)
-            if fingerprint is None and hashed is not None:
-                fingerprint=hashes.first(hashed,settings['min_appearance_distance'])
-            if fingerprint is None:
-                fingerprint=encoded(physical)
-                if hashed is not None and settings['min_appearance_distance']>0:hashes.add(hashed,fingerprint)
-            pixels[physical]=fingerprint
+            fingerprint=(f'appearance:{classes[by_pixel[physical]]:016x}' if distance and physical in by_pixel
+                         else encoded(physical))
             # Retain every cue edge of an appearance. A greedy representative can
             # consume the sole cue of a different, otherwise independent crop.
             vote=dict(vote,quality=encoded({'quality':{'pixel_digest':fingerprint}}))
             votes.add(vote);count+=1
             from .memory_size import size
-            charge=size([vars(votes),hashes.nodes,pixels,seen]) if count & (count-1)==0 else charge+2048
+            charge=class_bytes+size([vars(votes),seen]) if count & (count-1)==0 else charge+2048
             reserve(charge)
             yield dict(row=row,pixel=unit(vote),stamp=stamp(vote))
     candidates=save(candidates())
@@ -283,9 +292,11 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     record['cut_starts'] = tuple(start for start,shot in json.loads(shot_map[0]) if shot is not None) if shot_map else ()
     if not record['cut_starts']:
         record['cut_starts'] = tuple(sorted({q for r in rows if isinstance(q:=quality(r).get('view_shot'),int)}))
-    record['occupied_cues'] = [r[0] for r in db.execute(
-        'SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION SELECT cue FROM observations WHERE scan=?',
-        (scan,expected,scan))]
+    from .cue_gaps import blockers
+    record['gap_boxes'] = blockers(db,scan,expected)
+    record['occupied_cues'] = sorted(record['gap_boxes'])
+    motion = db.execute('SELECT value FROM metadata WHERE key=?',('cue-continuity:'+scan,)).fetchone()
+    record['motion'] = motion[0] if motion else ''
     return record,rows,roots,origins,ordered_owners(db,origins)
 
 
@@ -317,10 +328,10 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     graph = None
     if settings.get('tracklet_matching') and settings.get('body_first_matching'):
         from .body_tracklets import paths
-        graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph')))
+        graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph'), gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
     seeds={};decisions={}
     from .contact_anchors import questionable_links
-    uncertain = questionable_links(rows,settings,scores)
+    uncertain = questionable_links(rows,settings,scores,graph)
     for row in rows:
         if row['face_person'] is None:continue
         person=roots[row['face_person']]
@@ -332,6 +343,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
                                   reason='measured_face_association')
         if strong:seeds.setdefault(person,[]).append(row)
+    if graph:
+        from .contact_anchors import bridge_faces
+        bridge_faces(graph,decisions,settings,uncertain,guard)
     # Face-linked bodies are frozen before processing faceless queries.
     for row in rows:
         if quality(row).get('query_only_reason') == 'unresolved_partner' and row['id'] not in decisions:
@@ -344,7 +358,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     frozen=FrozenSeeds(seeds,scores,settings) if queries or review_faces else None
     if graph is None and turn_feature(settings,'extended_track_graph'):
         from .body_tracklets import paths
-        graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True))
+        graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True, gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
     anonymous = {}
     track_lineage = {}
     if settings.get('tracklet_matching') and (queries or review_faces):
@@ -365,7 +379,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             good=admissible and mean-runner>=settings['ambiguity_margin']
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
-                score=mean,minimum=minimum,runner=runner,rival=rival,threshold=settings['match_threshold'],
+                score=mean,minimum=minimum,runner=runner,rival=rival,query_owner=person,threshold=settings['match_threshold'],
                 required_margin=settings['ambiguity_margin'], cohesion_threshold=settings['cohesion_threshold'],
                 reference_count=len(bank), witness_ids=[w['id'] for w in bank[:8]])
             cue_choices[row['id']] = ranked
@@ -377,6 +391,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold']))
     borderline = [r for r in borderline if decisions[r['id']]['status']=='withheld']
     groups=[];weak=[]
+    from .body_seed_modes import paired_order
+    if settings.get('body_first_matching'):
+        remaining=paired_order(remaining,settings,scores,guard)
     for row in remaining:
         if not anchor(row,settings):weak.append(row);continue
         # With one possible owner there is no rival ordering to approximate.
@@ -411,12 +428,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                     and not copresent([row],other) and guard.allows(row,other)]
             if rivals:
                 mean,minimum=scores.compare([row],group)
-                runner=max(scores.compare([row],other)[0] for other in rivals)
+                runner, rival_index=max((scores.compare([row],other)[0],i) for i,other in enumerate(rivals))
                 # A dense ambiguous appearance cannot raise its own mean
                 # enough to overrule the original group's weaker witnesses.
                 if minimum-runner<settings['ambiguity_margin']:
                     decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',
-                        reason='body_group_competing_identity',score=mean,minimum=minimum,runner=runner)
+                        reason='body_group_competing_identity',score=mean,minimum=minimum,runner=runner,
+                        competing_witnesses=[next((r['id'] for r in group if r['id']!=row['id']),None),rivals[rival_index][0]['id']])
                     continue
             keep.append(row)
         if keep:retained.append(keep)

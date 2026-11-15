@@ -69,6 +69,7 @@ def _previous_contracts(config):
             _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False),
             _contract(config,'independent-person-v4-independent-torso'),
             _contract(config,'independent-person-v3-perspective'),
+            _contract(config,'independent-person-v3-perspective',legacy_association='v7'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, old_mask, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)
@@ -137,6 +138,8 @@ def coverage(db,config,scans):
 
 def copy_evidence(source,target,scan):
     if not available(source):return
+    target.executemany('INSERT OR REPLACE INTO metadata VALUES (?,?)',
+        source.execute('SELECT key,value FROM metadata WHERE key IN (?,?)',('cue-continuity:'+scan,'cue-view-shots:'+scan)))
     target.executemany('INSERT OR REPLACE INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         source.execute('SELECT id,scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,NULL '
                        'FROM body_observations WHERE scan=?',(scan,)))

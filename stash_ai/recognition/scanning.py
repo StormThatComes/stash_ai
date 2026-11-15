@@ -20,6 +20,12 @@ from .pose_policy import measurement_required
 def scan_identity(config, namespace):
     visibility_contract = CONTRACT_ID if measurement_required(config) else None
     detection = dict(config.data['detection'])
+    from .rotated_faces import enabled
+    if enabled(config):
+        from .body_observations import contract
+        detection['pose_guided_rotation'] = ['rotated-head-v1',contract(config)]
+    else:
+        detection.pop('pose_guided_rotation',None)
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
         detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
     return digest({'namespace': namespace, 'detection': detection,
@@ -123,6 +129,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     saved = db.execute('SELECT value FROM metadata WHERE key=?',(shots_key,)).fetchone()
     shots = json.loads(saved[0]) if saved else []
 
+    saved_motion = db.execute('SELECT value FROM metadata WHERE key=?',('cue-continuity:'+identifier,)).fetchone()
+    motion = list((saved_motion[0] if saved_motion else '')[:cursor].ljust(cursor,'0'))
     from .scan_writes import Writer
     writer = Writer(database, collector, lambda value: progress(scanned=value, total=record['total'],
                     scene=str(scene['id'])), config.data['execution']['scan_cpu_workers'] > 1 and (grouped or on_cue is None))
@@ -130,7 +138,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     def checkpoint():
         nonlocal pending_bytes, pending
         supplemental = collector.take_records() if grouped else []
-        writer.submit((identifier, cursor, pending, supplemental, tuple(shots), shot_state))
+        writer.submit((identifier, cursor, pending, supplemental, tuple(shots), shot_state, ''.join(motion)))
         pending = []
         pending_bytes = 0
 
@@ -149,8 +157,9 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                     for index, cue, records in process_cues(batch, backend, visibility, config, stage=cpu,
                             assess=assess,rejection=rejection,crop_bytes=crop_bytes,geometry_contract=geometry_contract):
                         image = images[index]
-                        next_shot = advance(image,index,shot_state)
-                        image._recognition_cue_signature = next_shot
+                        next_shot = advance(image,index,shot_state,evidence=True)
+                        motion.append('1' if next_shot[4] else '0')
+                        image._recognition_cue_signature = next_shot[:3]
                         start=len(pending)
                         for face_index, face, quality, reason, vector, crop in records:
                             if next_shot[1] is not None:

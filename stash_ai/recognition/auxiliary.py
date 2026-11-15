@@ -2,6 +2,7 @@
 
 Attachments are not reference samples, new identities, or merge votes.
 """
+import json
 import uuid
 
 from .clustering import _groups, vector, co_presence_allows, matching_policy
@@ -124,6 +125,33 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
         _attach_confirmed_views(db, selected, config, policy, groups, usage, cache,reference_views)
 
 
+def distinct_anchored_peers(db, row, grouping, reflection_threshold):
+    import math
+    def box(record):
+        try:
+            x,y,w,h = json.loads(record['geometry'])[:4]
+            if min(w,h)>0 and all(math.isfinite(n) for n in (x,y,w,h)):
+                return x,y,x+w,y+h
+        except (ValueError,TypeError):
+            pass
+        return None
+    from .reference_roles import strict_sql
+    current = box(row)
+    if current is None:
+        return {}
+    query = vector(row)
+    taken = {}
+    for peer in db.execute("SELECT o.id,o.geometry,o.dimensions,o.embedding,m.person FROM observations o JOIN members m ON m.observation=o.id "
+            "WHERE o.scan=? AND o.cue=? AND o.id<>? AND o.rejected IS NULL AND "+anchor_sql('o',grouping)+
+            " AND "+strict_sql(),(row['scan'],row['cue'],row['id'])):
+        other = box(peer)
+        if other is None or float(query @ vector(peer))>=reflection_threshold:
+            continue
+        if any(min(current[i+2],other[i+2])<=max(current[i],other[i]) for i in (0,1)):
+            taken.setdefault(peer['person'],[]).append(peer['id'])
+    return taken
+
+
 def _view_probe(db, candidate, reason):
     db.execute(
         "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe',?) "
@@ -162,9 +190,9 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
         scan = item['scan']
         source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
                   "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
-                  "AND json_extract(c.payload,'$.reason') IN ('auxiliary_unmatched','prior_attachment_query','insufficient_match_or_cohesion',"
+                  "AND json_extract(c.payload,'$.reason') IN ('auxiliary_ambiguous','auxiliary_unmatched','prior_attachment_query','insufficient_match_or_cohesion',"
                   "'candidate_group','anchor_view_insufficient_support','global_view_insufficient_support')")
-        rows = db.execute('SELECT o.*,c.id AS candidate ' + source +
+        rows = db.execute("SELECT o.*,c.id AS candidate,json_extract(c.payload,'$.reason') AS prior_reason " + source +
                           ' ORDER BY o.cue,o.geometry,o.embedding,o.id', (scan, policy))
         total = db.execute('SELECT COUNT(*) ' + source, (scan, policy)).fetchone()[0]
         with tracking(scored_rows(rows, groups, threshold-margin),
@@ -188,6 +216,11 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
                         by_person[group.identifier] = (mean, group, view, lowest)
+                occupied = {}
+                if row['prior_reason']=='auxiliary_ambiguous':
+                    occupied = distinct_anchored_peers(db,row,grouping,settings['cooccurrence_merge_threshold'])
+                    for other in occupied:
+                        by_person.pop(other,None)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
                 if not ranked:
                     if saw_cohesion:
@@ -204,15 +237,17 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                     _view_probe(db, row['candidate'], 'pose_mismatch')
                     continue
                 from .anchor_views import _competing_anchor
-                if _competing_anchor(anchors,person,query,score,margin):
+                if _competing_anchor((g for g in anchors if g.identifier not in occupied),person,query,score,margin):
                     _view_probe(db,row['candidate'],'competing_identity')
                     continue
                 if not co_presence_allows(db, row, group, groups, query, config,
                                           peer_threshold=threshold,
-                                          cohesion_threshold=grouping['view_cohesion_threshold']):
+                                          cohesion_threshold=grouping['view_cohesion_threshold'],
+                                          resolved_peers={oid for ids in occupied.values() for oid in ids}):
                     _view_probe(db, row['candidate'], 'co_presence')
                     continue
-                proof = {'pose': view.pose, 'medoid': view.medoid, 'authority': view.authority,
+                proof = {**({'previous_reason':'auxiliary_ambiguous','occupied_rivals':occupied} if row['prior_reason']=='auxiliary_ambiguous' else {}),
+                         'pose': view.pose, 'medoid': view.medoid, 'authority': view.authority,
                          'anchor_verified_support': view.support_count,
                          'support_examples': list(view.support),
                          'match_score': score, 'threshold': threshold, 'minimum': lowest,

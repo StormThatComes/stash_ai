@@ -353,6 +353,13 @@ def _execute(args, config, *, services, display):
                                         operation = 'pose'
                                         person_collector.flush()
                                         filled = person_collector.enrich(database.connection, scan, source) or 0
+                                        from .rotated_faces import recover as recover_rotated_faces
+                                        def acquire_face_retry():
+                                            if sequential:
+                                                person_collector.close()
+                                            return backend.borrow()
+                                        recover_rotated_faces(database.connection,scan,source,config,acquire_face_retry,
+                                                             visibility,release_faces if sequential else lambda: None)
                                         counts['pose_backfilled'] += filled
                                         counts['pose_cues'] += filled
                                         counts['vtt_complete'] += 1

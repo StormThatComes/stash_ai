@@ -10,7 +10,7 @@ from .database import encoded
 def write(db, batch, collector):
     from .pixel_storage import compact
     from .cold_payloads import available, put
-    scan, cursor, pending, supplemental, shots, state = batch
+    scan, cursor, pending, supplemental, shots, state, *motion = batch
     with db:
         cold = available(db)
         def records():
@@ -23,6 +23,8 @@ def write(db, batch, collector):
         if supplemental:
             collector.write_records(db, supplemental)
         db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, scan))
+        if motion:
+            db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('cue-continuity:'+scan,motion[0][:cursor]))
         if shots:
             db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('cue-view-shots:'+scan, encoded(shots)))
         if state and state[0]+1 == cursor:

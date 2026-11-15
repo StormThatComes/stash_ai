@@ -210,9 +210,9 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
         shot = q.get('view_shot')
         if decision.get('person'):
             components[decision['person']].append(row['id'])
-        # This local roster is a faceless recovery route. A measured face uses
-        # the ordinary face veto banks, including all external witness history.
-        if (shot is None or row.get('face_person') or row.get('_face_vector') is not None
+        # An unassigned face can corroborate a roster query. Require a measured
+        # face-rooted owner and keep all other appearances as competitors.
+        if (shot is None or row.get('face_person')
                 or q.get('query_only') or q.get('expected_people',0)>q.get('detected_people',1)):
             continue
         rank = modes.rank(row,guard)
@@ -221,6 +221,16 @@ def attach_with_scene_support(rows, groups, seeds, decisions, config, scores, gu
         for _,_,p,_,_,_ in rank:
             if p not in confirmed or p==decision['person']:
                 continue
+            face=row.get('_face_vector')
+            if face is not None:
+                own=[s['_face_vector'] for s in seeds.get(p,()) if s.get('_face_vector') is not None]
+                other=[s['_face_vector'] for key,bank in seeds.items() if key!=p for s in bank if s.get('_face_vector') is not None]
+                if not own:
+                    continue
+                best=max(scores.face_similarity(face,v) for v in own)
+                rival=max((scores.face_similarity(face,v) for v in other),default=-1.)
+                if best<config.data['sapiensid']['matching']['face_floor'] or rival>=best:
+                    continue
             for index,mode in enumerate(modes.modes[p]):
                 key = p,index,shot
                 if key not in by_shot:

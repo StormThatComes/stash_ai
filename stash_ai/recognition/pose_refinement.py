@@ -45,6 +45,7 @@ def retain_quality_mask(record, mask, bounds):
 
 class RefinedPMPose:
     def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728, joint_quality=None):
+        self.previous_cue = None
         self.pose, self.segmenter, self.settings = pose, segmenter, settings
         self.frame_batch_size, self.queue_bytes = frame_batch_size, queue_bytes
         # Prompt confidence is intentionally stricter than output joint eligibility.
@@ -78,6 +79,9 @@ class RefinedPMPose:
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
         recovery = settings.get('recover_prompt_points', False)
+        from .temporal_prompts import capture, borrow
+        previous = self.previous_cue
+        self.previous_cue = capture(image,bounds,points,cores) if recovery else None
         if recovery:
             valid, tests = prompt_recovery.eligible(points, scores, probabilities, bounds, settings)
             faces = prompt_recovery.assigned_faces(prompt_recovery.faces_for(image), bounds, points, valid)
@@ -100,6 +104,9 @@ class RefinedPMPose:
                 records[i]['prompt_rejections'] = counts
                 indices, minimum = prompt_recovery.recover(i, indices, points, valid, scores,
                     probabilities, bounds, faces.get(i), foreign, settings, records[i])
+                indices = borrow(previous,self.previous_cue,i,indices,settings['min_prompt_points'],records[i])
+                if 'temporal_prompts' in records[i]:
+                    minimum = settings['min_prompt_points']
                 records[i]['prompt_minimum'] = minimum
                 # On contact prioritize distinct torso/head regions over adjacent facial points.
                 if len(indices) >= minimum and any(j != i and overlaps(box, b, settings['overlap_threshold'])
@@ -109,7 +116,7 @@ class RefinedPMPose:
                 records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
             if len(indices) >= minimum:
                 limit = len(indices) if settings.get('adaptive_decoder_retries') else settings['max_prompt_points']
-                geometry = prompt_recovery.prompt_points(points, records)[i] if 'face_prompt' in records[i] else points[i]
+                geometry = prompt_recovery.prompt_points(points, records)[i] if recovery else points[i]
                 indices = spread_indices(geometry, indices, limit,
                                          initial=minimum)
                 jobs.append((i, indices, foreign))
@@ -180,7 +187,7 @@ class RefinedPMPose:
                 # The first pose and original crop survive drift. For neighbouring
                 # boxes, reuse SAM only when its torso ownership was established.
                 has_neighbours = 'negative_points' in record
-                if not has_neighbours or record['separated']:
+                if 'temporal_prompts' not in record and (not has_neighbours or record['separated']):
                     retain_quality_mask(record, mask, old)
                 continue
             from .limb_ownership import fuse
