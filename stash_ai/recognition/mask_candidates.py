@@ -186,7 +186,11 @@ def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points
         sparse = (record.get('prompt_minimum', settings['min_prompt_points']) < settings['min_prompt_points']
                   or any(k in (7,8,13,14) for k in indices)
                   or 'face_prompt' in record or 'temporal_prompts' in record)
-        weak_expansion = peers and outside and not inside(clean, points[i, holdout]).any()
+        # A plausible alternative can stay inside the detector box while following
+        # only one side of the skeleton into a contacting partner.
+        body = [k for k in reliable if k >= 5]
+        unilateral = len(body) >= 3 and len({k % 2 for k in body}) == 1
+        weak_expansion = peers and (outside or unilateral) and not inside(clean, points[i, holdout]).any()
         floor = settings.get('min_recovery_mask_score')
         if reason is None and (sparse or weak_expansion) and score < (
                 floor if floor is not None else (1 + settings['min_mask_score']) / 2):
