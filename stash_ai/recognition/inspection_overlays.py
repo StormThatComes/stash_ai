@@ -65,6 +65,9 @@ def read(db, config, selector, kind, address):
     else:
         body = _json(row['geometry'], {})
         bounds = body.get('bounds')
+        counts = (body.get('pose_refinement') or {}).get('prompt_rejections')
+        if counts:
+            notes.append('SAM core exclusions: ' + ', '.join(f'{key} {value}' for key,value in counts.items()))
         shapes.append(dict(kind='body', id=address, selected=True, geometry=body))
         face = db.execute('SELECT geometry FROM observations WHERE id=? AND scan=? AND cue=?',
                           (row['face'],row['scan'],row['cue'])).fetchone()

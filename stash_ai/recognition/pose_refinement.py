@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 
+from . import prompt_recovery
 from .mask_candidates import check_mask, inside, select_masks, spread_indices
 from .profiling import pipeline_stage, pipeline_timing
 
@@ -61,7 +62,7 @@ class RefinedPMPose:
             raise ValueError('PMPose returned an invalid refinement frame count.')
         return self.refine_many(frames, predictions)
 
-    def _plan(self, bounds, prediction):
+    def _plan(self, bounds, prediction, image=None):
         points, scores, probabilities = prediction
         settings = self.settings
         result = (points.copy(), scores.copy(), {k: v.copy() for k, v in probabilities.items()})
@@ -69,6 +70,10 @@ class RefinedPMPose:
                         detector_bounds=list(box), bounds=list(box)) for box in bounds]
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
+        recovery = settings.get('recover_prompt_points', False)
+        if recovery:
+            valid, tests = prompt_recovery.eligible(points, scores, probabilities, bounds, settings)
+            faces = prompt_recovery.assigned_faces(prompt_recovery.faces_for(image), bounds, points, valid)
         jobs = []
         for i, box in enumerate(bounds):
             if settings['mode'] == 'overlap' and not any(
@@ -81,9 +86,23 @@ class RefinedPMPose:
                 # Coincident head/torso estimates do not establish ownership.
                 distance = np.linalg.norm(points[i, indices, None] - foreign[None], axis=2).min(axis=1)
                 indices = indices[distance > max(2., .02 * math.hypot(box[2]-box[0], box[3]-box[1]))]
-            if len(indices) >= settings['min_prompt_points']:
+            minimum = settings['min_prompt_points']
+            if recovery:
+                counts = {name: int((~passed[i, CORE]).sum()) for name, passed in tests.items()}
+                counts['near_peer'] = len(cores[i]) - len(indices)
+                records[i]['prompt_rejections'] = counts
+                indices, minimum = prompt_recovery.recover(i, indices, points, valid, scores,
+                    probabilities, bounds, faces.get(i), foreign, settings, records[i])
+                records[i]['prompt_minimum'] = minimum
+                # On contact prioritize distinct torso/head regions over adjacent facial points.
+                if len(indices) >= minimum and any(j != i and overlaps(box, b, settings['overlap_threshold'])
+                                                   for j, b in enumerate(bounds)):
+                    xy = prompt_recovery.prompt_points(points, records)[i]
+                    indices = spread_indices(xy, indices, len(indices), initial=1)
+                records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
+            if len(indices) >= minimum:
                 indices = spread_indices(points[i], indices, settings['max_prompt_points'],
-                                         initial=settings['min_prompt_points'])
+                                         initial=minimum)
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs
 
@@ -107,7 +126,8 @@ class RefinedPMPose:
     @pipeline_stage('pmpose_mask_refinement')
     def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None):
         points = prediction[0]
-        result, records, cores, jobs = plan or self._plan(bounds, prediction)
+        result, records, cores, jobs = plan or self._plan(bounds, prediction, image)
+        points = prompt_recovery.prompt_points(points, records)
         second_pass = defer or self._second_pass
         pending = []
         for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks):
@@ -133,8 +153,8 @@ class RefinedPMPose:
                     inside(mask, new_points[offset, indices]))
             old = records[i]['detector_bounds']
             tolerance = max(3., .15 * math.hypot(old[2]-old[0], old[3]-old[1]))
-            keep &= np.linalg.norm(new_points[offset, indices] - original[i, indices], axis=1) <= tolerance
-            if keep.sum() < self.settings['min_prompt_points']:
+            keep &= np.linalg.norm(new_points[offset, indices] - records[i].get('prompt_points', original[i, indices]), axis=1) <= tolerance
+            if keep.sum() < records[i].get('prompt_minimum', self.settings['min_prompt_points']):
                 record = records[i]
                 record['reason'] = 'second_pass_core_drift'
                 # The first pose and original crop survive drift. For neighbouring

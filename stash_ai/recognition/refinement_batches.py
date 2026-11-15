@@ -13,11 +13,13 @@ def refine_many(owner, frames, predictions):
         if not window:
             return
         pipeline_max('refinement_window_bytes', sum(item[3] for item in window))
-        plans = [owner._plan(bounds,prediction) for (image,bounds),prediction,_,_ in window]
+        plans = [owner._plan(bounds,prediction,image) for (image,bounds),prediction,_,_ in window]
         requests, positions = [], []
         for position, (((image,bounds),prediction,_,_),plan) in enumerate(zip(window,plans)):
             minimum = owner.settings['min_prompt_points']
-            prompts = [owner._prompts(bounds, prediction[0], plan[2], i, indices[:minimum])
+            from .prompt_recovery import prompt_points
+            xy = prompt_points(prediction[0], plan[1])
+            prompts = [owner._prompts(bounds, xy, plan[2], i, indices[:plan[1][i].get('prompt_minimum', minimum)])
                        for i, indices, _ in plan[3]]
             if prompts:
                 positions.append(position)
