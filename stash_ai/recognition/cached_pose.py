@@ -10,6 +10,9 @@ def detections(owner,images,calculate):
         results=[]
         for value in calculate(batch):
             record=dict(boxes=value.boxes.xyxy.detach().cpu().numpy(),scores=value.boxes.conf.detach().cpu().numpy())
+            parents = getattr(value, 'reserve_parents', None)
+            if parents is not None:
+                record['reserve_parents'] = parents.numpy()
             if getattr(value,'keypoints',None) is not None:
                 record.update(points=value.keypoints.xy.detach().cpu().numpy(),confidence=value.keypoints.conf.detach().cpu().numpy())
             import numpy as np
@@ -22,7 +25,8 @@ def detections(owner,images,calculate):
         return results
     values=many('person_detection',[detector(owner.config),owner.device],images,compute)
     import torch
-    return [SimpleNamespace(boxes=SimpleNamespace(xyxy=torch.from_numpy(v['boxes']),conf=torch.from_numpy(v['scores'])),
+    return [SimpleNamespace(reserve_parents=torch.from_numpy(v['reserve_parents']) if 'reserve_parents' in v else None,
+        boxes=SimpleNamespace(xyxy=torch.from_numpy(v['boxes']),conf=torch.from_numpy(v['scores'])),
         keypoints=SimpleNamespace(xy=torch.from_numpy(v['points']),conf=torch.from_numpy(v['confidence'])) if 'points' in v else None) for v in values]
 
 
@@ -46,6 +50,9 @@ class Pose:
         from .prompt_recovery import faces_for
         def key(frame):
             faces = faces_for(frame[0]) if self.face_prompts else ()
+            reserves = getattr(frame[0], '_pose_reserves', {})
+            if reserves:
+                return fingerprint((frame, sorted(reserves.items()), [list(f.row) for f in faces]))
             return fingerprint((frame, [list(f.row) for f in faces])) if faces else fingerprint(frame)
         return many('pose',self.contract,list(frames),calculate,key=key)
 
@@ -55,7 +62,7 @@ class RawPMPose(Pose):
     def __init__(self,model,device,*,precision='fp32', check_flip=False):
         from .pmpose_registry import SHA256,INFERENCE
         self.model=model;self.contract=[SHA256,INFERENCE,str(device)]
-        if check_flip:self.contract.append('flip-peak-agreement-v1')
+        if check_flip:self.contract.append('flip-alternate-peak-v2')
         if precision!='fp32':self.contract.append({'precision':precision})
 
     def predict(self,image,bounds,masks=None):

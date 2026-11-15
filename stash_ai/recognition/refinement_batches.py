@@ -52,7 +52,7 @@ def refine_many(owner, frames, predictions):
                 return
             with pipeline_timing('pmpose_masked_second_pass'):
                 predicted = owner.pose.predict_many([(image,[box for _,box,_,_ in jobs],
-                    [mask for _,_,mask,_ in jobs]) for image,jobs,_,_,_ in pending])
+                    owner.masked_inputs(image,jobs,original)) for image,jobs,_,_,original in pending])
                 if len(predicted) != len(pending):
                     raise ValueError('PMPose returned an invalid masked frame count.')
                 for (_,jobs,result,records,original),prediction in zip(pending,predicted):

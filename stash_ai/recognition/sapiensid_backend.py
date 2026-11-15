@@ -165,6 +165,9 @@ class SapiensIDFaces(YuNetDetector):
                     raise ValueError('SapiensID pose detector returned an empty person box.')
                 selected.append(index)
                 bounds.append([left, top, right, bottom])
+            parents = getattr(result, 'reserve_parents', None)
+            image._pose_reserves = {} if parents is None else {
+                k:selected.index(int(parents[i])) for k,i in enumerate(selected) if int(parents[i]) in selected}
             if self.pose_refiner is not None:
                 if _defer is not None:
                     _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))
@@ -210,7 +213,8 @@ class SapiensIDFaces(YuNetDetector):
                 or np.any((confidences<0)|(confidences>1))):
             raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
         if settings.get('backend') == 'pmpose':
-            if (not isinstance(probabilities, dict) or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'}) or
+            if (not isinstance(probabilities, dict) or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'},
+                    {'presence','visibility','flip_agreement','alt_x','alt_y','alt_strength'}) or
                     any(not isinstance(v, np.ndarray) or v.shape != (len(bounds), 17)
                         or not np.isfinite(v).all() or np.any((v < 0) | (v > 1))
                         for v in probabilities.values())):

@@ -17,7 +17,8 @@ def _measurements(bounds, prediction, settings):
     n = len(bounds)
     boxes = np.asarray(bounds, dtype=np.float64).reshape(n, 4)
     if (points.shape != (n, 17, 2) or scores.shape != (n, 17)
-            or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'})
+            or set(probabilities) not in ({'presence', 'visibility'}, {'presence', 'visibility', 'flip_agreement'},
+                    {'presence','visibility','flip_agreement','alt_x','alt_y','alt_strength'})
             or any(v.shape != (n, 17) for v in probabilities.values())
             or not np.isfinite(boxes).all() or np.any(boxes[:, 2:] <= boxes[:, :2])
             or not np.isfinite(points).all()
@@ -78,13 +79,29 @@ def _compare(a, b, boxes, points, valid, settings):
 
 
 @pipeline_stage('pmpose_pose_deduplication')
-def select(bounds, prediction, settings, *, audit=False):
+def select(bounds, prediction, settings, *, audit=False, reserves=None, confirmed=()):
     boxes, valid, quality = _measurements(bounds, prediction, settings)
     points = prediction[0]
     order = sorted(range(len(boxes)), key=lambda i: (-quality[i], -int(valid[i].sum()), i))
+    reserves = reserves or {}
+    # The first-pass primary always gets evaluated before its reserve.
+    order.sort(key=lambda i: i in reserves)
     kept, suppressed, comparisons, reasons = [], [None] * len(boxes), [], Counter()
     total = omitted = retained_records = 0
     for candidate in order:
+        if candidate in reserves:
+            primary = reserves[candidate]
+            primary = primary if suppressed[primary] is None else suppressed[primary]
+            if primary not in kept:
+                continue
+            reason, detail = _compare(primary,candidate,boxes,points,valid,settings)
+            if candidate not in confirmed and reason not in ('distinct_heads','distinct_torsos'):
+                suppressed[candidate] = primary
+                reasons['unconfirmed_reserve'] += 1
+                if audit:
+                    comparisons.append(dict(detail, reason='unconfirmed_reserve', decision='suppress',
+                                            representative_index=primary))
+                continue
         for representative in kept:
             total += 1
             if total > MAX_COMPARISONS:
@@ -145,7 +162,13 @@ class DeduplicatedPMPose:
             raise ValueError('PMPose returned an invalid deduplication frame count.')
         selected_frames, selected_predictions, reports = [], [], []
         for (image, bounds), prediction in zip(frames, predictions):
-            report = select(bounds, prediction, self.settings, audit=active(image))
+            reserves = getattr(image, '_pose_reserves', {})
+            confirmed = set()
+            if self.refined and getattr(self.pose,'supports_rival_mask',False):
+                from .contact_pose import recover_pair
+                prediction,confirmed = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
+            report = select(bounds, prediction, self.settings, audit=active(image), reserves=reserves,
+                            confirmed=confirmed)
             keep = np.asarray(report['kept_indices'], dtype=np.int64)
             points, scores, probabilities = prediction
             selected = points[keep], scores[keep], {k: v[keep] for k, v in probabilities.items()}

@@ -35,6 +35,7 @@ def load(config, device):
     pose=Stage('pmpose_raw',lambda:_load_model(config,device),device)
     pose.batch_size=config.data['sapiensid']['pose']['pmpose_batch_size']
     pose.supports_masked_batches=True
+    pose.supports_rival_mask=True
     return _pipeline(pose,config,device)
 
 
@@ -98,6 +99,7 @@ def _pipeline(pose, config, device):
 
 class PMPose:
     supports_masked_batches = True
+    supports_rival_mask = True
     def __init__(self, model, *, device, batch_size, fused_flip=True, precision='fp32', check_flip=False):
         from .adaptive_gpu import Batches
         self.model, self.device, self.batch_size = model, device, batch_size
@@ -127,7 +129,7 @@ class PMPose:
             count = len(bounds)
             result.append((np.empty((count, 17, 2), dtype=np.float32),
                            np.empty((count, 17), dtype=np.float32),
-                           {key: np.empty((count, 17), dtype=np.float32) for key in (('presence', 'visibility', 'flip_agreement')
+                           {key: np.empty((count, 17), dtype=np.float32) for key in (('presence', 'visibility', 'flip_agreement','alt_x','alt_y','alt_strength')
                                        if self.check_flip else ('presence', 'visibility'))}))
             if not count:
                 continue
@@ -173,6 +175,23 @@ class PMPose:
                 a, b = maps.flatten(2).argmax(-1), mirrored.flatten(2).argmax(-1)
                 dx, dy = ((a % width)-(b % width))/width, ((a // width)-(b // width))/height
                 extras.append((1 - torch.hypot(dx, dy) / .20).clamp(0,1).cpu().numpy())
+                # Keep one distinct local maximum, expressed in source-image units.
+                heat = values[0]
+                primary = heat.flatten(2).argmax(-1)[...,None,None]
+                yy,xx = torch.meshgrid(torch.arange(height,device=heat.device),
+                                        torch.arange(width,device=heat.device),indexing='ij')
+                away = (xx-primary%width)**2 + (yy-primary//width)**2 >= 16
+                peaks = heat == torch.nn.functional.max_pool2d(heat,3,1,1)
+                strength,index = heat.masked_fill(~(away & peaks),0).flatten(2).max(-1)
+                ratio = (strength/heat.flatten(2).amax(-1).clamp_min(1e-12)).cpu().numpy()
+                indices = index.cpu().numpy()
+                source = np.stack((indices%width/(width-1),indices//width/(height-1)),axis=-1)
+                source = (source-.5)*scales[:,None,:]+centers[:,None,:]
+                sizes = np.array([frames[job[0]][0].size for job,_ in prepared])[:,None,:]
+                normalized = source / sizes
+                ratio *= ((normalized>=0)&(normalized<1)).all(axis=-1)
+                normalized = normalized.clip(0,1)
+                extras.extend((normalized[:,:,0],normalized[:,:,1],ratio))
             return list(zip(points,scores,presence,visibility,*extras))
 
         # A single future owns at most one additional batch of CPU crops.
@@ -192,7 +211,8 @@ class PMPose:
                 outputs=self.batches.run(prepared,infer,self.device)
                 for ((frame,index,_,_),_), (points,scores,presence,visibility,*extra) in zip(prepared,outputs):
                     if extra:
-                        result[frame][2]['flip_agreement'][index] = extra[0]
+                        for name, value in zip(('flip_agreement','alt_x','alt_y','alt_strength'),extra):
+                            result[frame][2][name][index] = value
                     result[frame][0][index]=points;result[frame][1][index]=scores
                     result[frame][2]['presence'][index]=presence;result[frame][2]['visibility'][index]=visibility
         return result
