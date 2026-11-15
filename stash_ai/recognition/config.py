@@ -10,6 +10,8 @@ from types import MappingProxyType
 
 
 DEFAULT_MIN_FACE_SOURCE_FRACTION = 0.85
+DEFAULT_FACEOCC_LOGIT_THRESHOLD = 0.0
+MAX_FLOAT32 = float.fromhex('0x1.fffffep127')
 
 
 def defaults():
@@ -25,6 +27,7 @@ def defaults():
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
                       'min_face_source_fraction': DEFAULT_MIN_FACE_SOURCE_FRACTION,
+                      'faceocc_logit_threshold': DEFAULT_FACEOCC_LOGIT_THRESHOLD,
                       'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
@@ -171,6 +174,8 @@ def validate(data):
     }.items():
         for key in names:
             _number(data[section][key], f'{section}.{key}', 0, 1)
+    _number(data['detection']['faceocc_logit_threshold'], 'detection.faceocc_logit_threshold', -MAX_FLOAT32, MAX_FLOAT32)
+    data['detection']['faceocc_logit_threshold'] = float(data['detection']['faceocc_logit_threshold'])
     if data['detection']['max_pose_deviation'] is not None:
         _number(data['detection']['max_pose_deviation'], 'detection.max_pose_deviation', 0, 1)
     anchor = data['clustering']['max_anchor_pose_deviation']

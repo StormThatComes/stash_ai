@@ -159,6 +159,7 @@ def upright_mask_model():
             foreground = rgb.amax(dim=1) > .05
             return torch.where(foreground & upright[:, None, None], 1., -1.)[:, None]
     model = object.__new__(FaceVisibility)
+    model.logit_threshold = 0.0
     model.device, model.model = 'cpu', Model()
     model.minimum_source_fraction = 1.0
     return model

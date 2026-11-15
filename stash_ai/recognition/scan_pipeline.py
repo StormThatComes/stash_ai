@@ -332,7 +332,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                                 continue
                             if isinstance(measurement,BaseException):
                                 raise measurement
-                            if not isinstance(measurement,dict) or not cached(measurement):
+                            if not isinstance(measurement,dict) or not cached(measurement, config.data['detection']['faceocc_logit_threshold']):
                                 raise VisibilityError('Recognition visibility gate received an invalid measurement.')
                             entry['quality'].update(measurement)
                             if measurement['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:

@@ -94,7 +94,7 @@ class Ranking:
                     if not metadata.get('reason'):
                         quality=metadata.get('quality',{})
                         policy=self.config.data['portraits']
-                        if ((needs_visible(policy) or extra_measurements(self.config)) and not visible(quality)
+                        if ((needs_visible(policy) or extra_measurements(self.config)) and not visible(quality, self.config.data['detection']['faceocc_logit_threshold'])
                                 or needs_expression(policy) and not expressive(quality)
                                 or anchor_reason(quality,self.config)
                                 or any(v.get('source_type')=='recognition_crop'

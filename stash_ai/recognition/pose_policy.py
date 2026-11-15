@@ -32,7 +32,8 @@ def compact_quality(raw):
         from .visibility import cached
         if cached(record):
             selected.update(visible_face_fraction=record['visible_face_fraction'],
-                            visibility={'contract':record['visibility']['contract']})
+                            visibility={k: record['visibility'][k] for k in ('contract', 'logit_threshold')
+                                        if k in record['visibility']})
         return json.dumps(selected,separators=(',',':'))
     except (TypeError, ValueError, AttributeError):
         pass
@@ -81,10 +82,16 @@ def is_anchor(quality, grouping):
 def visibility_sql(alias,minimum):
     if not minimum:
         return '1=1'
-    from .visibility import CONTRACT_ID
+    from .config import MAX_FLOAT32
+    from .visibility import CONTRACT_ID, TUNED_CONTRACT_ID
+    contract = f"json_extract({alias}.quality,'$.visibility.contract')"
+    cutoff = f"json_extract({alias}.quality,'$.visibility.logit_threshold')"
+    numeric = f"json_type({alias}.quality,'$.visibility.logit_threshold') IN ('integer','real')"
     return (f"COALESCE(json_type({alias}.quality,'$.visible_face_fraction') IN ('integer','real') "
             f"AND json_extract({alias}.quality,'$.visible_face_fraction') BETWEEN {minimum!r} AND 1 "
-            f"AND json_extract({alias}.quality,'$.visibility.contract')='{CONTRACT_ID}',0)")
+            f"AND (({contract}='{CONTRACT_ID}' AND (json_type({alias}.quality,'$.visibility.logit_threshold') IS NULL OR ({numeric} AND {cutoff}=0))) "
+            f"OR ({contract}='{TUNED_CONTRACT_ID}' AND {numeric} AND {cutoff}<>0 "
+            f"AND {cutoff} BETWEEN {-MAX_FLOAT32} AND {MAX_FLOAT32})),0)")
 
 
 def anchor_sql(alias, grouping):

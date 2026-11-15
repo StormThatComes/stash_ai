@@ -536,7 +536,8 @@ and closed at the end of the invocation. Visibility failures record an unavailab
 cue and warning while ranking other available quality; they never imply that a
 face is uncovered and do not block its portrait.
 
-The application reports the fraction of mask-positive pixels (`logit > 0`) within
+The application counts pixels whose raw logit exceeds
+`face.quality.faceocc_logit_threshold` (default `0.0`) within
 a fixed elliptical face region derived from the detector box, excluding artificial
 padding. The model input is a fixed square crop around that box, rotated upright
 using the semantic eye landmarks and resized to RGB 256x256 in one resampling
@@ -553,9 +554,8 @@ does not infer hidden features from landmark placement.
 
 VTT measurements, contract/model digest, pixel counts and device are retained in
 observation quality and selected portrait metadata in the face SQLite. Changing
-framing, ranking weights or the visibility threshold reuses these measurements
-without repeating face recognition or segmentation. A changed source/model contract
-requires a fresh measurement. Video measures the actual decoded face and retains
+framing, ranking weights or the portrait minimum visible fraction reuses these measurements
+without repeating face recognition or segmentation. Changing the pixel logit threshold, source or model requires a fresh measurement. Video measures the actual decoded face and retains
 that result in portrait metadata. Attribution and pinned inference provenance are
 in [faceocc-attribution.md](faceocc-attribution.md).
 

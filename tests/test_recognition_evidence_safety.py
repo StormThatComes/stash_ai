@@ -79,6 +79,7 @@ def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
 
     # Positive logits even over padding expose a cropped-denominator regression.
     model = object.__new__(FaceVisibility)
+    model.logit_threshold = 0.0
     model.device = 'cpu'
     model.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
     model.model = lambda inputs: torch.ones_like(inputs[:, :1])

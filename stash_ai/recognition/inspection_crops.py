@@ -110,7 +110,7 @@ class VttPreviews:
                 if face_evidence is not None:
                     visibility = quality.get('visibility')
                     face_evidence.update(geometry=source_geometry, fraction=quality.get('visible_face_fraction'),
-                                         contract=visibility.get('contract') if isinstance(visibility, dict) else None)
+                                         visibility=visibility if isinstance(visibility, dict) else {})
                 if geometry is not None:
                     geometry['bounds'] = [0,0,*full_image.size] if full else list(bounds)
                     geometry.update(cue_index=index,cue_count=len(self.source.cues),cue_seconds=self.source.cues[index].start)

@@ -468,7 +468,7 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         gc.collect()
 
 
-def vtt_fixture(tmp_path):
+def vtt_fixture(tmp_path, *, logit_threshold=0.0):
     from dataclasses import replace
     import json
     from types import SimpleNamespace
@@ -484,6 +484,7 @@ def vtt_fixture(tmp_path):
     from tests.test_recognition_scanning import config as configuration
     config = configuration(tmp_path)
     data = plain(config.data)
+    data['detection']['faceocc_logit_threshold'] = logit_threshold
     data['detection']['min_face_pixels'] = 256  # Rejected before embedding/crop encoding.
     data['execution']['media_cache_bytes'] = 0
     config = replace(config, data=data)
@@ -645,7 +646,7 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
     from stash_ai.recognition.inspection_crops import VttPreviews
     from stash_ai.recognition.scene_inspection import SceneReader
     from stash_ai.recognition.scene_window import SceneInspector
-    config, reader, client, media, face, backend, closed=vtt_fixture(tmp_path)
+    config, reader, client, media, face, backend, closed=vtt_fixture(tmp_path, logit_threshold=-0.25)
     from stash_ai.recognition.database import FaceDatabase
     import zlib
     with FaceDatabase(config.database) as state, state.connection as db:
@@ -716,6 +717,25 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         assert replays and main_thread not in replays
         assert window.images.panels['A'].image.size == window.images.panels['B'].image.size
         assert face in window.window.title()
+        assert window.slider.instate(['disabled'])
+        import numpy as np
+        from types import SimpleNamespace
+        mask_runs = []
+        def logits(blob):
+            mask_runs.append(get_ident())
+            return np.full((256, 256), -0.1, dtype='float32')
+        monkeypatch.setattr(inspection_face_visibility, 'ensure_assets', lambda *a, **kw: {})
+        monkeypatch.setattr(inspection_face_visibility, 'FaceVisibility',
+                            lambda *_: SimpleNamespace(inspect_logits=logits, close=lambda: None))
+        ui.face_visibility_button.invoke()
+        wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
+        assert window.slider.instate(['!disabled']) and window.value.get() == -0.25
+        window.slider.set(0.)
+        wait_for(lambda: 'Replay 0.000' in window.status.cget('text'))
+        assert window.nudge(-0.01) == 'break' and window.value.get() == -0.01
+        window.reset.invoke()
+        wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
+        assert window.value.get() == -0.25 and len(mask_runs) == 1 and mask_runs[0] != main_thread
         window.close()
         assert backend.calls==0
     finally:

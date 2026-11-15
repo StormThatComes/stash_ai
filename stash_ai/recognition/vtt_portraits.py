@@ -16,7 +16,7 @@ from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
 from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes, measurement_basis
 from .visibility import cached as cached_visibility, required as visibility_required
-from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements,ranking_quality
+from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements,ranking_quality,measurement_quality
 from .expression import cached as cached_expression, required as expression_required
 from .progress import tracking
 from .portrait_availability import candidate_observations, crop_row
@@ -107,6 +107,11 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
     from .context import portrait_references
     groups, context = portrait_references(database, scope, person['namespace'], config,
         lambda: _groups(db, scope, person['namespace'], config.data['clustering']))
+    from .pose_policy import measurement_required
+    from .scanning import scan_identity
+    scan_measures_visibility = measurement_required(config)
+    cutoff = config.data['detection']['faceocc_logit_threshold']
+    scan_policy = scan_identity(config, person['namespace'])
     policy_sha = policy_identity(config)
     ranking=Ranking(db,config,scope,target,person['namespace'],context,policy_sha,
                     enabled=policy['source']=='vtt' and fallback_reason is None,category=category)
@@ -128,7 +133,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     ranked.extend(scene_rankings[selected['scan']])
                     continue
                 rows = db.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,
-                  o.dimensions,o.embedding,s.input_sha FROM observations o
+                  o.dimensions,o.embedding,s.input_sha,s.policy_sha FROM observations o
                   JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
                   WHERE m.person=? AND o.scan=? AND s.scene=? AND s.scope=?
                   AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
@@ -148,7 +153,9 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     for row, candidate in tracked:
                         identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
                             encoded([scope, target['person'], row['id'], 'vtt', policy_sha])))
-                        quality = json.loads(row['quality'])
+                        retained = json.loads(row['quality'])
+                        quality = measurement_quality(retained, config)
+                        compatible_mask = cached_visibility(quality, cutoff)
                         original_quality = encoded(quality)
                         metadata = {'version': 3, 'source_type': 'vtt', 'requested_source': policy['source'],
                             'selection_category': category or 'face',
@@ -220,7 +227,12 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                                         bases[name] = measurement_basis(crop_row(db, row) if source_type == 'recognition_crop' else row,
                                                                         source_type)
                         # Reuse remains independent of framing and ranking preferences.
-                        if encoded(quality) != original_quality:
+                        # Portrait-only replay can read a historical scan. Keep its admission measurement intact.
+                        can_update = quality is retained and (
+                            'visibility' not in required or row['policy_sha'] == scan_policy or compatible_mask)
+                        if row['policy_sha'] == scan_policy and not scan_measures_visibility and cached_visibility(quality, cutoff):
+                            can_update = True  # This scan collected no admission mask to preserve.
+                        if can_update and encoded(quality) != original_quality:
                             cache_write(db,'UPDATE observations SET quality=? WHERE id=?', (encoded(quality), row['id']))
                         source_types = {basis['source_type'] for name, basis in bases.items() if name in required}
                         if source_types:

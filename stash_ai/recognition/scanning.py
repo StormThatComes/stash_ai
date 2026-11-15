@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from stash_ai.runtime.cleanup import closing
 
-from .config import digest
+from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, digest
 from .database import encoded
 from .media import safe_url
 from .quality import assess, rejection, crop_bytes, alignable
@@ -19,7 +19,10 @@ from .pose_policy import measurement_required
 
 def scan_identity(config, namespace):
     visibility_contract = CONTRACT_ID if measurement_required(config) else None
-    return digest({'namespace': namespace, 'detection': config.data['detection'],
+    detection = dict(config.data['detection'])
+    if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
+        detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
+    return digest({'namespace': namespace, 'detection': detection,
                    'max_cues': config.data['execution']['max_cues'], 'quality_format': 5,
                    'visibility_contract': visibility_contract})
 

@@ -56,7 +56,7 @@ def test_visibility_batches_keep_geometry_local_and_equal_scalar_masks():
     calls=[]
     class Model:
         def __call__(self,value):calls.append(len(value));return value[:,:1]
-    model=object.__new__(FaceVisibility);model.model=Model();model.device='cpu'
+    model=object.__new__(FaceVisibility);model.model=Model();model.device='cpu';model.logit_threshold=0.0
     model.minimum_source_fraction = 1.0
     with Image.new('RGB',(500,350),(200,90,60)) as first,Image.new('RGB',(500,350),(20,50,90)) as second:
         expected=[model.measure(first,FACE),model.measure(second,FACE)]
