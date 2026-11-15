@@ -45,11 +45,11 @@ def anchor_gate(metadata,settings,*,collection=None):
         valid=lambda value:type(value) in (int,float) and math.isfinite(value) and value>=0
         person=record.get('person') or {}
         if 'keypoints' in person:
-            from .person_geometry import body_points
-            anatomical=body_points(person,anatomical=regional['enabled'])
-            effective=sum(min(point)>=0 for point in anatomical)
+            from .person_geometry import detected_crop_points, used_keypoints
+            effective=used_keypoints(person)
             points=min(points,effective) if valid(points) else effective
-            regional=evaluate(rules,anatomical)
+            if regional['enabled']:
+                regional=evaluate(rules,detected_crop_points(person))
         reason=record.get('identity_rejection') or gate['reason']
         if quality.get('query_only'):
             reason='body_query_only'

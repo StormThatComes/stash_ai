@@ -228,7 +228,7 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
                        label=row['label'], points=row['points'], present=row['present']) for row in rows]
         summary = group('person_anchor_keypoints_'+mode, checks,
             note=('Every rule must pass.' if mode == 'all' else 'At least one rule must pass; other failed alternatives do not reject the anchor.')+
-                 ' Counts use surviving pose points with anatomical left/right labels; min=0 adds no requirement.')
+                 ' Counts use detected pose points inside the person crop, before the encoder filters the nose and eyes. A minimum of zero adds no requirement.')
         passed = all(row['passed'] for row in rows) if mode == 'all' else any(row['passed'] for row in rows)
         if passed:
             summary['status'] = 'pass'

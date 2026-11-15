@@ -9,6 +9,7 @@ from .reference_compatibility import fallback_sql
 from .scanning import scan_identity
 from .reference_selection import select
 from .database import encoded
+from .pose_anchor_rules import policy_rules
 
 
 def body_vector(row):
@@ -73,15 +74,19 @@ def catalogue_rows(db,config,scope,namespace,owners):
         from .derived_cache import current,fingerprint
         from .config import digest
         store=current()
+        body=config.data['sapiensid']
+        identity=dict(body['identities'])
+        if 'anchor_keypoint_rules' in identity:
+            identity['anchor_keypoint_rules']=policy_rules(identity['anchor_keypoint_rules'])
+        source_policy=digest(['body-source-v4-partial',body['matching'],identity,config.data['clustering']])
         for owner in sorted(owners):
             spool=Records();keep=False
             try:
                 from .body_mode_cache import load,save,witnesses
                 query=_query(db,config,scope,namespace,[owner]) if store else None
-                policy=digest(['body-source-v4-partial',config.data['sapiensid']['matching'],config.data['sapiensid']['identities'],config.data['clustering']])
                 from .local_dependencies import available as local_clocks
                 from .dependencies import version
-                policy=digest([policy,version(db,'heads')]) if store else policy
+                policy=digest([source_policy,version(db,'heads')]) if store else source_policy
                 signed=cached(db,'body-source',owner,policy,lambda:fingerprint(db,[query],policy),
                     dependency='owner' if local_clocks(db) else 'global',dependency_key=owner if local_clocks(db) else '*') if store else None
                 found=load(spool,signed,config) if store else None

@@ -52,8 +52,15 @@ def parameters(settings):
             for mode in ('all', 'any') for index, rule in enumerate(rules.get(mode, ()))}
 
 
+def policy_rules(rules):
+    """Invalidate cached regional decisions made with encoder-filtered points."""
+    if any(rules.values()):
+        return {**rules, 'point_source': 'detector_crop_v1'}
+    return rules
+
+
 def evaluate(rules, points):
-    """Points have anatomical labels after the encoder's exclusion filters.
+    """Count retained detector landmarks inside the source crop in COCO17 order.
 
     None means missing/invalid retained geometry, never zero observed points.
     A minimum of zero adds no requirement, including for legacy measurements.

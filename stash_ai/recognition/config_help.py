@@ -160,7 +160,7 @@ HELP = {
     'matching.body.anchors.min_keypoints': 'Minimum usable pose keypoints for a scene-local body anchor. Range: 1..17.',
     'matching.body.anchors.min_person_pixels': 'Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor. Range: 1..8192 or null.',
     'matching.body.anchors.min_sharpness': 'Minimum SAM-mask sharpness for body/hybrid anchors. Positive values require PMPose, refinement.enabled: true and mode: all; missing masks cannot qualify. 0 disables this floor. Range: 0..1000000.',
-    'matching.body.anchors.keypoint_rules': 'COCO17 regional rules. Each rule uses a group or a list of named points and a minimum count.',
+    'matching.body.anchors.keypoint_rules': 'Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop before the SapiensID nose and eye filter.',
     'matching.body.anchors.keypoint_rules.all': 'Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].',
     'matching.body.anchors.keypoint_rules.any': 'At least one rule must pass if nonempty: [{group: left_leg, min: 2}, {group: right_leg, min: 2}]. A rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.',
     'matching.body.global': 'Across-scene body consolidation with face contradiction checks.',

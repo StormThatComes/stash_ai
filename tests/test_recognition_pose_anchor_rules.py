@@ -94,16 +94,28 @@ def test_anatomical_labels_survive_swaps_crossed_limbs_and_missing_counterparts(
     assert canonical[6] == anatomical[5]  # Encoder output itself stays canonical.
 
 
-def test_regional_counts_exclude_head_outliers_crop_edges_and_missing_points():
-    value = metadata(['right_ear'])
-    value['person']['keypoints'][9] = [100-1e-7, 100]  # float32 rounds to excluded crop edge.
-    gate = anchor_gate(value, settings({'all': [{'points': ['left_wrist'], 'min': 1}]}))
-    assert gate['keypoint_rules']['all'][0]['measured'] == 0
+@pytest.mark.parametrize('name', ['nose', 'left_eye', 'right_eye'])
+def test_in_crop_head_point_counts_for_regional_rule_even_when_encoder_omits_it(name):
     value = metadata()
-    value['person']['keypoints'][0] = [95, 20]  # Outside the ears/shoulders envelope.
-    gate = anchor_gate(value, settings({'all': [{'group': 'head_without_eyes', 'min': 3}]}))
-    assert gate['keypoint_rules']['all'][0]['present'] == ['left_ear', 'right_ear']
-    assert gate['keypoints'] == 16 and not gate['eligible']
+    value['person']['keypoints'][POINTS.index(name)] = [95, 20]  # Ears and shoulders span x=30..70.
+    policy = settings({'all': [{'points': [name], 'min': 1}]})
+    gate = anchor_gate(value, policy)
+    assert gate['keypoint_rules']['all'][0]['present'] == [name]
+    assert gate['keypoints'] == 16 and gate['eligible']
+    policy['anchor_min_keypoints'] = 17
+    assert anchor_gate(value, policy)['reason'] == 'body_anchor_keypoints'
+
+
+@pytest.mark.parametrize(('nose', 'expected'), [
+    ([-1, -1], 0), ([9, 20], 0), ([40, 19], 0), ([100, 20], 0), ([40, 240], 0),
+    ([10, 20], 1), ([100-1e-7, 100], 1),  # Inside the source crop, even if the encoder rounds up.
+])
+def test_regional_nose_uses_half_open_source_crop(nose, expected):
+    value = metadata()
+    value['person']['bounds'] = [10, 20, 100, 240]
+    value['person']['keypoints'][0] = nose
+    gate = anchor_gate(value, settings({'all': [{'points': ['nose'], 'min': 1}]}))
+    assert gate['keypoint_rules']['all'][0]['measured'] == expected
 
 
 def test_overlapping_regions_do_not_inflate_global_count_and_back_view_needs_no_head():
@@ -165,14 +177,17 @@ def test_report_explains_or_without_marking_passing_anchor_failed(tmp_path):
     from PIL import Image
     c = SimpleNamespace(data=defaults())
     c.data['sapiensid']['identities']['anchor_keypoint_rules'] = {
-        'all': [{'group': 'hips', 'min': 1}],
+        'all': [{'points': ['nose'], 'min': 1}],
         'any': [{'group': 'left_leg', 'min': 3}, {'group': 'right_leg', 'min': 3}]}
     policies = SimpleNamespace(resolve=lambda *args: (c, 'current_configuration'))
     value = metadata(['left_knee', 'left_ankle'])
+    value['person']['keypoints'][0] = [95, 20]
     for independent in (False, True):
         report = admission_report.person(value, c, policies, '', independent=independent)
         groups = {g['stage']: g for g in report['groups']}
         assert report['anchor_gate']['eligible']
+        nose, = groups['person_anchor_keypoints_all']['checks']
+        assert nose['present'] == ['nose'] and nose['status'] == 'pass'
         assert groups['person_anchor_keypoints_any']['status'] == 'pass'
         assert [r['status'] for r in groups['person_anchor_keypoints_any']['checks']] == ['fail', 'pass']
     with Image.new('RGB', (100, 240)) as image:

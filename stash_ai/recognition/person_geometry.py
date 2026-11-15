@@ -51,6 +51,14 @@ def used_keypoints(person):
     return sum(x>=0 and y>=0 for x,y in body_points(person))
 
 
+def detected_crop_points(person):
+    """Keep validated detector points inside the source crop in anatomical order."""
+    left, top, right, bottom = person['bounds']
+    left, top = max(0, left), max(0, top)
+    return [point if left <= point[0] < right and top <= point[1] < bottom else (-1, -1)
+            for point in person['keypoints']]
+
+
 def unpack_mask(packed,width,height):
     import base64
     count = width*height
