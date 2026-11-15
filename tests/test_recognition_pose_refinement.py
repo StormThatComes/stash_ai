@@ -72,6 +72,7 @@ class Segmenter:
         mask[10:90, 20+offset:80+offset] = True
         if self.foreign:
             mask[:, 100:140] = True
+            mask[45:48, 50:110] = True  # A connected leak into the partner cannot be removed safely.
         return mask[:2] if self.malformed else mask, .95
 
 
