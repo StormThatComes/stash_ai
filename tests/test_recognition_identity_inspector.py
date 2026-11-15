@@ -735,6 +735,8 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         assert window.nudge(-0.01) == 'break' and window.value.get() == -0.01
         window.reset.invoke()
         wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
+        window.roi_toggle.invoke()
+        wait_for(lambda: window.use_profile.get() and 'Landmark ROI 1.000' in window.status.cget('text'))
         assert window.value.get() == -0.25 and len(mask_runs) == 1 and mask_runs[0] != main_thread
         window.close()
         assert backend.calls==0
