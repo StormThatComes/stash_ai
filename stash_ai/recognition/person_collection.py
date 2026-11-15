@@ -69,10 +69,7 @@ class PersonCollector:
             with db:repair_projections(db,self.config,scan)
         missing = self.missing_cues(db, scan, len(source.cues) if enabled(self.config) else 0)
         if not missing:
-            from .future_crowd import recover
-            recover(self,db,scan,source)
-            from .person_crop_backfill import backfill
-            backfill(db,scan,source,self.config)
+            self._finish_enrichment(db, scan, source)
             return 0
         self._load()
         from bisect import bisect_right
@@ -138,11 +135,16 @@ class PersonCollector:
             # them even when a later inference fails; never publish partial cues.
             try:self._flush_resume(db)
             finally:self.resume_rows=None
-        from .future_crowd import recover
-        recover(self,db,scan,source)
-        from .person_crop_backfill import backfill
-        backfill(db,scan,source,self.config)
+        self._finish_enrichment(db, scan, source)
         return len(missing)
+
+    def _finish_enrichment(self, db, scan, source):
+        from .future_crowd import recover
+        from .person_crop_backfill import backfill
+        from .body_mask_backfill import restore_masks
+        recover(self, db, scan, source)
+        restore_masks(self, db, scan, source)
+        backfill(db, scan, source, self.config)
 
     def _load(self):
         if self.model is None:

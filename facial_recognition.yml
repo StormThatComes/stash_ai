@@ -679,7 +679,7 @@ storage:
   retain_person_crops: true
   # Keep body crops for inspection/portraits, subject to storage.max_crop_mb.
   retain_body_masks: true
-  # Store the compressed SAM quality mask for each newly collected body, including rejected observations.
+  # Keep measured SAM masks, including rejected bodies. Restore missing masks from saved prompts on rerun.
   retention:
     # Evidence pruning after successful recognition runs.
     auto_prune: false

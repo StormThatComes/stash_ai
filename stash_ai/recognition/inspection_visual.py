@@ -157,7 +157,7 @@ class Visual:
             ttk.Checkbutton(window, text=label, variable=v).pack(anchor='w')
         ttk.Label(window,text='Only retained geometry/masks can be shown.\nPoint confidence may not have been retained.').pack()
         def apply():
-            if variables['masks'].get() and not self.layers['masks']:
+            if variables['masks'].get():
                 self.show_geometry.set(True)
             self.layers={k:v.get() for k,v in variables.items()};window.destroy()
             for panel,data in list(self.preview_data.items()):

@@ -100,6 +100,7 @@ class Stage:
     def predict(self,*args,**kwargs):return self.invoke('predict',*args,**kwargs)
     def predict_many(self,*args):return self.invoke('predict_many',*args)
     def predict_frames(self,frames):return self.invoke('predict_frames',frames)
+    def mask_frame(self,image):return self.invoke('mask_frame',image)
     def frame(self,image):return self.invoke('frame',image)
 
     def close(self):

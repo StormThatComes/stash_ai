@@ -130,6 +130,9 @@ class DeduplicatedPMPose:
         from .resident_models import release
         release(self.refined or self.pose)
 
+    def mask_frame(self, image):
+        return self.refined.mask_frame(image)
+
     def predict(self, image, bounds):
         return self.predict_many([(image, bounds)])[0]
 
