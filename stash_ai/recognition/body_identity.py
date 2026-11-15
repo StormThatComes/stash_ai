@@ -547,6 +547,16 @@ def rebuild(database,selected,config,result):
     db=database.connection
     from .body_cache import cached,stamp as cache_stamp
     if cached(db,selected,config):
+        from .staged_aliases import waiting
+        if enabled(config) and waiting(db,selected,config):
+            from .body_global import reconcile
+            from .body_recovery import recover
+            with db:
+                if not db.in_transaction:
+                    db.execute('BEGIN')
+                reconcile(database,selected,config)
+                recover(database,selected,config)
+                cache_stamp(db,selected,config)
         database.body_rebuild_mode='warm' if enabled(config) else 'disabled'
         return results(db,selected,result) if getattr(database, 'collect_publication_results', True) else result
     database.body_rebuild_mode='cold' if enabled(config) else 'disabled'

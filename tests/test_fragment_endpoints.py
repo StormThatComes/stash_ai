@@ -172,8 +172,10 @@ def test_different_side_appearances_and_open_fragment_keep_independent_faces():
     assert not open_nominations(looks,rows,d,roots,shots,scores,cfg,SimpleNamespace(allows=lambda *args: True))
 
 
-@pytest.mark.parametrize('owners', ['AB','ABC'])
-def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path, owners):
+@pytest.mark.parametrize('owners,without_face_plan', [('AB',False),('ABC',False),('AB',True)])
+def test_global_report_nominates_distinct_ids_in_separate_scenes(tmp_path, owners, without_face_plan, monkeypatch):
+    if without_face_plan:
+        monkeypatch.setattr('stash_ai.recognition.global_views.consolidation_plan',lambda *args,**kwargs:[])
     from stash_ai.recognition.body_identity import policy
     from stash_ai.recognition.body_global import report
     from stash_ai.recognition.database import encoded

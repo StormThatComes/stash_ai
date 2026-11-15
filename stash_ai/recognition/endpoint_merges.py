@@ -51,11 +51,15 @@ def verified(db, config, scope, namespace, bank, result):
 
     scores = Scores(config)
     threshold = config.data['recognition']['match_threshold']
+    near = {}
+    margin = config.data['recognition']['ambiguity_margin']
     def validate(pair, roots, sources):
         entries = [face(scan,oid,p) for p,scan,ids in zip(pair,sources,(roots[:2],roots[2:])) for oid in ids]
         if len(entries)!=4 or any(f is None for f in entries) or len({f[1] for f in entries})!=4:
             return
         minimum = min(scores.face_similarity(a[0],b[0]) for a in entries[:2] for b in entries[2:])
+        if minimum>=threshold-margin:
+            near[pair] = max(near.get(pair,-1.),minimum)
         if minimum>=threshold:
             remember(best,scenes,dict(people=list(pair), roots=list(roots), minimum=minimum),sources)
             if len(best)>config.data['sapiensid']['execution']['max_candidate_pairs']:
@@ -70,8 +74,7 @@ def verified(db, config, scope, namespace, bank, result):
         if len(pair)==2 and set(pair)<=eligible:
             validate(pair,proof['roots'],(scan,scan))
 
-    # First use indexed face representatives to nominate identities. Compare
-    # original endpoint vectors only inside pairs that passed that face plan.
+    # Both ordinary face consolidation and original strict track endpoints can nominate.
     focus = {p for pair in best for p in pair}
     tracks_sql = """FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND m.policy=? AND
@@ -132,33 +135,43 @@ def verified(db, config, scope, namespace, bank, result):
             return None
         return dict(best[pair][1], supporting_scans=len(scenes[pair]))
 
-    with Search(db, config, bank) as search:
-        for decision in face_plan:
-            people = sorted(decision['people'])
-            if decision['outcome'] != 'merge' or not set(people) <= eligible:
+    from .endpoint_nominations import nominate
+    budget = config.data['sapiensid']['execution']
+    candidates = nominate(focus,representatives,face,threshold-margin,budget['max_candidate_pairs'],
+                          min(budget['reference_bytes'],config.data['clustering']['max_reference_bytes']))
+    candidates.update(best)
+    for decision in face_plan:
+        people = sorted(decision['people'])
+        if decision['outcome']=='merge' and set(people)<=eligible:
+            for pair in combinations(people,2):
+                candidates.add(pair)
+                if len(candidates)>budget['max_candidate_pairs']:
+                    raise ResourceLimit('Too many pairs within a face endpoint nomination.')
+    edges = {}
+    neighbours = {p:set() for p in focus}
+    with Search(db,config,bank) as search:
+        for pair in sorted(candidates):
+            proof = verified_pair(pair,search)
+            if proof is None:
                 continue
-            if len(people) * (len(people)-1) // 2 > config.data['sapiensid']['execution']['max_candidate_pairs']:
-                raise ResourceLimit('Too many pairs within a face endpoint nomination.')
-            edges = {}
-            neighbours = {owner: set() for owner in people}
-            for pair in combinations(people, 2):
-                proof = verified_pair(pair, search)
-                if proof is not None:
-                    edges[pair] = proof
-                    a, b = pair
-                    neighbours[a].add(b)
-                    neighbours[b].add(a)
-            # Only publish isolated complete components. A-B and B-C alone
-            # cannot prove A-C or authorize two overlapping alias writes.
-            for a in people:
-                group = sorted({a} | neighbours[a])
-                if len(group) < 2 or group[0] != a:
-                    continue
-                members = set(group)
-                if any(neighbours[p] != members - {p} for p in group):
-                    continue
-                proofs = [edges[pair] for pair in combinations(group, 2)]
-                result['decisions'].append(dict(people=group, outcome='merge', blockers=[],
-                    endpoint_pair=proofs[0], **({'endpoint_pairs': proofs} if len(proofs)>1 else {}),
-                    cores={p:list(dict.fromkeys(r['id'] for core in bank[p]['cores'] for r in core)) for p in group},
-                    face_witnesses={p:list(bank[p]['face_ids']) for p in group}))
+            edges[pair] = proof
+            a,b = pair
+            neighbours.setdefault(a,set()).add(b)
+            neighbours.setdefault(b,set()).add(a)
+    for a in sorted(neighbours):
+        group = sorted({a}|neighbours[a])
+        if len(group)<2 or group[0]!=a:
+            continue
+        members = set(group)
+        if any(neighbours[p]!=members-{p} for p in group):
+            continue
+        proofs = [edges[pair] for pair in combinations(group,2)]
+        minimum = min(proof['minimum'] for proof in proofs)
+        # A competitor too close to the worst accepted endpoint vetoes the group,
+        # including candidates just below the positive match threshold.
+        if any(minimum-score<margin for pair,score in near.items() if len(members.intersection(pair))==1):
+            continue
+        result['decisions'].append(dict(people=group,outcome='merge',blockers=[],endpoint_pair=proofs[0],
+            **({'endpoint_pairs':proofs} if len(proofs)>1 else {}),
+            cores={p:list(dict.fromkeys(r['id'] for core in bank[p]['cores'] for r in core)) for p in group},
+            face_witnesses={p:list(bank[p]['face_ids']) for p in group}))
