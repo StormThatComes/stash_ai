@@ -83,6 +83,7 @@ def recover(db, scan, source, config, acquire, visibility, release):
     with closing(acquire(),name='close rotated head face backend') as backend:
         try:
             frames = source.frames_indices(sorted(planned)) if hasattr(source,'frames_indices') else source.frames(min(planned))
+            completed = set()
             with closing(frames,name='close rotated head VTT source') as stream:
                 for index,cue,image in stream:
                     with image:
@@ -130,6 +131,9 @@ def recover(db, scan, source, config, acquire, visibility, release):
                                                (oid,row['id']))
                                     faces.append(face)
                             repair_projections(db,config,scan,cue=index)
+                        completed.add(index)
+            if completed != planned.keys():
+                raise ValueError('The VTT source did not supply every requested sideways head cue.')
         finally:
             release()
     certify()
