@@ -1,5 +1,5 @@
 """Lazy, verified SAM-pose2seg loading without the OpenMMLab training stack."""
-from .profiling import pipeline_stage, pipeline_timing, pipeline_cuda_timing
+from .profiling import pipeline_stage, pipeline_timing, pipeline_cuda_timing, pipeline_count
 from contextlib import contextmanager
 import hashlib
 import importlib.abc
@@ -165,7 +165,28 @@ class Segmenter:
             raise ValueError('SAM-pose2seg returned malformed/non-finite masks or scores.')
         return masks[0].astype(bool), float(scores[0])
 
-    def predict_frames(self, frames):
+    def _decode_options(self, positive, negative, multi, image_index):
+        import numpy as np
+        points = np.concatenate((positive, np.asarray(negative).reshape(-1,2)))
+        labels = np.r_[np.ones(len(positive), dtype=np.int32), np.zeros(len(negative), dtype=np.int32)]
+        mask_input, coords, label, boxes = self.predictor._prep_prompts(
+            points, labels, None, None, True, img_idx=image_index)
+        with pipeline_cuda_timing('sam_prompt_decoder', self.device):
+            masks, scores, _ = self.predictor._predict(coords, label, boxes, mask_input,
+                multimask_output=multi, return_logits=False, img_idx=image_index)
+        masks, scores = masks[0].cpu().numpy(), scores[0].float().cpu().numpy()
+        if not 1 <= len(masks) <= 3 or len(scores) != len(masks):
+            raise ValueError('SAM returned an invalid number of mask candidates.')
+        pipeline_count('sam_retry_decoder_calls')
+        return [self._checked(mask[None], score[None]) for mask, score in zip(masks,scores)]
+
+    def predict_options(self, positive, negative):
+        return self._decode_options(positive, negative, True, -1)
+
+    def refine_frames(self, frames, process):
+        return self.predict_frames(frames, process=process)
+
+    def predict_frames(self, frames, *, process=None):
         """Batch image embeddings and equal-length prompt sets; never pad tokens."""
         import numpy as np
         import torch
@@ -210,6 +231,10 @@ class Segmenter:
                     for group in groups.values():
                         values=prompt_batches.run(group,decode,self.device)
                         for (index,_,_),value in zip(group,values):ordered[index]=value
+                    if process is not None:
+                        def retry(positive, negative, multi):
+                            return self._decode_options(positive, negative, multi, image_index)
+                        ordered = process(prompts, ordered, retry)
                     results.append(ordered)
                 return results
             finally:

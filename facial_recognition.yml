@@ -129,6 +129,8 @@ pose:
     # or null.
     min_visibility: null
     # Minimum prompt visibility. Null inherits pose.point_quality. Range: 0..1 or null.
+    adaptive_decoder_retries: true
+    # Try up to two ownership-guided SAM retries per rejected person using the same image features.
     recover_prompt_points: true
     # Recover sparse SAM prompts with distinct limbs, matched face landmarks or a single strong point.
     min_prompt_points: 2

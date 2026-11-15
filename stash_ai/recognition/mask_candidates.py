@@ -141,7 +141,7 @@ def shared_masks(candidates, evidence):
     return shared
 
 
-def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence):
+def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence, decoder=None):
     settings = owner.settings
     minimum = settings['min_prompt_points']
     active = list(jobs)
@@ -149,25 +149,52 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
     blocked = set()
     conflicts = set()
     rejected = set()
+    adaptive = settings.get('adaptive_decoder_retries', False)
+    leaks = {}
     packed_bytes = 0
     supplied = iter(initial_masks) if initial_masks is not None else None
     with ExitStack() as stack:
         frame_open = False
         while active:
-            if supplied is None and not frame_open:
+            if supplied is None and decoder is None and not frame_open:
                 stack.enter_context(owner.segmenter.frame(image))
                 frame_open = True
             for i, available, foreign in active:
                 record = records[i]
                 attempt = record.get('mask_attempts', 0) + 1
-                indices = available[:record.get('prompt_minimum', minimum) + attempt - 1]
-                positive, peers, negative = owner._prompts(bounds, points, cores, i, indices)
+                count = min(settings['max_prompt_points'], record.get('prompt_minimum', minimum) + attempt - 1)
+                indices = available[:count]
+                if adaptive and attempt > 1 and record.get('reason') in (
+                        'missing_prompt_support', 'foreign_core_in_mask', 'missing_independent_support'):
+                    unused = [k for k in available if k not in record['prompt_indices']]
+                    kept = [k for k in available if k in record['prompt_indices']]
+                    if unused:
+                        indices = np.asarray((unused + kept)[:count], dtype=np.intp)
+                positive, peers, negative = owner._prompts(bounds, points, cores, i, indices, leaks.get(i))
                 if supplied is not None:
                     mask, score = next(supplied)
-                elif negative:
-                    mask, score = owner.segmenter.predict(positive, negative)
                 else:
-                    mask, score = owner.segmenter.predict(positive)
+                    multi = adaptive and attempt > 1
+                    options = getattr(owner.segmenter, 'predict_options', None)
+                    if decoder is not None:
+                        variants = decoder(positive, negative, multi)
+                    elif multi and options:
+                        variants = options(positive, negative)
+                    else:
+                        variants = [owner.segmenter.predict(positive, negative) if negative
+                                    else owner.segmenter.predict(positive)]
+                    def rank(variant):
+                        raw, quality = variant
+                        clean, _, reason = check_mask(raw, quality, positive, foreign, bounds[i],
+                                                      settings, image.size, own=evidence[i])
+                        target = raw if clean is None else clean
+                        return (reason is None, -int(inside(target, foreign).sum()),
+                                int(inside(target, evidence[i]).sum()), quality)
+                    mask, score = max(variants, key=rank) if len(variants)>1 else variants[0]
+                    if multi:
+                        record['retry_mask_choices'] = len(variants)
+                if adaptive:
+                    leaks[i] = {j: set(cores[j][inside(mask, points[j, cores[j]])]) for j in peers}
                 record.update(status='rejected', mask_score=score, mask_attempts=attempt,
                               prompt_indices=indices.tolist(), prompt_points=positive.tolist())
                 if peers:
@@ -209,7 +236,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             conflicts = shared_masks(candidates, evidence) | blocked
             active = [(i, available, foreign) for i, available, foreign in jobs
                       if i not in blocked and (i in rejected or i in conflicts)
-                      and len(records[i]['prompt_indices']) < len(available)]
+                      and ((adaptive and records[i]['mask_attempts'] < 3) or
+                           (not adaptive and len(records[i]['prompt_indices']) < len(available)))]
 
     for i in conflicts:
         records[i].update(status='rejected', reason='shared_mask_pixels', mask_conflict=True, separated=False)

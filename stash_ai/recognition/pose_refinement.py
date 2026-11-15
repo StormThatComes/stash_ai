@@ -103,12 +103,13 @@ class RefinedPMPose:
                     indices = spread_indices(xy, indices, len(indices), initial=1)
                 records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
             if len(indices) >= minimum:
-                indices = spread_indices(points[i], indices, settings['max_prompt_points'],
+                limit = len(indices) if settings.get('adaptive_decoder_retries') else settings['max_prompt_points']
+                indices = spread_indices(points[i], indices, limit,
                                          initial=minimum)
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs
 
-    def _prompts(self, bounds, points, cores, i, indices):
+    def _prompts(self, bounds, points, cores, i, indices, leaks=None):
         prompts = points[i, indices]
         neighbours = [j for j, other in enumerate(bounds) if j != i
                       and overlaps(bounds[i], other, self.settings['overlap_threshold'])]
@@ -118,6 +119,8 @@ class RefinedPMPose:
             tolerance = max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))
             for j in neighbours:
                 usable = [k for k in cores[j] if np.linalg.norm(prompts - points[j,k], axis=1).min() > tolerance]
+                if leaks and j in leaks:
+                    usable.sort(key=lambda k: k not in leaks[j])
                 negatives.extend(points[j, spread_indices(points[j], usable, limit)])
         return prompts, neighbours, negatives
 
@@ -125,16 +128,22 @@ class RefinedPMPose:
         from .refinement_batches import refine_many
         return refine_many(self, frames, predictions)
 
-    @pipeline_stage('pmpose_mask_refinement')
-    def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None):
-        points = prediction[0]
-        result, records, cores, jobs = plan or self._plan(bounds, prediction, image)
-        points = prompt_recovery.prompt_points(points, records)
-        second_pass = defer or self._second_pass
-        pending = []
+    def candidates(self, image, bounds, prediction, plan, masks, decoder=None):
+        _, records, cores, jobs = plan
+        points = prompt_recovery.prompt_points(prediction[0], records)
         valid, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
         evidence = [xy[ok] for xy, ok in zip(prediction[0], valid)]
-        for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence):
+        return select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence, decoder)
+
+    @pipeline_stage('pmpose_mask_refinement')
+    def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None, selected=None):
+        plan = plan or self._plan(bounds, prediction, image)
+        result, records = plan[:2]
+        second_pass = defer or self._second_pass
+        pending = []
+        if selected is None:
+            selected = self.candidates(image, bounds, prediction, plan, masks)
+        for candidate in selected:
             pending.append(candidate)
             if len(pending) >= self.pose.batch_size:
                 second_pass(image, pending, result, records, prediction)
