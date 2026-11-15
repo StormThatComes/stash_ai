@@ -132,7 +132,9 @@ class RefinedPMPose:
         points = prompt_recovery.prompt_points(points, records)
         second_pass = defer or self._second_pass
         pending = []
-        for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks):
+        valid, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
+        evidence = [xy[ok] for xy, ok in zip(prediction[0], valid)]
+        for candidate in select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence):
             pending.append(candidate)
             if len(pending) >= self.pose.batch_size:
                 second_pass(image, pending, result, records, prediction)
