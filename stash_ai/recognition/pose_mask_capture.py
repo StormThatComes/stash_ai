@@ -11,6 +11,7 @@ class FrameMasks:
     def __init__(self, image):
         self.image = image
         self.people = {}
+        self.attempts = {}
         self.bytes = 0
 
     def save(self, record, stage, mask):
@@ -30,6 +31,9 @@ class FrameMasks:
         _, stages = self.people.setdefault(key, (record, {}))
         stages[stage] = (mask.shape, packed)
         self.bytes += len(packed)
+
+    def history(self, record):
+        return self.attempts.setdefault(id(record), [])
 
     def stages(self, record):
         entry = self.people.get(id(record))
@@ -55,8 +59,14 @@ def capture_masks(image, *, enabled=True):
         _CURRENT.reset(token)
         if capture is not None:
             capture.people.clear()
+            capture.attempts.clear()
             capture.bytes = 0
             capture.image = None
+
+
+def mask_history(image, record):
+    capture = _CURRENT.get()
+    return capture.history(record) if capture is not None and capture.image is image else None
 
 
 def mask_observer(image, record):

@@ -21,12 +21,13 @@ def test_final_gates_rank_every_variant_and_report_each_attempt():
     settings = dict(defaults(),adaptive_decoder_retries=True,min_prompt_points=1,max_prompt_points=1)
     owner = SimpleNamespace(settings=settings, segmenter=None,
         _prompts=lambda boxes, points, cores, i, chosen, leaks: (points[i,chosen],[],[]))
-    with Image.new('RGB',(64,64)) as image, capture_masks(image):
+    with Image.new('RGB',(64,64)) as image, capture_masks(image) as capture:
         selected = list(select_masks(owner,image,[[0,0,64,64]],xy,[np.array([0,5])],
             [(0,indices,np.empty((0,2)))],records,[(np.zeros_like(first),.99)],[evidence],
             decoder=lambda *args: [(first,.98),(other,.94)]))
+        assert capture.history(records[0])[1]['variants'][0]['reason'] == 'missing_independent_support'
     assert len(selected) == 1 and np.array_equal(selected[0][2],other)
-    assert records[0]['attempt_history'][1]['variants'][0]['reason'] == 'missing_independent_support'
+
     assert records[0]['mask_variant'] == 1
 
 

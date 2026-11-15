@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from .pose_mask_capture import mask_observer
+from .pose_mask_capture import mask_observer, mask_history
 from .profiling import pipeline_stage
 
 
@@ -307,7 +307,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 rank, mask, box, reason, edits = assessed[best]
                 if observer is not None:
                     assess(variants[best], observer)
-                    record.setdefault('attempt_history', []).append(dict(attempt=attempt,
+                    mask_history(image,record).append(dict(attempt=attempt,
                         positive=positive.tolist(), negative=np.asarray(negative).tolist(), chosen=best,
                         variants=[dict(score=float(item[1]), reason=assessment[3])
                                   for item, assessment in zip(variants, assessed)]))
@@ -376,5 +376,5 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 observer = mask_observer(image, records[i])
                 if observer is not None:
                     observer('cleaned', mask)
-                    records[i]['attempt_history'][-1]['paired_choice'] = candidate.variant
+                    mask_history(image,records[i])[-1]['paired_choice'] = candidate.variant
             yield i, candidate.box, mask, candidate.indices
