@@ -69,6 +69,7 @@ def _previous_contracts(config):
             _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False),
             _contract(config,'independent-person-v4-independent-torso'),
             _contract(config,'independent-person-v3-perspective'),
+            _contract(config,'independent-person-v3-perspective',legacy_association='v7'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v6'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v5'),
             _contract(config,'independent-person-v3-perspective',legacy_association='v4'), previous, recent, old_mask, *dict.fromkeys(_contract(config,version,legacy_boundaries=boundaries,legacy_association=association)

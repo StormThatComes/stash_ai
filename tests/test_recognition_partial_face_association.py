@@ -165,3 +165,12 @@ def test_full_frame_merged_box_retries_distinct_tiles_containing_each_complete_f
             x,y,w,h = face.box
             assert bounds[0]<=x<x+w<=bounds[2] and bounds[1]<=y<y+h<=bounds[3]
             assert len(heads)==1 and bounds[2]-bounds[0]<image.width
+
+
+def test_body_boxes_grazing_far_from_head_preserve_profile():
+    own, peer = person((0,0,100,140)),person((99,0,190,140))
+    own['keypoints'][1:3] = [[-1,-1],[-1,-1]]
+    peer['keypoints'] = [[-1,-1]]*17
+    assert associate([FACE],[own,peer])==[0]
+    peer['bounds'][0]=45
+    assert associate([FACE],[own,peer])==[None]

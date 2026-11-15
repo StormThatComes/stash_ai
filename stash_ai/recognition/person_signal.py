@@ -206,6 +206,8 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     if legacy_association is not True and not legacy_boundaries:
         from .person_association import policy
         evidence['face_person_association'] = policy()
+        if legacy_association == 'v7':
+            evidence['face_person_association']['version'] = 'contact-head-ownership-v7'
         if legacy_association == 'v6':
             evidence['face_person_association']['version'] = 'contact-head-ownership-v6'
         elif legacy_association == 'v5':
