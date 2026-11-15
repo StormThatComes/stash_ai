@@ -28,10 +28,26 @@ class Visual:
         ttk.Button(bar2,text='Gallery',command=self.gallery).pack(side='left')
         ttk.Button(bar2,text='Open observation…',command=self.open_id).pack(side='left')
         ttk.Button(bar2,text='Geometry layers…',command=self.layer_dialog).pack(side='left')
+        self.face_visibility_button = None
+        if self.previews is not None:
+            self.face_visibility_button = ttk.Button(bar2, text='Face visibility…', state='disabled',
+                                                    command=self.inspect_face_visibility)
+            self.face_visibility_button.pack(side='left')
         self.point_label=ttk.Label(right,text='',wraplength=700);self.point_label.grid(row=6,column=0,sticky='w')
         for name,panel in self.images.panels.items():
             panel.canvas.bind('<Motion>',lambda e,n=name:self.inspect_point(n,e))
             panel.canvas.bind('<Double-Button-1>',lambda e,n=name:self.select_shape(n,e))
+
+    def inspect_face_visibility(self):
+        from .inspection_face_visibility import FaceVisibilityWindow
+        row = self.current_row
+        if not row or row['kind'] != 'face' or self.preview_scope is None:
+            return
+        window = next((w for w in self.visual_windows if isinstance(w, FaceVisibilityWindow)), None)
+        if window is None:
+            window = FaceVisibilityWindow(self)
+            self.visual_windows.append(window)
+        window.show(row, self.preview_scope)
 
     def request_selected(self,cue=None):
         if not self.current_row or self.preview_scope is None:return

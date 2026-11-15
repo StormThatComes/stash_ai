@@ -174,6 +174,8 @@ class Inspector(Visual, Diagnostics):
         self.notes.configure(state='disabled')
 
     def clear_detail(self):
+        if self.face_visibility_button is not None:
+            self.face_visibility_button.state(['disabled'])
         self.detail_data=None
         self.decision_button.state(['disabled'])
         self.image_worker.invalidate()
@@ -298,6 +300,8 @@ class Inspector(Visual, Diagnostics):
         self.detail_data=result
         self.decision_button.state(['!disabled'])
         self.preview_scope = result['scope']
+        if self.face_visibility_button is not None and row['kind'] == 'face':
+            self.face_visibility_button.state(['!disabled'])
         self.request_selected()
         trace = result['trace']
         self.text(describe_advice(result.get('suggestions')) + describe(trace) + describe_diagnostics(result))
