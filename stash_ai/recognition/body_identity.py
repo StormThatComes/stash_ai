@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v45-turn-episodes',contract(config),matching_policy(config),
+    return digest(['body-local-v46-spatial-gaps',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -283,9 +283,11 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     record['cut_starts'] = tuple(start for start,shot in json.loads(shot_map[0]) if shot is not None) if shot_map else ()
     if not record['cut_starts']:
         record['cut_starts'] = tuple(sorted({q for r in rows if isinstance(q:=quality(r).get('view_shot'),int)}))
-    record['occupied_cues'] = [r[0] for r in db.execute(
-        'SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION SELECT cue FROM observations WHERE scan=?',
-        (scan,expected,scan))]
+    from .cue_gaps import blockers
+    record['gap_boxes'] = blockers(db,scan,expected)
+    record['occupied_cues'] = sorted(record['gap_boxes'])
+    motion = db.execute('SELECT value FROM metadata WHERE key=?',('cue-continuity:'+scan,)).fetchone()
+    record['motion'] = motion[0] if motion else ''
     return record,rows,roots,origins,ordered_owners(db,origins)
 
 
@@ -317,7 +319,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     graph = None
     if settings.get('tracklet_matching') and settings.get('body_first_matching'):
         from .body_tracklets import paths
-        graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph')))
+        graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph'), gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
     seeds={};decisions={}
     from .contact_anchors import questionable_links
     uncertain = questionable_links(rows,settings,scores)
@@ -344,7 +346,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     frozen=FrozenSeeds(seeds,scores,settings) if queries or review_faces else None
     if graph is None and turn_feature(settings,'extended_track_graph'):
         from .body_tracklets import paths
-        graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True))
+        graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True, gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
     anonymous = {}
     track_lineage = {}
     if settings.get('tracklet_matching') and (queries or review_faces):

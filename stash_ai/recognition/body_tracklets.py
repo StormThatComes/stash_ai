@@ -8,7 +8,7 @@ from .perspective_shots import change
 from .track_geometry import rejection, torso_points, translation
 
 
-def paths(rows, settings, scores, occupied=(), *, extended=False):
+def paths(rows, settings, scores, occupied=(), *, extended=False, gap_boxes=None, motion=''):
     cues = defaultdict(list)
     geometry = {}
     physical = {}
@@ -36,7 +36,9 @@ def paths(rows, settings, scores, occupied=(), *, extended=False):
     for cue,target in zip(ordered,ordered[1:]):
         gap = target-cue
         skipped = gap>1
-        if gap>(5 if extended else 2) or bisect_right(occupied,cue)!=bisect_right(occupied,target-1):
+        middle = occupied[bisect_right(occupied,cue):bisect_right(occupied,target-1)]
+        verified = len(motion)>target and '0' not in motion[cue+1:target+1]
+        if gap>(5 if extended else 2) or middle and (gap_boxes is None or not verified):
             continue
         left,right = cues[cue],cues[target]
         if not right:
@@ -53,16 +55,23 @@ def paths(rows, settings, scores, occupied=(), *, extended=False):
         qb,_,_,sb = geometry[right_valid[0]['id']]
         offset = translation(qa,qb,sa,sb)
         continuous = (np.abs(sa-sb).mean()<=8 or offset is not None) if skipped else change(sa,sb,True)=='continuous'
-        if qa['view_shot']!=qb['view_shot'] or not continuous:
+        if qa['view_shot']!=qb['view_shot'] or not (continuous or verified):
             continue
         edges = {}
         for a in left_valid:
             _,ba,ta,_ = geometry[a['id']]
             for b in right_valid:
                 _,bb,tb,_ = geometry[b['id']]
+                if middle:
+                    from .cue_gaps import clear
+                    if not clear(ba,bb,[gap_boxes.get(i,[None]) for i in middle]):
+                        continue
                 if not rejection(ba,bb,ta,tb,translation=offset):
                     edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
-        if gap>2:
+        solo = verified and len(left)==len(right)==1 and not partial
+        if gap>2 and solo:
+            edges = {key:v for key,v in edges.items() if v>=max(threshold,settings['match_threshold'])}
+        if gap>2 and not solo:
             # Long empty intervals only nominate two independently plausible
             # paths in a visually continuous shot with the same complete roster.
             from .crowd_context import pair
@@ -348,6 +357,13 @@ def split_members(core, proposed, occupied, minimum):
     no = [r for r in core if proposed.get(r['id'])!=target]
     if not yes or not no or len(independent(yes,minimum))<max(2,minimum['attach_min_support']):
         return set()
+    ordered = sorted(core,key=lambda r:r['cue'])
+    from itertools import groupby
+    runs = [(matched,list(rows)) for matched,rows in groupby(ordered,lambda r:r['id'] in proposed)]
+    if len(runs)==3 and runs[0][0] and runs[2][0]:
+        if all(len(independent(part,minimum))>=max(2,minimum['attach_min_support'])
+               for _,part in (runs[0],runs[2])) and not any(occupied(r,target) for r in yes):
+            return {r['id'] for r in yes}
     before = max(r['cue'] for r in yes)<min(r['cue'] for r in no)
     after = max(r['cue'] for r in no)<min(r['cue'] for r in yes)
     boundary = (min if before else max)(no,key=lambda r:r['cue'])
