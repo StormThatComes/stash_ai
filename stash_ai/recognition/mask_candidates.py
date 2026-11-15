@@ -20,7 +20,7 @@ def inside(mask, points):
 
 
 @pipeline_stage('mask_validation')
-def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None, own=()):
+def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None, own=(), limbs=(), edits=None, replay=()):
     """Return an admitted mask/box or an explicit, auditable rejection reason."""
     import cv2
     width, height = size
@@ -38,19 +38,34 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
     # but substantial hand/foot. Never force a single connected component.
     _, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
     keep = stats[:, cv2.CC_STAT_AREA] >= max(4, math.ceil(int(mask.sum()) * .001))
-    if len(own) and len(foreign) and len(stats) > 2:
+    original_keep = keep.copy()
+    if len(stats) > 2:
         def components(points):
             points = np.asarray(points).reshape(-1, 2)
             xy = np.floor(points[inside(mask, points)]).astype(int)
-            return labels[xy[:,1], xy[:,0]]
-        ours = components(np.concatenate((prompts, own)))
+            return labels[xy[:, 1], xy[:, 0]]
+
         theirs = components(foreign)
-        # Only remove independently supported foreign islands. A connection to
-        # any measured target joint protects a disconnected hand or foot.
-        if len(ours) and len(theirs):
+        for parent, tip in limbs:
+            # The visible chain must approach the island from our foreground.
+            segment = np.linspace(parent, tip, 9)
+            island = components([tip])
+            if (len(island) and island[0] not in theirs and
+                    inside(mask, segment[:-1]).sum() >= 6 and
+                    (not len(foreign) or np.linalg.norm(foreign - tip, axis=1).min() > 3)):
+                keep[island[0]] = True
+        if len(own) and len(theirs):
+            ours = components(np.concatenate((prompts, own)))
             for component in set(theirs) - set(ours):
-                if np.count_nonzero(theirs == component) >= 2:
+                if len(ours) and np.count_nonzero(theirs == component) >= 2:
                     keep[component] = False
+    for x, y, keep_island in replay:
+        if 0 <= x < width and 0 <= y < height and labels[y,x]:
+            keep[labels[y,x]] = keep_island
+    if edits is not None:
+        for label in np.flatnonzero(keep != original_keep):
+            y, x = np.argwhere(labels == label)[0]
+            edits.append((int(x), int(y), bool(keep[label])))
     keep[0] = False
     mask = keep[labels]
     if observe is not None:
@@ -104,6 +119,10 @@ class Candidate:
     box: list
     indices: np.ndarray
 
+    variant: int = 0
+    quality: float = 0.0
+    edits: tuple = ()
+
     def crop(self):
         x,y,r,b = self.extent
         return np.unpackbits(self.bits, count=(r-x)*(b-y)).reshape(b-y,r-x).view(bool)
@@ -141,11 +160,89 @@ def shared_masks(candidates, evidence):
     return shared
 
 
-def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence, decoder=None):
+def _regions(indices, xy, distance):
+    # Count one spatially independent point per anatomical group.
+    group = (0,0,0,0,0,1,1,2,3,2,3,4,4,5,6,5,6)
+    groups, witnesses = set(), []
+    for k in indices:
+        if group[k] not in groups and all(np.linalg.norm(xy[k]-p) >= distance for p in witnesses):
+            groups.add(group[k])
+            witnesses.append(xy[k])
+    return len(groups)
+
+
+def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points,
+                reliable, evidence, record, settings, size, limbs, observe=None):
+    box = bounds[i]
+    edits = []
+    clean, crop, reason = check_mask(raw, score, positive, foreign, box, settings, size,
+                                     observe=observe, own=evidence[i], limbs=limbs, edits=edits)
+    target = raw if clean is None else clean
+    if reason is None:
+        holdout = [k for k in record.get('support_indices', ()) if k not in indices]
+        if holdout and not inside(clean, points[i, holdout]).any():
+            reason = 'missing_independent_support'
+        outside = clean.sum() != clean[box[1]:box[3], box[0]:box[2]].sum()
+        sparse = (record.get('prompt_minimum', settings['min_prompt_points']) < settings['min_prompt_points']
+                  or any(k in (7,8,13,14) for k in indices)
+                  or 'face_prompt' in record or 'temporal_prompts' in record)
+        weak_expansion = peers and outside and not inside(clean, points[i, holdout]).any()
+        floor = settings.get('min_recovery_mask_score')
+        if reason is None and (sparse or weak_expansion) and score < (
+                floor if floor is not None else (1 + settings['min_mask_score']) / 2):
+            scale = np.hypot(box[2]-box[0], box[3]-box[1])
+            own = [k for k in reliable if inside(clean, [points[i,k]])[0]]
+            independent = [k for k in own if k not in indices and
+                           np.linalg.norm(positive-points[i,k], axis=1).min() > max(3., .06*scale)]
+            # Overriding a user-specified recovery floor is never permitted.
+            bilateral_core = {5,6}.issubset(own) or {11,12}.issubset(own)
+            supported = (floor is None and independent and bilateral_core and
+                         _regions(own, points[i], max(3., .09*scale)) >= 3 and
+                         not inside(clean, foreign).any())
+            if not supported:
+                reason = 'weak_recovery_mask'
+    rank = (reason is None, -int(inside(target, foreign).sum()),
+            int(inside(target, evidence[i]).sum()), float(score))
+    return rank, clean, crop, reason, edits
+
+
+def _pack(mask, box, indices, variant, score, edits):
+    yy, xx = np.nonzero(mask)
+    x,y,r,b = int(xx.min()),int(yy.min()),int(xx.max())+1,int(yy.max())+1
+    return Candidate(np.packbits(mask[y:b,x:r], axis=None), (x,y,r,b), len(xx),
+                     box, indices, variant, float(score), tuple(edits))
+
+
+def resolve_options(candidates, options, evidence):
+    """Try existing decoder variants for geometrically conflicting local pairs."""
+    conflicts = shared_masks(candidates, evidence)
+    for i in sorted(conflicts):
+        for j in candidates:
+            if i == j or not (options.get(i) or options.get(j)):
+                continue
+            if not shared_masks({i:candidates[i], j:candidates[j]}, evidence):
+                continue
+            for first in [candidates[i], *options.get(i, ())]:
+                for second in [candidates[j], *options.get(j, ())]:
+                    proposal = dict(candidates)
+                    proposal.update({i:first, j:second})
+                    remaining = shared_masks(proposal, evidence)
+                    if remaining < conflicts:
+                        candidates.update({i:first, j:second})
+                        conflicts = remaining
+                        break
+                else:
+                    continue
+                break
+    return conflicts
+
+
+def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence, decoder=None, valid=None):
     settings = owner.settings
     minimum = settings['min_prompt_points']
     active = list(jobs)
     candidates = {}
+    options_by_person = {}
     blocked = set()
     conflicts = set()
     rejected = set()
@@ -179,7 +276,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                         continue
                     previous.add(signature)
                 if supplied is not None:
-                    mask, score = next(supplied)
+                    variants = [next(supplied)]
                 else:
                     multi = adaptive and attempt > 1
                     options = getattr(owner.segmenter, 'predict_options', None)
@@ -190,41 +287,37 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                     else:
                         variants = [owner.segmenter.predict(positive, negative) if negative
                                     else owner.segmenter.predict(positive)]
-                    def rank(variant):
-                        raw, quality = variant
-                        clean, _, reason = check_mask(raw, quality, positive, foreign, bounds[i],
-                                                      settings, image.size, own=evidence[i])
-                        target = raw if clean is None else clean
-                        return (reason is None, -int(inside(target, foreign).sum()),
-                                int(inside(target, evidence[i]).sum()), quality)
-                    mask, score = max(variants, key=rank) if len(variants)>1 else variants[0]
                     if multi:
                         record['retry_mask_choices'] = len(variants)
+                reliable = np.flatnonzero(valid[i]) if valid is not None else cores[i]
+                limbs = [(points[i,p],points[i,k]) for p,k in ((7,9),(8,10),(13,15),(14,16))
+                         if p in reliable and k in reliable]
+                def assess(variant, observe=None):
+                    return _assessment(*variant, i, indices, positive, foreign, bounds, peers, points,
+                                       reliable, evidence, record, settings, image.size, limbs, observe)
+                assessed = [assess(item) for item in variants]
+                order = sorted(range(len(variants)), key=lambda v: assessed[v][0], reverse=True)
+                best = order[0]
+                raw, score = variants[best]
+                observer = mask_observer(image, record)
+                rank, mask, box, reason, edits = assessed[best]
+                if observer is not None:
+                    assess(variants[best], observer)
+                    record.setdefault('attempt_history', []).append(dict(attempt=attempt,
+                        positive=positive.tolist(), negative=np.asarray(negative).tolist(), chosen=best,
+                        variants=[dict(score=float(item[1]), reason=assessment[3])
+                                  for item, assessment in zip(variants, assessed)]))
                 if adaptive:
-                    leaks[i] = {j: set(cores[j][inside(mask, points[j, cores[j]])]) for j in peers}
-                record.update(status='rejected', mask_score=score, mask_attempts=attempt,
-                              prompt_indices=indices.tolist(), prompt_points=positive.tolist())
+                    leaks[i] = {j: set(cores[j][inside(raw, points[j, cores[j]])])
+                                for j in range(len(bounds)) if j != i}
+                record.update(status='rejected', mask_score=float(score), mask_attempts=attempt,
+                              prompt_indices=indices.tolist(), prompt_points=positive.tolist(),
+                              mask_variant=best)
+                record.pop('component_edits', None)
+                if edits:
+                    record['component_edits'] = edits
                 if peers:
                     record['negative_points'] = np.asarray(negative).tolist()
-                mask, box, reason = check_mask(mask, score, positive, foreign, bounds[i], settings,
-                                              image.size, observe=mask_observer(image, record), own=evidence[i])
-                holdout = [k for k in record.get('support_indices', ()) if k not in indices]
-                if reason is None and holdout and not inside(mask, points[i, holdout]).any():
-                    reason = 'missing_independent_support'
-                # A limb/face-assisted or below-minimum seed can describe only part
-                # of the body. Require stronger SAM confirmation for these rescues.
-                rescued = (record.get('prompt_minimum', minimum) < minimum or
-                           any(k in (7,8,13,14) for k in indices) or 'face_prompt' in record or 'temporal_prompts' in record)
-                recovery_floor = settings.get('min_recovery_mask_score')
-                if recovery_floor is None:
-                    recovery_floor = (1 + settings['min_mask_score']) / 2
-                if reason is None and peers and box != list(bounds[i]):
-                    # An expanded mask in contact can be supported only by the
-                    # very seeds that generated it. Treat it like a sparse rescue.
-                    unused = [k for k in record.get('support_indices', cores[i]) if k not in indices]
-                    rescued |= not inside(mask, points[i, unused]).any()
-                if reason is None and rescued and score < recovery_floor:
-                    reason = 'weak_recovery_mask'
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
                 record['separated'] = False
@@ -241,20 +334,26 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 torso = [k for k in cores[i] if k in (5, 6, 11, 12)]
                 record['separated'] = bool(peers and len(torso) >= 2 and inside(mask, points[i, torso]).all()
                     and all(len(cores[j]) >= 2 and not inside(mask, points[j, cores[j]]).any() for j in peers))
-                yy, xx = np.nonzero(mask)
-                x,y,r,b = int(xx.min()),int(yy.min()),int(xx.max())+1,int(yy.max())+1
-                bits = np.packbits(mask[y:b,x:r], axis=None)
+                candidate = _pack(mask, box, indices, best, score, edits)
+                packed_bytes -= sum(item.bits.nbytes for item in options_by_person.pop(i, []))
                 previous_bytes = candidates[i].bits.nbytes if i in candidates else 0
-                if packed_bytes - previous_bytes + bits.nbytes > 16 * 1024**2:
-                    # Without the candidate we cannot disambiguate a conflicting peer.
+                if packed_bytes - previous_bytes + candidate.bits.nbytes > 16 * 1024**2:
+                    x,y,r,b = candidate.extent
                     blocked.update(j for j, other in enumerate(bounds) if
                         other[0] < r and x < other[2] and other[1] < b and y < other[3])
                     blocked.add(i)
                     continue
-                packed_bytes += bits.nbytes - previous_bytes
-                candidates[i] = Candidate(bits, (x,y,r,b), pixels, box, indices)
+                packed_bytes += candidate.bits.nbytes - previous_bytes
+                candidates[i] = candidate
+                for v in order[1:]:
+                    _, alt_mask, alt_box, failure, alt_edits = assessed[v]
+                    if failure is None:
+                        alt = _pack(alt_mask, alt_box, indices, v, variants[v][1], alt_edits)
+                        if packed_bytes + alt.bits.nbytes <= 16 * 1024**2:
+                            options_by_person.setdefault(i, []).append(alt)
+                            packed_bytes += alt.bits.nbytes
             supplied = None
-            conflicts = shared_masks(candidates, evidence) | blocked
+            conflicts = resolve_options(candidates, options_by_person, evidence) | blocked
             active = [(i, available, foreign) for i, available, foreign in jobs
                       if i not in blocked and i not in exhausted and (i in rejected or i in conflicts)
                       and ((adaptive and records[i]['mask_attempts'] < 3) or
@@ -267,4 +366,11 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             x,y,r,b = candidate.extent
             mask = np.zeros((image.height,image.width), bool)
             mask[y:b,x:r] = candidate.crop()
+            if records[i]['mask_variant'] != candidate.variant:
+                records[i].update(mask_variant=candidate.variant, mask_score=candidate.quality,
+                                  mask_pixels=candidate.pixels, separated=False, component_edits=list(candidate.edits))
+                observer = mask_observer(image, records[i])
+                if observer is not None:
+                    observer('cleaned', mask)
+                    records[i]['attempt_history'][-1]['paired_choice'] = candidate.variant
             yield i, candidate.box, mask, candidate.indices

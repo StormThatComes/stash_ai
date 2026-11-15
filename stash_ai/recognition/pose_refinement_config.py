@@ -41,8 +41,8 @@ def validate(pose):
 
 def contract(settings):
     from . import sam_pose2seg_registry as registry
-    return dict(version=('pmpose-sam-pose2seg-refinement-v11' if settings.get('recover_prompt_points')
-                         else 'pmpose-sam-pose2seg-refinement-v10'),
+    return dict(version=('pmpose-sam-pose2seg-refinement-v13' if settings.get('recover_prompt_points')
+                         else 'pmpose-sam-pose2seg-refinement-v12'),
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,
                 **{k: v for k, v in settings.items() if k != 'directory'})

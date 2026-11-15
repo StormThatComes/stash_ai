@@ -33,7 +33,7 @@ def _checked_result(image, row, config, points, raw, score):
     details = person['pose_refinement']
     settings = config.data['sapiensid']
     mask, box, _ = check_mask(raw, score, points, (), details['detector_bounds'],
-                              settings['pose']['refinement'], image.size)
+                              settings['pose']['refinement'], image.size, replay=details.get('component_edits', ()))
     bounds = person['bounds']
     if (mask is None or int(mask.sum()) != details['mask_pixels'] or
             (bounds != box and details.get('reason') != 'second_pass_core_drift')):
@@ -67,8 +67,17 @@ def _restore_cue(collector, db, image, rows, attempt):
         prompts.append((np.asarray(details['prompt_points'], dtype=np.float32),
                         np.asarray(details.get('negative_points', []), dtype=np.float32).reshape(-1, 2)))
     with collector.model.pose_refiner.mask_frame(image) as segmenter:
-        results = [_checked_result(image, row, collector.config, points, *segmenter.predict(points, negative))
-                   for row, (points, negative) in zip(rows, prompts)]
+        results = []
+        for row, (points, negative) in zip(rows, prompts):
+            details = json.loads(row['geometry'])['pose_refinement']
+            if details.get('retry_mask_choices') and callable(getattr(segmenter, 'predict_options', None)):
+                options = segmenter.predict_options(points, negative)
+                index = details.get('mask_variant', 0)
+                prediction = options[index] if 0 <= index < len(options) else None
+            else:
+                prediction = segmenter.predict(points, negative)
+            results.append(_checked_result(image, row, collector.config, points, *prediction)
+                           if prediction is not None else None)
     # Recognition can use SAM's batched decoder for the first prompt set and
     # its scalar decoder for retries. Their edge pixels can differ on GPU.
     if callable(getattr(segmenter, 'predict_frames', None)):
@@ -101,7 +110,7 @@ def restore_masks(collector, db, scan, source):
     settings = config.data['sapiensid']
     if not (enabled(config) and settings['storage']['retain_body_masks'] and settings['pose']['refinement']['enabled']):
         return
-    attempt = digest(['sam-mask-replay-v1', config.data['models']['device'],
+    attempt = digest(['sam-mask-replay-v2', config.data['models']['device'],
                       config.data['execution']['sam_precision'], runtime_versions()])
     params = (scan, collector.body_contract, attempt)
     cues = [r[0] for r in db.execute('SELECT DISTINCT cue' + _GAPS + ' ORDER BY cue', params)]

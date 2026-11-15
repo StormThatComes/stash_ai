@@ -125,7 +125,7 @@ class RefinedPMPose:
     def _prompts(self, bounds, points, cores, i, indices, leaks=None):
         prompts = points[i, indices]
         neighbours = [j for j, other in enumerate(bounds) if j != i
-                      and overlaps(bounds[i], other, self.settings['overlap_threshold'])]
+                      and (overlaps(bounds[i], other, self.settings['overlap_threshold']) or (leaks and leaks.get(j)))]
         negatives = []
         limit = self.settings['max_negative_prompt_points_per_neighbor']
         if limit:
@@ -146,7 +146,7 @@ class RefinedPMPose:
         points = prompt_recovery.prompt_points(prediction[0], records)
         valid, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
         evidence = [xy[ok] for xy, ok in zip(prediction[0], valid)]
-        return select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence, decoder)
+        return select_masks(self, image, bounds, points, cores, jobs, records, masks, evidence, decoder, valid)
 
     @pipeline_stage('pmpose_mask_refinement')
     def refine(self, image, bounds, prediction, *, plan=None, masks=None, defer=None, selected=None):
