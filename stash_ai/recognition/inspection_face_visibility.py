@@ -86,7 +86,8 @@ class FaceReplay:
         return annotated, caption
 
     def slider_range(self, configured):
-        scores = self.logits[self.region]
+        measured = self.region if self.comparison is None else self.region | self.comparison[0]
+        scores = self.logits[measured]
         # Include the measured range, the YAML value, and a position below the lowest logit.
         return math.floor(min(float(scores.min()), configured, 0.)) - 1, math.ceil(max(float(scores.max()), configured, 1.))
 
@@ -162,8 +163,9 @@ class FaceVisibilityWindow:
         ttk.Button(bar, text='100%', command=lambda: self.images.set_zoom('A', 1.)).pack(side='left')
         ttk.Label(bar, text='Gold outline: measurement ellipse    Green: pixels counted as visible').pack(side='left')
         self.use_profile = tk.BooleanVar(master=self.window, value=False)
-        ttk.Checkbutton(bar,text='Landmark ROI (preview)',variable=self.use_profile,
-                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
+        self.roi_toggle = ttk.Checkbutton(bar, text='Landmark ROI (preview)', variable=self.use_profile,
+                                          command=lambda: self.set_threshold(self.value.get()))
+        self.roi_toggle.pack(side='left')
         controls = ttk.Frame(self.window)
         controls.pack(fill='x', padx=8)
         ttk.Label(controls, text='Pixel logit threshold (preview)').pack(side='left')
@@ -188,6 +190,7 @@ class FaceVisibilityWindow:
         self.window.title(f"Face visibility · Scene {row['scene']} · cue {row['cue']} · {row['id']}")
         self.window.lift()
         self.result = None
+        self.roi_toggle.state(['disabled'])
         self.slider.state(['disabled'])
         self.reset.state(['disabled'])
         self.value.set(self.configured)
@@ -204,6 +207,7 @@ class FaceVisibilityWindow:
         self.images.fit('A')
         if result.logits is not None:
             low, high = result.slider_range(self.configured)
+            self.roi_toggle.state(['!disabled'])
             self.slider.configure(from_=low, to=high)
             self.slider.state(['!disabled'])
             self.reset.state(['!disabled'])
