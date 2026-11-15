@@ -322,7 +322,8 @@ def test_command_outcome_after_final_release(tmp_path, monkeypatch, capsys):
 
 def test_sapiens_progress_counts_only_missing_cues(monkeypatch):
     from contextlib import nullcontext
-    from stash_ai.recognition import body_observations, person_collection, person_crop_backfill
+    from stash_ai.recognition.config import defaults
+    from stash_ai.recognition.person_collection import PersonCollector
     from stash_ai.recognition.progress import observe_updates
 
     class Source:
@@ -333,10 +334,11 @@ def test_sapiens_progress_counts_only_missing_cues(monkeypatch):
         def execute(self, query, arguments):
             return [(1,), (3,)] if 'SELECT DISTINCT o.cue' in query else []
 
-    collector = person_collection.PersonCollector(SimpleNamespace(data={'sapiensid': {'enabled': True}}), None)
-    monkeypatch.setattr(person_collection, 'contract', lambda _: 'test')
-    monkeypatch.setattr(body_observations, 'enabled', lambda _: False)
-    monkeypatch.setattr(person_crop_backfill, 'backfill', lambda *args: None)
+    data = defaults()
+    data['sapiensid']['enabled'] = True
+    data['sapiensid']['collection']['enabled'] = False
+    data['sapiensid']['storage']['retain_person_crops'] = False
+    collector = PersonCollector(SimpleNamespace(data=data), None)
     monkeypatch.setattr(collector, '_load', lambda: None)
     collected, rows = [], []
     monkeypatch.setattr(collector, 'collect_records', lambda db, scan, i, *a, **kw: collected.append(i))
