@@ -2,6 +2,8 @@
 import json
 import math
 
+from .body_overlap import admission_overlap
+
 PIXEL_PARAMETER='sapiensid.identities.anchor_min_person_pixels'
 
 
@@ -54,7 +56,7 @@ def anchor_gate(metadata,settings,*,collection=None):
         if reason is None and collection is not None:
             # Older face projections discarded collection rejection reasons.
             # Re-evaluate measured quality before admitting those retained rows.
-            source_pixels=pixels(record);overlap=quality.get('overlap')
+            source_pixels=pixels(record);overlap=admission_overlap(quality)
             reason=('person_pixels' if source_pixels is not None and source_pixels<collection['min_person_pixels'] else
                     'person_sharpness' if valid(sharpness) and sharpness<collection['min_sharpness'] else
                     'person_keypoints' if valid(points) and points<collection['min_keypoints'] else

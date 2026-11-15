@@ -3,6 +3,7 @@ import json
 import math
 from types import SimpleNamespace
 
+from .body_overlap import admission_overlap
 from .person_anchor import pixels
 from .pose_policy import measurement_required
 from .visibility import cached
@@ -175,15 +176,27 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
             for key, value, op in (
                 ('min_person_pixels', pixels(metadata), '>='),
                 ('min_sharpness', quality.get('sharpness'), '>='),
-                ('min_keypoints', quality.get('keypoints'), '>='),
-                ('max_overlap', quality.get('overlap'), '<='))]
+                ('min_keypoints', quality.get('keypoints'), '>='))]
+        skipped = quality.get('overlap_skipped_peer_indices', [])
+        maximum = admission_overlap(quality)
+        overlap_check = check('sapiensid.collection.max_overlap', maximum, collection['max_overlap'], '<=',
+                              enabled=not skipped or maximum is not None)
+        notes = []
+        if 'overlap_peer_index' in quality:
+            notes.append(f"Maximum against P{quality['overlap_peer_index']} in this cue "
+                         f"using {quality['overlap_pair_basis']}. Pair box overlap "
+                         f"{quality['overlap_pair_box_fraction']:.2%}.")
+            if quality.get('overlap_peer_observation'):
+                notes.append(f"Peer observation {quality['overlap_peer_observation']}.")
+        if quality.get('admission_overlap_basis') in ('peer_mask_in_box', 'mixed'):
+            notes.append("For peers with a usable mask, measured the fraction of this person's box covered by their mask.")
+        if skipped:
+            peers = ', '.join(f'P{index}' for index in skipped)
+            notes.append(f"This person has a valid mask. Skipped peers without a usable mask ({peers}).")
+        if notes:
+            overlap_check['note'] = ' '.join(notes)
+        checks.append(overlap_check)
         for row in checks:
-            if row['parameter'].endswith('.max_overlap') and 'overlap_peer_index' in quality:
-                row['note'] = (f"Maximum against P{quality['overlap_peer_index']} in this cue "
-                               f"using {quality['overlap_pair_basis']}. Pair box overlap "
-                               f"{quality['overlap_pair_box_fraction']:.2%}.")
-                if quality.get('overlap_peer_observation'):
-                    row['note'] += f" Peer observation {quality['overlap_peer_observation']}."
             if row['parameter'].endswith('.min_sharpness') and 'sharpness_pixels' in quality:
                 detail = person.get('pose_refinement', {})
                 row['note'] = (f"Method {quality.get('sharpness_method', 'unknown')}, "

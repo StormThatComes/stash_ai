@@ -65,22 +65,80 @@ def test_shifted_crop_coordinates_directional_area_and_exact_threshold():
 
 @pytest.mark.parametrize('missing', ['absent','empty','rejected','conflict','moved'])
 @pytest.mark.parametrize('side', [0,1])
-def test_unusable_mask_on_either_side_falls_back_to_boxes(missing,side):
+def test_one_usable_mask_is_directional(missing,side):
     people = split_people(); details = people[side]['pose_refinement']
     if missing == 'absent': details.pop('overlap_mask')
     if missing == 'empty': details['overlap_mask'] = base64.b64encode(bytes(32)).decode()
     if missing == 'rejected': details['status'] = 'rejected'
     if missing == 'conflict': details['mask_conflict'] = True
     if missing == 'moved': details['bounds'] = [1,0,17,16]
-    assert measure(people[0],people) == dict(overlap=1.,box_overlap=1.,overlap_basis='box')
+    without, masked = people[side], people[1-side]
+    fallback = measure(without, people, report_above=.65)
+    assert fallback == dict(overlap=1., box_overlap=1., overlap_basis='box',
+                            admission_overlap=.5, admission_overlap_basis='peer_mask_in_box')
+    assert measure(masked, people, report_above=.65) == dict(
+        overlap=1., box_overlap=1., overlap_basis='box', admission_overlap=None, admission_overlap_basis='skipped',
+        overlap_skipped_peer_indices=[side])
 
 
-def test_mixed_pairs_take_maximum_and_do_not_hide_a_maskless_peer():
+def test_missing_prompt_mask_disables_only_its_pair_and_not_another_mask_comparison():
     a,b = split_people()
-    c = person([8,0,24,16])
-    assert measure(a,[a,b,c]) == dict(overlap=.5,box_overlap=1.,overlap_basis='mixed')
-    assert measure(a,[a,c,b]) == measure(a,[a,b,c])
+    missing = person(a['bounds'])
+    missing['pose_refinement'] = dict(status='skipped', reason='no_reliable_prompts')
+    # Hold crowding and the maskless peer fixed; change only the comparable peer mask.
+    same = person(a['bounds'], np.indices((16,16))[1] < 8)
+    settings = dict(min_person_pixels=1, min_sharpness=0, min_keypoints=1, max_overlap=0.)
+    with Image.new('RGB',(16,16)) as image:
+        for valid, expected in [(b,0.), (same,1.)]:
+            for others in [[missing, valid], [valid, missing]]:
+                people = [a, *others]
+                q, reason = quality(image, a, people, settings)
+                assert q['overlap'] == q['box_overlap'] == 1 and q['overlap_basis'] == 'mixed'
+                assert q['overlap_skipped_peer_indices'] == [people.index(missing)]
+                assert q['admission_overlap'] == expected
+                if expected:
+                    assert reason == 'person_overlap'
+                    assert q['overlap_pair_basis'] == 'mask'
+                    assert q['overlap_peer_index'] == next(i for i,v in enumerate(people) if v is valid)
+                else:
+                    assert reason is None and 'overlap_peer_index' not in q
+        assert quality(image, missing, [a, missing], settings)[1] == 'person_overlap'
+        assert quality(image, a, [a, missing], settings)[1] is None
     assert measure(a,[a]) == dict(overlap=0.,box_overlap=0.,overlap_basis='none')
+
+
+def test_unmasked_box_counts_only_peer_pixels_in_source_coordinates():
+    target = person([0,2,8,10])  # 64 pixels
+    mask = np.zeros((12,8),bool)
+    mask[:6,:6] = True  # 36 peer pixels, 16 of them inside the target
+    peer = person([4,0,12,12], mask)
+    people = [target, peer]
+    settings = dict(min_person_pixels=1, min_sharpness=0, min_keypoints=1, max_overlap=.25)
+    with Image.new('RGB',(16,16)) as image:
+        q, reason = quality(image, target, people, settings)
+        assert reason is None and q['admission_overlap'] == 16/64
+        assert q['box_overlap'] == .5 and 'overlap_peer_index' not in q
+        settings['max_overlap'] = .24
+        q, reason = quality(image, target, people, settings)
+        assert reason == 'person_overlap' and q['overlap_peer_index'] == 1
+        assert q['overlap_pair_basis'] == 'peer_mask_in_box'
+        assert quality(image, peer, people, settings)[1] is None
+    # The same target falls back to boxes against an additional maskless peer.
+    other = person([5,2,13,10])
+    mixed = measure(target, [target, peer, other], report_above=.24)
+    assert mixed['admission_overlap'] == 3/8 and mixed['admission_overlap_basis'] == 'mixed'
+    assert mixed['overlap_peer_index'] == 2 and mixed['overlap_pair_basis'] == 'box'
+    assert measure(target, [target,other]) == dict(overlap=3/8, box_overlap=3/8, overlap_basis='box')
+
+
+@pytest.mark.parametrize('extra,eligible', [({},False), ({'admission_overlap':None},True),
+                                           ({'admission_overlap':.25},True), ({'admission_overlap':.5},False)])
+def test_anchor_recheck_uses_the_retained_admission_measurement(extra,eligible):
+    from stash_ai.recognition.person_anchor import anchor_gate
+    settings = dict(anchor_min_person_pixels=1, anchor_min_keypoints=1, anchor_min_sharpness=0)
+    collection = dict(min_person_pixels=1, min_keypoints=1, min_sharpness=0, max_overlap=.25)
+    q = dict(width=16,height=16,keypoints=5,sharpness=10,overlap=1.,**extra)
+    assert anchor_gate(dict(quality=q),settings,collection=collection)['eligible'] == eligible
 
 
 def test_nonintersecting_boxes_need_no_mask_decode_and_corruption_is_not_silently_accepted():
@@ -149,7 +207,8 @@ def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_p
             db=state.connection
             scan,_=scan_scene(state,'scope',client.scene,config,'ns',source,lambda:backend)
             legacy=_contract(config,'independent-person-v4-independent-torso',
-                             legacy_mask_overlap=False,legacy_foreground_sharpness=False)
+                             legacy_mask_overlap=False,legacy_foreground_sharpness=False,
+                             legacy_drift_mask=False,legacy_mask_prompts=False,legacy_pair_fallback=True)
             assert legacy!=contract(config)
             assert legacy in compatible_contracts(config)[1:]
             db.executemany('INSERT INTO body_cues VALUES (?,?,?)',[(scan,legacy,i) for i in range(3)])
