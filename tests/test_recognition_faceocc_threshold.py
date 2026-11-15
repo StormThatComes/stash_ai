@@ -31,8 +31,11 @@ def test_default_can_read_existing_scans_and_tuning_changes_measurement_keys(tmp
     default = configuration(tmp_path, 0)
     tuned = configuration(tmp_path, -0.2)
     ns = namespace(default)
-    legacy = plain(default.data['detection'])
-    del legacy['faceocc_logit_threshold']
+    # Reconstruct the original persisted scan contract from its historical fields.
+    # Deriving the payload from today's schema accidentally includes new opt-in flags.
+    legacy = dict(score_threshold=.9, nms_threshold=.3, min_face_pixels=32, min_sharpness=10.,
+                  max_faces_per_frame=100, max_pose_deviation=.5, min_visible_face_fraction=.8,
+                  min_face_source_fraction=.85, require_complete_face=True)
     legacy_sha = digest(dict(namespace=ns, detection=legacy, max_cues=default.data['execution']['max_cues'],
                              quality_format=5, visibility_contract=CONTRACT_ID))
     assert scan_identity(default, ns) == legacy_sha != scan_identity(tuned, ns)

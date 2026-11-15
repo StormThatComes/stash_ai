@@ -201,7 +201,7 @@ def reconcile(database,selected,config):
     from .solver_execution import current as solver
     from .stage_checkpoints import report as checkpoint_report
     result=(report(db,config,scope,namespace) if solver() is not None else
-            checkpoint_report(db,selected,config,'body-global-fragments-v2',lambda:_report(db,config,scope,namespace,compact=True)))
+            checkpoint_report(db,selected,config,'body-global-fragments-v3',lambda:_report(db,config,scope,namespace,compact=True)))
     from .publication_queue import enqueue
     from .alias_scene_index import remember, expire
     indexed = db.execute('PRAGMA user_version').fetchone()[0]>=17
@@ -210,14 +210,26 @@ def reconcile(database,selected,config):
     if indexed:
         expire(db,scope,namespace,current_policy,selection)
     proof_bytes=0
+    fresh = None
     for decision in result['decisions']:
         if decision['outcome']!='merge':continue
         people=decision['people'];scenes=_scenes(db,people)
         if not scenes<=selection:
-            decision.update(outcome='blocked',blockers=['identity_outside_selected_scenes'],required_scenes=sorted(scenes,key=int))
+            from .staged_aliases import ready
             if indexed:
                 remember(db,scope,namespace,current_policy,people,scenes)
-            continue
+            if not indexed or not ready(db,config,scope,namespace,current_policy,people,scenes,selection):
+                decision.update(outcome='blocked',blockers=['identity_outside_selected_scenes'],required_scenes=sorted(scenes,key=int))
+                continue
+            if fresh is None:
+                fresh = {tuple(sorted(d['people'])):d for d in _report(db,config,scope,namespace,compact=True)['decisions']
+                         if d['outcome']=='merge'}
+            verified = fresh.get(tuple(sorted(people)))
+            if verified is None:
+                continue
+            decision = dict(verified,staged_retained_validation=True)
+            db.execute('DELETE FROM pending_body_merges WHERE scope=? AND namespace=? AND people=?',
+                       (scope,namespace,encoded(sorted(people))))
         rows=list(db.execute('SELECT p.id,p.created,EXISTS(SELECT 1 FROM members WHERE person=p.id) AS has_face FROM people p '
             'WHERE p.id IN (SELECT value FROM json_each(?)) ORDER BY has_face DESC,p.created,p.id',(encoded(people),)))
         target=rows[0]['id']

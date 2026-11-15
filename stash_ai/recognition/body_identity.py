@@ -503,7 +503,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                           face_margin=config.data['recognition']['ambiguity_margin'],scene_context_bonus=scene_bonus(config.data),
                           roster_support=max(2,config.data['clustering']['same_scene_min_support']))
     recover(rows, decisions, seeds, track_settings, scores, guard, occupied=record.get('occupied_cues', ()),
-            cut_starts=starts, entrants=entrants, graph=graph if turn_feature(settings,'extended_track_graph') else None)
+            cut_starts=starts, entrants=entrants, graph=graph if turn_feature(settings,'extended_track_graph') else None,
+            motion=record.get('motion',''))
     if turn_feature(settings,'turn_recovery'):
         from .scene_continuity import recover_turns
         recover_turns(rows, decisions, seeds, settings, scores, guard, record.get('protected_turn_owners', ()),
@@ -547,6 +548,16 @@ def rebuild(database,selected,config,result):
     db=database.connection
     from .body_cache import cached,stamp as cache_stamp
     if cached(db,selected,config):
+        from .staged_aliases import waiting
+        if enabled(config) and waiting(db,selected,config):
+            from .body_global import reconcile
+            from .body_recovery import recover
+            with db:
+                if not db.in_transaction:
+                    db.execute('BEGIN')
+                reconcile(database,selected,config)
+                recover(database,selected,config)
+                cache_stamp(db,selected,config)
         database.body_rebuild_mode='warm' if enabled(config) else 'disabled'
         return results(db,selected,result) if getattr(database, 'collect_publication_results', True) else result
     database.body_rebuild_mode='cold' if enabled(config) else 'disabled'
