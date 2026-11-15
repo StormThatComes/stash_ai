@@ -12,10 +12,12 @@ def recover(database,selected,config):
     db=database.connection;settings=config.data['sapiensid']['identities']
     reasons={'body_anchor_quality','body_anchor_pixels','body_anchor_pixels_missing',
              'body_anchor_keypoint_rules', 'body_anchor_keypoint_rules_missing', 'fragment_auxiliary_retry'}
+    from .identity_merges import canonical
+    ambiguous={'body_group_competing_identity','ambiguous_or_insufficient_face_body_bank'}
     for item in selected:
         if not db.execute("SELECT 1 FROM body_members m JOIN body_observations b ON b.id=m.observation "
                 "WHERE b.scan=? AND m.status='withheld' AND (json_extract(m.proof,'$.reason') IN "
-                "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons)))).fetchone():continue
+                "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons|ambiguous)))).fetchone():continue
         rows=[];decisions={};cost=0
         for raw in db.execute('SELECT b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
                 'o.quality AS face_quality,o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
@@ -33,6 +35,16 @@ def recover(database,selected,config):
         # Original scene anchors remain frozen, including those downgraded by
         # a global alias. Recovered queries can never enter these banks.
         banks={};confirmed=set();queries=[]
+        by_id={r['id']:r for r in rows}
+        def competition_changed(proof):
+            if proof['reason']=='body_group_competing_identity':
+                peers=[by_id.get(k) for k in proof.get('competing_witnesses',())]
+                if len(peers)!=2 or not all(peers):
+                    return False
+                return (peers[0]['status']=='accepted' and (peers[1]['person']==peers[0]['person']
+                        or peers[1]['status']=='withheld'))
+            owner,rival=proof.get('query_owner'),proof.get('rival')
+            return bool(owner and rival and canonical(db,owner)==canonical(db,rival))
         for row in rows:
             proof=decisions[row['id']]
             if row['person'] is not None and not proof.get('view_exclusion') and anchor(row,settings) and (
@@ -40,7 +52,8 @@ def recover(database,selected,config):
                 banks.setdefault(row['person'],[]).append(row)
                 if row['status']=='accepted':confirmed.add(row['person'])
             elif row['status']=='withheld' and (proof.get('retry_when')=='confirmed_core_changes' or
-                    proof.get('reason') in reasons and not anchor(row,settings)):
+                    proof.get('reason') in reasons and not anchor(row,settings) or
+                    proof.get('reason') in ambiguous and competition_changed(proof)):
                 queries.append(row)
         scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         from .body_seed_modes import FrozenSeeds

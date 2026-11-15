@@ -19,7 +19,7 @@ class FaceGuard:
     def witnesses(self, person):
         from .body_scene_jobs import Witness, face_witness_query
         if self.frozen is not None:
-            for raw in self.frozen[person]:
+            for raw in self.frozen.get(person,()):
                 yield raw if isinstance(raw,Witness) else Witness(raw['dimensions'],raw['embedding'])
             return
         key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]

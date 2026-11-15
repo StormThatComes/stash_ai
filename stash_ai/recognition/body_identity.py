@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v48-independent-looks',contract(config),matching_policy(config),
+    return digest(['body-local-v49-rival-recovery',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -379,7 +379,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
             good=admissible and mean-runner>=settings['ambiguity_margin']
             decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
                 role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
-                score=mean,minimum=minimum,runner=runner,rival=rival,threshold=settings['match_threshold'],
+                score=mean,minimum=minimum,runner=runner,rival=rival,query_owner=person,threshold=settings['match_threshold'],
                 required_margin=settings['ambiguity_margin'], cohesion_threshold=settings['cohesion_threshold'],
                 reference_count=len(bank), witness_ids=[w['id'] for w in bank[:8]])
             cue_choices[row['id']] = ranked
@@ -428,12 +428,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                     and not copresent([row],other) and guard.allows(row,other)]
             if rivals:
                 mean,minimum=scores.compare([row],group)
-                runner=max(scores.compare([row],other)[0] for other in rivals)
+                runner, rival_index=max((scores.compare([row],other)[0],i) for i,other in enumerate(rivals))
                 # A dense ambiguous appearance cannot raise its own mean
                 # enough to overrule the original group's weaker witnesses.
                 if minimum-runner<settings['ambiguity_margin']:
                     decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',
-                        reason='body_group_competing_identity',score=mean,minimum=minimum,runner=runner)
+                        reason='body_group_competing_identity',score=mean,minimum=minimum,runner=runner,
+                        competing_witnesses=[next((r['id'] for r in group if r['id']!=row['id']),None),rivals[rival_index][0]['id']])
                     continue
             keep.append(row)
         if keep:retained.append(keep)
