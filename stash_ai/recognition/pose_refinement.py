@@ -82,7 +82,8 @@ class RefinedPMPose:
                 distance = np.linalg.norm(points[i, indices, None] - foreign[None], axis=2).min(axis=1)
                 indices = indices[distance > max(2., .02 * math.hypot(box[2]-box[0], box[3]-box[1]))]
             if len(indices) >= settings['min_prompt_points']:
-                indices = spread_indices(points[i], indices, settings['max_prompt_points'])
+                indices = spread_indices(points[i], indices, settings['max_prompt_points'],
+                                         initial=settings['min_prompt_points'])
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs
 

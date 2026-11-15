@@ -191,8 +191,8 @@ pose:
 `SAM-pose2seg` is the pose-guided segmenter from BMPv2, built on SAM2.1. It is
 not a new pose estimator and does not replace D-FINE. The first PMPose pass supplies reliable head, shoulder and hip landmarks.
 SAM receives the full RGB cue and starts with `min_prompt_points` own points.
-It starts with the most visible point, then prioritizes unrepresented body
-regions and distance from the selected points. Points must pass the presence,
+The initial set contains the most visible points. Each retry prioritizes
+unrepresented body regions and distance from the selected points. Points must pass the presence,
 localization and visibility gates and be distinct from another person's core.
 
 After mask rejection or shared pixels with a neighbour, SAM retries that person

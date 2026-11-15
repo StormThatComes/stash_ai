@@ -93,3 +93,19 @@ def test_each_neighbour_has_an_independent_exclusion_budget():
         assert peers == [1,2] and len(negatives) == 2 * limit
         if limit:
             np.testing.assert_array_equal(negatives[::limit], points[1:,0])
+
+
+def test_retry_preserves_both_initial_visibility_ranked_seeds():
+    model = driver(False, max_prompt_points=3)
+    model.settings['min_prompt_points'] = 2
+    sent = []
+    def segment(positive, negative=()):
+        sent.append(positive.copy())
+        return np.full((100,160), True), .1
+    model.segmenter.predict = segment
+    with Image.new('RGB',(160,100)) as image:
+        record = model.predict(image, [BOX])[3][0]
+    np.testing.assert_array_equal(sent[0], pose_points()[:2])
+    np.testing.assert_array_equal(sent[1][:2], sent[0])
+    assert record['prompt_indices'][2] in (11,12)
+    assert record['mask_attempts'] == 2

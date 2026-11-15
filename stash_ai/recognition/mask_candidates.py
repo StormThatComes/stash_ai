@@ -62,12 +62,12 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
     return mask, union if settings['expand_boxes'] else list(box), None
 
 
-def spread_indices(points, indices, limit):
-    """Keep the most visible seed, then cover distinct regions and distant landmarks."""
-    if limit <= 1 or len(indices) <= 1:
+def spread_indices(points, indices, limit, *, initial=1):
+    """Keep the initial visibility-ranked seeds, then add distinct regions and distant landmarks."""
+    if limit <= initial or len(indices) <= initial:
         return np.asarray(indices[:limit], dtype=np.intp)
-    chosen = [indices[0]]
-    remaining = list(indices[1:])
+    chosen = list(indices[:initial])
+    remaining = list(indices[initial:])
 
     def region(k):
         return 0 if k < 5 else (1 if k < 11 else 2)  # head, shoulders, hips
