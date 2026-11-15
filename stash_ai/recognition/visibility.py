@@ -174,17 +174,21 @@ def _constants():
 
 def prepare(image, face, *, allow_partial=False):
     """Return aligned pixels and the real ellipse for geometric sharpness."""
-    blob, region, _ = _prepare(image, face, 0. if allow_partial else 1.)
+    blob, region, _ = prepare_measurement(image, face, 0. if allow_partial else 1.)
     return blob, region
 
 
 def prepare_measurement(image, face, minimum_source_fraction):
     """Prepare FaceOcc input only when the source covers the configured fraction of its ellipse."""
-    return _prepare(image, face, minimum_source_fraction)
+    return prepare_aligned(image, face, minimum_source_fraction)[:3]
 
 
-def _prepare(image, face, minimum_source_fraction):
-    """Align real pixels and preserve the full ellipse size for FaceOcc."""
+def ellipse_radii(width, height):
+    return width * .45, height * .48
+
+
+def prepare_aligned(image, face, minimum_source_fraction):
+    """Return the FaceOcc input, real ROI, full count and model-to-source affine."""
     import numpy as np
     from PIL import Image
     points = np.asarray(face.landmarks, dtype=np.float64)
@@ -214,8 +218,9 @@ def _prepare(image, face, minimum_source_fraction):
     dy = sine * (columns + .5 - 128) + cosine * (rows + .5 - 128)
     # Keep the original physical ROI, rather than replacing it with a smaller
     # aligned ellipse that could silently discard an occluder near its edges.
-    region = ((dx / (width * .45 * 256 / side)) ** 2
-              + (dy / (height * .48 * 256 / side)) ** 2 <= 1)
+    radius_x, radius_y = ellipse_radii(width, height)
+    region = ((dx / (radius_x * 256 / side)) ** 2
+              + (dy / (radius_y * 256 / side)) ** 2 <= 1)
     # Padding cannot contribute to foreground or sharpness.
     source_x, source_y = center_x + dx * scale, center_y + dy * scale
     real = ((source_x >= 0) & (source_x < image.width)
@@ -226,18 +231,22 @@ def _prepare(image, face, minimum_source_fraction):
     if not source_count or source_count / full_count < minimum_source_fraction:
         raise VisibilityGeometryError('Insufficient face ellipse coverage in the real source.',
                                       source_pixels=source_count, face_pixels=full_count)
-    return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region, full_count
+    return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region, full_count, transform
 
 
-def measurement(logits, region, device, *, blob=None, face_pixels=None):
+def _foreground(logits, region):
     import numpy as np
     values = np.asarray(logits)
     if values.shape != (1, 1, 256, 256) or not np.isfinite(values).all():
         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
+    return (values[0, 0] > 0) & region
+
+
+def measurement(logits, region, device, *, blob=None, face_pixels=None):
+    foreground = _foreground(logits, region)
     count = int(region.sum())
     if count <= 0:
         raise ValueError('Visibility face region is empty.')
-    foreground = (values[0, 0] > 0) & region
     visible = int(foreground.sum())
     result = _counts(visible, count, device, face_pixels)
     if blob is not None:
@@ -304,6 +313,13 @@ class FaceVisibility:
                 raise
             self.device = 'cpu'
             self.model.to('cpu').eval()
+
+    def inspect_foreground(self, blob, region):
+        """Return one aligned diagnostic mask on explicit inspection only."""
+        import torch
+        with torch.inference_mode():
+            logits = self.model(torch.from_numpy(blob).to(self.device)).float().cpu().numpy()
+        return _foreground(logits, region)
 
     def measure(self, image, face):
         return self.measure_many([(image,face)])[0]

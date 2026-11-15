@@ -44,7 +44,9 @@ class VttPreviews:
         return type(self)(self.config if config is None else config,
                           client_factory=self.client_factory, source_factory=self.source_factory)
 
-    def image(self, kind, address, scope, retained, *, geometry=None, full=False, cue=None):
+    def image(self, kind, address, scope, retained, *, geometry=None, full=False, cue=None, face_evidence=None):
+        if face_evidence is not None and (kind != 'face' or not full or cue is not None):
+            raise ValueError('Face visibility requires the selected face and its original full cue.')
         if retained[0] is not None and not full:
             return retained
         check_cancelled()
@@ -104,6 +106,10 @@ class VttPreviews:
                     if actual != expected:
                         raise PreviewUnavailable('Reconstructed pixels differ from the recorded signature.')
                 verified = 'pixels verified' if expected is not None else 'source verified; original crop signature unavailable'
+                if face_evidence is not None:
+                    visibility = quality.get('visibility')
+                    face_evidence.update(geometry=source_geometry, fraction=quality.get('visible_face_fraction'),
+                                         contract=visibility.get('contract') if isinstance(visibility, dict) else None)
                 if geometry is not None:
                     geometry['bounds'] = [0,0,*full_image.size] if full else list(bounds)
                     geometry.update(cue_index=index,cue_count=len(self.source.cues),cue_seconds=self.source.cues[index].start)

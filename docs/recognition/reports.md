@@ -407,8 +407,8 @@ on selection, using read-only SQLite snapshots and background workers.
 
 Only observations retained in SQLite can be shown. Detections discarded before
 storage, pruned observations and absent measurements cannot be recovered by
-this viewer. The inspector performs no inference, rerun, automatic threshold
-adjustment or recognition state changes.
+this viewer. Routine inspection reads retained evidence. The optional FaceOcc
+replay below runs only for the face you select.
 
 When a selected observation or reference has no readable stored crop,
 `inspect-scene` now reconstructs its preview from Stash VTT. This includes
@@ -441,6 +441,25 @@ without reliable source bounds stays clean with an explanation. VTT previews
 use the verified reconstructed crop transform, after any pixel signature check.
 The checkbox switches between annotated and clean pixels without database,
 network or model work. Crops and recognition evidence are never modified.
+
+In `inspect-scene`, select a face (including an unassigned `face_occluded`
+observation) and click **Face visibility…**. The two synchronized panes show
+the original VTT cue and the selected face on the same cue. The gold outline
+marks the measurement ellipse. Green marks the pixels FaceOcc counted as
+visible inside it. Use the mouse wheel to zoom and drag either pane to pan.
+
+The window displays the recorded `visible_face_fraction` alongside a fresh
+FaceOcc result using the current configuration. The replay shows the visible
+pixel count divided by the full ellipse pixel count in the 256 × 256 model
+input. Source coverage shows how much of that ellipse fell inside the cue.
+A clipped ellipse can lower the score even when all its in-frame pixels are
+green. If alignment, minimum source coverage or model loading fails, the
+window gives the reason and shows the ellipse when geometry is available.
+
+Replay requires access to the verified VTT source and uses the configured
+device and FaceOcc asset download policy. It also works for observations
+without a stored crop or score. Browsing other observations does not trigger
+FaceOcc. Replaying a face leaves the saved score and recognition state intact.
 
 For fully offline browsing, retain the earlier behavior with:
 

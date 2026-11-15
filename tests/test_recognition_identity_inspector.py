@@ -632,7 +632,7 @@ def test_vtt_preview_checks_available_signature_and_leaves_retained_pixels_offli
     assert not parser().parse_args(['inspect-scene','--scene-id','1']).offline
 
 
-def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(tmp_path):
+def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(tmp_path, monkeypatch):
     tk = pytest.importorskip('tkinter')
     try:
         root=tk.Tk()
@@ -648,6 +648,12 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
     config, reader, client, media, face, backend, closed=vtt_fixture(tmp_path)
     main_thread=get_ident()
     started, release = Event(), Event()
+    from stash_ai.recognition import inspection_face_visibility
+    replays = []
+    def missing_weights(*args, **kwargs):
+        replays.append(get_ident())
+        raise FileNotFoundError
+    monkeypatch.setattr(inspection_face_visibility, 'ensure_assets', missing_weights)
     def factory():
         assert get_ident()!=main_thread
         started.set()
@@ -677,11 +683,20 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         release.set()
         wait_for(lambda: 'Reconstructed from VTT' in ui.images.panels['A'].caption.get())
         assert ui.images.panels['A'].image.size==(70,110)
+        assert ui.face_visibility_button.instate(['disabled'])
         assert 'rejected-body' in ui.status.get()
         ui.listing.selection_set(row)
         wait_for(lambda: face in ui.status.get() and ui.images.panels['A'].image is not None)
         assert ui.images.panels['A'].image.size==(160,160)
         assert 'Unassigned' in ui.notes.get('1.0','end')
+        assert ui.face_visibility_button.instate(['!disabled']) and not replays
+        ui.face_visibility_button.invoke()
+        window = ui.visual_windows[-1]
+        wait_for(lambda: 'weights missing' in window.status.cget('text'))
+        assert replays and main_thread not in replays
+        assert window.images.panels['A'].image.size == window.images.panels['B'].image.size
+        assert face in window.window.title()
+        window.close()
         assert backend.calls==0
     finally:
         release.set()

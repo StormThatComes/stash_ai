@@ -76,7 +76,7 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
     from PIL import Image, ImageDraw
     from stash_ai.recognition.config import load
     from stash_ai.recognition.models import checked_detection, ensure_assets
-    from stash_ai.recognition.visibility import FaceVisibility
+    from stash_ai.recognition.visibility import FaceVisibility, prepare_aligned
     from tests.test_recognition_visibility_rotation import quarter_turn
     # Grace Hopper, US Navy/public domain; immutable content checked independently
     # of the matplotlib tag. Download only in the explicit model smoke jobs.
@@ -96,6 +96,9 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
             ImageDraw.Draw(covered).rectangle((x, y + height * .6, x + width, y + height), fill=(70, 90, 160))
             visible = model.measure(image, face)
             occluded = model.measure(covered, face)
+            blob, region, total, _ = prepare_aligned(covered, face, model.minimum_source_fraction)
+            assert total == occluded['visibility']['face_pixels']
+            assert int(model.inspect_foreground(blob, region).sum()) == occluded['visibility']['visible_pixels']
             batched = model.measure_many([(image,face),(covered,face)])
             assert [v['visibility']['face_pixels'] for v in batched]==[visible['visibility']['face_pixels']]*2
             assert [v['visible_face_fraction'] for v in batched]==pytest.approx(
