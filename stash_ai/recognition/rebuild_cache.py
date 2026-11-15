@@ -79,7 +79,7 @@ def _assignment_index(db, selected):
 def _input_context(db,selected,scope,namespace,config=None,*,scene_progress=True):
     hasher=hashlib.sha256()
     from .pose_policy import anchor_visibility
-    visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if config is not None and anchor_visibility(config.data['clustering']) else ''
+    visibility_fields=",'$.visible_face_fraction','$.visibility.contract','$.visibility.logit_threshold'" if config is not None and anchor_visibility(config.data['clustering']) else ''
     with ExitStack() as stack:
         progress=stack.enter_context(work('Validate rebuild input catalogue',len(selected),unit='scene',position=0)) if scene_progress else None
         assignments_index = None

@@ -33,6 +33,7 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
     before = config.database.read_bytes()
 
     model = object.__new__(FaceVisibility)
+    model.logit_threshold = 0.0
     model.device = 'cpu'
     model.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
     def split(inputs):
@@ -47,17 +48,23 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
     monkeypatch.setattr(inspector, 'ensure_assets', assets)
     previews = VttPreviews(config, client_factory=lambda: client)
     try:
-        original, overlay, caption = inspector.replay(previews, face, reader.scan['scope'])
+        replay = inspector.replay(previews, face, reader.scan['scope'])
+        original = replay.image
+        overlay, caption = replay.render(0.0)
         assert model.model is None  # The inspector released its model.
         model.model = split
         expected = model.measure(original, geometry)['visibility']
         assert f"({expected['visible_pixels']:,} visible / {expected['face_pixels']:,} ellipse pixels)" in caption
-        assert 'Recorded 0.230 · Replay 0.500' in caption and 'Source coverage 100.0%' in caption
+        assert 'Recorded 0.230 at logit 0 · Replay 0.500' in caption and 'Source coverage 100.0%' in caption
         assert original.size == overlay.size == (160, 160)
         assert overlay.getpixel(visible) != original.getpixel(visible)
         assert overlay.getpixel(unmarked) == original.getpixel(unmarked)
         assert overlay.getpixel((5, 5)) == original.getpixel((5, 5))
         assert overlay.getpixel((80, 18)) == (255, 215, 0)
+        loose, status = replay.render(-0.2)
+        assert 'Replay 1.000' in status and loose.getpixel(unmarked) != original.getpixel(unmarked)
+        _, status = replay.render(1.)
+        assert 'Replay 0.000' in status  # Equal logits stay outside.
         assert config.database.read_bytes() == before and backend.calls == 0
     finally:
         previews.close()
@@ -87,7 +94,9 @@ def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatc
     monkeypatch.setattr(inspector, 'ensure_assets', assets)
     previews = VttPreviews(config, client_factory=lambda: client)
     try:
-        original, overlay, caption = inspector.replay(previews, face, reader.scan['scope'])
+        replay = inspector.replay(previews, face, reader.scan['scope'])
+        original = replay.image
+        overlay, caption = replay.render(0.0)
         if damage == 'changed_source':
             assert original is overlay is None and 'VTT source changed' in caption
         else:

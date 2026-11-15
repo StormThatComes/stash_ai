@@ -3,7 +3,7 @@ from dataclasses import asdict
 from functools import lru_cache
 import math
 
-from .config import digest
+from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 
 CONTRACT = {'version': 5, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
@@ -12,6 +12,7 @@ CONTRACT = {'version': 5, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
             'sharpness': 'foreground-interior-laplacian-256-v1'}
 CONTRACT_ID = digest(CONTRACT)
+TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
 
 
 class VisibilityError(RuntimeError):
@@ -38,17 +39,24 @@ def valid_fraction(value):
     return type(value) in (int, float) and 0 <= value <= 1 and math.isfinite(value)
 
 
-def cached(quality):
+def cached(quality, threshold=None):
+    """Validate a recorded measurement, optionally against the requested pixel cutoff."""
     from collections.abc import Mapping
     record = quality.get('visibility')
-    return (isinstance(record, Mapping) and record.get('contract') == CONTRACT_ID
-            and valid_fraction(quality.get('visible_face_fraction')))
+    if not isinstance(record, Mapping) or not valid_fraction(quality.get('visible_face_fraction')):
+        return False
+    cutoff = record.get('logit_threshold', DEFAULT_FACEOCC_LOGIT_THRESHOLD)
+    if type(cutoff) not in (int, float) or not -MAX_FLOAT32 <= cutoff <= MAX_FLOAT32:
+        return False
+    contract = CONTRACT_ID if cutoff == DEFAULT_FACEOCC_LOGIT_THRESHOLD else TUNED_CONTRACT_ID
+    return record.get('contract') == contract and (threshold is None or cutoff == threshold)
 
 
 class LazyVisibility:
     """One lazy segmentation session for the complete recognition invocation."""
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory or FaceVisibility
+        self.logit_threshold = config.data['detection']['faceocc_logit_threshold'] if config is not None else DEFAULT_FACEOCC_LOGIT_THRESHOLD
         self.model = None
         self._initialization_error = None
         self._inference_failures = 0
@@ -77,7 +85,7 @@ class LazyVisibility:
         self._ensure()
         try:
             value = self.model.measure(image, face)
-            if not isinstance(value, dict) or not cached(value):
+            if not isinstance(value, dict) or not cached(value, self.logit_threshold):
                 raise ValueError('Visibility model returned an invalid or incompatible measurement.')
         except VisibilityGeometryError:
             raise
@@ -104,7 +112,7 @@ class LazyVisibility:
             try:
                 values=many(items)
                 if (not isinstance(values,list) or len(values)!=len(items)
-                        or any(not isinstance(v,VisibilityGeometryError) and not (isinstance(v,dict) and cached(v)) for v in values)):
+                        or any(not isinstance(v,VisibilityGeometryError) and not (isinstance(v,dict) and cached(v, self.logit_threshold)) for v in values)):
                     raise ValueError('Visibility model returned an invalid batch.')
                 return values
             except Exception:
@@ -127,7 +135,7 @@ class LazyVisibility:
                 model=self._ensure()
                 if isinstance(item,VisibilityGeometryError):return item
                 value=model.measure_prepared_many([item])[0]
-                if not cached(value):raise ValueError('Invalid visibility measurement.')
+                if not cached(value, self.logit_threshold):raise ValueError('Invalid visibility measurement.')
                 return value
             except VisibilityGeometryError as error:return error
             except Exception as error:
@@ -145,7 +153,7 @@ class LazyVisibility:
         except Exception as error:return [error for _ in prepared]
         try:
             values=model.measure_prepared_many(prepared)
-            if len(values)!=len(prepared) or any(not isinstance(v,VisibilityGeometryError) and not cached(v) for v in values):
+            if len(values)!=len(prepared) or any(not isinstance(v,VisibilityGeometryError) and not cached(v, self.logit_threshold) for v in values):
                 raise ValueError('Invalid visibility batch.')
             return values
         except Exception:
@@ -234,39 +242,44 @@ def prepare_aligned(image, face, minimum_source_fraction):
     return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region, full_count, transform
 
 
-def _foreground(logits, region):
+def _pixel_logits(logits):
     import numpy as np
     values = np.asarray(logits)
     if values.shape != (1, 1, 256, 256) or not np.isfinite(values).all():
         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
-    return (values[0, 0] > 0) & region
+    return values[0, 0]
 
 
-def measurement(logits, region, device, *, blob=None, face_pixels=None):
-    foreground = _foreground(logits, region)
+def foreground_mask(pixel_logits, region, threshold):
+    return (pixel_logits > threshold) & region
+
+
+def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD):
+    foreground = foreground_mask(_pixel_logits(logits), region, threshold)
     count = int(region.sum())
     if count <= 0:
         raise ValueError('Visibility face region is empty.')
     visible = int(foreground.sum())
-    result = _counts(visible, count, device, face_pixels)
+    result = _counts(visible, count, device, face_pixels, threshold)
     if blob is not None:
         from .foreground_quality import face
         result.update(face(blob,foreground,'faceocc_mask'))
     return result
 
 
-def _counts(visible, source_count, device, face_pixels=None):
+def _counts(visible, source_count, device, face_pixels, threshold):
     count = source_count if face_pixels is None else face_pixels
     if (type(visible) is not int or type(count) is not int or
             not 0 < source_count <= count or not 0 <= visible <= source_count):
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
-            'visibility': {'contract': CONTRACT_ID, 'method': 'faceocc-ellipse-roll-v3', 'device': device,
+            'visibility': {'contract': CONTRACT_ID if threshold == DEFAULT_FACEOCC_LOGIT_THRESHOLD else TUNED_CONTRACT_ID,
+                           'logit_threshold': threshold, 'method': 'faceocc-ellipse-roll-v3', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
 
-def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None):
+def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD):
     """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
@@ -277,10 +290,10 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None):
     counts=[int(region.sum()) for region in regions]
     if any(value<=0 for value in counts):raise ValueError('Visibility face region is empty.')
     mask=torch.from_numpy(np.stack(regions)).to(logits.device)
-    foreground=(logits[:,0]>0)&mask
+    foreground=foreground_mask(logits[:,0], mask, threshold)
     visible=foreground.sum(dim=(1,2)).cpu().tolist()
     totals = counts if face_pixels is None else face_pixels
-    results = [_counts(int(value), count, device, total)
+    results = [_counts(int(value), count, device, total, threshold)
                for value, count, total in zip(visible, counts, totals, strict=True)]
     if inputs is not None:
         from .foreground_quality import device_faces
@@ -292,6 +305,7 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None):
 
 class FaceVisibility:
     def __init__(self, config, paths):
+        self.logit_threshold = config.data['detection']['faceocc_logit_threshold']
         self.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
         import torch
         from safetensors.torch import load
@@ -314,12 +328,15 @@ class FaceVisibility:
             self.device = 'cpu'
             self.model.to('cpu').eval()
 
-    def inspect_foreground(self, blob, region):
-        """Return one aligned diagnostic mask on explicit inspection only."""
+    def inspect_logits(self, blob):
+        """Keep one aligned score map on the CPU for interactive threshold previews."""
         import torch
         with torch.inference_mode():
             logits = self.model(torch.from_numpy(blob).to(self.device)).float().cpu().numpy()
-        return _foreground(logits, region)
+        return _pixel_logits(logits)
+
+    def inspect_foreground(self, blob, region):
+        return foreground_mask(self.inspect_logits(blob), region, self.logit_threshold)
 
     def measure(self, image, face):
         return self.measure_many([(image,face)])[0]
@@ -360,10 +377,10 @@ class FaceVisibility:
                     values=logits.cpu().numpy()
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
-                    measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i])
+                    measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i], threshold=self.logit_threshold)
                                     for i, region in enumerate(regions)]
                 else:
-                    measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals)
+                    measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals,threshold=self.logit_threshold)
             for index,value in zip(positions,measurements):result[index]=value
         return result
 

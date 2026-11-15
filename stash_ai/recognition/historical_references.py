@@ -98,7 +98,7 @@ def _context(db,selected,config,scope,namespace):
     from .scan_heads import predicate as current_scan
     hasher=hashlib.sha256(b'frozen-external-references-v5')
     from .pose_policy import anchor_visibility
-    visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if anchor_visibility(config.data['clustering']) else ''
+    visibility_fields=",'$.visible_face_fraction','$.visibility.contract','$.visibility.logit_threshold'" if anchor_visibility(config.data['clustering']) else ''
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"

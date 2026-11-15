@@ -298,6 +298,10 @@ detector score, minimum source face pixels, `face.quality.min_sharpness`,
 alignment validity, complete-face and pose restrictions. When
 `face.quality.min_visible_face_fraction > 0`, it additionally loads **FaceOcc**
 and checks the visibility threshold, just as recognition scanning does.
+`face.quality.faceocc_logit_threshold` sets the strict per-pixel cutoff on raw
+FaceOcc output (default `0.0`). Lowering it admits more pixels into the mask
+used for both visibility and sharpness. The minimum visible fraction sets the
+admission floor after measuring that mask.
 With every face visibility floor disabled (`0`/`null`), no scan FaceOcc asset is
 loaded; all scan/query/anchor sharpness floors must also be disabled. Rejected faces
 are **counted with their rejection reason but not exported as PNGs**.

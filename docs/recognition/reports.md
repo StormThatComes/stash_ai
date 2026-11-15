@@ -448,6 +448,14 @@ the original VTT cue and the selected face on the same cue. The gold outline
 marks the measurement ellipse. Green marks the pixels FaceOcc counted as
 visible inside it. Use the mouse wheel to zoom and drag either pane to pan.
 
+The **Pixel logit threshold (preview)** slider starts at
+`face.quality.faceocc_logit_threshold` from the loaded YAML. Drag it left to
+include more pixels, or right to include fewer. Use the left and right arrow
+keys on the slider for 0.01 steps. The green overlay and replay
+fraction update from the same score map, with no additional VTT or model calls.
+**Reset to YAML** restores the configured value. To use a preview value in
+recognition, set it in your YAML and rerun the affected scenes.
+
 The window displays the recorded `visible_face_fraction` alongside a fresh
 FaceOcc result using the current configuration. The replay shows the visible
 pixel count divided by the full ellipse pixel count in the 256 × 256 model

@@ -1,7 +1,7 @@
 """Reuse historical frame evidence/JPEGs when quality preferences change."""
 import json
 
-from .config import DEFAULT_MIN_FACE_SOURCE_FRACTION, plain
+from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, DEFAULT_MIN_FACE_SOURCE_FRACTION, plain
 from .database import encoded
 from .diagnostics import metadata as safe_metadata
 
@@ -20,6 +20,8 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
     if old is None:
         return None
     metadata = safe_metadata(json.loads(old['metadata']))
+    if metadata.get('faceocc_logit_threshold', DEFAULT_FACEOCC_LOGIT_THRESHOLD) != config.data['detection']['faceocc_logit_threshold']:
+        return None
     previous_floor = metadata.get('min_face_source_fraction', DEFAULT_MIN_FACE_SOURCE_FRACTION)
     if previous_floor != config.data['detection']['min_face_source_fraction']:
         return None

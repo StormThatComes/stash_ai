@@ -24,6 +24,7 @@ progress, and includes `observations_rejected` in its summary, including reused 
 | `min_sharpness` | 10 | Minimum Laplacian variance on the normalized grayscale crop; 0 disables |
 | `max_pose_deviation` | 0.50 | Maximum five-landmark pose estimate in `[0, 1]`; `null` disables this gate |
 | `min_visible_face_fraction` | 0.80 | Minimum FaceOcc visible-face estimate in `[0, 1]`; 0 disables recognition segmentation |
+| `faceocc_logit_threshold` | 0.0 | Strict per-pixel FaceOcc cutoff used for visible area and masked sharpness |
 | `min_face_source_fraction` | 0.85 | Minimum fraction of the face ellipse inside the image for a FaceOcc measurement |
 | `require_complete_face` | true | Reject face boxes extending beyond the source thumbnail |
 

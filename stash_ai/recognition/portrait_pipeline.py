@@ -13,7 +13,7 @@ from stash_ai.runtime.cleanup import cleanup, closing
 from .media import safe_url, verify_portrait_cue, ChangedPortraitSource
 from .models import checked_detection
 from .visibility import cached as visible,required as needs_visible
-from .portrait_admission import extra_measurements,pose_reason
+from .portrait_admission import extra_measurements,pose_reason,measurement_quality
 from .expression import cached as expressive,required as needs_expression
 
 _active=ContextVar('recognition_portrait_pipeline',default=None)
@@ -340,7 +340,7 @@ class Pipeline:
         for visited,(scene,row,candidate) in enumerate(pairs):
             if visited>=128:break
             if self.outcome(row,context) is not None:continue
-            quality=json.loads(row['quality']);bases=quality.setdefault('measurement_basis',{})
+            quality=measurement_quality(json.loads(row['quality']), self.config);bases=quality.setdefault('measurement_basis',{})
             if pose_reason(quality,self.config):continue
             legacy=None
             for name in required:
@@ -579,7 +579,7 @@ class Pipeline:
         policy=self.config.data['portraits']
         for row in rows[:128]:
             try:
-                quality=json.loads(row['quality'])
+                quality=measurement_quality(json.loads(row['quality']), self.config)
                 if pose_reason(quality,self.config):continue
                 if (((needs_visible(policy) or extra_measurements(self.config)) and not visible(quality)) or (needs_expression(policy) and not expressive(quality))
                         or any(v.get('source_type')=='recognition_crop' for v in quality.get('measurement_basis',{}).values())):

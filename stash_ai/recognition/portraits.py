@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from stash_ai.stash_api.transport import absolute_stash_url, origin
 from .clustering import _groups, reference_context, vector as retained_vector
-from .config import digest, plain
+from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, digest, plain
 from .database import encoded
 from .media import bounded_media, safe_url, SpriteInput
 from .models import normalized_embedding
@@ -41,7 +41,11 @@ def _policy_value(config):
     from .body_identity import enabled as bodies_enabled, policy as body_policy
     from .portrait_precedence import pose_contract
     uses_visibility = visibility_required(policy) or bool(extra_measurements(config))
-    return {'version': 10, 'portraits': policy,
+    cutoff = config.data['detection']['faceocc_logit_threshold']
+    from .pose_policy import measurement_required
+    uses_mask = uses_visibility or measurement_required(config)
+    tuning = {'faceocc_logit_threshold': cutoff} if uses_mask and cutoff != DEFAULT_FACEOCC_LOGIT_THRESHOLD else {}
+    return {'version': 10, 'portraits': policy, **tuning,
                    'pose_contract': pose_contract(config) if policy['kind'] == 'auto' else None,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
@@ -67,10 +71,11 @@ def missing_image(value, client, performer):
 
 def hints(database, target, config):
     """Stream all weighted hints, retaining bounded scene/temporal diversity."""
+    from .portrait_admission import measurement_quality
     policy = config.data['portraits']
     maximum = policy['max_candidates']
     def rank(row):
-        return (-portrait_score(json.loads(row['quality']), policy, expression=False),
+        return (-portrait_score(measurement_quality(json.loads(row['quality']), config), policy, expression=False),
                 row['seconds'], row['id'])
 
     def scene_queues():
@@ -258,6 +263,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                             'selection_category': 'face',
                             'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
+                            'faceocc_logit_threshold': config.data['detection']['faceocc_logit_threshold'],
                             'min_face_source_fraction': config.data['detection']['min_face_source_fraction'],
                             'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
                             'person': target['person'], 'performer': target['performer'],
