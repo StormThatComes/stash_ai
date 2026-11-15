@@ -25,7 +25,7 @@ def verified(db, config, scope, namespace, bank, result):
         return
     from .reference_roles import strict_sql
     from .pose_policy import anchor_sql
-    from .global_views import consolidation_plan
+    from .global_views import consolidation_plan, _cooccurs
     from .strict_partition import summary_views
     from .clustering import _groups, vector
     from .reference_usage import ReferenceUsage
@@ -128,7 +128,7 @@ def verified(db, config, scope, namespace, bank, result):
                     if scores.face_similarity(first,second)>=settings['match_threshold']:
                         continue
                 validate(pair,roots+ends,(scan,other))
-        if pair not in best:
+        if pair not in best or _cooccurs(db,a,b,config):
             return None
         evidence = exact_pair(*pair, bank, config, search.evidence)
         if set(evidence['blockers']) - {'body_similarity', 'body_cohesion'} or evidence['face_minimum'] is None:
@@ -158,6 +158,10 @@ def verified(db, config, scope, namespace, bank, result):
             a,b = pair
             neighbours.setdefault(a,set()).add(b)
             neighbours.setdefault(b,set()).add(a)
+    challengers = {}
+    for (a,b),score in near.items():
+        challengers.setdefault(a,[]).append((b,score))
+        challengers.setdefault(b,[]).append((a,score))
     for a in sorted(neighbours):
         group = sorted({a}|neighbours[a])
         if len(group)<2 or group[0]!=a:
@@ -169,7 +173,7 @@ def verified(db, config, scope, namespace, bank, result):
         minimum = min(proof['minimum'] for proof in proofs)
         # A competitor too close to the worst accepted endpoint vetoes the group,
         # including candidates just below the positive match threshold.
-        if any(minimum-score<margin for pair,score in near.items() if len(members.intersection(pair))==1):
+        if any(minimum-score<margin for p in group for other,score in challengers.get(p,()) if other not in members):
             continue
         result['decisions'].append(dict(people=group,outcome='merge',blockers=[],endpoint_pair=proofs[0],
             **({'endpoint_pairs':proofs} if len(proofs)>1 else {}),
