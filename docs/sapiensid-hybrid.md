@@ -260,10 +260,19 @@ only as `crop_sharpness` diagnostics. Quality metadata records `sharpness_method
 `body.collection.max_overlap` compares the intersection of validated instance
 masks divided by this person's foreground area, taking the maximum over other
 people (not IoU). Disjoint masks therefore have zero overlap even when their
-bounding boxes overlap heavily. If either mask in a pair is unavailable, empty,
-rejected or conflicting, that pair uses the original box intersection divided by
-this person's box area. Quality records expose `overlap`, `box_overlap` and
-`overlap_basis` (`mask`, `box`, `mixed`, or `none` for no intersecting boxes).
+bounding boxes overlap heavily. A person with a valid mask skips peers without a usable
+mask for this threshold. Other valid masks in the same cue still count. A person
+without a usable mask measures the fraction of their own box covered by each
+peer mask. Two people without usable masks compare the intersection of their
+boxes divided by the box area of the person being assessed. Empty, rejected and conflicting masks
+are unavailable. Sharpness and keypoint requirements apply independently.
+
+Quality records retain the crowding measurements `overlap`, `box_overlap` and
+`overlap_basis` for tracking and ranking. For pairs with only one usable mask, records also include
+`admission_overlap` and `admission_overlap_basis` for the gate. The maximum is
+taken over applicable peers. If all intersecting peers were skipped, the maximum
+is null and the inspector shows the gate as disabled. Skipped peer indices
+are recorded in `overlap_skipped_peer_indices`.
 
 On `second_pass_core_drift`, an isolated person can keep a validated SAM mask
 inside the original detector box. Overlapping neighbours additionally require

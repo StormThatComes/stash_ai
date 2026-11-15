@@ -125,11 +125,10 @@ def test_fused_flip_equals_two_forwards_with_one_model_call():
 
 @pytest.mark.parametrize('batched', [False, True])
 @pytest.mark.parametrize('owned', [False, True])
-def test_drift_keeps_only_owned_quality_mask_and_reports_actual_overlap_peer(batched, owned):
+def test_drift_keeps_only_owned_quality_mask_and_applies_directional_overlap(batched, owned):
     from types import SimpleNamespace
     from threading import get_ident
     from stash_ai.recognition.body_collection import quality, collect
-    from stash_ai.recognition.body_observations import identifier
     from stash_ai.recognition.config import defaults as config_defaults
     from stash_ai.recognition.admission_report import person as person_report
     from stash_ai.recognition.sapiensid_backend import SapiensIDFaces
@@ -176,7 +175,7 @@ def test_drift_keeps_only_owned_quality_mask_and_reports_actual_overlap_peer(bat
         assert ('overlap_mask' in drift) == owned
         measurements = [quality(image, p, people, collection) for p in people]
         assert [reason for _, reason in measurements] == ([None, None] if owned else
-            ['person_overlap','person_sharpness_mask_unavailable'])
+            [None,'person_sharpness_mask_unavailable'])
         for q, _ in measurements:
             assert q['box_overlap'] == 1 and q['overlap'] == (0 if owned else 1)
         assert bool(measurements[1][0]['sharpness_pixels']) == owned
@@ -185,10 +184,19 @@ def test_drift_keeps_only_owned_quality_mask_and_reports_actual_overlap_peer(bat
         collect(pipeline, None, model, config, scan, 0, 0., image, [], [], expected='contract',
                 captured=(people, [], measurements))
         if not owned:
-            record = items[0][0][1]
-            peer_id = identifier(scan,0,people[1],'contract')
-            assert record['quality']['overlap_peer_observation'] == peer_id
+            good = items[0][0][1]
+            assert good['identity_rejection'] is None and items[0][1] is not None
+            assert good['quality']['admission_overlap'] is None
+            assert 'overlap_peer_observation' not in good['quality']
+            other = items[1][0][1]
+            assert other['quality']['admission_overlap'] == .5
+            assert 'overlap_peer_observation' not in other['quality']
             policies = SimpleNamespace(resolve=lambda *args:(config,'current_configuration'))
-            report = person_report(record, config, policies, 'contract', independent=True)
-            gate = next(c for g in report['groups'] for c in g['checks'] if c['parameter'].endswith('max_overlap'))
-            assert gate['status'] == 'fail' and 'P1' in gate['note'] and 'box' in gate['note'] and peer_id in gate['note']
+            def overlap_gate(record):
+                report = person_report(record, config, policies, 'contract', independent=True)
+                return next(c for g in report['groups'] for c in g['checks'] if c['parameter'].endswith('.max_overlap'))
+            skipped = overlap_gate(good)
+            assert skipped['status'] == 'disabled' and skipped['measured'] is None and 'P1' in skipped['note']
+            gate = overlap_gate(other)
+            assert gate['status'] == 'pass' and gate['measured'] == .5
+            assert 'covered by their mask' in gate['note']

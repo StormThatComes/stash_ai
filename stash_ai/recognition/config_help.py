@@ -89,7 +89,7 @@ HELP = {
     'body.collection.min_person_pixels': 'Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.',
     'body.collection.min_sharpness': 'Minimum sharpness inside the SAM mask at source resolution. Positive values require PMPose, refinement.enabled: true and mode: all; missing masks reject the body. Independent of masked_identity_crop. 0 disables this gate. Range: 0..1000000.',
     'body.collection.min_keypoints': 'Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.',
-    'body.collection.max_overlap': 'Maximum fraction of this person mask shared with any other valid mask; box fallback if either mask is unavailable; not IoU. Range: 0..1.',
+    'body.collection.max_overlap': 'Maximum overlap with any peer. A masked person compares only with masked peers. For an unmasked person, use the fraction of their box covered by the peer mask, or by the peer box if both lack masks. Range: 0..1.',
     'matching': 'Build and match identities from retained evidence.',
     'matching.face': 'Identity matching using face embeddings.',
     'matching.face.metric': 'Similarity metric; only cosine is supported.',

@@ -42,9 +42,9 @@ def quality(image,person,people,settings):
         sharp=dict(crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_pixels=0)
     sharpness=sharp['sharpness']
     sharp['sharpness_method']='sam_mask' if mask is not None else 'unavailable'
-    from .body_overlap import measure
+    from .body_overlap import admission_overlap, measure
     overlaps=measure(person,people,report_above=settings['max_overlap'])
-    overlap=overlaps['overlap']
+    overlap=admission_overlap(overlaps)
     from .person_geometry import used_keypoints
     detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
     points=used_keypoints(person)
@@ -57,7 +57,7 @@ def quality(image,person,people,settings):
             'person_sharpness_mask_unavailable' if settings['min_sharpness']>0 and not sharp['sharpness_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
             'person_keypoints' if points<settings['min_keypoints'] else
-            'person_overlap' if overlap>settings['max_overlap'] else None)
+            'person_overlap' if overlap is not None and overlap>settings['max_overlap'] else None)
     return measured,reason
 
 
