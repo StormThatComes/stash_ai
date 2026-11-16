@@ -150,6 +150,17 @@ def body(proof, *, linked_face, role, status, policy, current, merges, target):
     if metrics.get('runner') == -1 and proof.get('rival') is None:
         metrics.pop('runner')
     summary = BODY_REASONS.get(proof.get('route'), BODY_REASONS.get(reason))
+    reference_role = None
+    if 'scene_anchor_check' in proof:
+        metrics.update(face_assignment=proof['face_assignment'], scene_anchor_check=proof['scene_anchor_check'])
+        if proof['scene_anchor_check'] == 'confirmed':
+            reference_role = 'scene-local body anchor'
+            metrics['reference_scope'] = proof['reference_scope']
+            summary = 'Independent body references confirmed the same-scene face assignment. This body qualified as a reference within this scene.'
+        else:
+            reference_role = 'auxiliary'
+            blocker = proof['scene_anchor_check'].replace('_', ' ')
+            summary = f'The body followed its same-scene face assignment. Local body anchor check: {blocker}.'
     sources = [link['source'] for key in ('global_merge','hybrid_merge')
                if isinstance(link := proof.get(key), dict) and link.get('source')]
     paths = [(src, merge_path(src, merges, target)) for src in sources]
@@ -157,5 +168,5 @@ def body(proof, *, linked_face, role, status, policy, current, merges, target):
     return dict(evidence_status='recorded_current_policy' if current else 'recorded_other_policy',
                 status=status, role=role, decisions=[dict(reason=reason, summary=summary or
                 'See the retained body decision for this assignment.', policy=policy, metrics=metrics,
-                references=references(proof, 'body', linked_face), merge_source=source,
+                references=references(proof, 'body', linked_face), reference_role=reference_role, merge_source=source,
                 merges=path)])

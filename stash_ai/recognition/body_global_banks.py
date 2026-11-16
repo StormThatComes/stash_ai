@@ -7,6 +7,7 @@ from .body_observations import contract,compatible_contracts
 from .database import encoded
 from .identity_merges import canonical
 from .memory_size import size
+from .reference_roles import global_body_anchor_sql
 from .scan_heads import predicate as current_scan
 
 ROUTES=('body_global','body_scene')
@@ -93,7 +94,7 @@ def _banks(db,config,scope,namespace):
     expected=contract(config);settings=config.data['sapiensid']['identities']
     limit=config.data['sapiensid']['execution']['reference_bytes']
     where=("s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract IN (SELECT value FROM json_each(?)) AND b.rejected IS NULL "
-           "AND m.status IN ('accepted','provisional') AND m.role='anchor' AND "+current_scan())
+           "AND m.status IN ('accepted','provisional') AND "+global_body_anchor_sql()+" AND "+current_scan())
     args=(scope,namespace,encoded(compatible_contracts(config)))
     source=' FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
     owners={}
@@ -147,7 +148,7 @@ def _banks(db,config,scope,namespace):
                 if proof.get('body_witness_format',0)<2:
                     extra=[r[0] for r in db.execute('SELECT b.id FROM body_observations b JOIN body_members m ON m.observation=b.id '
                         'WHERE b.contract IN (SELECT value FROM json_each(?)) AND json_extract(m.proof,\'$.global_merge.source\')=? '
-                        "AND json_extract(m.proof,'$.role')='anchor'",(encoded(compatible_contracts(config)),owner))]
+                        "AND json_extract(m.proof,'$.role')='anchor' AND json_extract(m.proof,'$.reference_scope') IS NOT 'scene'",(encoded(compatible_contracts(config)),owner))]
                     ids=list(dict.fromkeys([*ids,*extra]))
                 signature=digest(ids)
                 if signature in signatures:

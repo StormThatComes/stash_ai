@@ -39,6 +39,17 @@ def verified_sql(observation='o',member='m'):
             "ORDER BY c.rowid DESC LIMIT 1),0)")
 
 
+def global_body_anchor_sql(member='m'):
+    return f"({member}.role='anchor' AND json_extract({member}.proof,'$.reference_scope') IS NOT 'scene')"
+
+
+def same_scene_face_sql():
+    """Only the latest accepted association with this owner in this scan qualifies."""
+    return ("COALESCE((SELECT c.status='accepted' AND c.person=m.person AND c.scan=o.scan "
+            "AND json_extract(c.payload,'$.reason')='same_scene_identity' "
+            f"FROM candidates c WHERE {observation_sql('c')}=o.id ORDER BY c.rowid DESC LIMIT 1),0)")
+
+
 def attachment_sql(observation='o',member='m'):
     """Only currently accepted non-strict, non-direct-auxiliary memberships."""
     reasons=','.join(repr(r) for r in STRICT_REASONS+('auxiliary_identity',))

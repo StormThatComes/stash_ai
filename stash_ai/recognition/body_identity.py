@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v49-rival-recovery',contract(config),matching_policy(config),
+    return digest(['body-local-v50-scene-body-anchors',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -259,17 +259,20 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     completed=db.execute('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)).fetchone()[0]
     if record is None or record['status']!='complete' or completed!=record['total']:
         raise ValueError('Independent person input is incomplete; run recognition to collect all selected cues.')
-    from .reference_roles import strict_sql
+    from .reference_roles import same_scene_face_sql, strict_sql
     from .pose_policy import anchor_sql
     rows=[];cost=0
     for raw in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
             'o.quality AS face_quality,o.dimensions AS face_dimensions,o.embedding AS face_embedding,o.rejected AS face_rejected,'
-            'm.person AS face_person,CASE WHEN o.id IS NOT NULL THEN '+
-            strict_sql()+' AND '+anchor_sql('o',config.data['clustering'])+' ELSE 0 END AS face_anchor FROM body_observations b '
+            'm.person AS face_person,'+strict_sql()+' AS strict_face,'+same_scene_face_sql()+' AS same_scene_face,'
+            'CASE WHEN o.id IS NOT NULL THEN '+anchor_sql('o',config.data['clustering'])+
+            ' ELSE 0 END AS face_quality_ok FROM body_observations b '
             'LEFT JOIN observations o ON o.id=b.face LEFT JOIN members m ON m.observation=o.id '
             'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL ORDER BY b.seconds,b.id',
             (scan,expected)):
-        row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
+        row=dict(raw)
+        row['face_anchor'] = bool(row.pop('strict_face') and row['face_quality_ok'])
+        cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
             raise ResourceLimit('Person scene references exceed sapiensid.execution.reference_bytes.')
         rows.append(row)
@@ -355,7 +358,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     from .body_seed_modes import FrozenSeeds
     review_faces = settings.get('tracklet_matching') and seeds and any(
         r.get('face_person') and not r.get('face_anchor') for r in rows)
-    frozen=FrozenSeeds(seeds,scores,settings) if queries or review_faces else None
+    contextual = [r for r in rows if r.get('same_scene_face')]
+    frozen=FrozenSeeds(seeds,scores,settings) if queries or review_faces or contextual else None
     if graph is None and turn_feature(settings,'extended_track_graph'):
         from .body_tracklets import paths
         graph = list(paths(rows,settings,scores,record.get('occupied_cues',()),extended=True, gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
@@ -367,6 +371,9 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         claim_fragments(rows,anonymous,decisions,frozen,guard,settings)
         track_lineage = {**{oid:d['anonymous_fragment'] for oid,d in decisions.items() if d.get('anonymous_fragment')}, **anonymous}
         queries = [r for r in queries if r['id'] not in decisions]
+    if contextual:
+        from .scene_body_anchors import corroborate
+        corroborate(contextual, rows, decisions, frozen, guard)
     remaining=[]
     borderline=[]
     cue_choices={}

@@ -10,6 +10,7 @@ from .models import namespace
 from .clustering import vector as face_vector
 from .body_identity import vector as body_vector
 from .body_observations import contract
+from .reference_roles import global_body_anchor_sql
 
 
 def _body_sample(rows, maximum):
@@ -57,11 +58,11 @@ def calculate(config,kind,address,scope, *, top=5):
         permitted=int(budget//((sample.nbytes+4096)*16))
         if permitted<1:raise ValueError('Configured reference memory budget is too small for comparison.')
         if maximum>permitted:maximum=permitted;result['truncated']=True
-        selection=("m.status='accepted' AND m.role='anchor' AND o.contract=?" if body else
+        selection=("m.status='accepted' AND m.role='anchor' AND o.contract=? AND (o.scan=? OR "+global_body_anchor_sql()+")" if body else
                    strict_sql()+' AND '+anchor_sql('o',config.data['clustering']))
         base=(f' FROM {table} o JOIN {members} m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
               "WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL AND o.embedding IS NOT NULL AND "+selection)
-        args=(scope,namespace(config),contract(config)) if body else (scope,namespace(config))
+        args=(scope,namespace(config),contract(config),query['scan']) if body else (scope,namespace(config))
         owners=db.execute('SELECT p.id,p.performer FROM people p WHERE p.scope=? AND p.namespace=? '
             'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) AND EXISTS (SELECT 1'+base+' AND m.person=p.id) '
             'ORDER BY (p.id=?) DESC,p.id',(scope,namespace(config),*args,owner))

@@ -6,6 +6,7 @@ import numpy as np
 from .body_identity import policy, quality, vector, scene_bonus
 from .database import encoded
 from .scan_heads import predicate
+from .reference_roles import global_body_anchor_sql
 
 
 def _global_rivals(search, batch, *, plausible=None):
@@ -202,7 +203,8 @@ def _scene(db, scan, stamp, gallery, search, config, *, blocks=None, pending=Non
                 anonymous.add(old)
             else:
                 nonanonymous.add(old)
-            if row['role']=='anchor' or decision.get('reason') in ('body_scene_core','anonymous_body_track'):
+            global_anchor = row['role'] == 'anchor' and decision.get('reference_scope') != 'scene'
+            if global_anchor or decision.get('reason') in ('body_scene_core','anonymous_body_track'):
                 if settings.get('tracklet_matching'):
                     core_rows[old].append({key:row[key] for key in ('id','scan','cue','seconds','quality','geometry')})
                 required[old].add(row['id'])
@@ -405,7 +407,7 @@ def _recover_scans(db,scope,namespace,scans,config,stamp,gallery,active):
     from .assignment_delta import enqueue
     stale = db.execute("""SELECT DISTINCT m.person FROM body_members m JOIN body_observations b ON b.id=m.observation
         JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND m.person IS NOT NULL
-        AND m.role='anchor' AND b.contract NOT IN (SELECT value FROM json_each(?)) AND """+predicate(),(scope,namespace,encoded(compatible_contracts(config))))
+        AND """+global_body_anchor_sql()+""" AND b.contract NOT IN (SELECT value FROM json_each(?)) AND """+predicate(),(scope,namespace,encoded(compatible_contracts(config))))
     from .identity_merges import canonical
     unavailable = {canonical(db, row[0]) for row in stale}
     references = _banks(db,config,scope,namespace)

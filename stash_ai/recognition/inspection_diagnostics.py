@@ -43,6 +43,8 @@ def contribution(detail):
     trace=detail['trace']
     lines=['Recorded membership: '+trace['role']+'. Membership alone does not prove reference-bank use.']
     for d in trace['decisions']:
+        if 'scene_anchor_check' in d.get('metrics', {}):
+            lines.append(d['summary'])
         selected=d.get('reference_selected')
         value='yes' if selected is True else 'no' if selected is False else 'not retained'
         lines.append(f"{d['reason']}: recorded reference role {d.get('reference_role') or 'not retained'}; bank selection {value}. Policy: {d['policy']}.")
