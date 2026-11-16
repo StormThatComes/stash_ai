@@ -64,6 +64,8 @@ def frozen_steps(config, route, proof, current, blockers, component):
                       threshold('Body cohesion',proof.get('minimum'),cfg['cohesion_threshold'])))
     elif proof:
         cfg = config.data['sapiensid']['matching']
+        if proof.get('support'):
+            steps.append(threshold('Independent support', min(proof['support']), cfg['min_support']))
         for signal, key in (('face','face_floor'),('person','person_threshold')):
             steps.append(threshold(signal.capitalize()+' cohesion',(proof.get(signal) or {}).get('minimum'),cfg[key]))
     else:
@@ -111,8 +113,8 @@ def face_witnesses(db, config, ids, proof, component):
                    'ON b.observation=y.id WHERE a.person=? AND b.person=? AND x.id<>y.id '
                    'AND x.rejected IS NULL AND y.rejected IS NULL')
             for a, ga, ea, b, gb, eb in db.execute(sql,ids):
-                if not duplicate(dict(geometry=ga,embedding=ea),dict(geometry=gb,embedding=eb),
-                                 config.data['clustering'].get('deduplicate_detections',False)):
+                if not config.data['clustering'].get('deduplicate_detections') or not duplicate(
+                        dict(geometry=ga,embedding=ea),dict(geometry=gb,embedding=eb),True):
                     refs.append(witness('Co-presence in one cue','face',a,b))
                     break
     rival = (component or {}).get('nearest_rival')

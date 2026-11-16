@@ -116,12 +116,14 @@ def prepared_replay(db, config, scope, ns, installation, reuse_history, progress
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
             prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None,
-            compact_trial_reports=False):
+            compact_trial_reports=False, followup_variants=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
     recomputes selected assignments; no candidate is seeded from another trial.
     A consumer can reduce predictions without retaining N copies of the corpus.
+    Serial callers may generate followup_variants from their record_trial results.
+    These use the same baseline, snapshot and contract checks as initial variants.
     """
     ns = namespace(config)
     for name, variant in variants.items():
@@ -155,6 +157,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         wall_started = time.perf_counter()
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
+        if followup_variants is not None:
+            stream = chain(stream, followup_variants())
         seen_names = {'baseline'}
         preparation_started = time.perf_counter()
         from contextlib import ExitStack

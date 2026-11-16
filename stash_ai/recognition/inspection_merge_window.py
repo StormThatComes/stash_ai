@@ -13,7 +13,7 @@ class MergeWindow:
     def __init__(self, host, groups):
         self.host, self.reader, self.scan = host, host.reader, host.scan
         self.ids = [g['identity'] for g in groups]
-        self.witness_window = self.changes_window = None
+        self.witness_window = self.changes_window = self.variants_window = None
         self.protected = None
         self.results = {}
         self.labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
@@ -78,6 +78,8 @@ class MergeWindow:
         self.replay.pack(side='left', padx=6)
         self.changes = ttk.Button(actions,text='Observation changes…',command=self.open_changes)
         self.changes.pack(side='left')
+        self.batch = ttk.Button(actions,text='Compare YAML variants…',command=self.open_variants)
+        self.batch.pack(side='left',padx=4)
         self.reset()
         self.window.protocol('WM_DELETE_WINDOW', self.close)
         self.timer = self.window.after(50, self.poll)
@@ -91,6 +93,13 @@ class MergeWindow:
         if value and value.strip():
             self.reset()
             self.start('Finding current identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()), self.set_b)
+
+    def open_variants(self):
+        from .inspection_variants_window import VariantsWindow
+        if self.variants_window:
+            self.variants_window.window.lift()
+        else:
+            self.variants_window = VariantsWindow(self)
 
     def find_c(self):
         from .inspection_pair_evidence import find_identity
@@ -144,6 +153,8 @@ class MergeWindow:
             self.witness_window.close()
         if self.changes_window:
             self.changes_window.close()
+        if self.variants_window:
+            self.variants_window.close()
         self.results.clear()
         self.worker.invalidate()
         self.items.clear()
@@ -215,6 +226,7 @@ class MergeWindow:
         self.detail.delete('1.0','end')
         self.detail.insert('1.0','\n'.join(lines))
         self.detail.configure(state='disabled')
+        self.batch.state(['!disabled'] if self.revision and any(p is not None for _,p in self.items.values()) and not self.busy else ['disabled'])
         self.changes.state(['!disabled'] if item in self.results else ['disabled'])
         self.copy.state(['!disabled'] if patch and patch['yaml'] else ['disabled'])
         self.replay.state(['!disabled'] if patch is not None and not self.busy else ['disabled'])
@@ -237,6 +249,8 @@ class MergeWindow:
 
     def poll(self):
         self.worker.poll()
+        if self.variants_window:
+            self.variants_window.poll()
         if self.witness_window:
             self.witness_window.worker.poll()
         self.timer = self.window.after(50, self.poll)
@@ -247,6 +261,8 @@ class MergeWindow:
             self.witness_window.close()
         if self.changes_window:
             self.changes_window.close()
+        if self.variants_window:
+            self.variants_window.close()
         self.worker.close()
         self.window.destroy()
         self.host.visual_windows.remove(self)

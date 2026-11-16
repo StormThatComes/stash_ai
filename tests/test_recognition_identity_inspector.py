@@ -1228,6 +1228,36 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         pair.replay.invoke()
         wait_for(lambda: item in pair.replays)
         assert 'unassigned' in pair.detail.get('1.0','end')
+        pair.changes.invoke()
+        changes = pair.changes_window
+        changes.mode.set('All')
+        changes.filter()
+        observation = changes.tree.get_children()[0]
+        changes.tree.selection_set(observation)
+        changes.open()
+        witness = pair.witness_window
+        wait_for(lambda: not witness.worker.future)
+        witness.worker.poll()
+        assert 'Scene ' in witness.images.panels['A'].cget('text')
+        assert pair.tree.selection() == (item,)
+        witness.close()
+        changes.close()
+        pair.batch.invoke()
+        variants = pair.variants_window
+        wait_for(lambda: variants.plan is not None)
+        variants.choices.selection_set(0,'end')
+        variants.run.invoke()
+        wait_for(lambda: variants.result is not None)
+        best = next(key for key, value in variants.result['trials'].items() if value['success'] and key != 'baseline')
+        variants.table.selection_set(best)
+        root.update()
+        variants.budget.set('2')
+        variants.minimize.invoke()
+        wait_for(lambda: variants.result and 'minimized' in variants.result)
+        assert 'minimized' in variants.table.get_children()
+        variants.validate.invoke()
+        wait_for(lambda: variants.full.get() and variants.result and 'option' in variants.result['trials'])
+        assert variants.result['trials']['option']['success']
         ui.search()
         assert ui.merge_window is None
     finally:
