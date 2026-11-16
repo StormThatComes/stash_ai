@@ -143,11 +143,11 @@ class MergeWindow:
             result, name = self.results[selected[0]]
             self.show_changes(result, name)
 
-    def show_changes(self, result, name):
+    def show_changes(self, result, name, before_name="baseline"):
         from .inspection_pair_changes import ChangesWindow
         if self.changes_window:
             self.changes_window.close()
-        self.changes_window = ChangesWindow(self, result, name)
+        self.changes_window = ChangesWindow(self, result, name, before_name)
 
     def set_b(self, group):
         address = group['identity']
@@ -277,6 +277,8 @@ class MergeWindow:
 
     def poll(self):
         self.worker.poll()
+        if self.changes_window:
+            self.changes_window.worker.poll()
         if self.fragment_window:
             self.fragment_window.worker.poll()
         if self.views_window:

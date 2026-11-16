@@ -28,6 +28,9 @@ def resolve(database, selected, config, *, progress=None):
     data['clustering'].update(view_match_threshold=data['recognition']['match_threshold'],
         view_cohesion_threshold=data['clustering']['cohesion_threshold'],
         view_ambiguity_margin=data['recognition']['ambiguity_margin'])
+    from .replay_intervention import allow
+    if not allow('strict_partition'):
+        return
     merge_views(database,summaries,replace(config,data=data),matching_policy(config),
                 evidence_field='strict_partition',subcomponents=False)
 

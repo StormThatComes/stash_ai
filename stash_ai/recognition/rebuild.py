@@ -525,7 +525,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                           'external_references': external_context})
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
-    if state and rebuild_cache.admissible(state,config):
+    from .replay_intervention import controlled
+    if state and not controlled() and rebuild_cache.admissible(state,config):
         from .dependencies import certified
         if certified(db,scope,namespace,state):
             from .profiling import count

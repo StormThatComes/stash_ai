@@ -502,12 +502,15 @@ def apply_global_views(database, selected, config, *, progress=None):
     # Freeze all merger nominations and competition before any attachment.
     plan=consolidation_plan(db,views,config,neighbours=neighbours,subcomponents=False)
     from .cohort_resolution import whole_views
-    attached=whole_views(db,config,anchors,views)
+    from .replay_intervention import allow
+    attached=whole_views(db,config,anchors,views) if allow('global_whole_view') else set()
     views=tuple(v for v in views if v.group.identifier not in attached)
     plan=tuple(d for d in plan if not attached.intersection(d['people']))
-    views = merge_views(database,views,config,policy,neighbours=neighbours,plan=plan)
+    if allow('global_view_merge'):
+        views = merge_views(database,views,config,policy,neighbours=neighbours,plan=plan)
     anchors = [Group(canonical(db,group.identifier),group.samples,True,group.sample_ids) for group in anchors
                if group.identifier not in attached]
-    recover(database,selected,config,views,anchors,policy)
+    if allow('global_view_query'):
+        recover(database,selected,config,views,anchors,policy)
     usage.emit(force=True)
     return views,{canonical(db,person) for person in neighbours}

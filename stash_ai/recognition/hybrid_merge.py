@@ -159,7 +159,8 @@ def rebuild(database,selected,config,ordinary,results):
     with stage('Validate hybrid rebuild evidence'), read_only():
         key,before=signature(db,selected,config)
     record=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-rebuild:'+key,)).fetchone()
-    if record is not None and record[0]==before:
+    from .replay_intervention import allow, controlled
+    if not controlled() and record is not None and record[0]==before:
         database.hybrid_rebuild_mode=database.face_rebuild_mode='warm'
         return results()
     existing={row[0] for row in db.execute('SELECT id FROM people')}
@@ -167,9 +168,12 @@ def rebuild(database,selected,config,ordinary,results):
     births={row[0] for row in db.execute('SELECT id FROM people')}-existing
     with stage('Consolidate hybrid identities'):
         from .hybrid_queries import recover
-        if births:recover(database,selected,config,births=births)
-        apply(database,selected,config,compact=True)
-        recover(database,selected,config)
+        if births and allow('hybrid_query'):
+            recover(database,selected,config,births=births)
+        if allow('hybrid_merge'):
+            apply(database,selected,config,compact=True)
+        if allow('hybrid_query'):
+            recover(database,selected,config)
     from .derived_cache import current
     store=current()
     database.hybrid_rebuild_mode=('partial' if store and store.hits.intersection({'hybrid-nominations','hybrid-pair','hybrid-blocks'})

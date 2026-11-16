@@ -353,3 +353,60 @@ def test_track_timeline_keeps_blocked_rival_distinct_from_a_face_root(tmp_path):
     rows=timeline(reader,scan,ids)
     assert [r['id'] for r in rows if r['loss']]==['two']
     assert rows[2]['blocked'] and rows[2]['refs']==['one']
+
+
+def test_first_difference_ties_and_linked_decisions_use_each_trial_separately():
+    from stash_ai.recognition.inspection_first_difference import first_difference
+    rows = {k: dict(scene=s, cue=c) for k,s,c in [
+        ('early','2',4), ('same','2',4), ('bridge','3',0), ('later','10',0), ('unrelated','11',0)]}
+    owners = dict.fromkeys(rows,'same owner')
+    def decision(route, *refs):
+        return dict(route=route, references=list(refs))
+    initial = dict(early=decision('seed'), same=decision('seed'), bridge=decision('ref','early'),
+                   later=decision('local','bridge'), unrelated=decision('seed'))
+    proposed = dict(early=decision('query'), same=decision('query'), bridge=decision('ref'),
+                    later=decision('aux'), unrelated=decision('aux','bridge'))
+    diff = first_difference(rows, dict(owners=owners, decisions=initial), dict(owners=owners, decisions=proposed))
+    assert diff['first'] == ['early','same']
+    # The edge to "unrelated" appears only in the trial without the early -> bridge edge.
+    assert diff['later'] == ['bridge','later']
+    assert diff['changed'] == set(rows)
+
+
+def test_hybrid_stage_check_compares_identical_yaml_and_preserves_catalogue(tmp_path):
+    from tests.test_recognition_hybrid_merge import prepared
+    from stash_ai.recognition.inspection_first_difference import stage_finding, first_difference
+    from stash_ai.recognition.inspection_pair_replay import experiment
+    from stash_ai.recognition.inspection_runtime import stamp
+    from stash_ai.recognition.merge_report_policy import proposal
+    from stash_ai.recognition.models import namespace
+    from stash_ai.recognition.scanning import scan_identity
+    config,ids=prepared(tmp_path)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('UPDATE scans SET policy_sha=?',(scan_identity(config,namespace(config)),))
+        state.connection.commit()
+    original=config.database.read_bytes()
+    patch=proposal(config,{})
+    result=experiment(config,'scope',ids,dict(enabled=patch,omitted=patch),stamp(config.database),omitted_stage='hybrid_merge')
+    with_stage,without_stage=(result['trials'][k] for k in ('enabled','omitted'))
+    assert with_stage['success']
+    assert result['intervention']['enabled_visits'] == result['intervention']['omitted_visits'] > 0
+    assert result['trials']['baseline'] is with_stage
+    assert 'was necessary' in stage_finding(result)
+    assert config.database.read_bytes() == original
+    assert not without_stage['success']
+    assert first_difference(result['rows'],with_stage,without_stage)['first']
+    both=experiment(config,'scope',ids,dict(enabled=patch,omitted=patch),stamp(config.database),omitted_stage='hybrid')
+    assert not both['trials']['omitted']['success']
+    assert both['intervention']['omitted_visits'] > result['intervention']['omitted_visits']
+
+
+def test_formation_explains_duplicate_vote_at_its_cue(tmp_path):
+    from stash_ai.recognition.inspection_view_evidence import face_rows, formation
+    reader, scan, ids = face_scene(tmp_path)
+    rows = face_rows(reader, scan['scope'], ids[0])
+    with FaceDatabase(reader.config.database) as state:
+        state.connection.execute('UPDATE observations SET seconds=0 WHERE id IN (?,?)', (rows[0]['id'],rows[1]['id']))
+        state.connection.commit()
+    result = formation(reader,scan['scope'],ids[0],[row['id'] for row in rows])
+    assert 'no additional independent timestamp/crop vote' in result

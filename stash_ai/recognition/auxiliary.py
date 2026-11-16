@@ -164,6 +164,9 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
     Only independently supported *anchor-matched* profiles are prototypes.
     Late matches are never used to train these prototypes in this replay.
     """
+    from .replay_intervention import allow
+    if not allow('auxiliary_view_query'):
+        return
     grouping, settings = config.data['clustering'], config.data['recognition']
     views = (confirmed_views(db, policy, grouping,
                             remaining_bytes=grouping['max_reference_bytes'] - usage.bytes,complete=True,include_local=True)
