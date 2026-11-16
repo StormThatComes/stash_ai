@@ -1242,8 +1242,10 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         pair.fragments.invoke()
         scenarios = pair.fragment_window
         scenarios.run.invoke()
-        wait_for(lambda: bool(scenarios.data))
-        assert len(scenarios.data)==3 and 'first query' in scenarios.status.cget('text')
+        # This button runs a private SQLite trial and is enabled again on success or failure.
+        wait_for(lambda: scenarios.run.instate(['!disabled']), replay_status=scenarios.status)
+        message = scenarios.status.cget('text')
+        assert len(scenarios.data) == 3 and 'first query' in message, message
         scenarios.close()
         pair.copy.invoke()
         assert root.clipboard_get() == pair.items[item][1]['yaml']

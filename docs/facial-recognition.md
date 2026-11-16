@@ -36,6 +36,43 @@ Use `--face-config PATH` and `--faces-db PATH` to select configuration and state
 CUDA is the default; use `--device cpu` with a CPU installation. Only explicit
 `auto` permits CPU fallback. See [model/runtime setup](recognition/models.md).
 
+## Check threshold relationships
+
+```shell
+python stash_ai.py recognition check-config --face-config facial_recognition.yml
+python stash_ai.py recognition check-config --face-config facial_recognition_solver.yml --all --json
+python stash_ai.py recognition run --scene-id 123 --check-config
+```
+
+The standalone check reads the effective policy offline, including defaults and
+inherited settings. Each finding shows the input YAML paths, their values, the
+effect on a specific route and a tuning suggestion. `--all` includes passing
+checks for active routes. The optional run flag prints findings to stderr before
+processing scenes. Both forms leave the YAML untouched. Advisory findings return
+success and normal configuration validation still rejects invalid YAML.
+
+| Area | Relationships checked |
+| --- | --- |
+| Face admission and matching | Scan, query and anchor floors, auxiliary eligibility, mean versus weakest reference, ambiguity, same-scene bonus, provisional birth and co-presence |
+| Face Views | Effective View match and margin, cohesion, reflection strength, local and historical promotion support, contextual evidence, pose recovery and reference capacity |
+| Body and hybrid | Collection versus anchor admission, adjacent-cue and turn thresholds, local versus global similarity, scene bonus versus cohesion, provisional global support, hybrid face veto, body rival margin and fallback bank size |
+| Pose and masks | PMPose output and prompt gates, duplicate core counts and agreement, recovery mask floor, positive prompt count and coverage, overlap-only refinement |
+| Sampling and portraits | Per-scene cue caps versus independent support, anchor admission versus soft portrait targets, ranking weights and opposing mouth preferences |
+
+For example, a body match threshold of `0.85` and a track threshold of `0.845`
+leave a `0.005` interval for weaker adjacent-cue matches. A null track threshold
+inherits local body cohesion. With a scene bonus of `0.06` and local cohesion
+of `0.84`, the same-scene roster route still needs every witness to score at
+least `0.84`, so the mean can drop at most `0.01` below `0.85`.
+
+`warning` identifies a bound or prerequisite that limits a particular gate or
+route. `advice` also reports narrow tuning intervals and intentional shared
+cutoffs. `--min-score-gap 0.02` sets the default advisory spacing for normalized
+scores. Use `0` to suppress notes about strictly positive narrow intervals.
+Counts, pixels and sharpness use their own units. A static check describes
+which scores could pass. Use [labelled replay](recognition/evaluation.md) to
+measure changes in actual assignments.
+
 ## Choose a workflow
 
 | Task | Guide |
