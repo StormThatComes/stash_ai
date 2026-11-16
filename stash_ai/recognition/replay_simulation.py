@@ -357,6 +357,7 @@ def merge_impact(config, report, source):
         return dict(requested_pair=dict(observation_scope='selected_latest_scans',
             fully_merged=complete and len(all_peers)==1,
             fully_assigned=complete, resulting_identities=sorted(all_peers),
+            additional_identity_ids=sorted(p for p, destinations in peers.items() if p is not None and p not in wanted and destinations & all_peers),
             members=[dict(identity=p, observations=counts[p], withheld=lost[p],
                           outside_latest_selection=retained_totals.get(p, 0)-counts[p],
                           resulting_identities=sorted(peers[p])) for p in wanted]))

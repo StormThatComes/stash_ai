@@ -1,0 +1,157 @@
+"""On-demand comparison of two identities from the scene catalogue."""
+from functools import partial
+import tkinter as tk
+from tkinter import ttk
+from tkinter.scrolledtext import ScrolledText
+
+from .inspection_merge_paths import analyse, verify
+from .inspection_runtime import Worker
+
+
+class MergeWindow:
+    def __init__(self, host, groups):
+        self.host, self.reader, self.scan = host, host.reader, host.scan
+        self.ids = [g['identity'] for g in groups]
+        labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
+                  for g in groups]
+        self.window = tk.Toplevel(host.root)
+        self.window.title('Identity merge paths · Scene '+self.scan['scene'])
+        self.window.geometry('1020x640')
+        self.worker = Worker('scene-merge-paths')
+        self.items, self.replays = {}, {}
+        self.busy = False
+        self.revision = None
+        self.selectors = []
+        bar = ttk.Frame(self.window, padding=6)
+        bar.pack(fill='x')
+        for index, label in enumerate(('Identity A','Identity B')):
+            ttk.Label(bar, text=label).grid(row=index,column=0,sticky='w')
+            combo = ttk.Combobox(bar, values=labels, state='readonly', width=54)
+            combo.grid(row=index,column=1,sticky='ew')
+            combo.current(index)
+            combo.bind('<<ComboboxSelected>>', self.reset)
+            self.selectors.append(combo)
+        bar.columnconfigure(1, weight=1)
+        self.run = ttk.Button(bar, text='Analyse paths', command=self.load)
+        self.run.grid(row=0,column=2,padx=5)
+        self.cancel_button = ttk.Button(bar, text='Cancel', command=self.reset)
+        self.cancel_button.grid(row=1,column=2)
+        self.status = ttk.Label(self.window, wraplength=940, padding=6)
+        self.status.pack(fill='x')
+        split = ttk.Panedwindow(self.window, orient='horizontal')
+        split.pack(fill='both', expand=True, padx=6)
+        left = ttk.Frame(split)
+        split.add(left, weight=1)
+        self.tree = ttk.Treeview(left, columns=('status',), selectmode='browse')
+        self.tree.heading('#0', text='Route / YAML option')
+        self.tree.heading('status', text='Evidence')
+        self.tree.column('#0', width=285)
+        self.tree.column('status', width=155)
+        scroll = ttk.Scrollbar(left, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right',fill='y')
+        self.tree.pack(fill='both',expand=True)
+        self.tree.bind('<<TreeviewSelect>>', self.select)
+        self.detail = ScrolledText(split, width=48, wrap='word', state='disabled', padx=8, pady=8)
+        split.add(self.detail, weight=1)
+        actions = ttk.Frame(self.window, padding=6)
+        actions.pack(fill='x')
+        self.copy = ttk.Button(actions, text='Copy YAML patch', command=self.copy_yaml)
+        self.copy.pack(side='left')
+        self.replay = ttk.Button(actions, text='Verify option by replay', command=self.verify)
+        self.replay.pack(side='left', padx=6)
+        self.reset()
+        self.window.protocol('WM_DELETE_WINDOW', self.close)
+        self.timer = self.window.after(50, self.poll)
+
+    def pair(self):
+        return tuple(self.ids[combo.current()] for combo in self.selectors)
+
+    def reset(self, event=None):
+        self.worker.invalidate()
+        self.items.clear()
+        self.replays.clear()
+        self.revision = None
+        self.tree.delete(*self.tree.get_children())
+        valid = len(set(self.pair())) == 2
+        self.ready('Select Analyse paths to compare this pair.' if valid else 'Choose two different identities.')
+
+    def ready(self, message):
+        self.busy = False
+        self.run.state(['!disabled'] if len(set(self.pair())) == 2 else ['disabled'])
+        self.cancel_button.state(['disabled'])
+        self.status.configure(text=message)
+        self.select()
+
+    def start(self, message, operation, complete):
+        self.busy = True
+        self.run.state(['disabled'])
+        self.cancel_button.state(['!disabled'])
+        self.select()
+        self.status.configure(text=message)
+        self.worker.request(operation, complete, lambda error: self.ready(str(error)))
+
+    def load(self):
+        self.reset()
+        if len(set(self.pair())) == 2:
+            self.start('Comparing retained evidence and checking catalogue proposals…',
+                       partial(analyse, self.reader, self.scan, self.pair()), self.show)
+
+    def show(self, result):
+        self.revision = result.get('revision')
+        for route in result['routes']:
+            parent = self.tree.insert('', 'end', text=route['title'], values=(route['status'],), open=True)
+            self.items[parent] = (route, None)
+            for patch in route['patches']:
+                item = self.tree.insert(parent, 'end', text=patch['title'].capitalize(), values=('YAML option' if patch['changes'] else 'Current YAML',))
+                self.items[item] = (route, patch)
+        if self.items:
+            self.tree.selection_set(next(iter(self.items)))
+        self.ready(result['summary'])
+
+    def select(self, event=None):
+        selected = self.tree.selection()
+        item = selected[0] if selected else None
+        route, patch = self.items.get(item, (None,None))
+        lines = [route['title'], route['status'], '', *route['notes']] if route else []
+        if patch is not None:
+            lines.extend(('', patch['title'], *patch.get('evidence', ()), *patch.get('notes', ())))
+            for change in patch['changes']:
+                key = change.get('yaml_parameter',change['parameter'])
+                lines.append(f"{key}: {change['current']} → {change['proposed']}")
+            lines.extend(('', patch['yaml'].rstrip() or 'Use the current YAML.'))
+        elif route and route['patches']:
+            lines.extend(('', 'Select a YAML option below this route to inspect its changes or verify it by replay.'))
+        if item in self.replays:
+            lines.extend(('', self.replays[item]))
+        self.detail.configure(state='normal')
+        self.detail.delete('1.0','end')
+        self.detail.insert('1.0','\n'.join(lines))
+        self.detail.configure(state='disabled')
+        self.copy.state(['!disabled'] if patch and patch['yaml'] else ['disabled'])
+        self.replay.state(['!disabled'] if patch is not None and not self.busy else ['disabled'])
+
+    def copy_yaml(self):
+        _, patch = self.items[self.tree.selection()[0]]
+        self.window.clipboard_clear()
+        self.window.clipboard_append(patch['yaml'])
+
+    def verify(self):
+        item = self.tree.selection()[0]
+        _, patch = self.items[item]
+        def complete(message):
+            self.replays[item] = message
+            self.ready('Replay finished. Select the verified option to see its result.')
+        self.start('Replaying the current YAML and selected option on retained scans…',
+                   partial(verify, self.reader.config, self.scan['scope'], self.pair(), patch, self.revision), complete)
+
+    def poll(self):
+        self.worker.poll()
+        self.timer = self.window.after(50, self.poll)
+
+    def close(self):
+        self.window.after_cancel(self.timer)
+        self.worker.close()
+        self.window.destroy()
+        self.host.visual_windows.remove(self)
+        self.host.merge_window = None

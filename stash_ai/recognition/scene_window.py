@@ -28,6 +28,10 @@ class SceneInspector(Inspector):
         ttk.Button(bar,text='Search / filters',command=self.filter_dialog).pack(side='left')
         ttk.Button(bar,text='Back',command=lambda:self.navigate(-1)).pack(side='left')
         ttk.Button(bar,text='Forward',command=lambda:self.navigate(1)).pack(side='left')
+        self.merge_window = None
+        self.merge_groups = []
+        self.merge_button = ttk.Button(bar, text='Compare performers', command=self.compare_performers, state='disabled')
+        self.merge_button.pack(side='left', padx=4)
         self.summary = ttk.Label(bar)
         self.summary.pack(side='left', padx=10)
         left = ttk.Frame(panel)
@@ -63,6 +67,10 @@ class SceneInspector(Inspector):
             self.restore_state=self.capture()
             self.history.record(self.restore_state)
             if scene!=self.reader.scene:self.restore_state=None
+        if self.merge_window is not None:
+            self.merge_window.close()
+        self.merge_groups = []
+        self.merge_button.state(['disabled'])
         self.reader = SceneReader(config, str(int(scene)), scope=self.reader.scope)
         self.worker.invalidate()
         self.tree_worker.invalidate()
@@ -81,6 +89,8 @@ class SceneInspector(Inspector):
 
     def show_catalogue(self, result):
         self.scan = result['scan']
+        self.merge_groups = result['groups']
+        self.merge_button.state(['!disabled'] if len(self.merge_groups) >= 2 else ['disabled'])
         self.summary.configure(text=f"Scope {self.scan['scope']} · {self.scan['status']} scan · Current YAML results")
         if self.view_filters:
             from .inspection_search import SearchReader
@@ -116,6 +126,14 @@ class SceneInspector(Inspector):
                 self.listing.insert(kind_item, 'end', text='No observations in this group.')
         self.status.set('Expand a performer to see all scenes, or inspect unassigned observations from this scene.')
         self.restore_view()
+
+    def compare_performers(self):
+        if self.merge_window is not None:
+            self.merge_window.window.lift()
+        elif len(self.merge_groups) >= 2:
+            from .inspection_merge_window import MergeWindow
+            self.merge_window = MergeWindow(self, self.merge_groups)
+            self.visual_windows.append(self.merge_window)
 
     def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None, state=None, level='observations'):
         item = self.listing.insert(parent, 'end', text=label)
