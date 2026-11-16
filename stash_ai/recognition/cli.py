@@ -127,6 +127,14 @@ def parser():
     root = RecognitionParser(prog='stash_ai.py recognition', allow_abbrev=False,
                                    description='On-demand facial recognition independent of tagging.')
     commands = root.add_subparsers(dest='command', required=True)
+    check = commands.add_parser('check-config', allow_abbrev=False,
+        help='Explain interactions between effective recognition YAML thresholds (offline).')
+    check.add_argument('--face-config', type=Path, help='Recognition YAML; defaults to facial_recognition.yml.')
+    check.add_argument('--all', dest='show_all', action='store_true', help='Include passing active checks.')
+    check.add_argument('--json', action='store_true', help='Print a machine-readable report.')
+    from .config_check import DEFAULT_SCORE_GAP
+    check.add_argument('--min-score-gap', type=float, default=DEFAULT_SCORE_GAP,
+        help='Advisory spacing for normalized scores (0..1, default %(default)s).')
     migration = commands.add_parser('migrate-config', allow_abbrev=False,
         help='Write a complete v2 recognition YAML from the effective input policy (offline).')
     migration.add_argument('--face-config', type=Path, required=True, help='Existing recognition YAML.')
@@ -150,6 +158,8 @@ def parser():
             maintenance.add_argument('--scene-id', action='append', type=stash_id, help='Limit to these scenes; repeatable.')
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
+    run.add_argument('--check-config', action='store_true',
+        help='Print advisory threshold diagnostics to stderr before recognition.')
     run.add_argument('--scene-range', action='append', type=scene_range, metavar='START-END',
         help='Existing scenes in this inclusive ID range; repeat for multiple ranges and combine with --scene-id. Cannot be used with --all-scenes.')
     evaluation = commands.add_parser('evaluate', allow_abbrev=False,
@@ -370,6 +380,14 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command == 'check-config':
+        from .config_check import display, report
+        display(report(config, args.min_score_gap), show_all=args.show_all, as_json=args.json)
+        return 0
+    if args.command == 'run' and args.check_config:
+        import sys
+        from .config_check import display, report
+        display(report(config), stream=sys.stderr)
     if args.command == 'run' or args.command == 'report-merge' and args.solve:
         from .work_locations import invocation, validate_outputs
         if args.faces_db is not None:
