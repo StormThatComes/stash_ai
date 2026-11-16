@@ -4,7 +4,8 @@ import tkinter as tk
 from tkinter import ttk, simpledialog
 from tkinter.scrolledtext import ScrolledText
 
-from .inspection_merge_paths import analyse, verify
+from .inspection_merge_paths import analyse
+from .inspection_pair_replay import describe, experiment
 from .inspection_runtime import Worker
 
 
@@ -12,7 +13,9 @@ class MergeWindow:
     def __init__(self, host, groups):
         self.host, self.reader, self.scan = host, host.reader, host.scan
         self.ids = [g['identity'] for g in groups]
-        self.witness_window = None
+        self.witness_window = self.changes_window = None
+        self.protected = None
+        self.results = {}
         self.labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
                   for g in groups]
         self.window = tk.Toplevel(host.root)
@@ -34,6 +37,10 @@ class MergeWindow:
             combo.bind('<<ComboboxSelected>>', self.reset)
             self.selectors.append(combo)
         ttk.Button(bar, text='Find B by ID…', command=self.find_b).grid(row=1,column=3)
+        self.protect_label = ttk.Label(bar, text='Protected C (optional): none')
+        self.protect_label.grid(row=2,column=0,columnspan=2,sticky='w')
+        ttk.Button(bar,text='Choose C…',command=self.find_c).grid(row=2,column=2)
+        ttk.Button(bar,text='Clear C',command=lambda:self.set_c(None)).grid(row=2,column=3)
         bar.columnconfigure(1, weight=1)
         self.run = ttk.Button(bar, text='Analyse paths', command=self.load)
         self.run.grid(row=0,column=2,padx=5)
@@ -69,6 +76,8 @@ class MergeWindow:
         self.copy.pack(side='left')
         self.replay = ttk.Button(actions, text='Verify option by replay', command=self.verify)
         self.replay.pack(side='left', padx=6)
+        self.changes = ttk.Button(actions,text='Observation changes…',command=self.open_changes)
+        self.changes.pack(side='left')
         self.reset()
         self.window.protocol('WM_DELETE_WINDOW', self.close)
         self.timer = self.window.after(50, self.poll)
@@ -82,6 +91,33 @@ class MergeWindow:
         if value and value.strip():
             self.reset()
             self.start('Finding current identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()), self.set_b)
+
+    def find_c(self):
+        from .inspection_pair_evidence import find_identity
+        value = simpledialog.askstring('Protect identity C', 'Stash performer ID or identity UUID:', parent=self.window)
+        if value and value.strip():
+            self.start('Finding protected identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()),
+                       lambda group:self.set_c(group['identity']))
+
+    def set_c(self, identity):
+        if identity is not None and identity in self.pair():
+            self.ready('C must be different from both A and B.')
+            return
+        self.protected = identity
+        self.protect_label.configure(text='Protected C (optional): ' + (identity or 'none'))
+        self.reset()
+
+    def open_changes(self):
+        selected = self.tree.selection()
+        if selected and selected[0] in self.results:
+            result, name = self.results[selected[0]]
+            self.show_changes(result, name)
+
+    def show_changes(self, result, name):
+        from .inspection_pair_changes import ChangesWindow
+        if self.changes_window:
+            self.changes_window.close()
+        self.changes_window = ChangesWindow(self, result, name)
 
     def set_b(self, group):
         address = group['identity']
@@ -106,17 +142,20 @@ class MergeWindow:
     def reset(self, event=None):
         if self.witness_window:
             self.witness_window.close()
+        if self.changes_window:
+            self.changes_window.close()
+        self.results.clear()
         self.worker.invalidate()
         self.items.clear()
         self.replays.clear()
         self.revision = None
         self.tree.delete(*self.tree.get_children())
-        valid = len(set(self.pair())) == 2
-        self.ready('Select Analyse paths to compare this pair.' if valid else 'Choose two different identities.')
+        valid = len(set(self.pair())) == 2 and self.protected not in self.pair()
+        self.ready('Select Analyse paths to compare this pair.' if valid else 'A, B and optional C must be different identities.')
 
     def ready(self, message):
         self.busy = False
-        self.run.state(['!disabled'] if len(set(self.pair())) == 2 else ['disabled'])
+        self.run.state(['!disabled'] if len(set(self.pair())) == 2 and self.protected not in self.pair() else ['disabled'])
         self.cancel_button.state(['disabled'])
         self.status.configure(text=message)
         self.select()
@@ -131,7 +170,7 @@ class MergeWindow:
 
     def load(self):
         self.reset()
-        if len(set(self.pair())) == 2:
+        if len(set(self.pair())) == 2 and self.protected not in self.pair():
             self.start('Comparing retained evidence and checking catalogue proposals…',
                        partial(analyse, self.reader, self.scan, self.pair()), self.show)
 
@@ -176,6 +215,7 @@ class MergeWindow:
         self.detail.delete('1.0','end')
         self.detail.insert('1.0','\n'.join(lines))
         self.detail.configure(state='disabled')
+        self.changes.state(['!disabled'] if item in self.results else ['disabled'])
         self.copy.state(['!disabled'] if patch and patch['yaml'] else ['disabled'])
         self.replay.state(['!disabled'] if patch is not None and not self.busy else ['disabled'])
 
@@ -187,11 +227,13 @@ class MergeWindow:
     def verify(self):
         item = self.tree.selection()[0]
         _, patch = self.items[item]
-        def complete(message):
-            self.replays[item] = message
+        ids = self.pair() + ((self.protected,) if self.protected else ())
+        def complete(result):
+            self.results[item] = (result, 'option')
+            self.replays[item] = describe(result, 'option')
             self.ready('Replay finished. Select the verified option to see its result.')
         self.start('Replaying the current YAML and selected option on retained scans…',
-                   partial(verify, self.reader.config, self.scan['scope'], self.pair(), patch, self.revision), complete)
+                   partial(experiment, self.reader.config, self.scan['scope'], ids, {'option':patch}, self.revision), complete)
 
     def poll(self):
         self.worker.poll()
@@ -203,6 +245,8 @@ class MergeWindow:
         self.window.after_cancel(self.timer)
         if self.witness_window:
             self.witness_window.close()
+        if self.changes_window:
+            self.changes_window.close()
         self.worker.close()
         self.window.destroy()
         self.host.visual_windows.remove(self)
