@@ -2,6 +2,7 @@
 from contextlib import closing, contextmanager
 
 from . import merge_report
+from .inspection_pair_evidence import find_identity, gate, threshold, frozen_steps, face_witnesses, witness
 from .body_identity import available, enabled, policy as body_policy
 from .body_observations import contract
 from .clustering import matching_policy
@@ -39,7 +40,7 @@ def _measurements(proof):
             yield f'{key.replace("_", " ")}: {value:.4f}' if isinstance(value, float) else f'{key.replace("_", " ")}: {value}'
 
 
-def _catalogue_routes(config, report):
+def _catalogue_routes(db, config, report):
     ids = report['identity_ids']
     paths = {path['route']: path for path in report['paths']}
     for name, (title, sequence) in ROUTES.items():
@@ -48,7 +49,7 @@ def _catalogue_routes(config, report):
             keys = ['sapiensid.enabled'] if name == 'sapiensid_hybrid' else [
                 'sapiensid.enabled', 'sapiensid.collection.enabled', 'sapiensid.identities.enabled', 'sapiensid.global_matching.enabled']
             disabled = [f'{_name(config,key)} = false' for key in keys if not parameter(config.data,key)]
-            yield dict(title=title, status='Disabled', notes=[sequence, *disabled], patches=[])
+            yield dict(title=title, status='Disabled', notes=[sequence, *disabled], patches=[], steps=[gate('Enable route',False,', '.join(disabled)), gate('Score pair',None,reached=False)])
             continue
         current = path.get('current', {})
         notes = [sequence]
@@ -65,6 +66,7 @@ def _catalogue_routes(config, report):
             blockers.extend(proof.get('blockers', ()))
         for item in current.get('effective_thresholds', {}).items():
             notes.append(f'Effective {item[0]}: {item[1]:g}')
+        component = current.get('shared_component')
         patches = []
         for rec in path['recommendations']:
             shared = rec['verification']['shared_component']
@@ -81,6 +83,7 @@ def _catalogue_routes(config, report):
                 status = 'Disabled'
                 notes.append(f"{_name(config,'sapiensid.global_matching.enabled')} = false")
             relevant = [d for d in full.get('decisions', ()) if set(ids) <= set(d['people'])]
+            component = next((d for d in relevant if d['outcome']=='merge'), next(iter(relevant),None))
             for decision in relevant:
                 blockers.extend(decision['blockers'])
                 if decision['outcome'] == 'merge':
@@ -99,7 +102,19 @@ def _catalogue_routes(config, report):
             notes.append('No comparable pair of references was retained for this route.')
         if blockers:
             notes.append('Current blockers: ' + ', '.join(dict.fromkeys(blockers)))
-        yield dict(title=title, status=status, notes=notes, patches=patches)
+        steps = frozen_steps(config,name,proof,current,blockers,component)
+        if status == 'Disabled':
+            steps = [gate('Enable route',False),gate('Compare references',None,reached=False)]
+        refs = []
+        if name in ('strict_core','confirmed_views'):
+            refs = face_witnesses(db,config,ids,proof,component)
+        elif name == 'sapiensid_hybrid' and proof:
+            banks = proof.get('observations', ())
+            if len(banks)==2 and all(banks):
+                refs.append(witness('Supporting faces','face',banks[0][0],banks[1][0]))
+        elif component and all(component.get('cores',{}).get(i) for i in ids):
+            refs.append(witness('Supporting body cores','body',*(component['cores'][i][0] for i in ids)))
+        yield dict(title=title, status=status, notes=notes, patches=patches, steps=steps, witnesses=refs)
 
 
 def _local_face(db, config, scan, ids, report):
@@ -147,7 +162,12 @@ def _local_face(db, config, scan, ids, report):
                 patches.append(patch)
         notes.append(f"Review {_name(config, 'recognition.min_merge_support')} = {settings['min_merge_support']}.")
         routes.append(dict(title='Same-scene face core and nominations' if same_scene else 'Merge by independent face nominations',
-                           status='Rebuild hypothesis' if patches else 'Measured only', notes=notes, patches=patches))
+                           status='Rebuild hypothesis' if patches else 'Measured only', notes=notes, patches=patches,
+                           steps=[threshold('Cross mean',pair['cross_mean'],local['effective_match_threshold'] if same_scene else settings['match_threshold']),
+                                  threshold('Cross cohesion',pair['cross_minimum'],local['effective_cohesion_threshold'] if same_scene else grouping['cohesion_threshold']),
+                                  threshold('Validated nomination timestamps',count,settings['min_merge_support']),
+                                  gate('Rebuild ownership',None,reached=False)],
+                           witnesses=face_witnesses(db,config,ids,proof,None)))
     return routes
 
 
@@ -171,15 +191,30 @@ def _local_body_core(db, config, scan, ids):
         guard = FaceGuard(db, config, scores=scores)
         if copresent(*banks):
             route['status'] = 'Blocked'
+            right = {r['cue']:r['id'] for r in banks[1]}
+            a = next(r for r in banks[0] if r['cue'] in right)
+            route['witnesses'] = [witness('Co-present body anchors','body',a['id'],right[a['cue']])]
             notes.append('Anchors from both cores occur in the same cue. Local body grouping excludes co-present observations.')
         elif any(not guard.allows(row, banks[1-i]) for i, bank in enumerate(banks) for row in bank):
             route['status'] = 'Blocked'
             notes.append('The production face guard found incompatible face evidence between these cores.')
         else:
-            comparisons = (scores.compare([row], banks[1-i]) for i, bank in enumerate(banks) for row in bank)
-            match = cohesion = 1.
-            for mean, low in comparisons:
-                match, cohesion = min(match, mean), min(cohesion, low)
+            match = cohesion = float('inf')
+            for index, bank in enumerate(banks):
+                for row in bank:
+                    mean, low = scores.compare([row], banks[1-index])
+                    match = min(match, mean)
+                    if low < cohesion:
+                        cohesion, weakest, opposite = low, row, 1-index
+            singleton_banks = ([other] for other in banks[opposite])
+            peer = next(other[0] for other in singleton_banks if scores.compare([weakest], other)[1] == cohesion)
+            pair = (weakest['id'], peer['id']) if opposite == 1 else (peer['id'], weakest['id'])
+            local = config.data['sapiensid']['identities']
+            route['steps'] = [gate('Co-presence and face guards',True),
+                              threshold('Lowest body query mean',match,local['match_threshold']),
+                              threshold('Weakest cross-core similarity',cohesion,local['cohesion_threshold']),
+                              gate('Rebuild ownership',None,reached=False)]
+            route['witnesses'] = [witness('Weakest cross-core similarity','body',*pair)]
             notes.extend([f"Scene {scan['scene']}: {len(banks[0])} and {len(banks[1])} current body-core anchors.",
                           f"Lowest query mean {match:.4f}, weakest cross-core similarity {cohesion:.4f}.",
                           'Let scene anchors join the same group before publishing two identities. '
@@ -233,7 +268,9 @@ def _local_body_links(db, config, scan, ids):
                     patches.append(patch)
         else:
             notes.append(f"Linked face {row['face']} belongs to the other selected identity.")
-        routes.append(dict(title=title, status='Recorded link', notes=notes, patches=patches))
+        routes.append(dict(title=title, status='Recorded link', notes=notes, patches=patches,
+                           witnesses=[witness(title,'body',row['id'],row['peer'] if title.startswith('Body track') else row['face'],
+                                              'body' if title.startswith('Body track') else 'face')]))
     return routes
 
 
@@ -256,8 +293,12 @@ def analyse(reader, scan, ids):
     revision = stamp(config.database)
     catalogue = reader.catalogue()
     groups = {g['identity']: g for g in catalogue['groups']}
-    if catalogue['scan']['id'] != scan['id'] or any(i not in groups for i in ids):
+    if catalogue['scan']['id'] != scan['id'] or ids[0] not in groups:
         raise ValueError('The selected scene or identity memberships changed. Refresh the scene.')
+    if ids[1] not in groups:
+        groups[ids[1]] = find_identity(reader,scan['scope'],ids[1])
+        if groups[ids[1]]['identity'] != ids[1]:
+            raise ValueError('The selected identity changed. Refresh the scene.')
     labels = {i: f"Performer {groups[i]['performer']}" if groups[i]['performer'] else i for i in ids}
     with (_cancellable(), closing(open_readonly(config.database)) as db, cache_scope(config),
           scratch_scope(config), alias_scope(db, scan['scope'], reader.namespace)):
@@ -275,7 +316,7 @@ def analyse(reader, scan, ids):
             if list(ids) != report['identity_ids']:
                 raise ValueError('The selected identities have been redirected. Refresh the scene.')
             coverage = report['measurement_coverage']
-            routes = list(_catalogue_routes(config, report))
+            routes = list(_catalogue_routes(db, config, report))
             routes.extend(_local_face(db, config, scan, ids, report))
         check_cancelled()
         if enabled(config) and available(db):
@@ -289,6 +330,14 @@ def analyse(reader, scan, ids):
             summary += f" Incomplete {name}: {detail['detail']}"
     if stamp(config.database) != revision:
         summary += ' The database changed during analysis. Refresh to compare the latest results.'
+    for route in routes:
+        if 'steps' not in route:
+            status = route['status']
+            route['steps'] = [gate('Retained scene evidence', None if status=='Incomplete' else True),
+                              gate('Current route',False if status in ('Blocked','No separating boundary') else None,
+                                   ' '.join(route['notes']) if status=='Blocked' else status),
+                              gate('Verify final assignment',None,reached=False)]
+        route['first_blocker'] = next((s['label'] for s in route['steps'] if s['status']=='Blocked'),None)
     routes.sort(key=lambda r: (r['status'] not in ('Eligible on frozen references', 'Frozen planner verified'),
                                not bool(r['patches']), r['status'] == 'Disabled'))
     return dict(routes=routes, summary=summary, revision=revision)

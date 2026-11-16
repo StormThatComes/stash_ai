@@ -341,6 +341,7 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                             if score<effective-margin:
                                 continue
                         entry=dict(identity=person,rival=other.identifier,score=score,
+                                   medoids=[view.medoid,by_group[id(other)].medoid],
                                    internal_score=internal[person],gap=internal[person]-score)
                         if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
                             rival=entry
