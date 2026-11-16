@@ -128,6 +128,7 @@ def partial_windows_metadata(monkeypatch, anonymous, *, mount=None, lstat_only=F
     elif os.name != 'nt':
         monkeypatch.setattr(disk_budget, '_windows_volume', lambda path: 'test-volume')
     monkeypatch.setattr(Path, 'stat', partial_stat)
+    monkeypatch.setattr(Path, 'lstat', lambda path: partial_stat(path, follow_symlinks=False))
 
 
 @pytest.mark.parametrize('partial_directory', [False, True])
@@ -146,6 +147,7 @@ def test_parallel_scratch_files_with_zero_device_and_inode(tmp_path, monkeypatch
     budget.roots.add(work)
     partial_windows_metadata(monkeypatch, {first, second, work} if partial_directory else {first, second},
                              lstat_only=True)
+    assert first.lstat().st_dev == first.lstat().st_ino == 0
     rows = budget.check(growth=3)
     assert len(rows) == 1
     row, = rows.values()
