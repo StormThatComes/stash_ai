@@ -1223,6 +1223,15 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         root.update()
         assert pair.copy.instate(['!disabled'])
         assert pair.items[item][1]['yaml'].strip() in pair.detail.get('1.0','end')
+        pair.views.invoke()
+        lab = pair.views_window
+        lab.tabs.select(1)
+        root.update()
+        wait_for(lambda: bool(lab.rows))
+        lab.list.selection_set(0,'end')
+        lab.explain()
+        wait_for(lambda: 'independent votes' in lab.notes.get('1.0','end'))
+        lab.close()
         pair.copy.invoke()
         assert root.clipboard_get() == pair.items[item][1]['yaml']
         pair.replay.invoke()

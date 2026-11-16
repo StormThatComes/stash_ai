@@ -299,6 +299,8 @@ def analyse(reader, scan, ids):
         groups[ids[1]] = find_identity(reader,scan['scope'],ids[1])
         if groups[ids[1]]['identity'] != ids[1]:
             raise ValueError('The selected identity changed. Refresh the scene.')
+    matrix = {}
+    hybrid = {}
     labels = {i: f"Performer {groups[i]['performer']}" if groups[i]['performer'] else i for i in ids}
     with (_cancellable(), closing(open_readonly(config.database)) as db, cache_scope(config),
           scratch_scope(config), alias_scope(db, scan['scope'], reader.namespace)):
@@ -306,7 +308,7 @@ def analyse(reader, scan, ids):
             raise ValueError('Recognition results changed. Refresh the scene and compare again.')
         check_cancelled()
         try:
-            report = merge_report.analyse_pair(db, config, *ids, scope=scan['scope'])
+            report = merge_report.analyse_pair(db, config, *ids, scope=scan['scope'], view_matrix=matrix)
         except ResourceLimit as error:
             coverage = {'catalogue': dict(complete=False, detail=str(error))}
             routes = [dict(title='Catalogue comparison', status='Incomplete', notes=[str(error)], patches=[])]
@@ -316,6 +318,13 @@ def analyse(reader, scan, ids):
             if list(ids) != report['identity_ids']:
                 raise ValueError('The selected identities have been redirected. Refresh the scene.')
             coverage = report['measurement_coverage']
+            view = next((p.get('current', {}) for p in report['paths'] if p['route']=='confirmed_views'), {})
+            matrix['component'] = view.get('shared_component')
+            hybrid_path = next((p.get('current', {}) for p in report['paths'] if p['route']=='sapiensid_hybrid'), {})
+            proof = _pair(hybrid_path.get('pair_evidence', ()),ids) or _pair(report['hybrid'].get('pairs', ()),ids)
+            if proof:
+                from .inspection_view_evidence import hybrid_panel
+                hybrid = hybrid_panel(db,config,ids,proof,hybrid_path.get('shared_component'))
             routes = list(_catalogue_routes(db, config, report))
             routes.extend(_local_face(db, config, scan, ids, report))
         check_cancelled()
@@ -340,7 +349,7 @@ def analyse(reader, scan, ids):
         route['first_blocker'] = next((s['label'] for s in route['steps'] if s['status']=='Blocked'),None)
     routes.sort(key=lambda r: (r['status'] not in ('Eligible on frozen references', 'Frozen planner verified'),
                                not bool(r['patches']), r['status'] == 'Disabled'))
-    return dict(routes=routes, summary=summary, revision=revision)
+    return dict(routes=routes, summary=summary, revision=revision, matrix=matrix, hybrid=hybrid)
 
 
 def verify(config, scope, ids, patch, revision):

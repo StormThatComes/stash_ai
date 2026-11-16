@@ -14,6 +14,8 @@ class MergeWindow:
         self.host, self.reader, self.scan = host, host.reader, host.scan
         self.ids = [g['identity'] for g in groups]
         self.witness_window = self.changes_window = self.variants_window = None
+        self.views_window = None
+        self.matrix, self.hybrid = {}, {}
         self.protected = None
         self.results = {}
         self.labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
@@ -70,6 +72,8 @@ class MergeWindow:
         self.witnesses.pack(side='left')
         self.open_evidence = ttk.Button(evidence, text='Inspect evidence', command=self.open_witness)
         self.open_evidence.pack(side='left')
+        self.views = ttk.Button(evidence,text='View / Hybrid evidence…',command=self.open_views)
+        self.views.pack(side='left',padx=4)
         actions = ttk.Frame(self.window, padding=6)
         actions.pack(fill='x')
         self.copy = ttk.Button(actions, text='Copy YAML patch', command=self.copy_yaml)
@@ -93,6 +97,13 @@ class MergeWindow:
         if value and value.strip():
             self.reset()
             self.start('Finding current identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()), self.set_b)
+
+    def open_views(self):
+        from .inspection_views_window import ViewsWindow
+        if self.views_window:
+            self.views_window.window.lift()
+        else:
+            self.views_window = ViewsWindow(self)
 
     def open_variants(self):
         from .inspection_variants_window import VariantsWindow
@@ -149,6 +160,8 @@ class MergeWindow:
         self.witness_window = WitnessWindow(self, evidence)
 
     def reset(self, event=None):
+        if self.views_window:
+            self.views_window.close()
         if self.witness_window:
             self.witness_window.close()
         if self.changes_window:
@@ -186,6 +199,7 @@ class MergeWindow:
                        partial(analyse, self.reader, self.scan, self.pair()), self.show)
 
     def show(self, result):
+        self.matrix, self.hybrid = result.get('matrix',{}),result.get('hybrid',{})
         self.revision = result.get('revision')
         for route in result['routes']:
             parent = self.tree.insert('', 'end', text=route['title'], values=(route['status'],), open=True)
@@ -226,6 +240,7 @@ class MergeWindow:
         self.detail.delete('1.0','end')
         self.detail.insert('1.0','\n'.join(lines))
         self.detail.configure(state='disabled')
+        self.views.state(['!disabled'] if self.revision else ['disabled'])
         self.batch.state(['!disabled'] if self.revision and any(p is not None for _,p in self.items.values()) and not self.busy else ['disabled'])
         self.changes.state(['!disabled'] if item in self.results else ['disabled'])
         self.copy.state(['!disabled'] if patch and patch['yaml'] else ['disabled'])
@@ -249,6 +264,8 @@ class MergeWindow:
 
     def poll(self):
         self.worker.poll()
+        if self.views_window:
+            self.views_window.worker.poll()
         if self.variants_window:
             self.variants_window.poll()
         if self.witness_window:
@@ -257,6 +274,8 @@ class MergeWindow:
 
     def close(self):
         self.window.after_cancel(self.timer)
+        if self.views_window:
+            self.views_window.close()
         if self.witness_window:
             self.witness_window.close()
         if self.changes_window:
