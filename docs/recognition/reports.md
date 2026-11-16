@@ -319,6 +319,15 @@ without a linked Stash performer are explicitly labelled `no Stash performer`.
 The number in each branch title counts its observations in the entry scene only. Blue rows mark
 that scene. The remaining rows provide the performer's wider recognition context.
 
+Choose **Compare performers** when at least two identities appear in the loaded scene.
+Select A and B, including unpublished identities, then choose **Analyse paths**.
+The comparison uses the loaded YAML and a consistent read of the recognition database.
+
+- Face anchors, confirmed views, hybrid and independent body consolidation use catalogue evidence across the scope. Each route shows its blockers, measured scores where available and any additional identities in a verified component.
+- Local routes consider face nominations, body-core formation and recorded face/body or track links in the entry scene. A directional route can demote A's anchors to auxiliary eligibility while retaining an eligible witness for B, or test the opposite direction. When both modalities can create separate cores, the view also offers combined face and body options. Support alternatives use independent evidence.
+- Expand a route and select a YAML option to see the current and proposed values. **Copy YAML patch** copies that option in the loaded schema version. These settings affect the entire run.
+- **Verify option by replay** runs the baseline and selected change against retained scans in the scope. It can take as long as a rebuild. The result shows whether both sets of observations reached one destination, how many were withheld, which other identities shared their destinations and how many observations fell outside the replay selection. A frozen-planner result or a demoted anchor alone cannot establish that outcome.
+
 `Unassigned in this scene` includes every current face without membership and
 every current body without accepted membership, including withheld and
 provisional tracks. An accepted auxiliary or attachment is already assigned

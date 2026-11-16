@@ -66,10 +66,16 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
 
 
 def _build(config, left_id, right_id, *, scope=None, by_performer=False, simulate=False):
-    model_namespace = namespace(config)
     from .report_snapshot import snapshot
     with snapshot(config, left_id, scope=scope, by_performer=by_performer,
-                  other_identifiers=[right_id]) as db, alias_scope(db):
+                  other_identifiers=[right_id]) as db:
+        return analyse_pair(db, config, left_id, right_id, scope=scope, by_performer=by_performer, simulate=simulate)
+
+
+def analyse_pair(db, config, left_id, right_id, *, scope, by_performer=False, simulate=False):
+    """Analyse both labels in the caller's consistent, alias-aware read snapshot."""
+    model_namespace = namespace(config)
+    with alias_scope(db):
         requested_left, left = _select(db, model_namespace,
             None if by_performer else left_id, left_id if by_performer else None, scope)
         requested_right, right = _select(db, model_namespace,

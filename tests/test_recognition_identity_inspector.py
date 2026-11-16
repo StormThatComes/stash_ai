@@ -1181,3 +1181,57 @@ def test_member_state_groups_filter_before_pagination_and_match_detail_roles(tmp
         with pytest.raises(ValueError,match='kind'):
             reader.states('invalid')
     assert config.database.read_bytes()==before
+
+
+def test_native_scene_compares_selected_performers_on_demand(tmp_path):
+    import os
+    from tests.test_recognition_inspection_merge_paths import face_scene
+    from stash_ai.recognition.scene_window import SceneInspector
+    tk = pytest.importorskip('tkinter')
+    try:
+        root = tk.Tk()
+    except tk.TclError as error:
+        if os.environ.get('STASH_AI_DESKTOP_TEST'):
+            raise
+        pytest.skip(f'No graphical desktop: {error}')
+    reader, _, _ = face_scene(tmp_path)
+    ui = SceneInspector(root, reader, 'Compare scene performers')
+
+    def wait_for(condition):
+        deadline = time.monotonic() + 10
+        while not condition() and time.monotonic() < deadline:
+            root.update()
+            time.sleep(.01)
+        assert condition()
+
+    try:
+        wait_for(lambda: len(ui.merge_groups) == 2)
+        ui.merge_button.invoke()
+        pair = ui.merge_window
+        assert pair.worker.future is None and not pair.items
+        pair.selectors[1].current(0)
+        pair.selectors[1].event_generate('<<ComboboxSelected>>')
+        root.update()
+        assert pair.run.instate(['disabled'])
+        pair.selectors[1].current(1)
+        pair.selectors[1].event_generate('<<ComboboxSelected>>')
+        root.update()
+        pair.run.invoke()
+        wait_for(lambda: bool(pair.items))
+        item = next(i for i, (_, patch) in pair.items.items() if patch and patch['yaml'])
+        pair.tree.selection_set(item)
+        root.update()
+        assert pair.copy.instate(['!disabled'])
+        assert pair.items[item][1]['yaml'].strip() in pair.detail.get('1.0','end')
+        pair.copy.invoke()
+        assert root.clipboard_get() == pair.items[item][1]['yaml']
+        pair.replay.invoke()
+        wait_for(lambda: item in pair.replays)
+        assert 'unassigned' in pair.detail.get('1.0','end')
+        ui.search()
+        assert ui.merge_window is None
+    finally:
+        ui.close()
+        root.destroy()
+        del ui, root
+        gc.collect()
