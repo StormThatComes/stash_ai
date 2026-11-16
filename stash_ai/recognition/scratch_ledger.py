@@ -1,5 +1,5 @@
 """Serialize scratch capacity admission across spawned trials in one invocation."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 import os
 from pathlib import Path
 import sqlite3
@@ -25,16 +25,15 @@ def reserve(directory, amount, limit):
         db.execute('INSERT OR REPLACE INTO leases VALUES (?,?)', (owner, amount))
 
 
-from contextlib import contextmanager
-
-
 @contextmanager
 def file_leases(*, write=False):
     root = os.environ.get('RECOGNITION_WORK_ROOT')
     if not root:
         yield None
         return
-    with closing(sqlite3.connect(Path(root)/'scratch-leases.sqlite',timeout=30)) as db, db:
+    # A file reservation's data_version tracks changes to file grants only.
+    # Frequent scratch page allocations have an independent quota and ledger.
+    with closing(sqlite3.connect(Path(root) / 'file-leases.sqlite', timeout=30)) as db, db:
         if write:
             db.execute('BEGIN IMMEDIATE')
         db.execute('CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, device INTEGER, cap INTEGER)')

@@ -32,3 +32,45 @@ def test_solver_index_releases_unused_capacity_while_trials_are_active(tmp_path)
         with coordinator(images, db, config, scans) as (index, _):
             assert len(index) > 0
             assert not budget.reservations
+
+
+def test_parallel_file_admission_rechecks_capacity_after_another_trial_writes(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from stash_ai.recognition.scratch_ledger import reserve
+
+    monkeypatch.setenv('RECOGNITION_WORK_ROOT', str(tmp_path))
+    mib = 1024**2
+    config = SimpleNamespace(database=tmp_path/'faces', data={'execution': {'disk_total_bytes': 8*mib}})
+    first, second = tmp_path/'first', tmp_path/'second'
+    first.touch()
+    second.touch()
+    scanned, resume = Event(), Event()
+
+    def slow_trial():
+        with scope(config) as budget:
+            check = budget.check
+            def slow_check(*args, **kwargs):
+                volumes = check(*args, **kwargs)
+                if not scanned.is_set():
+                    scanned.set()
+                    assert resume.wait(10)
+                return volumes
+            budget.check = slow_check
+            with reserve_file(first, 8*mib) as granted:
+                return granted
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(slow_trial)
+        try:
+            assert scanned.wait(10)
+            # A different trial can reserve scratch and finish growing a file
+            # while the first is still measuring the volume.
+            reserve('other', mib, 8*mib)
+            with scope(config), reserve_file(second, 5*mib) as granted:
+                assert granted == 5*mib
+                second.write_bytes(b'x' * granted)
+            reserve('other', 0, 8*mib)
+        finally:
+            resume.set()
+        assert 2*mib < future.result() <= 3*mib

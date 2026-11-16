@@ -23,7 +23,6 @@ class Budget:
         self.checked=0.0
         self.lock=threading.RLock()
         self.reservations={}
-        self.ledger=None
         self.directories = {}
 
     def check(self, growth=0, path=None, *, throttled=False):
@@ -33,6 +32,13 @@ class Budget:
     def _check(self, growth=0, path=None, *, throttled=False):
         if throttled and time.monotonic()-self.checked<1:return self.volumes
         if not self.limit and not self.headroom:return {}
+        from .scratch_ledger import file_leases
+        reservations = dict(self.reservations)
+        with file_leases() as ledger:
+            if ledger is not None:
+                reservations.update((Path(name), (device, cap))
+                                    for name, device, cap in ledger.execute('SELECT path,device,cap FROM files'))
+        counted_sizes = {}
         parent=self.database.parent
         roots=[p for p in parent.glob(self.database.name+'*') if not p.is_symlink()]
         roots.extend(self.roots)
@@ -66,25 +72,21 @@ class Budget:
             elif stat.S_ISREG(info.st_mode):
                 row = volumes.setdefault(info.st_dev, dict(path=str(item.parent), used=0))
                 row['used'] += info.st_size
+                if item in reservations:
+                    counted_sizes[item] = info.st_size
         for directory in self.directories.keys() - visited:
             del self.directories[directory]
         target=Path(path or parent)
         while not target.exists():target=target.parent
         device=target.stat().st_dev
         volumes.setdefault(device,dict(path=str(target),used=0))
-        from contextlib import nullcontext
-        from .scratch_ledger import file_leases
-        reservations = dict(self.reservations)
-        with nullcontext(self.ledger) if self.ledger is not None else file_leases() as ledger:
-            if ledger is not None:
-                reservations.update((Path(path),(device,cap)) for path,device,cap in ledger.execute('SELECT * FROM files'))
         for dev,row in volumes.items():
             held = 0
             for path,(volume,cap) in reservations.items():
                 if volume == dev:
-                    try: size = path.stat().st_size
-                    except FileNotFoundError: size = 0
-                    held += max(0,cap-size)
+                    # A worker can grow this file during the scan. Subtract
+                    # only bytes already included in the measured volume.
+                    held += max(0, cap - counted_sizes.get(path, 0))
             requested=row['used']+held+(growth if dev==device else 0)
             free=shutil.disk_usage(row['path']).free
             row.update(free=free, requested=requested, reserved=held)
@@ -132,21 +134,33 @@ def reserve_file(path, maximum):
         return
     path=Path(path)
     from .scratch_ledger import file_leases
-    with budget.lock, file_leases(write=True) as ledger:
-        budget.ledger = ledger
-        try:
-            dev=path.stat().st_dev
-            volume=budget.check(path=path)[dev]
-            held=volume['requested']-volume['used']
-            existing=path.stat().st_size
-            cap=min(maximum,existing+volume['free']-budget.headroom-held)
-            if budget.limit:cap=min(cap,existing+budget.limit-volume['requested'])
-            cap=max(0,cap)
-            if ledger is not None:
-                ledger.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)',(str(path),dev,cap))
-            budget.reservations[path]=(dev,cap)
-        finally:
-            budget.ledger = None
+    with budget.lock:
+        info = path.stat()
+        dev, existing = info.st_dev, info.st_size
+        with file_leases() as ledger:
+            while True:
+                # A directory walk can outlast SQLite's busy timeout. Take the
+                # writer lock only to validate the measurement and publish.
+                version = ledger.execute('PRAGMA data_version').fetchone() if ledger is not None else None
+                try:
+                    volume = budget.check(path=path)[dev]
+                except ResourceLimit:
+                    if ledger is None or ledger.execute('PRAGMA data_version').fetchone() == version:
+                        raise
+                    continue
+                held = volume['reserved']
+                cap = min(maximum, existing + volume['free'] - budget.headroom - held)
+                if budget.limit:
+                    cap = min(cap, existing + budget.limit - volume['requested'])
+                cap = max(0, cap)
+                if ledger is None:
+                    break
+                ledger.execute('BEGIN IMMEDIATE')
+                if ledger.execute('PRAGMA data_version').fetchone() == version:
+                    ledger.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)', (str(path), dev, cap))
+                    break
+                ledger.rollback()
+        budget.reservations[path] = (dev, cap)
     try:yield cap
     finally:
         with budget.lock, file_leases(write=True) as ledger:
