@@ -294,3 +294,62 @@ def test_matrix_keeps_current_axes_and_formation_counts(tmp_path):
     assert 'independent votes' in text and 'Independent witnesses:' in text
     with pytest.raises(ValueError,match='changed'):
         formation(reader,scan['scope'],ids[1],[rows[0]['id']])
+
+
+def test_directional_view_trial_is_private_and_accounts_for_each_query(tmp_path):
+    from stash_ai.recognition.inspection_attachment import simulate
+    from stash_ai.recognition.inspection_runtime import stamp
+    reader,scan,ids=face_scene(tmp_path)
+    original=reader.config.database.read_bytes()
+    for pair in (ids,ids[::-1]):
+        result=simulate(reader.config,scan['scope'],pair,'view',stamp(reader.config.database))
+        assert sum(result['counts'].values())==len(result['rows'])==3
+        assert {r['source'] for r in result['rows']}=={pair[0]}
+    assert reader.config.database.read_bytes()==original
+
+
+def test_partial_replay_distinguishes_outsiders_and_unresolved_target():
+    from stash_ai.recognition.inspection_pair_replay import partial_state
+    item=dict(destinations={'A':['canonical'],'B':['b','canonical','other']},outsider_destinations=['other'])
+    states=[partial_state('B',v,('A','B'),item) for v in ('canonical','b','other',None)]
+    assert states==['joined target','separate destination','with another identity','unassigned']
+    assert partial_state('A','canonical',('A','B'),item)=='target unresolved'
+
+
+def test_hybrid_query_trial_uses_body_and_preserves_source(tmp_path):
+    from tests.test_recognition_hybrid_merge import prepared
+    from stash_ai.recognition.inspection_attachment import simulate
+    from stash_ai.recognition.inspection_runtime import stamp
+    from stash_ai.recognition.models import namespace
+    from stash_ai.recognition.scanning import scan_identity
+    config,ids=prepared(tmp_path)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('UPDATE scans SET policy_sha=?',(scan_identity(config,namespace(config)),))
+        state.connection.commit()
+    before=config.database.read_bytes()
+    result=simulate(config,'scope',ids,'hybrid',stamp(config.database))
+    assert result['counts']=={'target':3}
+    assert {r['signal'] for r in result['rows']}=={'face_and_body'}
+    assert config.database.read_bytes()==before
+
+
+def test_track_timeline_keeps_blocked_rival_distinct_from_a_face_root(tmp_path):
+    import json
+    from stash_ai.recognition.body_identity import policy
+    from stash_ai.recognition.body_observations import contract
+    from stash_ai.recognition.inspection_attachment import timeline
+    reader,scan,ids=face_scene(tmp_path)
+    with FaceDatabase(reader.config.database) as state:
+        db=state.connection
+        face=db.execute('SELECT observation FROM members WHERE person=? LIMIT 1',(ids[0],)).fetchone()[0]
+        for i,(key,link,proof) in enumerate([('one',face,{'reason':'measured_face_association'}),
+                ('two',None,{'open_face_root':{'owner':ids[0],'observation':'one'}}),
+                ('three',None,{'track_blocker':{'peer':'one','reason':'competing_owner'}})]):
+            db.execute('INSERT INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                (key,scan['id'],i,float(i),contract(reader.config),link,'{}','{}',None,None,None))
+            db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
+                (key,ids[0] if i==0 else None,'auxiliary','accepted' if i==0 else 'withheld',policy(reader.config),json.dumps(proof)))
+        db.commit()
+    rows=timeline(reader,scan,ids)
+    assert [r['id'] for r in rows if r['loss']]==['two']
+    assert rows[2]['blocked'] and rows[2]['refs']==['one']

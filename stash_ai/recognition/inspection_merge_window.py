@@ -14,6 +14,7 @@ class MergeWindow:
         self.host, self.reader, self.scan = host, host.reader, host.scan
         self.ids = [g['identity'] for g in groups]
         self.witness_window = self.changes_window = self.variants_window = None
+        self.fragment_window = None
         self.views_window = None
         self.matrix, self.hybrid = {}, {}
         self.protected = None
@@ -74,6 +75,8 @@ class MergeWindow:
         self.open_evidence.pack(side='left')
         self.views = ttk.Button(evidence,text='View / Hybrid evidence…',command=self.open_views)
         self.views.pack(side='left',padx=4)
+        self.fragments = ttk.Button(evidence,text='Attachment scenarios…',command=self.open_fragments)
+        self.fragments.pack(side='left')
         actions = ttk.Frame(self.window, padding=6)
         actions.pack(fill='x')
         self.copy = ttk.Button(actions, text='Copy YAML patch', command=self.copy_yaml)
@@ -97,6 +100,13 @@ class MergeWindow:
         if value and value.strip():
             self.reset()
             self.start('Finding current identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()), self.set_b)
+
+    def open_fragments(self):
+        from .inspection_fragment_window import FragmentWindow
+        if self.fragment_window:
+            self.fragment_window.window.lift()
+        else:
+            self.fragment_window = FragmentWindow(self)
 
     def open_views(self):
         from .inspection_views_window import ViewsWindow
@@ -160,6 +170,8 @@ class MergeWindow:
         self.witness_window = WitnessWindow(self, evidence)
 
     def reset(self, event=None):
+        if self.fragment_window:
+            self.fragment_window.close()
         if self.views_window:
             self.views_window.close()
         if self.witness_window:
@@ -240,6 +252,7 @@ class MergeWindow:
         self.detail.delete('1.0','end')
         self.detail.insert('1.0','\n'.join(lines))
         self.detail.configure(state='disabled')
+        self.fragments.state(['!disabled'] if self.revision else ['disabled'])
         self.views.state(['!disabled'] if self.revision else ['disabled'])
         self.batch.state(['!disabled'] if self.revision and any(p is not None for _,p in self.items.values()) and not self.busy else ['disabled'])
         self.changes.state(['!disabled'] if item in self.results else ['disabled'])
@@ -264,6 +277,8 @@ class MergeWindow:
 
     def poll(self):
         self.worker.poll()
+        if self.fragment_window:
+            self.fragment_window.worker.poll()
         if self.views_window:
             self.views_window.worker.poll()
         if self.variants_window:
@@ -274,6 +289,8 @@ class MergeWindow:
 
     def close(self):
         self.window.after_cancel(self.timer)
+        if self.fragment_window:
+            self.fragment_window.close()
         if self.views_window:
             self.views_window.close()
         if self.witness_window:

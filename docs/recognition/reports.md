@@ -582,3 +582,12 @@ counts independent witnesses in their coherent groups. This evaluates the
 selected subset under the loaded strict-view policy. Hybrid displays the two
 face crops and the two face-associated body projections separately. Missing
 crops or limiting witnesses are labelled explicitly.
+
+**Attachment scenarios…** tests A → B or B → A on a private snapshot. View
+queries counterfactually withhold the source faces and keep other reference
+owners as competitors. Hybrid query treats the source as a new birth and uses
+production claim resolution, including its complete-birth requirement.
+The body-track timeline shows entry-scene observations by cue, face roots,
+recorded breaks, orientation and linked blockers. Select a dot or open its row.
+After a full replay, **A residuals** and **B residuals** locate missing samples,
+separate destinations and assignments shared with an outside identity.
