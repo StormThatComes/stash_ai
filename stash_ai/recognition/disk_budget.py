@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+import errno
 import os
 import stat
 import shutil
@@ -11,6 +12,21 @@ import threading
 from .resource_errors import ResourceLimit
 
 _active = ContextVar('recognition_disk_budget',default=None)
+
+
+def _volume_space(path, device=None):
+    """A peer may remove its scratch tree between stat and disk_usage."""
+    while True:
+        try:
+            current = path.stat().st_dev
+            if device is not None and current != device:
+                raise OSError(errno.ENODEV, f'Recognition disk budget volume {device} is unavailable', str(path))
+            device = current
+            return device, dict(path=str(path), free=shutil.disk_usage(path).free)
+        except (FileNotFoundError, NotADirectoryError):
+            if path == path.parent:
+                raise
+            path = path.parent
 
 
 class Budget:
@@ -70,17 +86,18 @@ class Budget:
                     cached = self.directories[item] = stamp, children, time.monotonic()
                 pending.extend(cached[1])
             elif stat.S_ISREG(info.st_mode):
-                row = volumes.setdefault(info.st_dev, dict(path=str(item.parent), used=0))
+                row = volumes.setdefault(info.st_dev, dict(path=str(item), used=0))
                 row['used'] += info.st_size
                 if item in reservations:
                     counted_sizes[item] = info.st_size
         for directory in self.directories.keys() - visited:
             del self.directories[directory]
-        target=Path(path or parent)
-        while not target.exists():target=target.parent
-        device=target.stat().st_dev
-        volumes.setdefault(device,dict(path=str(target),used=0))
+        device, target_space = _volume_space(Path(path or parent))
+        volumes.setdefault(device, {'used': 0}).update(target_space)
         for dev,row in volumes.items():
+            if dev != device:
+                _, space = _volume_space(Path(row['path']), dev)
+                row.update(space)
             held = 0
             for path,(volume,cap) in reservations.items():
                 if volume == dev:
@@ -88,8 +105,9 @@ class Budget:
                     # only bytes already included in the measured volume.
                     held += max(0, cap - counted_sizes.get(path, 0))
             requested=row['used']+held+(growth if dev==device else 0)
-            free=shutil.disk_usage(row['path']).free
-            row.update(free=free, requested=requested, reserved=held)
+            target = row['path']
+            free = row['free']
+            row.update(requested=requested, reserved=held)
             if self.limit and requested>self.limit:
                 raise ResourceLimit(f'Recognition data, caches and scratch exceed the per-volume disk budget at {target}: {requested} bytes required, limit {self.limit}.',
                     budget='execution.rebuild.disk_total_bytes',limit=self.limit,requested=requested)
