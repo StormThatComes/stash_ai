@@ -188,3 +188,29 @@ def test_cross_scene_pair_resolves_by_performer_id_and_links_weakest_faces(tmp_p
     weakest = next(w for w in strict['witnesses'] if w['label'] == 'Weakest cross comparison')
     scenes = {locate(config, kind, addr, scan['scope'])['scene'] for kind, addr in weakest['refs']}
     assert scenes == {'1', '2'}
+
+
+def test_replay_keeps_protected_c_separate_and_observations_navigable(tmp_path):
+    from stash_ai.recognition.inspection_pair_replay import experiment
+    config, ids = seeded(tmp_path, [[1,0,0,0],[.7,math.sqrt(.51),0,0],[0,0,1,0]])
+    reader = SceneReader(config,'1')
+    scan = reader.catalogue()['scan']
+    report = analyse(reader, scan, ids[:2])
+    patch = report['routes'][0]['patches'][0]
+    result = experiment(config,scan['scope'],ids,{'option':patch},report['revision'])
+    trial = result['trials']['option']
+    assert trial['protected'] and trial['counts'][ids[2]] == 3
+    assert len(result['rows']) == 9
+    assert all(row['kind']=='face' for row in result['rows'].values())
+    assert all('role' in item for item in trial['decisions'].values())
+    assert set(trial['owners']) == set(result['trials']['baseline']['owners'])
+
+
+def test_protection_rejects_withheld_split_or_absorbed_c():
+    from stash_ai.recognition.inspection_pair_replay import outcome
+    retained = dict(a='A', b='B', c='C', d='C', e='D')
+    rows = {k:dict(source=v) for k,v in retained.items() if v != 'D'}
+    for c, d in ((None,'third'), ('third','fourth'), ('joined','joined')):
+        result = outcome(('A','B','C'),rows,retained,dict(a='joined',b='joined',c=c,d=d,e='joined'))
+        assert result['joined'] and not result['success'] and not result['protected']
+        assert 'D' in result['outsiders']

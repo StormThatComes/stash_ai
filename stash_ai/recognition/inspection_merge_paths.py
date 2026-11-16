@@ -344,30 +344,6 @@ def analyse(reader, scan, ids):
 
 
 def verify(config, scope, ids, patch, revision):
-    """Replay a single proposed YAML variant and retain just the pair outcome."""
-    from .report_snapshot import snapshot
-    from .replay_simulation import merge_impact
-    result = dict(scope=scope, identity_ids=list(ids), recommendations=[dict(changes=patch['changes'])])
-    if stamp(config.database) != revision:
-        raise ValueError('The database changed. Refresh the scene and analyse the pair again before replay.')
-    with _cancellable(), snapshot(config, ids[0], scope=scope, other_identifiers=ids[1:]) as db:
-        check_cancelled()
-        if stamp(config.database) != revision:
-            raise ValueError('The database changed while preparing the replay. Refresh and analyse again.')
-        replay = merge_impact(config, result, db)
-    if not replay['trials']:
-        raise ValueError('No compatible scenes were available for replay.')
-    item = (result['recommendations'] or result['rejected_recommendations'])[0]
-    trial = replay['trials'][item['simulation_trial']]['requested_pair']
-    lines = ['Replay on retained scans: '+('both identities fully joined.' if trial['fully_merged'] else 'pair did not fully join.'),
-             'The replay tests the final assignments across all enabled routes.']
-    if item['simulation_trial'] != 'baseline':
-        baseline = replay['trials']['baseline']['requested_pair']
-        lines.append('Current YAML baseline: ' + ('pair fully joined.' if baseline['fully_merged'] else 'pair did not fully join.'))
-    outsiders = trial['additional_identity_ids']
-    if outsiders:
-        lines.append(f"Also sharing destinations with this pair ({len(outsiders)}): " + ', '.join(outsiders[:8]))
-    for member in trial['members']:
-        lines.append(f"{member['identity']}: {member['observations']} selected observations, {member['withheld']} unassigned, "
-                     f"{member['outside_latest_selection']} outside the selection, {len(member['resulting_identities'])} destinations.")
-    return '\n'.join(lines)
+    from .inspection_pair_replay import describe, experiment
+    result = experiment(config, scope, ids, {'option': patch}, revision)
+    return describe(result, 'option')
