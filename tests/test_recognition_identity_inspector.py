@@ -1232,6 +1232,12 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         lab.explain()
         wait_for(lambda: 'independent votes' in lab.notes.get('1.0','end'))
         lab.close()
+        pair.fragments.invoke()
+        scenarios = pair.fragment_window
+        scenarios.run.invoke()
+        wait_for(lambda: bool(scenarios.data))
+        assert len(scenarios.data)==3 and 'first query' in scenarios.status.cget('text')
+        scenarios.close()
         pair.copy.invoke()
         assert root.clipboard_get() == pair.items[item][1]['yaml']
         pair.replay.invoke()

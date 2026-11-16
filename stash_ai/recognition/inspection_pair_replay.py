@@ -102,9 +102,27 @@ def outcome(ids, rows, retained, predicted):
     if len(ids) == 3:
         c = ids[2]
         protected = bool(counts[c] and not lost[c] and len(dest[c]) == 1 and dest[c].isdisjoint(pair))
-    outsiders = {src for key, src in retained.items() if src is not None and src not in ids[:2] and predicted[key] in pair}
+    by_destination = defaultdict(set)
+    for key, src in retained.items():
+        if src is not None and src not in ids[:2] and predicted[key] in pair:
+            by_destination[predicted[key]].add(src)
+    outsiders = {p for people in by_destination.values() for p in people}
     return dict(joined=bool(joined), protected=protected, success=bool(joined and protected is not False),
-                counts=counts, lost=lost, outsiders=sorted(outsiders), destinations={p:sorted(v) for p,v in dest.items()})
+                outsider_destinations=sorted(by_destination), counts=counts, lost=lost, outsiders=sorted(outsiders), destinations={p:sorted(v) for p,v in dest.items()})
+
+
+def partial_state(source, owner, ids, outcome):
+    target=ids[1] if source==ids[0] else ids[0]
+    targets=outcome['destinations'][target]
+    if owner is None:
+        return 'unassigned'
+    if len(targets)!=1:
+        return 'target unresolved'
+    if owner==targets[0]:
+        return 'joined target'
+    if owner in outcome['outsider_destinations']:
+        return 'with another identity'
+    return 'separate destination'
 
 
 def attribution(ids, rows, before, after, result):
@@ -190,6 +208,12 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
             trial = dict(**item['pair'], owners=item['owners'], decisions=records, elapsed=item['elapsed_seconds'],
                          unassigned=impact['common_observations']-impact['assigned'], coverage_lost=impact['coverage_lost'],
                          attribution=explanation, evidence_id=evidence)
+            from collections import Counter
+            trial['partial'] = {p:Counter() for p in ids[:2]}
+            for key, row in rows.items():
+                if row['source'] in trial['partial']:
+                    state = partial_state(row['source'],trial['owners'][key],ids,trial)
+                    trial['partial'][row['source']][state] += 1
             if refinement:
                 values = {} if name=='baseline' else patch_values(patches[name]) if name in patches else refinement.pending
                 refinement.record(name, values, trial)
@@ -233,6 +257,9 @@ def describe(result, name):
         outside = result['totals'][person] - item['counts'][person]
         lines.append(f"{label} · {person}: {item['counts'][person]} observations, {item['lost'][person]} unassigned, "
                      f"{outside} outside the current selection.")
+    if not item['joined']:
+        for label,person in zip('AB',result['ids']):
+            lines.append(label+' → other side: '+', '.join(f'{count} {state}' for state,count in item['partial'][person].items()))
     if item['outsiders']:
         lines.append('Additional identities sharing a destination: ' + ', '.join(item['outsiders']))
     return '\n'.join(lines)

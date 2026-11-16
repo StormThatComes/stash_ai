@@ -2,10 +2,10 @@
 import tkinter as tk
 from tkinter import ttk
 
-from .inspection_pair_replay import describe
+from .inspection_pair_replay import describe, partial_state
 
 
-FILTERS = ('Changed', 'Owner changed', 'A → B', 'B → A', 'Anchor → auxiliary', 'Unassigned', 'Protected C', 'All')
+FILTERS = ('Changed', 'Owner changed', 'A → B', 'B → A', 'Anchor → auxiliary', 'Unassigned', 'Protected C', 'A residuals', 'B residuals', 'All')
 
 
 def matches(mode, row, ids, before, after, old_role, new_role):
@@ -67,7 +67,13 @@ class ChangesWindow:
         result = self.result
         before, after = result['trials']['baseline'], result['trials'][self.name]
         for key,row in result['rows'].items():
-            if matches(self.mode.get(), row, result['ids'], before['owners'][key], after['owners'][key],
+            mode=self.mode.get()
+            if mode in ('A residuals','B residuals'):
+                src=result['ids'][int(mode=='B residuals')]
+                if row['source']==src and partial_state(src,after['owners'][key],result['ids'],after)!='joined target':
+                    self.keys.append(key)
+                continue
+            if matches(mode, row, result['ids'], before['owners'][key], after['owners'][key],
                        before['decisions'].get(key,{}).get('role'), after['decisions'].get(key,{}).get('role')):
                 self.keys.append(key)
         self.keys.sort(key=lambda k:(int(result['rows'][k]['scene']),result['rows'][k]['cue'],k))
