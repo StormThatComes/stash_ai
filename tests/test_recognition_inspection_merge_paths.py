@@ -279,3 +279,18 @@ def test_attribution_links_only_recorded_pair_evidence():
     assert 'Post-formation consolidation' in msg and key == 'y'
     _, key = attribution(ids,rows,initial,dict(x=seed,y=dict(matched,reference_sources=['c'])),result)
     assert key is None
+
+
+def test_matrix_keeps_current_axes_and_formation_counts(tmp_path):
+    from stash_ai.recognition.inspection_view_evidence import face_rows, formation
+    reader,scan,ids=face_scene(tmp_path)
+    matrix=analyse(reader,scan,ids)['matrix']
+    assert len(matrix['axes'])==2
+    for a in matrix['axes'][0]:
+        for b in matrix['axes'][1]:
+            assert any(p['medoids']==[a['id'],b['id']] for p in matrix['pairs'])
+    rows=face_rows(reader,scan['scope'],ids[0])
+    text=formation(reader,scan['scope'],ids[0],[r['id'] for r in rows])
+    assert 'independent votes' in text and 'Independent witnesses:' in text
+    with pytest.raises(ValueError,match='changed'):
+        formation(reader,scan['scope'],ids[1],[rows[0]['id']])

@@ -91,12 +91,17 @@ def _planner_config(config, route):
     return replace(config, data=data)
 
 
-def check(db, views, config, identities, route):
+def check(db, views, config, identities, route, *, matrix=None):
     owned = {person: [v for v in views if v.group.identifier == person] for person in identities}
     effective = _planner_config(config, route)
     evidence = [cohort_evidence(db, a, b, effective)
                 for a in owned[identities[0]] for b in owned[identities[1]]]
     evidence.sort(key=lambda row: (len(row['blockers']), -row['match_score'], row['medoids']))
+    if matrix is not None:
+        matrix['axes'] = [[dict(id=v.medoid, pose=v.pose, support=v.support_count, witnesses=list(v.support))
+                            for v in owned[person]] for person in identities]
+        matrix['pairs'] = evidence
+        matrix['tested'] = []
     plans = consolidation_plan(db, views, effective, focus=identities)
     shared = next((p for p in plans if set(identities).issubset(p['people'])), None)
     blockers = []
@@ -149,9 +154,9 @@ def _thresholds(config, proof, route, isolate):
     return changes
 
 
-def analyse(db, config, identities, route, make_views):
+def analyse(db, config, identities, route, make_views, *, matrix=None):
     """Rebuild changed view catalogues; never reuse cohorts after changing their gates."""
-    current = check(db, make_views(config), config, identities, route)
+    current = check(db, make_views(config), config, identities, route, matrix=matrix)
     result = dict(route=route, current=current, attempts=[], recommendations=[])
     if current['can_merge_in_frozen_catalogue']:
         result['recommendations'].append(dict(proposal(config, {}), verification=current))
@@ -177,6 +182,8 @@ def analyse(db, config, identities, route, make_views):
             changes.update(base_changes)
             candidate = patched(config, changes)
             verification = check(db, make_views(candidate), candidate, identities, route)
+            if matrix is not None and list(proof['medoids']) not in matrix['tested']:
+                matrix['tested'].append(list(proof['medoids']))
             shared = verification['shared_component']
             if shared and shared['blocker'] == 'competing_view':
                 gap = shared['nearest_rival']['gap']

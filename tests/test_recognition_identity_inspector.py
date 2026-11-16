@@ -1197,12 +1197,19 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
     reader, _, _ = face_scene(tmp_path)
     ui = SceneInspector(root, reader, 'Compare scene performers')
 
-    def wait_for(condition):
-        deadline = time.monotonic() + 10
+    def wait_for(condition, *, replay_status=None):
+        # A production replay rebuilds SQLite state for every selected variant.
+        # Keep ordinary Tk interactions on their short deadline.
+        timeout = 180 if replay_status is not None else 10
+        deadline = time.monotonic() + timeout
         while not condition() and time.monotonic() < deadline:
             root.update()
             time.sleep(.01)
-        assert condition()
+        assert condition(), (f'Replay timed out after {timeout}s: {replay_status.cget("text")}'
+                             if replay_status is not None else 'Timed out waiting for the inspector')
+
+    def wait_for_replay(window):
+        wait_for(lambda: not window.busy, replay_status=window.status)
 
     try:
         wait_for(lambda: len(ui.merge_groups) == 2)
@@ -1223,10 +1230,20 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         root.update()
         assert pair.copy.instate(['!disabled'])
         assert pair.items[item][1]['yaml'].strip() in pair.detail.get('1.0','end')
+        pair.views.invoke()
+        lab = pair.views_window
+        lab.tabs.select(1)
+        root.update()
+        wait_for(lambda: bool(lab.rows))
+        lab.list.selection_set(0,'end')
+        lab.explain()
+        wait_for(lambda: 'independent votes' in lab.notes.get('1.0','end'))
+        lab.close()
         pair.copy.invoke()
         assert root.clipboard_get() == pair.items[item][1]['yaml']
         pair.replay.invoke()
-        wait_for(lambda: item in pair.replays)
+        wait_for_replay(pair)
+        assert item in pair.replays, pair.status.cget('text')
         assert 'unassigned' in pair.detail.get('1.0','end')
         pair.changes.invoke()
         changes = pair.changes_window
@@ -1247,16 +1264,19 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         wait_for(lambda: variants.plan is not None)
         variants.choices.selection_set(0,'end')
         variants.run.invoke()
-        wait_for(lambda: variants.result is not None)
+        wait_for_replay(variants)
+        assert variants.result is not None, variants.status.cget('text')
         best = next(key for key, value in variants.result['trials'].items() if value['success'] and key != 'baseline')
         variants.table.selection_set(best)
         root.update()
         variants.budget.set('2')
         variants.minimize.invoke()
-        wait_for(lambda: variants.result and 'minimized' in variants.result)
+        wait_for_replay(variants)
+        assert variants.result and 'minimized' in variants.result, variants.status.cget('text')
         assert 'minimized' in variants.table.get_children()
         variants.validate.invoke()
-        wait_for(lambda: variants.full.get() and variants.result and 'option' in variants.result['trials'])
+        wait_for_replay(variants)
+        assert variants.full.get() and variants.result and 'option' in variants.result['trials'], variants.status.cget('text')
         assert variants.result['trials']['option']['success']
         ui.search()
         assert ui.merge_window is None

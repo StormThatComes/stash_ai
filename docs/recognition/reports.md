@@ -574,3 +574,11 @@ distance to the nearest failed boundary. Gate counts overlap; alternative anchor
 and auxiliary paths remain separate. Historical versus current thresholds are
 labeled. Double-click a state to open its filtered observations. Both aggregate
 views run only when requested and read neither images nor embedding columns.
+
+**View / Hybrid evidence…** opens the measured appearance matrix. Select a cell
+to inspect its lowest retained comparison. The rival belongs to the frozen
+component. The formation tab accepts several faces from one performer and
+counts independent witnesses in their coherent groups. This evaluates the
+selected subset under the loaded strict-view policy. Hybrid displays the two
+face crops and the two face-associated body projections separately. Missing
+crops or limiting witnesses are labelled explicitly.
