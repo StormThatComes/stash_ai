@@ -14,6 +14,7 @@ from .inspection_runtime import check_cancelled, stamp
 from .merge_report_policy import patched
 from .models import namespace
 from .report_snapshot import snapshot
+from .reference_roles import observation_sql
 
 
 def sources(db, config, scope, ids):
@@ -45,6 +46,12 @@ def decisions(db, settings, rows, scope):
         if row['kind'] == 'face':
             owner = db.execute('SELECT person FROM members WHERE observation=?', (key,)).fetchone()
             if not owner:
+                item = db.execute("SELECT status,json_extract(payload,'$.reason') AS reason FROM candidates c "
+                                  f"WHERE {observation_sql('c')}=? AND policy=? ORDER BY rowid DESC LIMIT 1",
+                                  (key,policy)).fetchone()
+                if item:
+                    result[key] = dict(role='unassigned', route=item['reason'] or item['status'], stage='',
+                                       links=[], reference_sources=[])
                 continue
             people, edges = family(owner[0])
             history = _decisions(db, dict(id=owner[0]), people, policy, observation=key).get(key, [])
@@ -53,14 +60,19 @@ def decisions(db, settings, rows, scope):
             record = assignment_explanation.face(current, assignment, edges, owner[0])
         else:
             item = db.execute("SELECT m.*,b.face FROM body_members m JOIN body_observations b ON b.id=m.observation "
-                              "WHERE observation=? AND m.status='accepted'", (key,)).fetchone()
+                              "WHERE observation=?", (key,)).fetchone()
             if not item:
                 continue
             from .body_identity import policy as body_policy
             if item['policy'] != body_policy(settings):
                 continue
+            proof = json.loads(item['proof'])
+            if item['status'] != 'accepted':
+                result[key] = dict(role='unassigned', route=proof.get('reason') or item['status'], stage='',
+                                   links=[], reference_sources=[])
+                continue
             _, edges = family(item['person'])
-            record = assignment_explanation.body(json.loads(item['proof']), linked_face=item['face'], role=item['role'],
+            record = assignment_explanation.body(proof, linked_face=item['face'], role=item['role'],
                 status=item['status'], policy=item['policy'], current=True, merges=edges, target=item['person'])
         proofs = record['decisions']
         routes = sorted({p['reason'] for p in proofs if p.get('reason')})
@@ -97,7 +109,7 @@ def outcome(ids, rows, retained, predicted):
 
 def attribution(ids, rows, before, after, result):
     if not result['joined']:
-        return 'The pair did not fully join.'
+        return 'The pair did not fully join.', None
     for key, decision in after.items():
         row = rows[key]
         if row['source'] not in ids[:2]:
@@ -105,18 +117,22 @@ def attribution(ids, rows, before, after, result):
         for src, target, route in decision['links']:
             if {src, target} == set(ids[:2]):
                 return (f"Post-formation consolidation · {route or 'recorded identity merge'} · "
-                        f"supporting observation in scene {row['scene']}, cue {row['cue']}.")
+                        f"supporting observation in scene {row['scene']}, cue {row['cue']}."), key
     for source, target in (ids[:2], ids[:2][::-1]):
         keys = [key for key,r in rows.items() if r['source']==source]
         seeds = [k for k in keys if before.get(k, {}).get('stage')=='seed'
                  or before.get(k, {}).get('route')=='body_scene_core']
-        if seeds and all(k in after and after[k]['role'] in ('auxiliary','attachment') and not after[k]['links'] for k in keys):
+        def attached(k):
+            decision = after.get(k, {})
+            return not decision.get('links') and (decision.get('role') in ('auxiliary','attachment') or
+                decision.get('route') == 'candidate_group' and decision.get('stage') == 'match')
+        if seeds and all(attached(k) for k in keys):
             example = next((k for k in seeds if target in after[k]['reference_sources']), None)
             if example:
                 row = rows[example]
                 return (f"Separate core avoided · {after[example]['route']} · former seed/core in scene "
-                        f"{row['scene']}, cue {row['cue']} attached to the other identity's recorded evidence.")
-    return 'Final join verified. The retained decisions do not establish a decisive pair route or cue.'
+                        f"{row['scene']}, cue {row['cue']} attached to the other identity's recorded evidence."), example
+    return 'Final join verified. The retained decisions do not establish a decisive pair route or cue.', None
 
 
 def _fresh(config, revision):
@@ -124,16 +140,30 @@ def _fresh(config, revision):
         raise ValueError('The database changed. Refresh the scene and analyse the pair again before replay.')
 
 
-def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=None):
+def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=None, refine_budget=None):
     from .inspection_merge_paths import _cancellable
     from .replay_simulation import replay
+    from .inspection_pair_variants import patch_values, Refinement
+    from .merge_report_policy import proposal
     if len(ids) not in (2,3) or len(set(ids)) != len(ids):
         raise ValueError('Select distinct identities for A, B and optional C.')
     _fresh(config, revision)
-    variants = {}
+    from .config import digest
+    names = {digest({}): 'baseline'}
+    aliases, variants = {}, {}
+    refinement = Refinement(config, patches['option'], refine_budget) if refine_budget is not None else None
     for name, patch in patches.items():
-        changes = {c['parameter']:c['proposed'] for c in patch['changes']}
-        variants[name] = patched(config, changes)
+        if name == 'baseline':
+            raise ValueError('The baseline name is reserved.')
+        changes = patch_values(patch)
+        signature = digest(changes)
+        if signature not in names:
+            variants[name] = patched(config, changes)
+            names[signature] = name
+        aliases[name] = names[signature]
+    if refinement and aliases['option'] == 'baseline':
+        raise ValueError('The selected option already uses the current YAML.')
+    trials = {}
     with _cancellable(), snapshot(config, ids[0], scope=scope, other_identifiers=ids[1:]) as db:
         _fresh(config, revision)
         rows = sources(db, config, scope, ids)
@@ -152,20 +182,43 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
             raise ValueError('A selected identity has no current observations in this selection.')
         def consume(name, observations, retained, predicted):
             return dict(pair=outcome(ids, rows, retained, predicted), owners={k:predicted.get(k) for k in rows})
+        def collect(name, settings, item, inputs):
+            records = item['decision_evidence']
+            baseline = trials['baseline']['decisions'] if name != 'baseline' else records
+            impact = item['versus_baseline']
+            explanation, evidence = attribution(ids,rows,baseline,records,item['pair'])
+            trial = dict(**item['pair'], owners=item['owners'], decisions=records, elapsed=item['elapsed_seconds'],
+                         unassigned=impact['common_observations']-impact['assigned'], coverage_lost=impact['coverage_lost'],
+                         attribution=explanation, evidence_id=evidence)
+            if refinement:
+                values = {} if name=='baseline' else patch_values(patches[name]) if name in patches else refinement.pending
+                refinement.record(name, values, trial)
+                # Keep details for the incumbent and latest probe until the generator makes its decision.
+                for old in list(trials):
+                    if old.startswith('probe-') and old != refinement.best:
+                        # A previously successful patch may become relevant again after ablation.
+                        # Re-run it if its full observation result is no longer available.
+                        if trials[old]['success']:
+                            refinement.forget(old)
+                        del trials[old]
+            trials[name] = trial
+            # The serial inspector retains only its projection, independently of corpus size.
+            for bulky in ('decision_evidence','owners','independent_person','hybrid'):
+                item.pop(bulky, None)
+
         replayed = replay(config, variants, source=db, scope=scope, scenes=scenes, progress=progress, consume=consume,
-                          inspect_trial=lambda trial, settings: decisions(trial, settings, rows, scope))
+                          inspect_trial=lambda trial, settings: decisions(trial, settings, rows, scope),
+                          record_trial=collect, followup_variants=refinement.variants if refinement else None)
         _fresh(config, revision)
-    if not replayed['trials']:
+    if not trials:
         raise ValueError('No compatible scans were available.')
-    trials = {}
-    for name, item in replayed['trials'].items():
-        records = item['decision_evidence']
-        baseline = replayed['trials']['baseline']['decision_evidence']
-        pair = item['pair']
-        trials[name] = dict(**pair, owners=item['owners'], decisions=records, elapsed=item['elapsed_seconds'],
-                            unassigned=item['versus_baseline']['common_observations']-item['versus_baseline']['assigned'],
-                            attribution=attribution(ids, rows, baseline, records, pair))
-    return dict(ids=ids, rows=rows, trials=trials, scenes=replayed['selection'], totals=dict(totals))
+    result = dict(ids=ids, rows=rows, scenes=replayed['selection'], totals=dict(totals),
+                  trials={'baseline':trials['baseline'], **{name:trials[actual] for name,actual in aliases.items()}})
+    if refinement:
+        result.update(minimized=proposal(config,refinement.values), probe_count=refinement.count,
+                      budget_reached=not refinement.finished)
+        result['trials']['minimized'] = trials[refinement.best]
+    return result
 
 
 def describe(result, name):

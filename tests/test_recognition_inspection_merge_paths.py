@@ -214,3 +214,68 @@ def test_protection_rejects_withheld_split_or_absorbed_c():
         result = outcome(('A','B','C'),rows,retained,dict(a='joined',b='joined',c=c,d=d,e='joined'))
         assert result['joined'] and not result['success'] and not result['protected']
         assert 'D' in result['outsiders']
+
+
+def test_quick_preflight_includes_protected_scenes_and_full_counts_outside(tmp_path):
+    from stash_ai.recognition.inspection_pair_variants import preflight
+    from stash_ai.recognition.inspection_runtime import stamp
+    config, ids = seeded(tmp_path,[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+    revision = stamp(config.database)
+    quick = preflight(config,'scope',ids[:3],'1',False,revision)
+    full = preflight(config,'scope',ids[:3],'1',True,revision)
+    assert (quick['scenes'], quick['faces']) == (['1','2','3'],9)
+    assert (full['scenes'], full['faces']) == (['1','2','3','4'],12)
+    from stash_ai.recognition.inspection_pair_replay import experiment
+    with pytest.raises(ValueError,match='every current scene'):
+        experiment(config,'scope',ids[:3],{},revision,scenes=['1','2'])
+
+
+def test_variants_share_baseline_and_minimized_yaml_reproduces_goal(tmp_path):
+    from stash_ai.recognition.inspection_pair_replay import experiment
+    from stash_ai.recognition.merge_report_policy import proposal
+    from stash_ai.recognition.inspection_pair_variants import patch_values
+    reader, scan, ids = face_scene(tmp_path)
+    config = reader.config
+    report = analyse(reader,scan,ids)
+    patch = patch_values(report['routes'][0]['patches'][0])
+    # An auxiliary-only gate cannot improve this fixture's strict anchor join.
+    patch['clustering.auxiliary_min_support'] = 7
+    option = proposal(config,patch)
+    starts = []
+    def observe(name, stage, item):
+        if stage == 'start':
+            starts.append(name)
+    observe.telemetry_enabled = False
+    result = experiment(config,'scope',ids,dict(option=option, duplicate=option, unchanged=proposal(config,{})),
+                        report['revision'],progress=observe,refine_budget=12)
+    assert starts.count('baseline') == 1 and 'duplicate' not in starts and 'unchanged' not in starts
+    assert result['trials']['option'] is result['trials']['duplicate']
+    assert result['probe_count'] <= 12 and result['trials']['minimized']['success']
+    assert 'clustering.auxiliary_min_support' not in patch_values(result['minimized'])
+    confirmed = experiment(config,'scope',ids,{'recheck':result['minimized']},report['revision'])
+    assert confirmed['trials']['recheck']['success']
+    assert confirmed['trials']['recheck']['owners'] == result['trials']['minimized']['owners']
+
+
+def test_refinement_preserves_outsiders_and_coverage():
+    from stash_ai.recognition.inspection_pair_variants import admissible
+    initial = dict(success=True, outsiders=['D'],unassigned=2,coverage_lost=1)
+    assert admissible(dict(initial,outsiders=[]), initial)
+    for changed in (dict(success=False),dict(outsiders=['E']),dict(unassigned=3),dict(coverage_lost=2)):
+        assert not admissible(dict(initial,**changed),initial)
+
+
+def test_attribution_links_only_recorded_pair_evidence():
+    from stash_ai.recognition.inspection_pair_replay import attribution
+    ids = ('a','b')
+    rows = {'x':dict(source='a',scene='2',cue=4),'y':dict(source='b',scene='5',cue=3)}
+    seed = dict(route='candidate_group', stage='seed', role='anchor', links=[], reference_sources=[])
+    matched = dict(seed, stage='match',reference_sources=['a'])
+    result = dict(joined=True)
+    initial = {'x':seed, 'y':seed}
+    msg, key = attribution(ids,rows,initial,dict(x=seed,y=matched),result)
+    assert 'Separate core avoided' in msg and key == 'y'
+    msg, key = attribution(ids,rows,initial,dict(x=seed,y=dict(matched,links=[('b','a','body_global')])),result)
+    assert 'Post-formation consolidation' in msg and key == 'y'
+    _, key = attribution(ids,rows,initial,dict(x=seed,y=dict(matched,reference_sources=['c'])),result)
+    assert key is None

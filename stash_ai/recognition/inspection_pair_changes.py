@@ -44,6 +44,9 @@ class ChangesWindow:
         self.next = ttk.Button(bar, text='Next', command=lambda:self.show(self.page+1))
         for button in (self.previous,self.next):
             button.pack(side='left')
+        evidence = result['trials'][name].get('evidence_id')
+        if evidence:
+            ttk.Button(bar,text='Inspect route evidence',command=lambda:self.open_key(evidence)).pack(side='left')
         self.count = ttk.Label(bar)
         self.count.pack(side='left')
         columns = ('cue', 'source', 'old', 'new', 'role', 'route')
@@ -92,8 +95,11 @@ class ChangesWindow:
     def open(self, event=None):
         selection = self.tree.selection()
         if selection:
-            row = self.result['rows'][selection[0]]
-            self.comparison.view(dict(label=f"Replay observation · {row['id']}",refs=[(row['kind'],row['id'])]))
+            self.open_key(selection[0])
+
+    def open_key(self, key):
+        row = self.result['rows'][key]
+        self.comparison.view(dict(label=f"Replay observation · {row['id']}",refs=[(row['kind'],row['id'])]))
 
     def close(self):
         self.window.destroy()
