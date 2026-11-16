@@ -1,7 +1,7 @@
 """On-demand comparison of two identities from the scene catalogue."""
 from functools import partial
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 from tkinter.scrolledtext import ScrolledText
 
 from .inspection_merge_paths import analyse, verify
@@ -12,7 +12,8 @@ class MergeWindow:
     def __init__(self, host, groups):
         self.host, self.reader, self.scan = host, host.reader, host.scan
         self.ids = [g['identity'] for g in groups]
-        labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
+        self.witness_window = None
+        self.labels = [(f"Performer {g['performer']}" if g['performer'] else 'Unpublished identity') + ' · ' + g['identity']
                   for g in groups]
         self.window = tk.Toplevel(host.root)
         self.window.title('Identity merge paths · Scene '+self.scan['scene'])
@@ -26,11 +27,13 @@ class MergeWindow:
         bar.pack(fill='x')
         for index, label in enumerate(('Identity A','Identity B')):
             ttk.Label(bar, text=label).grid(row=index,column=0,sticky='w')
-            combo = ttk.Combobox(bar, values=labels, state='readonly', width=54)
+            combo = ttk.Combobox(bar, values=self.labels, state='readonly', width=54)
             combo.grid(row=index,column=1,sticky='ew')
-            combo.current(index)
+            if index < len(groups):
+                combo.current(index)
             combo.bind('<<ComboboxSelected>>', self.reset)
             self.selectors.append(combo)
+        ttk.Button(bar, text='Find B by ID…', command=self.find_b).grid(row=1,column=3)
         bar.columnconfigure(1, weight=1)
         self.run = ttk.Button(bar, text='Analyse paths', command=self.load)
         self.run.grid(row=0,column=2,padx=5)
@@ -54,6 +57,12 @@ class MergeWindow:
         self.tree.bind('<<TreeviewSelect>>', self.select)
         self.detail = ScrolledText(split, width=48, wrap='word', state='disabled', padx=8, pady=8)
         split.add(self.detail, weight=1)
+        evidence = ttk.Frame(self.window, padding=4)
+        evidence.pack(fill='x')
+        self.witnesses = ttk.Combobox(evidence, state='readonly', width=45)
+        self.witnesses.pack(side='left')
+        self.open_evidence = ttk.Button(evidence, text='Inspect evidence', command=self.open_witness)
+        self.open_evidence.pack(side='left')
         actions = ttk.Frame(self.window, padding=6)
         actions.pack(fill='x')
         self.copy = ttk.Button(actions, text='Copy YAML patch', command=self.copy_yaml)
@@ -65,9 +74,38 @@ class MergeWindow:
         self.timer = self.window.after(50, self.poll)
 
     def pair(self):
-        return tuple(self.ids[combo.current()] for combo in self.selectors)
+        return tuple(self.ids[c.current()] for c in self.selectors if c.current() >= 0)
+
+    def find_b(self):
+        from .inspection_pair_evidence import find_identity
+        value = simpledialog.askstring('Find identity B', 'Stash performer ID or identity UUID in this scope:', parent=self.window)
+        if value and value.strip():
+            self.reset()
+            self.start('Finding current identity…', partial(find_identity, self.reader, self.scan['scope'], value.strip()), self.set_b)
+
+    def set_b(self, group):
+        address = group['identity']
+        if address not in self.ids:
+            self.ids.append(address)
+            self.labels.append((f"Performer {group['performer']}" if group['performer'] else 'Unpublished identity') + ' · ' + address)
+            self.selectors[1].configure(values=self.labels)
+        self.selectors[1].current(self.ids.index(address))
+        self.reset()
+
+    def open_witness(self):
+        index = self.witnesses.current()
+        if index >= 0:
+            self.view(self.refs[index])
+
+    def view(self, evidence):
+        from .inspection_witness_window import WitnessWindow
+        if self.witness_window:
+            self.witness_window.close()
+        self.witness_window = WitnessWindow(self, evidence)
 
     def reset(self, event=None):
+        if self.witness_window:
+            self.witness_window.close()
         self.worker.invalidate()
         self.items.clear()
         self.replays.clear()
@@ -114,6 +152,16 @@ class MergeWindow:
         item = selected[0] if selected else None
         route, patch = self.items.get(item, (None,None))
         lines = [route['title'], route['status'], '', *route['notes']] if route else []
+        self.refs = (patch or {}).get('witnesses', []) + (route or {}).get('witnesses', [])
+        self.witnesses.configure(values=[ref['label'] for ref in self.refs])
+        self.witnesses.set('')
+        if self.refs:
+            self.witnesses.current(0)
+        self.open_evidence.state(['!disabled'] if self.refs else ['disabled'])
+        if route:
+            lines.extend(('', 'First blocker: ' + (route.get('first_blocker') or 'none recorded')))
+            for step in route.get('steps', ()):
+                lines.append(f"{step['status']} · {step['label']}  {step['detail']}")
         if patch is not None:
             lines.extend(('', patch['title'], *patch.get('evidence', ()), *patch.get('notes', ())))
             for change in patch['changes']:
@@ -147,10 +195,14 @@ class MergeWindow:
 
     def poll(self):
         self.worker.poll()
+        if self.witness_window:
+            self.witness_window.worker.poll()
         self.timer = self.window.after(50, self.poll)
 
     def close(self):
         self.window.after_cancel(self.timer)
+        if self.witness_window:
+            self.witness_window.close()
         self.worker.close()
         self.window.destroy()
         self.host.visual_windows.remove(self)

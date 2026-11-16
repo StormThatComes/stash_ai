@@ -29,6 +29,7 @@ class SceneInspector(Inspector):
         ttk.Button(bar,text='Back',command=lambda:self.navigate(-1)).pack(side='left')
         ttk.Button(bar,text='Forward',command=lambda:self.navigate(1)).pack(side='left')
         self.merge_window = None
+        self.merge_owner_items = {}
         self.merge_groups = []
         self.merge_button = ttk.Button(bar, text='Compare performers', command=self.compare_performers, state='disabled')
         self.merge_button.pack(side='left', padx=4)
@@ -50,6 +51,14 @@ class SceneInspector(Inspector):
         self.listing.configure(yscrollcommand=scroll.set)
         self.listing.bind('<<TreeviewOpen>>', self.expand)
         self.listing.bind('<<TreeviewSelect>>', self.select)
+        menu = tk.Menu(self.listing, tearoff=False)
+        menu.add_command(label='Compare with…', command=self.compare_selected)
+        def context(event):
+            item = self.listing.identify_row(event.y)
+            if self.selected_owner(item):
+                self.listing.selection_set(item)
+                menu.tk_popup(event.x_root, event.y_root)
+        self.listing.bind('<Button-3>', context)
         self.listing.tag_configure('entry_scene', foreground='#2466a0')
         ttk.Label(left, text='Expand a group. Blue rows belong to the entry scene.\nSelect “Load more…” to read the next page.').grid(row=1, column=0, sticky='w')
 
@@ -69,6 +78,7 @@ class SceneInspector(Inspector):
             if scene!=self.reader.scene:self.restore_state=None
         if self.merge_window is not None:
             self.merge_window.close()
+        self.merge_owner_items = {}
         self.merge_groups = []
         self.merge_button.state(['disabled'])
         self.reader = SceneReader(config, str(int(scene)), scope=self.reader.scope)
@@ -90,7 +100,7 @@ class SceneInspector(Inspector):
     def show_catalogue(self, result):
         self.scan = result['scan']
         self.merge_groups = result['groups']
-        self.merge_button.state(['!disabled'] if len(self.merge_groups) >= 2 else ['disabled'])
+        self.merge_button.state(['!disabled'] if self.merge_groups else ['disabled'])
         self.summary.configure(text=f"Scope {self.scan['scope']} · {self.scan['status']} scan · Current YAML results")
         if self.view_filters:
             from .inspection_search import SearchReader
@@ -103,6 +113,7 @@ class SceneInspector(Inspector):
             label = (f"Performer {group['performer']}" if group['performer'] else
                      f"Identity {group['identity'][:12]} · no Stash performer")
             item = self.listing.insert('', 'end', text=label + f" · {group['count']} in scene")
+            self.merge_owner_items[item] = group['identity']
             description = f"Identity {group['identity']}\nCurrent results across all scenes. Expand Face or Body to load observations."
             self.groups[item] = description
             reader = self.reader.identity_reader(group['identity'], self.scan['scope'])
@@ -127,10 +138,32 @@ class SceneInspector(Inspector):
         self.status.set('Expand a performer to see all scenes, or inspect unassigned observations from this scene.')
         self.restore_view()
 
+    def selected_owner(self, item):
+        if item in self.rows:
+            selector = getattr(self.rows[item]['reader'], 'selector', None)
+            if selector and selector[1] in {g['identity'] for g in self.merge_groups}:
+                return selector[1]
+        while item:
+            if item in self.merge_owner_items:
+                return self.merge_owner_items[item]
+            item = self.listing.parent(item)
+        return None
+
+    def compare_selected(self):
+        selected = self.listing.selection()
+        owner = self.selected_owner(selected[0]) if selected else None
+        if owner:
+            self.compare_performers()
+            comparison = self.merge_window
+            comparison.selectors[0].current(comparison.ids.index(owner))
+            if len(comparison.pair()) == 2 and len(set(comparison.pair())) == 1:
+                comparison.selectors[1].set('')
+            comparison.reset()
+
     def compare_performers(self):
         if self.merge_window is not None:
             self.merge_window.window.lift()
-        elif len(self.merge_groups) >= 2:
+        elif self.merge_groups:
             from .inspection_merge_window import MergeWindow
             self.merge_window = MergeWindow(self, self.merge_groups)
             self.visual_windows.append(self.merge_window)

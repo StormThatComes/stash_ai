@@ -169,3 +169,22 @@ def test_face_and_body_core_prevention_combines_gates_for_the_same_direction(tmp
     patch = yaml.safe_load(combined['patches'][0]['yaml'])
     assert patch['matching']['face']['anchors']['quality']['min_sharpness'] > 30
     assert any(c['parameter']=='sapiensid.identities.anchor_min_sharpness' for c in combined['patches'][0]['changes'])
+
+
+
+def test_cross_scene_pair_resolves_by_performer_id_and_links_weakest_faces(tmp_path):
+    from stash_ai.recognition.inspection_context import locate
+    from stash_ai.recognition.inspection_pair_evidence import find_identity
+    config, ids = seeded(tmp_path)
+    reader = SceneReader(config, '1')
+    scan = reader.catalogue()['scan']
+    assert find_identity(reader, scan['scope'], '901')['identity'] == ids[1]
+    with pytest.raises(ValueError):
+        find_identity(reader, 'another-scope', ids[1])
+    report = analyse(reader, scan, ids)
+    strict = next(route for route in report['routes'] if route['title'] == 'Merge strict face anchors')
+    assert strict['first_blocker'] == 'Similarity'
+    assert strict['steps'][0]['status'] == 'Pass'
+    weakest = next(w for w in strict['witnesses'] if w['label'] == 'Weakest cross comparison')
+    scenes = {locate(config, kind, addr, scan['scope'])['scene'] for kind, addr in weakest['refs']}
+    assert scenes == {'1', '2'}

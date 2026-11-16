@@ -126,6 +126,7 @@ def alternatives(db, config, scan, ids, labels):
                     evidence=[f'Strongest source: {peak:g} at cue {cue} ({witness}).',
                               f'Surviving target: {surviving:g} at cue {other_cue} ({other_witness}).'])
                 if patch['changes']:
+                    patch['witnesses'] = [dict(label='Source and surviving target',refs=[(kind,witness),(kind,other_witness)])]
                     patches.append(patch)
             if 0 < a['support'] < min(8, b['support']):
                 patch = _path(config, 'Require more evidence for a new scene core',
@@ -149,6 +150,7 @@ def alternatives(db, config, scan, ids, labels):
                     patch = _path(config, f"Face: {face['title']} + body: {body['title']}", changes,
                                   evidence=face['evidence'] + body['evidence'])
                     if patch['changes']:
+                        patch['witnesses'] = face.get('witnesses',[]) + body.get('witnesses',[])
                         combined.append(patch)
             if combined:
                 routes.append(dict(title=f"Prevent both separate cores · {labels[source]} → {labels[target]}",

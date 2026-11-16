@@ -319,7 +319,12 @@ without a linked Stash performer are explicitly labelled `no Stash performer`.
 The number in each branch title counts its observations in the entry scene only. Blue rows mark
 that scene. The remaining rows provide the performer's wider recognition context.
 
-Choose **Compare performers** when at least two identities appear in the loaded scene.
+Choose **Compare performers** in a scene with an assigned identity. Right-click a
+performer or one of their observations and choose **Compare with…** to preselect A.
+Use **Find B by ID…** to compare with a current Stash performer or identity UUID
+from another scene in the same scope. Select a route to see its measured gates
+and first blocker. **Inspect evidence** opens the recorded pair of cues with
+geometry and available masks. Closing it returns to the same option.
 Select A and B, including unpublished identities, then choose **Analyse paths**.
 The comparison uses the loaded YAML and a consistent read of the recognition database.
 
