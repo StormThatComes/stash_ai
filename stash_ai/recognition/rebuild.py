@@ -9,6 +9,7 @@ from .profiling import pipeline_stage
 from stash_ai.runtime.cleanup import closing
 import json
 import itertools
+from pathlib import Path
 import sqlite3
 import time
 from types import SimpleNamespace
@@ -558,7 +559,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
     database._rebuild_corroboration_pending=False
     database._rebuild_corroborated_plan={row['id'] for row in hints}
     database._rebuild_revalidated_medoids=set()
-    with memory_replay(config) as (replay, replay_uri):
+    with memory_replay(config) as (replay, prefetch_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
         from .replay_input_cache import InputCache
@@ -567,7 +568,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .solver_images import current as solver_images
         images = solver_images()
         raw_image = None
-        if images is not None and any(r[1] == 'retained' and r[2] == str(images.seed) for r in db.execute('PRAGMA database_list')):
+        if images is not None and any(r[1] == 'retained' and Path(r[2]) == images.seed for r in db.execute('PRAGMA database_list')):
+            # Prefetch needs only the original id, dimensions and embedding of
+            # accepted observations in this scan. Read the immutable seed while
+            # the trial owns the mutable replay, even if its page cache spills.
+            prefetch_uri = images.seed.as_uri() + '?mode=ro&immutable=1'
             raw_image = 'raw-' + digest([selected, scope, namespace, config.data['clustering']['max_anchor_pose_deviation'] is not None]) + '.sqlite'
         if not inputs.restore(replay):
             restored = raw_image is not None and images.restore(raw_image, replay)
@@ -648,7 +653,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                                 pool.scenes_applied+=1;pool.publish()
                                 checkpoints.save(replay,index+1,clock.value)
                 else:
-                    with Lookahead(replay_uri, config) as lookahead:
+                    with Lookahead(prefetch_uri, config) as lookahead:
                         # Prime the first remaining scene as well: with explicit
                         # prefetch enabled no selected scene may silently go serial.
                         def prepare_local(index):

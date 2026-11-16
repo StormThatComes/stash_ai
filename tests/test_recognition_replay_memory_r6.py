@@ -91,3 +91,29 @@ def test_bulk_import_restores_triggers_and_rolls_back_on_failure():
         assert not db.execute('SELECT * FROM evidence_versions').fetchall()
         db.execute("UPDATE metadata SET value='next'")
         assert db.execute('SELECT * FROM evidence_versions').fetchall()
+
+
+def test_solver_prefetch_during_exclusive_replay_write(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from stash_ai.recognition import rebuild
+    from stash_ai.recognition.merge_solver import solve
+
+    config, goals = fixture(tmp_path, 'disjoint')
+    data = plain(config.data)
+    data['execution'].update(rebuild_storage='disk', rebuild_prefetch_scenes=True, rebuild_parallel_scenes=False)
+    config = replace(config, data=data)
+    original_replay = rebuild.memory_replay
+
+    @contextmanager
+    def exclusive_replay(settings):
+        with original_replay(settings) as (db, uri):
+            # Keep the writer lock after a cache spill or commit, so even admission
+            # of the next scene would block if it opened the mutable database.
+            assert db.execute('PRAGMA main.locking_mode=EXCLUSIVE').fetchone()[0] == 'exclusive'
+            yield db, uri
+
+    monkeypatch.setattr(rebuild, 'memory_replay', exclusive_replay)
+    with closing(_open_readonly(config.database)) as source:
+        result = solve(config, goals, source, maximum=1, execution=dict(cpus=1, trials=1, profile=True))
+    counts = result['simulation']['trials']['baseline']['performance']['rebuild']['counts']
+    assert counts['prefetched_replay_vectors'] > 0
