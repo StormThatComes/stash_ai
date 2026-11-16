@@ -1256,7 +1256,15 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         assert 'Scene ' in witness.images.panels['A'].cget('text')
         assert pair.tree.selection() == (item,)
         witness.close()
-        changes.close()
+        assert all(panel.cget('text') for panel in changes.panels)
+        changes.stage.set('Strict core consolidation')
+        changes.test.invoke()
+        wait_for(lambda: pair.changes_window is not changes)
+        intervention = pair.changes_window
+        assert intervention.before_name == 'enabled'
+        assert intervention.result['intervention']['stage'] == 'strict_partition'
+        assert all(panel.cget('text') for panel in intervention.panels)
+        intervention.close()
         pair.batch.invoke()
         variants = pair.variants_window
         wait_for(lambda: variants.plan is not None)

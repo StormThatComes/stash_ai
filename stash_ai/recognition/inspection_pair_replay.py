@@ -79,8 +79,11 @@ def decisions(db, settings, rows, scope):
         stages = sorted({p['stage'] for p in proofs if p.get('stage')})
         links = list(dict.fromkeys((edge['source'], edge['target'], edge['route']) for p in proofs for edge in p['merges']))
         refs = {r['observation'] for p in proofs for r in p['references']}
+        signals = sorted({p['metrics']['signal'] for p in proofs if p['metrics'].get('signal')})
+        selected_refs = sorted(refs.intersection(rows))
         result[key] = dict(role=record['role'], route=', '.join(routes), stage=', '.join(stages), links=links,
-                           reference_sources=sorted({rows[ref]['source'] for ref in refs if ref in rows}))
+                           signal=', '.join(signals), references=selected_refs,
+                           reference_sources=sorted({rows[ref]['source'] for ref in selected_refs}))
     return result
 
 
@@ -158,7 +161,7 @@ def _fresh(config, revision):
         raise ValueError('The database changed. Refresh the scene and analyse the pair again before replay.')
 
 
-def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=None, refine_budget=None):
+def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=None, refine_budget=None, omitted_stage=None):
     from .inspection_merge_paths import _cancellable
     from .replay_simulation import replay
     from .inspection_pair_variants import patch_values, Refinement
@@ -170,11 +173,16 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
     names = {digest({}): 'baseline'}
     aliases, variants = {}, {}
     refinement = Refinement(config, patches['option'], refine_budget) if refine_budget is not None else None
+    visits = defaultdict(dict)
+    if omitted_stage is not None:
+        from .replay_intervention import STAGES, members, trial
+        if omitted_stage not in STAGES or set(patches)!={'enabled','omitted'} or patches['enabled']!=patches['omitted']:
+            raise ValueError('The stage check requires two identical patches and one isolated stage.')
     for name, patch in patches.items():
         if name == 'baseline':
             raise ValueError('The baseline name is reserved.')
         changes = patch_values(patch)
-        signature = digest(changes)
+        signature = digest([changes,omitted_stage]) if omitted_stage and name=='omitted' else digest(changes)
         if signature not in names:
             variants[name] = patched(config, changes)
             names[signature] = name
@@ -230,18 +238,26 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
             for bulky in ('decision_evidence','owners','independent_person','hybrid'):
                 item.pop(bulky, None)
 
+        def context(name):
+            return trial(omitted_stage if name=='omitted' else None,visits[name])
         replayed = replay(config, variants, source=db, scope=scope, scenes=scenes, progress=progress, consume=consume,
                           inspect_trial=lambda trial, settings: decisions(trial, settings, rows, scope),
-                          record_trial=collect, followup_variants=refinement.variants if refinement else None)
+                          record_trial=collect, trial_context=context if omitted_stage else None, followup_variants=refinement.variants if refinement else None)
         _fresh(config, revision)
     if not trials:
         raise ValueError('No compatible scans were available.')
-    result = dict(ids=ids, rows=rows, scenes=replayed['selection'], totals=dict(totals),
+    result = dict(ids=ids, rows=rows, patches=dict(patches), scenes=replayed['selection'], totals=dict(totals),
                   trials={'baseline':trials['baseline'], **{name:trials[actual] for name,actual in aliases.items()}})
+    if omitted_stage:
+        entries = {name: sum(visits[aliases[name]].get(stage, 0) for stage in members(omitted_stage))
+                   for name in ('enabled', 'omitted')}
+        result['intervention'] = dict(stage=omitted_stage, enabled_visits=entries['enabled'],
+                                      omitted_visits=entries['omitted'])
     if refinement:
         result.update(minimized=proposal(config,refinement.values), probe_count=refinement.count,
                       budget_reached=not refinement.finished)
         result['trials']['minimized'] = trials[refinement.best]
+        result['patches']['minimized'] = result['minimized']
     return result
 
 

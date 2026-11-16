@@ -74,7 +74,9 @@ def _catalogue_routes(db, config, report):
             evidence = ['The frozen planner accepts this component.']
             if extra:
                 evidence.append('Also merges: ' + ', '.join(extra))
-            patches.append(dict(rec, title=rec.get('strategy', 'Current YAML').replace('_',' '), evidence=evidence))
+            mechanism = {'strict_core':'strict_partition', 'confirmed_views':'global_view_merge',
+                         'sapiensid_hybrid':'hybrid_merge'}.get(name)
+            patches.append(dict(rec, mechanism=mechanism, title=rec.get('strategy', 'Current YAML').replace('_',' '), evidence=evidence))
         status = ('Eligible on frozen references' if current.get('can_merge_in_frozen_catalogue') else
                   'Frozen planner verified' if patches else 'Blocked / insufficient evidence')
         if name == 'independent_person':

@@ -30,6 +30,7 @@ def face_rows(reader, scope, owner, *, keys=None, offset=0, limit=80):
 
 
 def formation(reader, scope, owner, keys):
+    import numpy as np
     from .view_prototypes import add_cohort, witness_limit, coverage_threshold
     from .evidence_pixels import alias_scope
     from .inspection_runtime import stamp
@@ -51,9 +52,21 @@ def formation(reader, scope, owner, keys):
                 eligible.append(row)
         for title, floor in [('View cohesion',policy['view_cohesion_threshold']),('Appearance coverage',coverage_threshold(policy))]:
             slots = []
+            split_reasons = []
+            independent = set()
             for row in eligible:
                 check_cancelled()
-                add_cohort(slots,row,vector(row),floor,complete=True,maximum=witness_limit(policy))
+                count = len(slots)
+                sample = vector(row)
+                add_cohort(slots,row,sample,floor,complete=True,maximum=witness_limit(policy))
+                if count and len(slots) > count:
+                    compatible = [slot for slot in slots[:-1] if slot.accepts_pose(row['geometry'])]
+                    if compatible:
+                        best = max(min(float(np.dot(witness, sample)) for witness in slot.examples) for slot in compatible)
+                        gate = f'best available group minimum {best:.4f} < required {floor:.4f}'
+                    else:
+                        gate = 'pose incompatible with every earlier group'
+                    split_reasons.append(f"Scene {row['scene']} cue {row['cue']} · new group · {gate}")
             notes.append(f'{title} {floor:g} · {len(slots)} coherent groups from {len(eligible)} eligible faces.')
             for slot in slots:
                 if slot.needs_final_selection:
@@ -62,9 +75,13 @@ def formation(reader, scope, owner, keys):
                 required = policy['view_min_support']
                 notes.append(f"{slot.pose} · {votes}/{required} independent votes · " +
                              ('eligible for promotion' if votes >= required else f'{required-votes} more needed'))
-                notes.append('Independent witnesses: '+', '.join(r[0] for r in slot.cue_representatives.values()))
-            if len(slots)>1:
-                notes.append('Selected faces split at the pose or complete-link cohesion gate. Votes belong to each group.')
+                witnesses = [value[0] for value in slot.cue_representatives.values()]
+                independent.update(witnesses)
+                notes.append('Independent witnesses: '+', '.join(witnesses))
+            notes.extend(split_reasons)
+            for row in eligible:
+                if row['id'] not in independent:
+                    notes.append(f"Scene {row['scene']} cue {row['cue']} · {row['id']} · no additional independent timestamp/crop vote")
     if revision != stamp(config.database):
         raise ValueError('Recognition changed during the check. Refresh the comparison.')
     return '\n'.join(notes)

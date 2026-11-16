@@ -591,3 +591,22 @@ The body-track timeline shows entry-scene observations by cue, face roots,
 recorded breaks, orientation and linked blockers. Select a dot or open its row.
 After a full replay, **A residuals** and **B residuals** locate missing samples,
 separate destinations and assignments shared with an outside identity.
+
+After a pair replay, **Observation changes…** opens at the first differing scene
+and cue (numeric scene ID, then cue index). All changed observations at that cue
+appear together. Select a row to compare owners, roles, routes and retained
+references side by side. **Later linked changes** follows recorded references
+within each trial through the selected identities. **Changed** includes route
+changes even when ownership stayed the same.
+
+Choose a mechanism and **Test stage necessity** to replay the same YAML and scene
+selection with that stage enabled and omitted. Hybrid identity consolidation,
+Hybrid query attachment, confirmed View consolidation, global View queries, strict
+core consolidation, scene anchor View queries and auxiliary View attachment can
+be isolated separately. You can also omit both Hybrid stages together, or the
+confirmed View passes together (including the global whole-View attachment).
+Other historical and pooled recovery routes remain eligible during this check.
+The result reports stage entries, the A/B join, protected
+C, additional identities and unassigned observations in each trial. A necessity
+finding applies to the selected goal, observations and YAML. Open any changed cue
+from the comparison to examine the retained evidence.

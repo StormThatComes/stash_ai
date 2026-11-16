@@ -201,7 +201,8 @@ def _probe(db, candidate, reason):
 
 def apply_anchor_views(database, selected, config, *, progress=None):
     grouping, settings = config.data['clustering'], config.data['recognition']
-    if not grouping['anchor_view_matching'] or not selected:
+    from .replay_intervention import allow
+    if not grouping['anchor_view_matching'] or not selected or not allow('anchor_view_query'):
         return
     db, policy = database.connection, matching_policy(config)
     cache = evidence_for(db)
