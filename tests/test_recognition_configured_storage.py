@@ -2,6 +2,7 @@ import errno
 import os
 import shutil
 import sqlite3
+import stat
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,9 +85,9 @@ def test_disk_check_survives_trial_cleanup_after_scan(tmp_path, monkeypatch, tar
             shutil.rmtree(trial)
         return disk_usage(path)
 
+    device, _ = _volume_space(database)
     monkeypatch.setattr(shutil, 'disk_usage', cleanup_then_measure)
 
-    device = database.stat().st_dev
     target = spool if target_is_removed else database.parent
     result = budget.check(growth=3, path=target)[device]
     assert result['used'] == 7
@@ -98,9 +99,89 @@ def test_disk_check_survives_trial_cleanup_after_scan(tmp_path, monkeypatch, tar
 
 def test_disappeared_volume_cannot_borrow_space_from_parent(tmp_path, monkeypatch):
     missing = tmp_path / 'unmounted' / 'trial'
-    other_device = tmp_path.stat().st_dev + 1
+    other_device = 'unmounted-volume' if os.name == 'nt' else tmp_path.stat().st_dev + 1
     monkeypatch.setattr(shutil, 'disk_usage', lambda path: pytest.fail(f'Probed a different volume at {path}'))
 
     with pytest.raises(OSError) as error:
         _volume_space(missing, other_device)
     assert error.value.errno == errno.ENODEV
+
+
+def partial_windows_metadata(monkeypatch, anonymous, *, mount=None, lstat_only=False):
+    from stash_ai.recognition import disk_budget
+
+    real_stat = Path.stat
+    def partial_stat(path, *, follow_symlinks=True):
+        info = real_stat(path, follow_symlinks=follow_symlinks)
+        if (lstat_only and follow_symlinks) or (path not in anonymous and path != mount):
+            return info
+        values = {name: getattr(info, name) for name in dir(info) if name.startswith('st_')}
+        if path in anonymous:
+            values.update(st_dev=0, st_ino=0)
+        if path == mount and not follow_symlinks:
+            values['st_file_attributes'] = stat.FILE_ATTRIBUTE_REPARSE_POINT
+        return SimpleNamespace(**values)
+
+    if mount is not None:
+        monkeypatch.setattr(disk_budget, '_windows_volume',
+                            lambda path: 'nested-volume' if path.is_relative_to(mount) else 'host-volume')
+    elif os.name != 'nt':
+        monkeypatch.setattr(disk_budget, '_windows_volume', lambda path: 'test-volume')
+    monkeypatch.setattr(Path, 'stat', partial_stat)
+    monkeypatch.setattr(Path, 'lstat', lambda path: partial_stat(path, follow_symlinks=False))
+
+
+@pytest.mark.parametrize('partial_directory', [False, True])
+def test_parallel_scratch_files_with_zero_device_and_inode(tmp_path, monkeypatch, partial_directory):
+    from stash_ai.recognition.resource_errors import ResourceLimit
+
+    database = tmp_path / 'faces.db'
+    database.write_bytes(b'ab')
+    work = tmp_path / 'recognition-scratch'
+    work.mkdir()
+    first, second = work / 'first', work / 'second'
+    first.write_bytes(b'123')
+    second.write_bytes(b'4567')
+    config = SimpleNamespace(database=database, data={'execution': {'disk_total_bytes': 12}})
+    budget = Budget(config)
+    budget.roots.add(work)
+    partial_windows_metadata(monkeypatch, {first, second, work} if partial_directory else {first, second},
+                             lstat_only=True)
+    assert first.lstat().st_dev == first.lstat().st_ino == 0
+    rows = budget.check(growth=3)
+    assert len(rows) == 1
+    row, = rows.values()
+    assert (row['used'], row['requested']) == (9, 12)
+    with pytest.raises(ResourceLimit, match='per-volume'):
+        budget.check(growth=4)
+
+
+def test_partial_metadata_reservation_is_charged_to_its_mounted_volume(tmp_path, monkeypatch):
+    from stash_ai.recognition.disk_budget import reserve_file, scope
+
+    work = tmp_path / 'work'
+    mount = work / 'mount'
+    mount.mkdir(parents=True)
+    spool = mount / 'trial.sqlite'
+    spool.write_bytes(b'123')
+    monkeypatch.setenv('RECOGNITION_WORK_ROOT', str(work))
+    partial_windows_metadata(monkeypatch, {spool}, mount=mount)
+
+    config = SimpleNamespace(database=tmp_path / 'faces.db', data={'execution': {'disk_total_bytes': 1024**2}})
+    observer = Budget(config)
+    with scope(config), reserve_file(spool, 1024) as grant:
+        assert grant == 1024
+        rows = observer.check(growth=5, path=spool)
+        assert rows['host-volume']['reserved'] == 0
+        nested = rows['nested-volume']
+        assert (nested['used'], nested['reserved'], nested['requested']) == (3, 1021, 1029)
+    assert observer.check()['nested-volume']['reserved'] == 0
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows mount paths')
+@pytest.mark.parametrize('mount', ['\\\\Server\\Share\\', '\\\\?\\UNC\\SERVER\\SHARE\\'])
+def test_windows_share_mounts_have_the_same_budget_key(monkeypatch, tmp_path, mount):
+    from stash_ai.recognition import windows_volume
+
+    monkeypatch.setattr(windows_volume, '_getvolumepathname', lambda path: mount)
+    assert windows_volume.volume_key(tmp_path) == '\\\\server\\share\\'
