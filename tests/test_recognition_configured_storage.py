@@ -1,11 +1,15 @@
+import errno
 import os
+import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from stash_ai.recognition.config import load
+from stash_ai.recognition.disk_budget import Budget, _volume_space
 from stash_ai.recognition.work_locations import invocation, validate_outputs, work_root
 
 
@@ -59,3 +63,44 @@ def test_direct_solver_uses_configured_work_root(tmp_path):
         solve(config,goals,source,maximum=1,progress=observe)
     assert len(captured)==1 and captured[0].parent == work_root(config)
     assert not captured[0].exists()
+
+
+@pytest.mark.parametrize('target_is_removed', [False, True])
+def test_disk_check_survives_trial_cleanup_after_scan(tmp_path, monkeypatch, target_is_removed):
+    database = tmp_path / 'faces.db'
+    database.write_bytes(b'db')
+    scratch = tmp_path / 'work'
+    trial = scratch / 'trial-32'
+    trial.mkdir(parents=True)
+    spool = trial / 'replay.sqlite'
+    spool.write_bytes(b'trial')
+    budget = Budget(SimpleNamespace(database=database, data={'execution': {'disk_total_bytes': 1024}}))
+    budget.roots.add(scratch)
+
+    disk_usage = shutil.disk_usage
+
+    def cleanup_then_measure(path):
+        if trial.exists():
+            shutil.rmtree(trial)
+        return disk_usage(path)
+
+    monkeypatch.setattr(shutil, 'disk_usage', cleanup_then_measure)
+
+    device = database.stat().st_dev
+    target = spool if target_is_removed else database.parent
+    result = budget.check(growth=3, path=target)[device]
+    assert result['used'] == 7
+    assert result['requested'] == 10
+    assert Path(result['path']).exists()
+    assert result['free'] > 0
+    assert budget.check()[device]['used'] == 2
+
+
+def test_disappeared_volume_cannot_borrow_space_from_parent(tmp_path, monkeypatch):
+    missing = tmp_path / 'unmounted' / 'trial'
+    other_device = tmp_path.stat().st_dev + 1
+    monkeypatch.setattr(shutil, 'disk_usage', lambda path: pytest.fail(f'Probed a different volume at {path}'))
+
+    with pytest.raises(OSError) as error:
+        _volume_space(missing, other_device)
+    assert error.value.errno == errno.ENODEV
