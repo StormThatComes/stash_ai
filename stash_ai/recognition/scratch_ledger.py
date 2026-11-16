@@ -36,5 +36,6 @@ def file_leases(*, write=False):
     with closing(sqlite3.connect(Path(root) / 'file-leases.sqlite', timeout=30)) as db, db:
         if write:
             db.execute('BEGIN IMMEDIATE')
-        db.execute('CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, device INTEGER, cap INTEGER)')
+        # Preserve POSIX device numbers and Windows volume names as-is.
+        db.execute('CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, device NOT NULL, cap INTEGER)')
         yield db

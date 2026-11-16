@@ -11,6 +11,26 @@ import threading
 
 from .resource_errors import ResourceLimit
 
+if os.name == 'nt':
+    from .windows_volume import volume_key as _windows_volume
+else:
+    _windows_volume = None
+
+
+def _device(path, info, parent_device=None):
+    if _windows_volume is None:
+        return info.st_dev
+    # Ordinary children share their parent's volume. Reparse points may
+    # redirect to another volume underneath the same drive letter.
+    if parent_device is not None and not _is_reparse_point(info):
+        return parent_device
+    return _windows_volume(path)
+
+
+def _is_reparse_point(info):
+    return getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+
+
 _active = ContextVar('recognition_disk_budget',default=None)
 
 
@@ -18,7 +38,7 @@ def _volume_space(path, device=None):
     """A peer may remove its scratch tree between stat and disk_usage."""
     while True:
         try:
-            current = path.stat().st_dev
+            current = _device(path, path.stat())
             if device is not None and current != device:
                 raise OSError(errno.ENODEV, f'Recognition disk budget volume {device} is unavailable', str(path))
             device = current
@@ -63,14 +83,23 @@ class Budget:
         volumes = {}
         seen = set()
         visited = set()
-        pending = list(roots)
+        pending = [(root, None) for root in roots]
         while pending:
-            item = pending.pop()
+            item, parent_device = pending.pop()
             try:
                 info = item.lstat()
-            except FileNotFoundError:
+                if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                    continue
+                dev = _device(item, info, parent_device)
+                if _is_reparse_point(info):
+                    # The volume belongs to the target of a junction, so use
+                    # its file index as well when deduplicating the walk.
+                    info = item.stat()
+            except (FileNotFoundError, NotADirectoryError):
                 continue
-            key = (info.st_dev, info.st_ino)
+            # A partial Windows stat may omit the file index as well as st_dev.
+            # Distinct anonymous files must each be charged against the quota.
+            key = (dev, info.st_ino or os.path.normcase(os.path.realpath(item)))
             if key in seen:
                 continue
             seen.add(key)
@@ -84,9 +113,9 @@ class Budget:
                     except FileNotFoundError:
                         continue
                     cached = self.directories[item] = stamp, children, time.monotonic()
-                pending.extend(cached[1])
+                pending.extend((child, dev) for child in cached[1])
             elif stat.S_ISREG(info.st_mode):
-                row = volumes.setdefault(info.st_dev, dict(path=str(item), used=0))
+                row = volumes.setdefault(dev, dict(path=str(item), used=0))
                 row['used'] += info.st_size
                 if item in reservations:
                     counted_sizes[item] = info.st_size
@@ -154,7 +183,7 @@ def reserve_file(path, maximum):
     from .scratch_ledger import file_leases
     with budget.lock:
         info = path.stat()
-        dev, existing = info.st_dev, info.st_size
+        dev, existing = _device(path, info), info.st_size
         with file_leases() as ledger:
             while True:
                 # A directory walk can outlast SQLite's busy timeout. Take the
