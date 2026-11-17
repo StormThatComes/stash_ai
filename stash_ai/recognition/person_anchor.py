@@ -51,6 +51,8 @@ def anchor_gate(metadata,settings,*,collection=None):
             if regional['enabled']:
                 regional=evaluate(rules,detected_crop_points(person))
         reason=record.get('identity_rejection') or gate['reason']
+        if person.get('pose_refinement',{}).get('contact_pose_recovered'):
+            reason='body_contact_recovery_unconfirmed'
         if quality.get('query_only'):
             reason='body_query_only'
         if reason is None and collection is not None:

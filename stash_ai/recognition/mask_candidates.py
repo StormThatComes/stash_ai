@@ -165,11 +165,12 @@ def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points
         edits['bridge_cuts'] = bridge_cuts
     target = raw if clean is None else clean
     temporal = {k for k, _ in record.get('temporal_prompts', ())}
-    if (not peers and settings.get('recover_prompt_points') and
+    if (settings.get('recover_prompt_points') and
             reason in (None, 'missing_prompt_support')):
         support = set(record.get('support_indices', ())) | (temporal & set(indices))
         for missing, group in TORSO_REGIONS.items():
-            witnesses = [k for k in group if k in support]
+            witnesses = [k for k in group if k in support and
+                         (not len(foreign) or np.linalg.norm(foreign-points[i,k],axis=1).min() > 3)]
             if witnesses and not inside(target, points[i, witnesses]).any():
                 reason = missing
                 break
@@ -384,4 +385,11 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 if observer is not None:
                     observer('cleaned', mask)
                     mask_history(image,records[i])[-1]['paired_choice'] = candidate.variant
+            peers = [j for j in range(len(bounds)) if j != i and
+                     bounds[j][0] < candidate.box[2] and candidate.box[0] < bounds[j][2]
+                     and bounds[j][1] < candidate.box[3] and candidate.box[1] < bounds[j][3]]
+            torso = [k for k in cores[i] if k in (5,6,11,12)]
+            records[i]['separated'] = bool(peers and len(torso) >= 2
+                and inside(mask, points[i,torso]).all()
+                and all(len(cores[j]) >= 2 and not inside(mask, points[j,cores[j]]).any() for j in peers))
             yield i, candidate.box, mask, candidate.indices
