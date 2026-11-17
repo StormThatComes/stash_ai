@@ -277,9 +277,15 @@ class SapiensIDFaces(YuNetDetector):
         count('person_detector_batches')
         count('person_detector_frames', len(source) if isinstance(source,list) else 1)
         # YOLO selects its one-to-many head; D-FINE applies person-only NMS.
-        return self.pose.predict(source=source, device=self.device, verbose=False, nms=True,
-            conf=settings['score_threshold'], iou=settings['nms_threshold'],
-            max_det=settings['max_people_per_frame'])
+        reserve = (settings['backend']=='pmpose' and settings['deduplication']['enabled']
+                   and settings['detector']!='rfdetr_xl')
+        values = self.pose.predict(source=source, device=self.device, verbose=False, nms=True,
+            conf=settings['score_threshold'], iou=.94 if reserve else settings['nms_threshold'],
+            max_det=settings['max_people_per_frame']*(2 if reserve else 1))
+        if reserve:
+            from .contact_reserves import select
+            values = [select(v,settings['nms_threshold'],settings['max_people_per_frame']) for v in values]
+        return values
 
     def detect_many(self, frames):
         self._owner()
