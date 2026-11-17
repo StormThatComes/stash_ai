@@ -30,7 +30,11 @@ def _signed_pose(geometry):
         distance = math.hypot(values[4] - values[6], values[5] - values[7])
         if distance <= 1:
             return None
-        horizontal = ((values[6]-values[4])/distance, (values[7]-values[5])/distance)
+        import numpy as np
+        from .face_frame import axis
+        horizontal,profile=axis(np.asarray(values[4:14]).reshape(5,2),values[2],values[3])
+        if profile:
+            distance=max(distance,.6*math.dist(eye,((values[10]+values[12])/2,(values[11]+values[13])/2)))
         signed = ((values[8]-eye[0])*horizontal[0] + (values[9]-eye[1])*horizontal[1]) / distance
         return signed
     except (ValueError, TypeError, OverflowError):
@@ -82,6 +86,15 @@ def pose_fallback(geometry, pose):
     pose = 'neutral' if pose == 'other' else pose
     if value is None or pose == 'unknown':
         return .08, 3
+    try:
+        raw=metadata(geometry) if isinstance(geometry,str) else geometry
+        from .quality import pose_measurements
+        measure=pose_measurements([raw[i:i+2] for i in range(4,14,2)],raw[2:4])
+        uncertain=measure['pose_deviation']>.5 or math.hypot(raw[4]-raw[6],raw[5]-raw[7])<.08*min(raw[2:4])
+    except (ValueError,TypeError,IndexError):
+        uncertain=True
+    if uncertain:
+        return .08,3
     if pose_matches(geometry, pose):
         return 0., 2
     distance = (max(0., value + .12) if pose == 'left' else

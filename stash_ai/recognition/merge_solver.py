@@ -378,7 +378,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         magnitude = mutation_magnitude(patch['changes'])
         established_outsiders = sum(g['outsider_observations'] for g in status['groups']) - coverage['recovered_target_attachments']
         rank = objective(status) + (-established_outsiders, -outside['coverage_lost'], -outside['split_pairs'],
-            -outside['newly_joined_pairs'], -coverage['unassigned'], -len(patch['changes']), -magnitude)
+            -outside['newly_joined_pairs'], -coverage['goal_fragments'], -coverage['unassigned'], -len(patch['changes']), -magnitude)
         ranks[name] = rank
         fallback_references[name] = latest_feedback.get('fallback_references', 0)
         if status['fully_solved']:

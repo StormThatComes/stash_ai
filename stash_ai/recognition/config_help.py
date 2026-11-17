@@ -338,3 +338,10 @@ HELP.update({
  'face.detector.candidate_score_threshold': 'Optional lower SCRFD candidate floor; detections below score_threshold can query identities but cannot seed face anchors. Null disables. Range: 0..score_threshold.',
  'face.detector.alignment_retry_error': 'Retry one local SCRFD crop when normalized five-point alignment error exceeds this value. 0 disables. Range: 0..1.',
 })
+
+HELP.update({
+ 'matching.body.identities.correct_contact_face_links': 'Correct and demote a contact body anchor only between two independent clean same-owner endpoints, above body gates and rival margin. Scene-local derived proof; raw face membership is retained. Experimental.',
+ 'matching.body.identities.defer_contact_births': 'Keep contact-born body groups provisional until independent clean observations support them. Experimental.',
+ 'matching.body.identities.contact_birth_support': 'Independent clean observations required to confirm a contact-born group. Range: 1..8.',
+ 'matching.body.identities.mixed_mask_score_penalty': 'Calibrated cosine penalty for masked/full body bank comparisons; 0 preserves original scores. Range: 0..0.3.',
+})
