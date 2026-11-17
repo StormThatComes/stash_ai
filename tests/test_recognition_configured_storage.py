@@ -97,6 +97,69 @@ def test_disk_check_survives_trial_cleanup_after_scan(tmp_path, monkeypatch, tar
     assert budget.check()[device]['used'] == 2
 
 
+@pytest.mark.parametrize('operation', ['lstat', 'iterdir'])
+@pytest.mark.parametrize('removed', [True, False], ids=['removed', 'still-live'])
+def test_disk_scan_rechecks_denied_trial_directory(tmp_path, monkeypatch, operation, removed):
+    from stash_ai.recognition.resource_errors import ResourceLimit
+
+    database = tmp_path / 'faces.db'
+    database.write_bytes(b'db')
+    work = tmp_path / 'recognition-scratch-test'
+    witnesses = work / 'stash-hybrid-witnesses-test'
+    witnesses.mkdir(parents=True)
+    (witnesses / 'records.sqlite').write_bytes(b'trial')
+    (work / 'live.bin').write_bytes(b'peer')
+    expected = 6 if removed else 11
+    budget = Budget(SimpleNamespace(database=database, data={'execution': {'disk_total_bytes': expected}}))
+    budget.roots.add(work)
+    original = getattr(Path, operation)
+    denied = False
+
+    def read(path):
+        nonlocal denied
+        if path == witnesses and not denied:
+            denied = True
+            if removed:
+                shutil.rmtree(path)
+            raise PermissionError(errno.EACCES, 'Access is denied', str(path))
+        return original(path)
+
+    monkeypatch.setattr(Path, operation, read)
+    row, = budget.check().values()
+    assert denied
+    assert row['used'] == expected
+    with pytest.raises(ResourceLimit, match='per-volume'):
+        budget.check(growth=1)
+
+
+def test_disk_scan_reports_persistent_directory_denial(tmp_path, monkeypatch):
+    from stash_ai.recognition import disk_budget
+
+    witnesses = tmp_path / 'stash-hybrid-witnesses-test'
+    witnesses.mkdir()
+    budget = Budget(SimpleNamespace(database=tmp_path / 'faces.db', data={'execution': {'disk_total_bytes': 100}}))
+    budget.roots.add(witnesses)
+    error = PermissionError(errno.EACCES, 'Access is denied', str(witnesses))
+    original = Path.iterdir
+    attempts = 0
+
+    def denied(path):
+        nonlocal attempts
+        if path == witnesses:
+            attempts += 1
+            assert attempts < 10
+            raise error
+        return original(path)
+
+    monkeypatch.setattr(Path, 'iterdir', denied)
+    monkeypatch.setattr(disk_budget.time, 'sleep', lambda delay: None)
+    with pytest.raises(PermissionError) as failure:
+        budget.check()
+    assert failure.value is error
+    assert attempts > 1
+    assert not budget.volumes
+
+
 def test_disappeared_volume_cannot_borrow_space_from_parent(tmp_path, monkeypatch):
     missing = tmp_path / 'unmounted' / 'trial'
     other_device = 'unmounted-volume' if os.name == 'nt' else tmp_path.stat().st_dev + 1
@@ -105,6 +168,21 @@ def test_disappeared_volume_cannot_borrow_space_from_parent(tmp_path, monkeypatc
     with pytest.raises(OSError) as error:
         _volume_space(missing, other_device)
     assert error.value.errno == errno.ENODEV
+
+
+def test_denied_space_probe_rechecks_original_volume(tmp_path, monkeypatch):
+    from stash_ai.recognition import disk_budget
+
+    devices = iter(['original-volume', 'replacement-volume'])
+    monkeypatch.setattr(disk_budget, '_windows_volume', lambda path: next(devices))
+
+    def deny_space(path):
+        raise PermissionError(errno.EACCES, 'Access is denied', str(path))
+
+    monkeypatch.setattr(shutil, 'disk_usage', deny_space)
+    with pytest.raises(OSError) as failure:
+        _volume_space(tmp_path)
+    assert failure.value.errno == errno.ENODEV
 
 
 def partial_windows_metadata(monkeypatch, anonymous, *, mount=None, lstat_only=False):
