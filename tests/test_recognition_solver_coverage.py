@@ -17,7 +17,7 @@ def test_coverage_counts_goal_and_non_goal_faces_and_bodies_once(storage):
                            'old-outsider': 'a', 'lost': None})
     targets = {'goal', 'goal-soft', 'missing-scan'}
     groups = [dict(resulting_identities={'a': 2})]
-    expected = dict(total=7, assigned=5, unassigned=2, gained=3, lost=1,
+    expected = dict(goal_fragments=0,total=7, assigned=5, unassigned=2, gained=3, lost=1,
                     recovered_target_attachments=1)
     with sqlite3.connect(':memory:') as db:
         if storage == 'slots':
@@ -96,7 +96,7 @@ def test_recovery_beats_stricter_solved_trial_and_survives_resume(tmp_path, monk
         assert all(row['goal_result']['fully_solved'] for row in rows.values())
         baseline, recovered, tightened = [rows[n]['goal_result'] for n in ('baseline','trial-1','trial-2')]
         assert baseline['assignment_coverage']['unassigned'] == 3
-        assert recovered['assignment_coverage'] == dict(total=6, assigned=6, unassigned=0,
+        assert recovered['assignment_coverage'] == dict(goal_fragments=0,total=6, assigned=6, unassigned=0,
             gained=3, lost=0, recovered_target_attachments=3)
         assert recovered['groups'][0]['outsider_observations'] == 3
         assert tightened['assignment_coverage']['unassigned'] == 3

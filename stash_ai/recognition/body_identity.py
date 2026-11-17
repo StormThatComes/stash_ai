@@ -16,7 +16,7 @@ from .person_anchor import pixel_gate,anchor_gate
 
 
 def defaults():
-    return dict(enabled=False, contact_max_cues=12, contact_max_hidden=2, contact_max_people=4,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+    return dict(enabled=False, correct_contact_face_links=False, defer_contact_births=False, contact_birth_support=2, mixed_mask_score_penalty=0., contact_max_cues=12, contact_max_hidden=2, contact_max_people=4,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, turn_similarity_discount=.06, extended_track_graph=None, turn_recovery=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
@@ -146,6 +146,7 @@ class Scores:
     """Exact weighted banks; identical vectors share computation, not votes."""
     def __init__(self,config):
         from collections import OrderedDict
+        self.mask_penalty=config.data['sapiensid'].get('identities',{}).get('mixed_mask_score_penalty',0.)
         self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
         self.banks={};self.cache=OrderedDict()
         self.cache_limit=max(1,min(4096,config.data['sapiensid']['execution']['reference_bytes']//65536))
@@ -198,6 +199,8 @@ class Scores:
         bound always falls back to every retained witness.
         """
         if not rows:return False
+        if self.mask_penalty and any(quality(r).get('embedding_foreground')!=quality(row).get('embedding_foreground') for r in rows):
+            return self.compare([row],rows)[1]>=threshold
         bank=self.bank(rows);state=self.banks[id(rows)]
         # Preserve the exact score cache for repeated identical features.
         if len(bank)==1 and row['_vector'].tobytes() in bank:
@@ -219,6 +222,15 @@ class Scores:
         return lower>=threshold
 
     def compare(self,first,second):
+        if self.mask_penalty:
+            values=[]
+            for a in distinct_pixels(first):
+                for b in distinct_pixels(second):
+                    score=self.face_similarity(a['_vector'],b['_vector'])
+                    domains=quality(a).get('embedding_foreground'),quality(b).get('embedding_foreground')
+                    if None not in domains and domains[0]!=domains[1]:score-=self.mask_penalty
+                    values.append(score)
+            return (sum(values)/len(values),min(values)) if values else (-1.,-1.)
         bank=self.bank(second);total=0.;minimum=float('inf');count=0
         pixels=set()
         for row in first:
@@ -334,9 +346,12 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     if settings.get('tracklet_matching') and settings.get('body_first_matching'):
         from .body_tracklets import paths
         graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph'), gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
+    from .contact_identity_proof import correct
+    rows=correct(rows,graph,settings,scores)
     seeds={};decisions={}
     from .contact_anchors import questionable_links
     uncertain = questionable_links(rows,settings,scores,graph)
+    uncertain.difference_update(r['id'] for r in rows if r.get('_contact_correction'))
     for row in rows:
         if row['face_person'] is None:continue
         person=roots[row['face_person']]
@@ -347,6 +362,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         strong=bool(row['face_anchor']) and anchor(row,settings)
         decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
                                   reason='measured_face_association')
+        if row.get('_contact_correction'):
+            decisions[row['id']].update(reason='corrected_contact_face_link',contact_correction=row['_contact_correction'])
         if strong:seeds.setdefault(person,[]).append(row)
     if graph:
         from .contact_anchors import bridge_faces
@@ -463,8 +480,11 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 attempt+=1
         used.add(person)
         support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
+        from .contact_identity_proof import birth_ready
+        deferred=not birth_ready(group,settings,independent)
+        if deferred:status='provisional'
         for row in group:
-            decisions[row['id']]=dict(person=person,status=status,role='anchor',reason='body_scene_core',independent_support=support,
+            decisions[row['id']]=dict(person=person,status=status,role='auxiliary' if deferred else 'anchor',reason='contact_birth_pending' if deferred else 'body_scene_core',independent_support=support,
                 required_support=settings['min_support'])
     # Weak observations may attach to frozen accepted cores but never train them.
     banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']

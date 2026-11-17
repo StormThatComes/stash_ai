@@ -81,6 +81,10 @@ def validate(settings, *, detection_preview=False):
     _number(collection['min_sharpness'],'sapiensid.collection.min_sharpness',0,1000000)
     _number(collection['max_overlap'],'sapiensid.collection.max_overlap',0,1)
     identity=settings['identities']
+    for key in ('correct_contact_face_links','defer_contact_births'):
+        if type(identity[key]) is not bool:raise ValueError('sapiensid.identities.'+key+' must be boolean.')
+    _number(identity['mixed_mask_score_penalty'],'sapiensid.identities.mixed_mask_score_penalty',0,.3)
+    _number(identity['contact_birth_support'],'sapiensid.identities.contact_birth_support',1,8,integer=True)
     for key,low,high in (('contact_max_cues',2,64),('contact_max_hidden',0,8),('contact_max_people',2,4)):
         _number(identity[key],'sapiensid.identities.'+key,low,high,integer=True)
     from .pose_anchor_rules import validate as validate_anchor_rules

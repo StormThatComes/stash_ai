@@ -26,7 +26,8 @@ def measure(baseline, predicted, target_ids, outside, groups):
     # Explicit new-outsider limits still count these attachments without exception.
     recovered_target_attachments = sum(destinations.get(person, 0) for oid, person in rows
         if person is not None and oid not in target_ids and baseline.get(oid) is None)
-    return dict(total=len(baseline), assigned=assigned, unassigned=len(baseline)-assigned,
+    fragments=sum(max(0,len(set(g['resulting_identities'])-{None})-1) for g in groups)
+    return dict(goal_fragments=fragments,total=len(baseline), assigned=assigned, unassigned=len(baseline)-assigned,
                 gained=gained, lost=lost, recovered_target_attachments=recovered_target_attachments)
 
 

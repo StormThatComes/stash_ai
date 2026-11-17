@@ -68,7 +68,7 @@ _GROUPS = (
      'provisional=cross_scene_provisional min_merge_support cooccurrence_merge_threshold'),
 
     ('matching.body.identities', 'sapiensid.identities',
-     'enabled contact_max_cues contact_max_hidden contact_max_people tracklet_matching body_first_matching extended_track_graph turn_recovery turn_similarity_discount endpoint_matching match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus scene_bonus_mode ambiguity_margin min_support attach_min_support '
+     'enabled correct_contact_face_links defer_contact_births contact_birth_support mixed_mask_score_penalty contact_max_cues contact_max_hidden contact_max_people tracklet_matching body_first_matching extended_track_graph turn_recovery turn_similarity_discount endpoint_matching match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus scene_bonus_mode ambiguity_margin min_support attach_min_support '
      'min_appearance_distance'),
     ('matching.body.anchors', 'sapiensid.identities',
      'min_keypoints=anchor_min_keypoints min_person_pixels=anchor_min_person_pixels '

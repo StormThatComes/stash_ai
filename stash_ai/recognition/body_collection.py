@@ -143,6 +143,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measured['overlap_peer_observation'] = identifier(scan, cue, peer, expected)
         ambiguous=associated is None and any(index in candidates for candidates in choices)
         refinement = person.get('pose_refinement', {})
+        measured['embedding_foreground']='masked' if refinement.get('encoder_mask') else 'full'
         separated = refinement.get('status') in ('refined','masked') and refinement.get('separated')
         if separated and (ambiguous or reason == 'person_overlap'):
             measured['query_only_reason'] = 'unassigned_face' if ambiguous else 'separated_overlap'
