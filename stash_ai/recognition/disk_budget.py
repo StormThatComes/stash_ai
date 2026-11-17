@@ -17,6 +17,17 @@ else:
     _windows_volume = None
 
 
+def _retry_access_denied(read, *args):
+    # Windows can temporarily deny reads while a peer removes its scratch
+    # directory. Retry that read locally and propagate a lasting denial.
+    for delay in (0.01, 0.05, 0.2):
+        try:
+            return read(*args)
+        except PermissionError:
+            time.sleep(delay)
+    return read(*args)
+
+
 def _device(path, info, parent_device=None):
     if _windows_volume is None:
         return info.st_dev
@@ -36,17 +47,32 @@ _active = ContextVar('recognition_disk_budget',default=None)
 
 def _volume_space(path, device=None):
     """A peer may remove its scratch tree between stat and disk_usage."""
+    def measure():
+        nonlocal device
+        current = _device(path, path.stat())
+        if device is not None and current != device:
+            raise OSError(errno.ENODEV, f'Recognition disk budget volume {device} is unavailable', str(path))
+        device = current
+        return device, dict(path=str(path), free=shutil.disk_usage(path).free)
+
     while True:
         try:
-            current = _device(path, path.stat())
-            if device is not None and current != device:
-                raise OSError(errno.ENODEV, f'Recognition disk budget volume {device} is unavailable', str(path))
-            device = current
-            return device, dict(path=str(path), free=shutil.disk_usage(path).free)
+            return _retry_access_denied(measure)
         except (FileNotFoundError, NotADirectoryError):
             if path == path.parent:
                 raise
             path = path.parent
+
+
+def _entry_metadata(path, parent_device):
+    info = path.lstat()
+    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+        return None
+    device = _device(path, info, parent_device)
+    if _is_reparse_point(info):
+        # Use the target's file index with its volume when deduplicating.
+        info = path.stat()
+    return device, info
 
 
 class Budget:
@@ -87,38 +113,34 @@ class Budget:
         while pending:
             item, parent_device = pending.pop()
             try:
-                info = item.lstat()
-                if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
-                    continue
-                dev = _device(item, info, parent_device)
-                if _is_reparse_point(info):
-                    # The volume belongs to the target of a junction, so use
-                    # its file index as well when deduplicating the walk.
-                    info = item.stat()
+                entry = _retry_access_denied(_entry_metadata, item, parent_device)
             except (FileNotFoundError, NotADirectoryError):
                 continue
+            if entry is None:
+                continue
+            dev, info = entry
             # A partial Windows stat may omit the file index as well as st_dev.
             # Distinct anonymous files must each be charged against the quota.
             key = (dev, info.st_ino or os.path.normcase(os.path.realpath(item)))
             if key in seen:
                 continue
-            seen.add(key)
             if stat.S_ISDIR(info.st_mode):
-                visited.add(item)
                 stamp = (key, info.st_mtime_ns, info.st_ctime_ns)
                 cached = self.directories.get(item)
                 if cached is None or cached[0] != stamp or time.monotonic() - cached[2] >= 5:
                     try:
-                        children = tuple(item.iterdir())
-                    except FileNotFoundError:
+                        children = _retry_access_denied(lambda: tuple(item.iterdir()))
+                    except (FileNotFoundError, NotADirectoryError):
                         continue
                     cached = self.directories[item] = stamp, children, time.monotonic()
+                visited.add(item)
                 pending.extend((child, dev) for child in cached[1])
             elif stat.S_ISREG(info.st_mode):
                 row = volumes.setdefault(dev, dict(path=str(item), used=0))
                 row['used'] += info.st_size
                 if item in reservations:
                     counted_sizes[item] = info.st_size
+            seen.add(key)
         for directory in self.directories.keys() - visited:
             del self.directories[directory]
         device, target_space = _volume_space(Path(path or parent))
