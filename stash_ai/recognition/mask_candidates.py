@@ -171,6 +171,28 @@ def _regions(indices, xy, distance):
     return len(groups)
 
 
+TORSO_REGIONS = {'missing_hip_region': (11, 12), 'missing_shoulder_region': (5, 6)}
+
+
+def regional_seeds(points, indices, temporal):
+    ordered = list(spread_indices(points, indices, len(indices)))
+    if len(ordered) < 2:
+        return np.asarray(ordered, dtype=np.intp)
+    opposite = (5, 6) if ordered[0] in (11, 12) else (11, 12)
+    second = next((k for k in ordered if k in opposite), None)
+    if second is not None:
+        ordered.remove(second)
+        ordered.insert(1, second)
+    # A current, locally corroborated limb/face can be an extra prompt after
+    # the initial torso span. Keep the user's existing per-attempt budget.
+    for k, _ in temporal:
+        if k in ordered[2:] and k not in (5, 6, 11, 12):
+            ordered.remove(k)
+            ordered.insert(2, k)
+            break
+    return np.asarray(ordered, dtype=np.intp)
+
+
 def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points,
                 reliable, evidence, record, settings, size, limbs, observe=None):
     box = bounds[i]
@@ -178,6 +200,15 @@ def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points
     clean, crop, reason = check_mask(raw, score, positive, foreign, box, settings, size,
                                      observe=observe, own=evidence[i], limbs=limbs, edits=edits)
     target = raw if clean is None else clean
+    temporal = {k for k, _ in record.get('temporal_prompts', ())}
+    if (not peers and settings.get('recover_prompt_points') and
+            reason in (None, 'missing_prompt_support')):
+        support = set(record.get('support_indices', ())) | (temporal & set(indices))
+        for missing, group in TORSO_REGIONS.items():
+            witnesses = [k for k in group if k in support]
+            if witnesses and not inside(target, points[i, witnesses]).any():
+                reason = missing
+                break
     if reason is None:
         holdout = [k for k in record.get('support_indices', ()) if k not in indices]
         if holdout and not inside(clean, points[i, holdout]).any():
@@ -185,7 +216,7 @@ def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points
         outside = clean.sum() != clean[box[1]:box[3], box[0]:box[2]].sum()
         sparse = (record.get('prompt_minimum', settings['min_prompt_points']) < settings['min_prompt_points']
                   or any(k in (7,8,13,14) for k in indices)
-                  or 'face_prompt' in record or 'temporal_prompts' in record)
+                  or 'face_prompt' in record or any(k in temporal for k in indices))
         # A plausible alternative can stay inside the detector box while following
         # only one side of the skeleton into a contacting partner.
         body = [k for k in reliable if k >= 5]
@@ -265,7 +296,16 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 attempt = record.get('mask_attempts', 0) + 1
                 count = min(settings['max_prompt_points'], record.get('prompt_minimum', minimum) + attempt - 1)
                 indices = available[:count]
-                if adaptive and attempt > 1 and record.get('reason') in (
+                missing_region = TORSO_REGIONS.get(record.get('reason'))
+                if attempt > 1 and missing_region:
+                    # Try the previously unused side of the omitted region first.
+                    regional = [k for k in available if k in missing_region]
+                    regional.sort(key=lambda k: k in record['prompt_indices'])
+                    if regional:
+                        target = regional[0]
+                        indices = np.asarray(([target] + [k for k in available if k != target])[:count],
+                                             dtype=np.intp)
+                elif adaptive and attempt > 1 and record.get('reason') in (
                         'missing_prompt_support', 'foreign_core_in_mask', 'missing_independent_support'):
                     unused = [k for k in available if k not in record['prompt_indices']]
                     kept = [k for k in available if k in record['prompt_indices']]

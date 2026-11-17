@@ -39,6 +39,38 @@ def stages(detail):
     return result
 
 
+def pose_landmarks(geometry):
+    """Explain the selected body's two PMPose passes using only retained evidence."""
+    from .pose_anchor_rules import POINTS
+    body = next((shape['geometry'] for shape in geometry.get('shapes', ())
+                 if shape['kind'] == 'body' and shape['selected']), {})
+    record = body.get('pose_refinement', {})
+    first = record.get('first_pass_pixels', ())
+    if len(first) != len(POINTS):
+        return []
+    final = body.get('keypoints', ())
+    temporal = dict(record.get('temporal_prompts', ()))
+    prompts = record.get('prompt_indices', ())
+    exclusions = record.get('point_exclusions', {})
+    def position(xy):
+        if len(xy) != 2 or min(xy) < 0:
+            return 'Missing'
+        return f'({xy[0]:.0f}, {xy[1]:.0f})'
+    rows = []
+    for k, name in enumerate(POINTS):
+        gates = ', '.join(gate for gate, bits in exclusions.items() if bits & (1 << k))
+        hint = 'Unused'
+        if k in temporal:
+            source = f"cue {record['temporal_source_cue']}"
+            hint = ('SAM prompt' if k in prompts else 'Candidate') + f' from {source} {position(temporal[k])}'
+        elif k in prompts:
+            source = 'face' if record.get('face_prompt', [None])[0] == k else 'pose'
+            hint = f'Current {source} prompt'
+        rows.append((name, position(first[k]), gates or 'Passed', hint,
+                     position(final[k]) if k < len(final) else 'Unknown'))
+    return rows
+
+
 def contribution(detail):
     trace=detail['trace']
     lines=['Recorded membership: '+trace['role']+'. Membership alone does not prove reference-bank use.']

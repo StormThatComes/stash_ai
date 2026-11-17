@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from . import prompt_recovery
-from .mask_candidates import check_mask, inside, select_masks, spread_indices
+from .mask_candidates import check_mask, inside, regional_seeds, select_masks, spread_indices
 from .profiling import pipeline_stage, pipeline_timing
 
 CORE = (0, 1, 2, 3, 4, 5, 6, 11, 12)  # Head/torso, not the suspect wrists/ankles.
@@ -81,15 +81,18 @@ class RefinedPMPose:
         recovery = settings.get('recover_prompt_points', False)
         from .temporal_prompts import capture, borrow
         previous = self.previous_cue
-        self.previous_cue = capture(image,bounds,points,cores) if recovery else None
+        self.previous_cue = None
         if recovery:
             valid, tests = prompt_recovery.eligible(points, scores, probabilities, bounds, settings)
+            self.previous_cue = capture(image, bounds, points, valid)
             faces = prompt_recovery.assigned_faces(prompt_recovery.faces_for(image), bounds, points, valid)
         jobs = []
         for i, box in enumerate(bounds):
             if settings['mode'] == 'overlap' and not any(
                     overlaps(box, other, settings['overlap_threshold']) for j, other in enumerate(bounds) if i != j):
                 records[i]['reason'] = 'no_overlap'
+                if recovery:
+                    prompt_recovery.record_points(records[i], points[i], tests, i, cores[i], cores[i])
                 continue
             foreign = np.concatenate([points[j, indices] for j, indices in enumerate(cores) if j != i], axis=0) if len(bounds)>1 else np.empty((0, 2))
             indices = cores[i]
@@ -101,24 +104,30 @@ class RefinedPMPose:
             if recovery:
                 counts = {name: int((~passed[i, CORE]).sum()) for name, passed in tests.items()}
                 counts['near_peer'] = len(cores[i]) - len(indices)
-                records[i]['prompt_rejections'] = counts
+                record = records[i]
+                record['prompt_rejections'] = counts
+                prompt_recovery.record_points(record, points[i], tests, i, cores[i], indices)
                 indices, minimum = prompt_recovery.recover(i, indices, points, valid, scores,
-                    probabilities, bounds, faces.get(i), foreign, settings, records[i])
-                indices = borrow(previous,self.previous_cue,i,indices,settings['min_prompt_points'],records[i])
+                    probabilities, bounds, faces.get(i), foreign, settings, record)
+                local = (prompt_recovery.local_candidates(points, scores, tests, valid, i)
+                         if previous and self.previous_cue else {})
+                indices = borrow(previous, self.previous_cue, i, indices, settings['min_prompt_points'],
+                                 record, local=local)
                 if 'temporal_prompts' in records[i]:
                     minimum = settings['min_prompt_points']
                 records[i]['prompt_minimum'] = minimum
-                # On contact prioritize distinct torso/head regions over adjacent facial points.
-                if len(indices) >= minimum and any(j != i and overlaps(box, b, settings['overlap_threshold'])
-                                                   for j, b in enumerate(bounds)):
-                    xy = prompt_recovery.prompt_points(points, records)[i]
-                    indices = spread_indices(xy, indices, len(indices), initial=1)
-                records[i]['support_indices'] = [int(k) for k in cores[i] if k in indices]
+                record['support_indices'] = [int(k) for k in cores[i] if k in indices]
             if len(indices) >= minimum:
                 limit = len(indices) if settings.get('adaptive_decoder_retries') else settings['max_prompt_points']
-                geometry = prompt_recovery.prompt_points(points, records)[i] if recovery else points[i]
-                indices = spread_indices(geometry, indices, limit,
-                                         initial=minimum)
+                if recovery:
+                    xy = prompt_recovery.prompt_points(points, records)[i]
+                    if any(j != i and overlaps(box, b, settings['overlap_threshold'])
+                           for j, b in enumerate(bounds)):
+                        indices = spread_indices(xy, indices, limit)
+                    else:
+                        indices = regional_seeds(xy, indices, record.get('temporal_prompts', ()))[:limit]
+                else:
+                    indices = spread_indices(points[i], indices, limit, initial=minimum)
                 jobs.append((i, indices, foreign))
         return result, records, cores, jobs
 
@@ -197,13 +206,16 @@ class RefinedPMPose:
             old = records[i]['detector_bounds']
             tolerance = max(3., .15 * math.hypot(old[2]-old[0], old[3]-old[1]))
             keep &= np.linalg.norm(new_points[offset, indices] - records[i].get('prompt_points', original[0][i, indices]), axis=1) <= tolerance
-            if keep.sum() < records[i].get('prompt_minimum', self.settings['min_prompt_points']):
+            temporal = {k for k, _ in records[i].get('temporal_prompts', ())}
+            used_temporal = [j for j, k in enumerate(indices) if k in temporal]
+            if (keep.sum() < records[i].get('prompt_minimum', self.settings['min_prompt_points'])
+                    or not keep[used_temporal].all()):
                 record = records[i]
                 record['reason'] = 'second_pass_core_drift'
                 # The first pose and original crop survive drift. For neighbouring
                 # boxes, reuse SAM only when its torso ownership was established.
                 has_neighbours = 'negative_points' in record
-                if 'temporal_prompts' not in record and (not has_neighbours or record['separated']):
+                if not used_temporal and (not has_neighbours or record['separated']):
                     retain_quality_mask(record, mask, old)
                 continue
             from .limb_ownership import fuse

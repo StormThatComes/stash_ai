@@ -191,14 +191,32 @@ pose:
 `SAM-pose2seg` is the pose-guided segmenter from BMPv2, built on SAM2.1. It is
 not a new pose estimator and does not replace D-FINE. The first PMPose pass supplies reliable head, shoulder and hip landmarks.
 SAM receives the full RGB cue and starts with `min_prompt_points` own points.
-The initial set contains the most visible points. Each retry prioritizes
-unrepresented body regions and distance from the selected points. Points must pass the presence,
-localization and visibility gates and be distinct from another person's core.
+With `pose.refinement.recover_prompt_points` enabled, the first attempt for
+an isolated person spans the available regions. A hip complements a head or
+shoulder seed when the prompt budget permits. A mask missing all reliable hips or all reliable shoulders is
+rejected. A retry targets the omitted region within the existing prompt and
+decoder budgets. Exhaustion preserves the first-pass pose and records the
+rejection without using the partial mask for body quality.
 
-After mask rejection or shared pixels with a neighbour, SAM retries that person
-with one more own point, up to `max_prompt_points` or the number available.
-Setting both limits to the same value makes one attempt. With limits of 1 and 2,
-an uncontested mask that passes validation needs only the first point.
+Recovery can use one immediately preceding VTT cue from the same continuous
+shot when the boxes and a shared torso landmark establish a unique person.
+A missing shoulder or hip region can trigger recovery even with enough face
+points. For elbows and knees, a current local prediction must agree with the
+preceding cue relative to the current shoulder or hip. Wrists and ankles also
+require the same-side elbow or knee and its root. Face points require local
+head support. Current crop, presence and flip gates still apply to those mobile
+points. Only first-pass measurements are carried into the next cue. Every
+temporal prompt actually sent to SAM must be rediscovered by masked PMPose
+before the result can be used.
+
+In Inspect Scene, select a body and open **Decision details → Pose landmarks**
+to see the first-pass source pixel, failed prompt gates, selected SAM input
+and final point for each COCO17 landmark. This requires a fresh recognition
+run with prompt recovery enabled. The detection audit stores the same data
+under `pose_refinement`. The `point_exclusions` field uses bit `1 << COCO_index` for
+each failed gate. A temporal candidate was sent on the reported attempt only
+if its index also appears in `prompt_indices`.
+
 Each overlapping neighbour can independently supply up to
 `max_negative_prompt_points_per_neighbor` exclusion points (default 1, 0 disables).
 Foreign-core validation still checks all reliable foreign core points.

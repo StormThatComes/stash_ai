@@ -138,8 +138,8 @@ pose:
     adaptive_decoder_retries: true
     # Try up to two ownership-guided SAM retries per rejected person using the same image features.
     recover_prompt_points: true
-    # Recover sparse SAM prompts from distinct limbs, an associated face, a strong joint or a verified torso in
-    # the preceding VTT cue.
+    # Use regional SAM seeds and recover missing regions from current landmarks and one verified adjacent cue.
+    # Mobile joints require a current local prediction.
     min_prompt_points: 2
     # Reliable head/torso points required for the first SAM attempt. Range: 1..8.
     max_prompt_points: 3
