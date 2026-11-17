@@ -25,7 +25,8 @@ CASES = ('face', 'query', 'disjoint', 'missing_body', 'quality', 'body_modes')
 def fixture(root, case):
     root.mkdir(parents=True, exist_ok=True)
     path = root/'config.yml'
-    path.write_text(yaml.safe_dump(dict(version=1,storage=dict(output_directory=str(root.parent)),recognition=dict(match_threshold=.99),
+    # Historical sampler benchmark intentionally pits conflicting thresholds against labelled goals.
+    path.write_text(yaml.safe_dump(dict(version=1,execution=dict(solver_strict=False),storage=dict(output_directory=str(root.parent)),recognition=dict(match_threshold=.99),
         clustering=dict(cohesion_threshold=.85,max_anchor_pose_deviation=.2,anchor_view_matching=True))))
     config = load(path, database=root/'faces.sqlite3')
     data = plain(config.data)

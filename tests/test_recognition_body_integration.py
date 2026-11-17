@@ -16,6 +16,8 @@ from tests.test_recognition_body_identity import configuration,scene
 
 def seeded(tmp_path,vectors=None):
     c=configuration(tmp_path);c.data['sapiensid']['global_matching']['enabled']=True
+    # Keep historical body-gate experiments isolated from strict baseline repair.
+    c.data['execution']['solver_strict'] = False
     vectors=vectors or [[1,0],[.88,math.sqrt(1-.88**2)],[0,-1]]
     selected=[];ids=[];people=[]
     with FaceDatabase(c.database) as state:

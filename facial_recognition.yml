@@ -661,7 +661,10 @@ execution:
       # Budget in MB for retained body/hybrid matching plans and decision proofs. Range: >= 9.5367431640625e-07
       # MB; fractions allowed.
   solver:
-    # Solver strategy comparison on labelled validation scenes.
+    # Solver configuration policy and strategy comparison on labelled validation scenes.
+    strict: true
+    # Require solver recommendations to pass all active config checks, including tuning advice. Override with
+    # --no-strict.
     compare_scene_strategies: true
     # Compare scene matching strategies when solving with a validation manifest and body identities enabled.
   portraits:

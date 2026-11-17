@@ -189,6 +189,23 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
     settings = replace(config,database=database or config.database)
     changes = {item['parameter']:item['proposed'] for item in result['best_result']['changes']}
     winner = patched(settings,changes)
+    policy = None
+    if result.get('config_policy', {}).get('mode') == 'strict':
+        from .solver_config_policy import StrictPolicy
+        policy = StrictPolicy(settings)
+        policy.verify(winner)
+    skipped = {}
+    def admissible(variants):
+        if policy is None:
+            return variants
+        accepted = {}
+        for name, variant in variants.items():
+            checks, missing = policy.check(variant)
+            if checks.issues or missing:
+                skipped[name] = sorted(checks.issues.keys() | missing)
+            else:
+                accepted[name] = variant
+        return accepted
     if not isinstance(series,list) or len(series)>3:
         raise ValueError('At most three validation cue series are supported.')
     with closing(_open_readonly(settings.database)) as source:
@@ -231,12 +248,14 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                         metrics={'baseline/joint':measured,'winner/joint':measured},omissions=[],incremental={},
                         scene_strategies={},omission_status='no_bound_observations')
         from .scene_strategy_validation import variants, strategy_summary, omission_damage
-        strategies = variants(winner) if compare_strategies else {}
+        strategies = admissible(variants(winner)) if compare_strategies else {}
         selected = {}
         trained = result.get('search',{}).get('scene_finalists',{})
-        if strategies and trained:
+        if compare_strategies and trained:
             for name,patch in trained.items():
                 strategies[name] = patched(settings,patch)
+                if policy:
+                    policy.verify(strategies[name])
                 selected[name] = strategies[name]
         elif strategies:
             if result.get('groups'):
@@ -245,7 +264,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                 order = sorted(strategies, key=lambda name:objective(training_trials[name]['goal_result']), reverse=True)
             else:
                 # Direct evaluation without labelled training goals uses a fixed paired comparison.
-                order = ['paths-only-evidence', 'tracks-1-evidence']
+                order = [k for k in ('paths-only-evidence', 'tracks-1-evidence') if k in strategies]
             from .config import digest
             distinct = {}
             for name in order:
@@ -256,10 +275,11 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             selected = {name:strategies[name] for name in distinct.values()}
         if compare_strategies:
             from .scene_strategy_validation import holdout_ablations
-            controls = holdout_ablations(winner)
+            controls = admissible(holdout_ablations(winner))
             strategies.update(controls)
             for name in ('order-0-extended-1-turns-1','order-1-extended-1-turns-1'):
-                selected[name] = controls[name]
+                if name in controls:
+                    selected[name] = controls[name]
         stress_variants = {'winner':winner, **selected}
         tested = ('baseline', *stress_variants)
         full = evaluate(settings,replay_labels,variants={'winner':winner,**strategies},variant_started=announce,**options)
@@ -369,7 +389,7 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
                                    excluded_labels=len(excluded), damage=damage, **delta, reference=before, omitted=after))
     return dict(verdict=holdout_verdict(metrics, contamination, incremental, stress, require_slices=compare_strategies or any(
                 k.startswith('sapiensid.identities.scene_') or k.endswith(('tracklet_matching','endpoint_matching','body_first_matching')) for k in changes)),
-                scene_strategies=strategy_results, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
+                scene_strategies=strategy_results, skipped_config_rules=skipped, stress_strategies=list(selected), selected_trial=result.get('selected_trial'), scenes=scenes, metrics=metrics, detection=detections, association_stress=contamination, omissions=stress, incremental=incremental,
                 omission_status='tested' if stress else 'no_series_identified', labelled=len(labels))
 
 

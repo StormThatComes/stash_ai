@@ -57,7 +57,7 @@ def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path
         changes = state.connection.total_changes
         result = replay(settings, {}, source=state.connection, scope='scope')
         assert result['selection'] == ['7'] and 'baseline' in result['trials']
-        assert solve(settings, goals, state.connection, maximum=1)['search']['executed'] == 1
+        assert solve(settings, goals, state.connection, maximum=2)['search']['executed'] == 2
         assert state.connection.total_changes == changes
 
 

@@ -178,7 +178,8 @@ def execute(args, config):
                 progress = display
             with report_phase('Solve merge goals', quiet=True, interrupted=lambda: result.get('interrupted')):
                 result.update(solve(config, result, db, maximum=args.max_trials,
-                                     progress=progress if args.progress_style != 'off' else None,
+                                     strict=getattr(args, 'strict', None),
+                                    progress=progress if args.progress_style != 'off' else None,
                                     checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                      compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
@@ -227,7 +228,7 @@ def execute(args, config):
             if paths:
                 text += '\n  ' + ' · '.join(paths)
         print(text, file=sys.stderr, flush=True)
-    return 130 if result.get('interrupted') else 2 if result.get('status') == 'no_compatible_scans' else 0
+    return 130 if result.get('interrupted') else 2 if result.get('status') in ('no_compatible_scans', 'strict_config_blocked', 'strict_config_budget') else 0
 
 
 @evaluation_scope

@@ -131,8 +131,38 @@ beats baseline, the current configuration is explicitly selected as unchanged.
 
 The default budget is **500 completed replays, including baseline**. It is a
 ceiling, not a target or an exhaustive Cartesian grid. `--max-trials 1` evaluates
-only baseline. The separate `recognition tune` Cartesian-grid command retains its
+only baseline when the input already satisfies the active policy. A strict repair needs
+at least two slots for the input comparison and the repaired baseline. The separate `recognition tune` Cartesian-grid command retains its
 own default and limit.
+
+### Strict solver configuration
+
+Solver search defaults to `execution.solver.strict: true` (v1 `execution.solver_strict`).
+Every recommended configuration must pass all active `recognition check-config`
+rules, including tuning advice and the default 0.02 score gap. This applies to
+both full YAML and diffs. The merge goal policy is controlled separately.
+
+When the input needs repair, the solver tries bounded alternatives using the
+existing evidence, keeps active input routes and compares the original assignments
+against the eligible candidates. The original replay counts toward `--max-trials`
+and is available in `simulation.input_control`. The trial named `baseline` is the
+first eligible repair. Additional repairs compete on the same recognition objectives.
+Static checks run before dispatch and use no replay slots. The input file stays
+read-only and exported changes are relative to that file.
+
+The report's `config_policy` records the input findings, repair and rejected rules.
+A repair outside the retained evidence contract returns exit code 2 with the
+affected YAML paths and suggestions. The same exit code reports a one-trial budget
+that cannot compare a repair. A completed search may still have unmet merge goals.
+
+To use the previous unconstrained search for a single run:
+
+```bash
+python stash_ai.py recognition report-merge --performer-set 123,456 --solve --no-strict
+```
+
+Set `execution.solver.strict: false` to persist that choice for one profile.
+Use `--strict` to override that profile for a single invocation.
 
 With `sapiensid.enabled: true`, the search tunes all four matching gates:
 `sapiensid.matching.face_floor`, `person_threshold`, `ambiguity_margin`, and
