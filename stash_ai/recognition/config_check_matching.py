@@ -1,4 +1,4 @@
-"""Effective gates, route capacity and the adjacent-cue solver constraint."""
+"""Effective matching thresholds and the routes available under those thresholds."""
 from math import isclose
 
 FACE = 'matching.face.'
@@ -10,12 +10,73 @@ GLOBAL = 'matching.body.global.'
 HYBRID = 'matching.hybrid.'
 
 
+def _face_routes(c):
+    support = FACE + 'anchors.min_identity_support'
+    c.scene_capacity('local-face-birth-cue-cap', (support,), c.value(support), 'Confirming a new face core locally')
+    provisional = CROSS + 'provisional'
+    c.route('provisional-face-birth', (provisional, support), c.value(support) >= 2,
+            'Cross-scene pooling uses groups withheld for insufficient local support. '
+            'At one vote a singleton can already confirm locally.',
+            'Review birth support if cross-scene provisional pooling is needed.',
+            enabled=c.value(provisional), available=c.value(support), required=2)
+    bonus, local = SCENE + 'match_bonus', SCENE + 'min_support'
+    context = VIEW + 'context_view_enrichment'
+    c.route('context-view-source', (context, bonus), c.value(bonus) > 0,
+            'Context View enrichment consumes same-scene attachments produced by a positive face bonus.',
+            'Use a positive face bonus if this source is needed.', enabled=c.value(context))
+    if c.value(bonus):
+        c.scene_capacity('face-context-cue-cap', (local,), c.value(local), 'Establishing a strict same-scene core')
+    if c.value(VIEW + 'anchor_view_matching'):
+        support = VIEW + 'min_support'
+        c.scene_capacity('local-view-cue-cap', (support, local), max(c.value(support), c.value(local)),
+                         'Building a strict anchor View')
+    cap = FACE + 'samples.references.max_samples_per_person'
+    if c.value(VIEW + 'prototypes_enabled'):
+        support = VIEW + 'attach_min_support'
+        c.route('early-view-core-repair', (support, cap), c.value(cap) >= c.value(support),
+                'Early auxiliary View repair counts selected strict samples from the core.',
+                'Increase the face reference bank or reduce View attachment support for this repair.',
+                available=c.value(cap), required=c.value(support))
+    if c.value('body.enabled'):
+        support = HYBRID + 'min_support'
+        c.route('hybrid-selected-bank-support', (cap, support), c.value(cap) >= c.value(support),
+                'Without a supported body mode, hybrid support is counted from the selected reference bank. '
+                'Supported modes can count independent witnesses beyond that bank.',
+                'Increase the bank size or review hybrid support for the selected-bank fallback.',
+                available=c.value(cap), required=c.value(support))
+
+
+def _body_routes(c, match, cohesion):
+    for key, label in (('min_support', 'Confirming a local body core'),
+                       ('attach_min_support', 'Building an independent face-linked body bank')):
+        c.scene_capacity('local-body-cue-cap-' + key, (BODY + key,), c.value(BODY + key), label)
+    bonus_path = BODY + 'scene_match_bonus'
+    paths = (match, cohesion, bonus_path)
+    bonus = c.value(bonus_path)
+    if bonus is None:
+        inherited = SCENE + 'match_bonus'
+        paths += (inherited,)
+        bonus = c.value(inherited)
+    high = c.value(match)
+    low = max(high - bonus, c.value(cohesion))
+    c.route('body-scene-bonus', paths, low < high,
+            'The roster bonus discounts the mean. Cohesion still applies to each witness.',
+            'Keep local body cohesion below the match cutoff to let the bonus admit a weaker mean.',
+            enabled=bonus > 0, lower=low, upper=high, gap=max(0., high-low))
+    if bonus:
+        required = (BODY + 'attach_min_support', SCENE + 'min_support')
+        c.scene_capacity('body-roster-cue-cap', required, 1 + max(2, *(c.value(p) for p in required)),
+                         'A roster query and its independent witnesses in other shots')
+
+
 def solver_constraints(c):
     """Recognition policy enforced before replay. Keep scan and ranking diagnostics separate."""
     from .body_identity import enabled
+    _face_routes(c)
     if not enabled(c.config):
         return
     match, track, cohesion = (BODY + key for key in ('match_threshold', 'track_similarity_threshold', 'cohesion_threshold'))
+    _body_routes(c, match, cohesion)
     lower = c.value(track)
     paths = (track, match)
     if lower is None:
@@ -73,28 +134,11 @@ def _views(c):
         attach = VIEW + 'attach_min_support'
         c.effective_max('pose-recovery-view-support', (attach,), (c.value(attach), 2),
                         'Uncertain-pose recovery needs at least two query witnesses.')
-        other = SCENE + 'min_support'
-        c.scene_capacity('local-view-cue-cap', (support, other), max(c.value(support), c.value(other)),
-                         'Building a strict anchor View')
-    if c.value(VIEW + 'context_view_enrichment'):
-        bonus = SCENE + 'match_bonus'
-        c.add('context-view-source', (VIEW + 'context_view_enrichment', bonus),
-              'warning' if c.value(bonus) == 0 else 'ok',
-              'Context View enrichment consumes same-scene attachments produced by a positive face bonus.',
-              'Use a positive face bonus if this source is needed.')
-    if c.value(VIEW + 'prototypes_enabled'):
-        support, cap = VIEW + 'attach_min_support', FACE + 'samples.references.max_samples_per_person'
-        c.covers('early-view-core-repair', (support, cap), c.value(cap), c.value(support),
-                 'Early auxiliary View repair needs this many selected strict samples from the core.',
-                 'Increase the face reference bank or reduce View attachment support for this repair.')
 
 
 def _body(c):
     match, cohesion = BODY + 'match_threshold', BODY + 'cohesion_threshold'
     _mean_and_minimum(c, 'local-body-mean-cohesion', match, cohesion)
-    for key, label in (('min_support', 'Confirming a local body core'),
-                       ('attach_min_support', 'Building an independent face-linked body bank')):
-        c.scene_capacity('local-body-cue-cap-' + key, (BODY + key,), c.value(BODY + key), label)
     _rival_headroom(c, 'local-body', (match,), (BODY + 'ambiguity_margin',))
     track_path = BODY + 'track_similarity_threshold'
     track = c.value(track_path)
@@ -120,19 +164,6 @@ def _body(c):
         c.detail('body-turn-discount-cap', (*track_paths, discount),
                  'The effective discount ends at a zero similarity floor.', effective=track-floor)
 
-    bonus_path = BODY + 'scene_match_bonus'
-    bonus_paths = (bonus_path,)
-    bonus = c.value(bonus_path)
-    if bonus is None:
-        bonus_paths += (SCENE + 'match_bonus',)
-        bonus = c.value(SCENE + 'match_bonus')
-    if bonus:
-        high, low = c.value(match), c.value(cohesion)
-        c.interval('body-scene-bonus', (match, cohesion, *bonus_paths), high, max(high - bonus, low),
-                   'The roster bonus discounts the mean. Cohesion still applies to each witness.')
-        required = (BODY + 'attach_min_support', SCENE + 'min_support')
-        c.scene_capacity('body-roster-cue-cap', required, 1 + max(2, *(c.value(p) for p in required)),
-                         'A roster query and its independent witnesses in other shots')
     if c.value(GLOBAL + 'enabled'):
         _mean_and_minimum(c, 'global-body-mean-cohesion', GLOBAL + 'match_threshold', GLOBAL + 'cohesion_threshold')
         _rival_headroom(c, 'global-body', (GLOBAL + 'match_threshold',), (GLOBAL + 'ambiguity_margin',))
@@ -148,33 +179,25 @@ def _body(c):
 def matching(c):
     match, cohesion = FACE + 'match_threshold', FACE + 'cohesion_threshold'
     _mean_and_minimum(c, 'face-mean-cohesion', match, cohesion)
-    _rival_headroom(c, 'face', (match,), (FACE + 'ambiguity_margin',))
+    margin = FACE + 'ambiguity_margin'
+    c.add('face-ambiguity-margin', (margin,), 'ok' if c.value(margin) > 0 else 'advice',
+          'A zero margin allows tied face scores to pass the ordinary rival test.',
+          'Set a positive margin to require a lead over a competing face identity.')
+    _rival_headroom(c, 'face', (match,), (margin,))
     reflection = CROSS + 'cooccurrence_merge_threshold'
-    c.effective_max('face-reflection', (reflection, match), (c.value(reflection), c.value(match)),
-                    'Co-present face merges apply this cutoff to the weakest cross-pair.')
-    support = FACE + 'anchors.min_identity_support'
-    c.scene_capacity('local-face-birth-cue-cap', (support,), c.value(support), 'Confirming a new face core locally')
-    if c.value(CROSS + 'provisional'):
-        c.covers('provisional-face-birth', (CROSS + 'provisional', support), c.value(support), 2,
-                 'Cross-scene pooling uses groups withheld for insufficient local support. '
-                 'At one vote a singleton can already confirm locally.',
-                 'Review birth support if cross-scene provisional pooling is needed.')
+    c.add('face-reflection', (reflection, match), 'ok' if c.value(reflection) > c.value(match) else 'advice',
+          'Co-present face merges test the weakest cross-pair against the higher cutoff.',
+          'Raise the co-occurrence threshold above the ordinary match cutoff for extra separation.',
+          effective=max(c.value(reflection), c.value(match)))
     bonus = SCENE + 'match_bonus'
     if c.value(bonus):
         for setting in (match, cohesion):
             c.interval('face-same-scene-' + setting.split('.')[-1], (setting, bonus), c.value(setting),
                        max(0., c.value(setting) - c.value(bonus)), 'Local face support discounts this cutoff down to zero.')
-        support = SCENE + 'min_support'
-        c.scene_capacity('face-context-cue-cap', (support,), c.value(support), 'Establishing a strict same-scene core')
     if c.value(VIEW + 'anchor_view_matching') or c.value(VIEW + 'prototypes_enabled'):
         _views(c)
     if c.value('body.enabled'):
         _rival_headroom(c, 'hybrid-body', (HYBRID + 'person_threshold',), (HYBRID + 'ambiguity_margin',))
-        cap, required = FACE + 'samples.references.max_samples_per_person', HYBRID + 'min_support'
-        c.covers('hybrid-selected-bank-support', (cap, required), c.value(cap), c.value(required),
-                 'Without a supported body mode, hybrid support is counted from the selected reference bank. '
-                 'Supported modes can count independent witnesses beyond that bank.',
-                 'Increase the bank size or review hybrid support for the selected-bank fallback.')
         floor = HYBRID + 'face_floor'
         for path, label in ((cohesion, 'weakest face reference'), (match, 'ordinary face mean')):
             c.interval('hybrid-face-' + path.split('.')[-1], (floor, path), c.value(path), c.value(floor),

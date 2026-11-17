@@ -19,7 +19,7 @@ class Checks:
     def value(self, path):
         return get(self.config.data, PUBLIC_PATHS[path])
 
-    def add(self, rule, paths, status, effect, suggestion, *, solver_constraint=False, **measures):
+    def add(self, rule, paths, status, effect, suggestion, *, solver_constraint=False, preserve_input=False, **measures):
         values = {}
         for path in paths:
             if self.config.document_version == 1:
@@ -31,7 +31,8 @@ class Checks:
                     and parts[2] in POINT_FIELDS and self.pose_source.get(parts[1], {}).get(parts[2]) is None):
                 values['pose.point_quality.' + parts[2]] = values[path]
                 values[path] = None
-        self.rows.append(dict(rule=rule, status=status, solver_constraint=solver_constraint, settings=values, measures=measures,
+        self.rows.append(dict(rule=rule, status=status, solver_constraint=solver_constraint or preserve_input,
+                              preserve_input=preserve_input, settings=values, measures=measures,
                               effect=effect, suggestion=suggestion if status != 'ok' else ''))
 
     def detail(self, rule, paths, effect, **measures):
@@ -48,12 +49,20 @@ class Checks:
         self.add(rule, paths, 'warning' if available < required else 'ok', effect, suggestion,
                  available=available, required=required)
 
+    def route(self, rule, paths, reachable, effect, suggestion, *, enabled=True, **measures):
+        """Strict proposals preserve this route when the input can use it."""
+        if enabled:
+            self.add(rule, paths, 'ok' if reachable else 'warning', effect, suggestion,
+                     preserve_input=True, **measures)
+
     def scene_capacity(self, rule, paths, required, description):
         cap = 'execution.scan.max_cues'
-        if self.value(cap):
-            self.covers(rule, (cap, *paths), self.value(cap), required,
-                        f'{description} needs at least {required} sampled cues in one scene.',
-                        'Increase the scan cue limit or review the independent support requirement.')
+        available = self.value(cap)
+        if available:
+            self.route(rule, (cap, *paths), available >= required,
+                       f'{description} needs at least {required} sampled cues in one scene.',
+                       'Increase the scan cue limit or review the independent support requirement.',
+                       available=available, required=required)
 
 
 def run_rules(checks, *, solver_only=False):
@@ -88,6 +97,8 @@ def display(result, *, show_all=False, as_json=False, stream=None):
           f"warnings={counts['warning']}, tuning notes={counts['advice']}, passed={counts['ok']}.", file=stream)
     for row in rows:
         scope = ' [strict solver]' if row['solver_constraint'] else ''
+        if row['preserve_input']:
+            scope = ' [strict solver: preserve input route]'
         print(f"[{row['status'].upper()}]{scope} {row['rule']}  {row['effect']}", file=stream)
         print('  ' + ', '.join(f'{p}={json.dumps(v)}' for p, v in row['settings'].items()), file=stream)
         if row['measures']:

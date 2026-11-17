@@ -69,8 +69,11 @@ least `0.84`, so the mean can drop at most `0.01` below `0.85`.
 Shared quality floors, ranking targets and effective maxima are valid and visible
 with `--all`. `--min-score-gap` sets the diagnostic spacing for adjacent-cue
 body continuity (default 0.02). A zero gap setting still reports an equal or
-reversed cutoff. JSON rows identify matching constraints with
-`solver_constraint`. Only these rules constrain default merge recommendations.
+reversed cutoff. JSON rows mark solver constraints with `solver_constraint`.
+Rows with `preserve_input` compare reachability with the original YAML. A warning
+already present in the input can be inspected while the solver continues.
+Zero face ambiguity margin and a co-presence cutoff at or below the ordinary
+face cutoff generate tuning advice.
 Counts, pixels and sharpness use their own units. A static check describes
 which scores could pass. Use [labelled replay](recognition/evaluation.md) to
 measure changes in actual assignments.
