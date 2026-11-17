@@ -81,7 +81,9 @@ class ScrfdDetector:
         if len(outputs) != 9:
             raise ValueError('SCRFD KPS inference requires exactly nine outputs.')
         detections = []
-        score_threshold = config.data['detection']['score_threshold']
+        score_threshold = config.data['detection'].get('candidate_score_threshold')
+        if score_threshold is None:
+            score_threshold = config.data['detection']['score_threshold']
         for layer, stride in enumerate(cls.STRIDES):
             count = (cls.INPUT_SIZE // stride) ** 2 * cls.ANCHORS
             values = []
@@ -129,12 +131,39 @@ class ScrfdDetector:
                                     config.data['detection']['nms_threshold'])
         return [detections[int(n)] for n in np.asarray(selected).reshape(-1)[:maximum]]
 
-    def detect(self, bgr):
+    def _raw(self, bgr):
         tensor, scale_x, scale_y = self._blob(bgr)
         outputs = self.session.run(self.output_names, {self.input_name: tensor})
         return self.decode(outputs, scale_x=scale_x, scale_y=scale_y, config=self.config)
 
+    def detect(self,bgr):
+        found=self._raw(bgr)
+        threshold=self.config.data['detection'].get('alignment_retry_error',0.)
+        if not threshold:return found
+        from .quality import alignment_measurements
+        from .rotated_faces import duplicate_face
+        result=[]
+        for face in found:
+            error=alignment_measurements(face).get('alignment_error',1.)
+            if error<=threshold:
+                result.append(face);continue
+            x,y,w,h=face.box
+            l,t=max(0,int(x-.25*w)),max(0,int(y-.25*h))
+            r,b=min(bgr.shape[1],math.ceil(x+1.25*w)),min(bgr.shape[0],math.ceil(y+1.25*h))
+            candidates=[]
+            if r>l and b>t:
+                for other in self._raw(bgr[t:b,l:r]):
+                    row=list(other.row);row[0]+=l;row[1]+=t
+                    for k in range(4,14,2):row[k]+=l;row[k+1]+=t
+                    candidate=checked_detection(row)
+                    if duplicate_face(face,candidate):candidates.append(candidate)
+            better=min(candidates,key=lambda f:alignment_measurements(f).get('alignment_error',1.),default=face)
+            result.append(better if alignment_measurements(better).get('alignment_error',1.)<error else face)
+        return result
+
     def detect_many(self,images):
+        if self.config.data['detection'].get('alignment_retry_error',0.):
+            return [self.detect(image) for image in images]
         if len(images) <= 1:
             return [self.detect(image) for image in images]
         if not getattr(self,'dynamic_batch',False):

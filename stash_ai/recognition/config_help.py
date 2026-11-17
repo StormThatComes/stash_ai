@@ -333,3 +333,8 @@ HELP.update({
     'matching.body.identities.contact_max_hidden': 'Maximum one-person hidden layers in a two-person contact. Range: 0..8.',
     'matching.body.identities.contact_max_people': 'Maximum jointly resolved contact roster. Range: 2..4.',
 })
+
+HELP.update({
+ 'face.detector.candidate_score_threshold': 'Optional lower SCRFD candidate floor; detections below score_threshold can query identities but cannot seed face anchors. Null disables. Range: 0..score_threshold.',
+ 'face.detector.alignment_retry_error': 'Retry one local SCRFD crop when normalized five-point alignment error exceeds this value. 0 disables. Range: 0..1.',
+})

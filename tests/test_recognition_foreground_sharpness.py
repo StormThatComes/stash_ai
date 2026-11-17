@@ -143,7 +143,9 @@ def test_device_mask_sharpness_matches_cpu_without_transferring_images(monkeypat
         assert a['sharpness']==pytest.approx(b['sharpness'],rel=1e-5,abs=1e-5)
         assert a['sharpness_pixels']==b['sharpness_pixels']
         assert a['visible_face_fraction']==b['visible_face_fraction']
-    assert copied==[2,4]
+        for key in ('sharpness_normalized','sharpness_contrast','sharpness_noise'):
+            assert a[key]==pytest.approx(b[key],rel=1e-4,abs=1e-4)
+    assert copied==[2,8]  # Only scalar statistics cross the device boundary.
 
 
 @pytest.mark.parametrize('batch_size',[1,2])
