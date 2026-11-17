@@ -213,28 +213,25 @@ def _pack(mask, box, indices, variant, score, edits):
                      box, indices, variant, float(score), edits)
 
 
-def resolve_options(candidates, options, evidence):
-    """Try existing decoder variants for geometrically conflicting local pairs."""
-    conflicts = shared_masks(candidates, evidence)
-    for i in sorted(conflicts):
-        for j in candidates:
-            if i == j or not (options.get(i) or options.get(j)):
-                continue
-            if not shared_masks({i:candidates[i], j:candidates[j]}, evidence):
-                continue
-            for first in [candidates[i], *options.get(i, ())]:
-                for second in [candidates[j], *options.get(j, ())]:
-                    proposal = dict(candidates)
-                    proposal.update({i:first, j:second})
-                    remaining = shared_masks(proposal, evidence)
-                    if remaining < conflicts:
-                        candidates.update({i:first, j:second})
-                        conflicts = remaining
-                        break
-                else:
-                    continue
-                break
-    return conflicts
+def resolve_options(candidates, options, evidence, maximum=256):
+    """Choose the complete bounded group, never a sequence of pairwise winners."""
+    from itertools import product
+    keys = sorted(candidates)
+    domains = [[candidates[i], *options.get(i,())] for i in keys]
+    if math.prod(map(len,domains)) > maximum:
+        return shared_masks(candidates,evidence)
+    best = None
+    selected = None
+    for choices in product(*domains):
+        proposal = dict(zip(keys,choices))
+        conflicts = shared_masks(proposal,evidence)
+        rank = (-len(conflicts),sum(int(c.hits(evidence[i]).sum()) for i,c in proposal.items()),
+                sum(c.quality for c in choices))
+        if best is None or rank > best:
+            best,selected = rank,proposal
+    if selected is not None:
+        candidates.update(selected)
+    return shared_masks(candidates,evidence)
 
 
 def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence, decoder=None, valid=None):
@@ -336,6 +333,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                     # peer moves clear. It is never submitted after this failed retry.
                     continue
                 rejected.discard(i)
+                from .mask_uncertainty import boundary_fraction
+                record['mask_boundary_fraction'] = boundary_fraction(mask)
                 pixels = record['mask_pixels'] = int(mask.sum())
                 if len(bounds) == 1:
                     yield i, box, mask, indices
@@ -362,7 +361,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                             options_by_person.setdefault(i, []).append(alt)
                             packed_bytes += alt.bits.nbytes
             supplied = None
-            conflicts = resolve_options(candidates, options_by_person, evidence) | blocked
+            conflicts = resolve_options(candidates, options_by_person, evidence, settings.get('max_mask_combinations',256)) | blocked
             active = [(i, available, foreign) for i, available, foreign in jobs
                       if i not in blocked and i not in exhausted and (i in rejected or i in conflicts)
                       and ((adaptive and records[i]['mask_attempts'] < settings.get('max_decoder_attempts',3)) or

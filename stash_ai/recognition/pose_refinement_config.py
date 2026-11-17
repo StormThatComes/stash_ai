@@ -11,6 +11,7 @@ LEGACY_CLEANUP = dict(min_island_pixels=4, min_island_fraction=.001,
 def defaults():
     return dict(enabled=False, directory='', mode='all', overlap_threshold=.2,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
+                max_mask_combinations=256, negative_limb_prompts=False, joint_limb_ownership=False, max_limb_length_ratio=3.,
                 max_decoder_attempts=3, limb_peer_distance_fraction=.035, limb_peer_min_pixels=2., limb_contact_reach_ratio=5.,
                 min_recovery_mask_score=None, adaptive_decoder_retries=False, recover_prompt_points=False, min_prompt_points=2, max_prompt_points=3, max_negative_prompt_points_per_neighbor=1, min_mask_score=.5,
                 min_prompt_coverage=1., max_foreign_coverage=0., **LEGACY_CLEANUP,
@@ -25,13 +26,15 @@ def validate(pose):
         raise ValueError(prefix + 'enabled must be boolean.')
     if not settings['enabled']:
         return
-    for key in ('expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries'):
+    for key in ('expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
     if pose['backend'] not in ('pmpose', 'sapiens', 'vitpose_plus_large'):
         raise ValueError(prefix + 'enabled requires a top-down pose backend.')
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')
+    _number(settings['max_mask_combinations'], prefix+'max_mask_combinations', 1, 4096, integer=True)
+    _number(settings['max_limb_length_ratio'], prefix+'max_limb_length_ratio', 1, 10)
     _number(settings['max_decoder_attempts'], prefix+'max_decoder_attempts', 1, 8, integer=True)
     _number(settings['limb_peer_distance_fraction'], prefix+'limb_peer_distance_fraction', .001, .2)
     _number(settings['limb_peer_min_pixels'], prefix+'limb_peer_min_pixels', 0, 32)

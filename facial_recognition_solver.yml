@@ -124,6 +124,14 @@ pose:
     # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
     overlap_threshold: 0.2
     # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
+    max_mask_combinations: 256
+    # Maximum complete mask combinations; exceeding it preserves unresolved conflicts. Range: 1..4096.
+    negative_limb_prompts: false
+    # Include high-confidence foreign limb chains in negative prompts. Experimental.
+    joint_limb_ownership: false
+    # Jointly withhold ambiguous endpoints across contacting people. Experimental.
+    max_limb_length_ratio: 3.0
+    # Maximum distal/proximal limb ratio for resolving rival chains. Range: 1..10.
     max_decoder_attempts: 3
     # Maximum SAM attempts per person, including the first. Range: 1..8.
     limb_peer_distance_fraction: 0.035
