@@ -153,6 +153,29 @@ pose:
     # Required fraction of selected prompts inside the mask. Range: 0..1.
     max_foreign_coverage: 0.0
     # Maximum fraction of other people's reliable head/torso points inside the mask. Range: 0..1.
+    min_island_pixels: 8
+    # Minimum disconnected area in source pixels. Combined with min_island_fraction using the larger floor.
+    # Range: 0..1000000.
+    min_island_fraction: 0.002
+    # Minimum disconnected area as a fraction of all raw mask pixels. A supported wrist or ankle can rescue a
+    # smaller tip. Range: 0..1.
+    max_island_gap_fraction: 0.12
+    # Remove unsupported islands farther from pose-supported mask pixels than this fraction of the detector box
+    # diagonal. 0 disables distance pruning. Range: 0..1.
+    bridge_radius_pixels: 1
+    # Opening radius in source pixels for finding thin bridges. 1 uses a 3x3 square. 0 disables bridge pruning.
+    # Range: 0..8.
+    max_bridge_lobe_fraction: 0.12
+    # Maximum removable lobe plus bridge area relative to the largest opened lobe of the same island. 0 disables
+    # bridge pruning. Range: 0..1.
+    min_limb_path_coverage: 0.75
+    # Minimum fraction of the sampled elbow-to-wrist or knee-to-ankle path on foreground to rescue a tiny tip.
+    # Range: 0..1.
+    min_limb_foreign_distance_pixels: 3.0
+    # Rescue a tiny limb tip only if the nearest reliable foreign core point is farther than this many source
+    # pixels. Range: 0..1000000.
+    min_foreign_island_points: 2
+    # Minimum foreign core points on an island with no own support to discard it. Range: 1..1000.
     expand_boxes: true
     # Union the admitted mask bounds with the original detector box; never shrink.
     max_box_area_ratio: 2.0

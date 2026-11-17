@@ -33,7 +33,8 @@ def _checked_result(image, row, config, points, raw, score):
     details = person['pose_refinement']
     settings = config.data['sapiensid']
     mask, box, _ = check_mask(raw, score, points, (), details['detector_bounds'],
-                              settings['pose']['refinement'], image.size, replay=details.get('component_edits', ()))
+                              settings['pose']['refinement'], image.size, replay=details.get('component_edits', ()),
+                              replay_cuts=details.get('bridge_cuts', ()))
     bounds = person['bounds']
     if (mask is None or int(mask.sum()) != details['mask_pixels'] or
             (bounds != box and details.get('reason') != 'second_pass_core_drift')):

@@ -242,13 +242,35 @@ SAM's mask score. There is no second box NMS that could silently delete a person
 Admission rejects low-quality/empty masks, missing prompt support, masks covering
 another person's reliable head/torso points, or excessive expansion. Defaults
 limit union area to 2x the original area and extension on each side to 0.5x the
-original width/height. Tiny disconnected speckles are removed; substantial
-disconnected hands/feet are retained. The second pose must retain at least the
+original width/height. Cleanup runs before prompt coverage and box expansion.
+The second pose must retain at least the
 configured minimum number of prompt landmarks inside the mask, with adequate
 quality/presence and displacement within 15% of the original box diagonal
 (minimum 3 px). If any admission gate fails, **both the first pose and original
 box are retained**. Model errors, malformed outputs, missing dependencies or
 invalid assets raise errors; they are not treated as successful refinement.
+
+Tune `pose.refinement` on the same cue with `audit-detection --mask-view panels`
+(raw SAM on the left, cleaned on the right) or compare profiles in Tune Detection.
+
+| Artifact | Shipped YAML settings | Effect |
+| --- | --- | --- |
+| Isolated dots | `min_island_pixels: 8`, `min_island_fraction: 0.002` | Keep 8-connected components meeting the larger of the two area floors. The fraction uses the raw foreground area. An eligible wrist/ankle at the end of a supported limb can rescue a smaller tip. |
+| Distant patch | `max_island_gap_fraction: 0.12` | Remove an unsupported component if its nearest edge is farther than 12% of the original detector box diagonal from every retained component containing an own prompt or reliable joint. Smaller positive values remove closer patches. |
+| Patch on a thin bridge | `bridge_radius_pixels: 1`, `max_bridge_lobe_fraction: 0.12` | A square opening (side = 2 × radius + 1 source pixels) identifies lobes. A lobe and its bridge can be cut if together they occupy at most 12% of the largest opened lobe. Own pose support protects a branch. Regions linking two large cores are kept. Other pixels retain their original outline. |
+
+For crowded cues, `min_limb_path_coverage` (0.75) controls how much of an
+eligible elbow–wrist or knee–ankle path must touch foreground to rescue a tiny
+tip. `min_limb_foreign_distance_pixels` (3) sets its clearance from rival core
+points. `min_foreign_island_points` (2) controls when an exclusively foreign
+island is discarded.
+
+Zero disables the corresponding area floor or distance rule. Set either bridge
+setting to zero to disable bridge pruning. Older YAMLs omitting these options
+keep the previous 4 px / 0.001 area floors with distance and bridge pruning off.
+Bridge pruning requires a distinct lobe at the selected radius. A broad spill or
+a thin strand with no such lobe can remain in the mask.
+
 
 `mode: all` also attempts recovery for isolated, tightly cropped people.
 `mode: overlap` saves segmentation work by requiring intersection divided by the
