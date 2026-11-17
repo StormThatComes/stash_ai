@@ -260,9 +260,9 @@ def select_profile(results, profiles):
         counts = result['totals']
         # Compare the worst photo first. A solo and a trio each get one vote.
         per_photo = sorted(f['counts']['clean_masks'] / f['counts']['people'] for f in result['frames'].values())
-        return (per_photo, counts['clean_masks'], counts['matched'], counts['correct_joints'],
-                -counts.get('partner_joint_hits',0), -counts.get('wrong_side',0), counts.get('correct_side',0),
-                -counts.get('maskless_partner_joints',0),
+        return (-counts.get('partner_joint_hits',0), -counts.get('maskless_partner_joints',0),
+                -counts.get('wrong_side',0), per_photo, counts['clean_masks'], counts['matched'],
+                counts['correct_joints'], counts.get('correct_side',0),
                 counts['own_hits'], -len(profiles[name]))
 
     eligible = [name for name, result in results.items()
