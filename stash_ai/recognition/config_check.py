@@ -61,14 +61,18 @@ class Checks:
                         'Increase the scan cue limit or review the independent support requirement.')
 
 
-def report(config, score_gap=DEFAULT_SCORE_GAP):
+def run_rules(checks):
     from .config_check_matching import matching
     from .config_check_quality import quality
+    quality(checks)
+    matching(checks)
+
+
+def report(config, score_gap=DEFAULT_SCORE_GAP):
     if not 0 <= score_gap <= 1:
         raise ValueError('--min-score-gap must be in [0, 1].')
     checks = Checks(config, score_gap)
-    quality(checks)
-    matching(checks)
+    run_rules(checks)
     counts = {status: sum(r['status'] == status for r in checks.rows)
               for status in ('warning', 'advice', 'ok')}
     return dict(config=str(config.source_path) if config.source_path else 'built-in defaults',

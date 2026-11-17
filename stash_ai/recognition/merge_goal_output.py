@@ -16,6 +16,8 @@ def explain(result):
         conflicting_trials=[dict(trial=name, conflicts=item['goal_result']['conflicts'])
             for name, item in simulation.get('trials', {}).items() if not item['goal_result']['disjoint']],
         conclusion='Best among completed trials, including baseline; neither global optimality nor impossibility is proved.')
+    if result.get('status') in ('strict_config_blocked', 'strict_config_budget'):
+        result['explanation']['conclusion'] = summary(result)
     feedback = trial.get('solver_feedback', {})
     if feedback:
         result['explanation']['solver_feedback'] = feedback
@@ -203,6 +205,12 @@ def summary(result):
             scope_hint = 'simulation.selection' if result.get('yaml_export_mode') == 'diff' else 'run_argv'
             input_lines.append(f'Recommendations apply only to replayed scenes; use {scope_hint} from the JSON report.')
     if selected is None:
+        if result.get('status') == 'strict_config_budget':
+            return 'Strict solver requires --max-trials of at least 2 to compare the input and a compliant repair.'
+        if result.get('status') == 'strict_config_blocked':
+            rows = result['config_policy']['blockers']
+            return '\n'.join(['Strict solver could not repair the input using retained evidence.'] +
+                [f"{r['rule']}: {', '.join(r['settings'])}. {r['suggestion']} ({r['repair_scope']})" for r in rows])
         from .merge_solver_feasibility import lines as feasibility_lines
         return '\n'.join(['Merge solver: no completed trial; no configuration selected.'] + input_lines +
                          (feasibility_lines(result['feasibility']) if 'feasibility' in result else []))

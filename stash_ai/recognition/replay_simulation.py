@@ -116,7 +116,7 @@ def prepared_replay(db, config, scope, ns, installation, reuse_history, progress
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
             prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None,
-            compact_trial_reports=False, followup_variants=None, trial_context=None):
+            compact_trial_reports=False, followup_variants=None, trial_context=None, input_control=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -194,6 +194,21 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                     if progress and not inputs['complete_scope']:
                         progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
                                  'compatible complete scenes; excluded scenes will be listed in the report', None)
+                    if input_control is not None:
+                        # Optionally keep the unrepaired input as the immutable comparison
+                        # for sparse deltas, including deltas from the repaired baseline.
+                        from .trial_evaluation import evaluate, settings_for_replay
+                        from .solver_progress import heartbeat
+                        settings, capture, restore_control = input_control
+                        with heartbeat('initialization', progress, 'Compare original solver configuration'):
+                            baseline = restore_control()
+                            if baseline is None:
+                                evaluated = evaluate('input-control', settings_for_replay(settings, runtime),
+                                    seed=seed, source=db, scope=scope, namespace=ns, installation=installation,
+                                    scans=scans, observations=observations, rebuild=rebuild_selected)
+                                baseline = (apply_baseline(evaluated['prediction_delta']) if isinstance(observations, Slots)
+                                            else evaluated['predictions'])
+                            result['input_control'] = capture(observations, retained, baseline)
                     for name, settings in chain([('baseline', config)], yield_entries):
                         if name != 'baseline':
                             if name in seen_names:
@@ -255,7 +270,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 evaluated['prediction_encoding'] = 'baseline-delta-v1'
                             if evaluated.get('prediction_encoding') == 'baseline-delta-v1':
                                 from .partition_delta import Predictions
-                                if name == 'baseline' and isinstance(observations, Slots):
+                                if baseline is None and name == 'baseline' and isinstance(observations, Slots):
                                     predictions = apply_baseline(evaluated.pop('prediction_delta'))
                                     evaluated.pop('prediction_encoding')
                                 elif baseline is not None:

@@ -47,7 +47,7 @@ class RecognitionParser(argparse.ArgumentParser):
                     self.error('--' + field.replace('_', '-') + ' must be in 1..16.')
             if result.solver_memory_mb is not None and result.solver_memory_mb <= 0:
                 self.error('--solver-memory-mb must be positive.')
-            if not result.solve and (result.solver_cpus is not None or result.solver_trials != 1
+            if not result.solve and (result.strict is not None or result.solver_cpus is not None or result.solver_trials != 1
                     or result.solver_memory_mb is not None or result.solver_scheduling != 'batch'):
                 self.error('Solver execution options require --solve.')
             if result.feasibility_trials < 0:
@@ -345,6 +345,8 @@ def parser():
     merge_report.add_argument('--max-new-outsider-observations', type=int,
         help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
     merge_report.add_argument('--solver-cpus', type=int, help='Joint CPU budget, 1..16; enables bounded solver execution.')
+    merge_report.add_argument('--strict', action=argparse.BooleanOptionalAction, default=None,
+                              help='Require solver proposals to pass every check-config rule (YAML default: enabled). Use --no-strict for unconstrained search.')
     merge_report.add_argument('--solver-trials', type=int, default=1, help='Requested simultaneous trial capacity (default: 1); errors if CPU/RAM admission would reduce it.')
     merge_report.add_argument('--solver-memory-mb', type=mb_argument, metavar='MB',
         help='Total trial memory admission budget in MB (1 MB = 1048576 bytes; fractions allowed); not a hard RSS limit.')

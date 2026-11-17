@@ -100,15 +100,17 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     return options
 
 
-def _face_neighbours(config, changes, options):
+def _face_neighbours(config, changes, options, *, gap=0.):
     # Joint candidates avoid spending the entire budget on isolated threshold changes.
     def joint():
         for value in spread(options['recognition.match_threshold'],
                             changes.get('recognition.match_threshold', config.data['recognition']['match_threshold'])):
             candidate = dict(changes)
+            cohesion = max(0., round(value - gap, 6)) if gap else value
+            view = min(1., round(value + gap, 6)) if gap else value
             candidate.update({'recognition.match_threshold': value,
-                'clustering.cohesion_threshold': min(value, config.data['clustering']['cohesion_threshold']),
-                'clustering.view_match_threshold': value,
+                'clustering.cohesion_threshold': min(cohesion, config.data['clustering']['cohesion_threshold']),
+                'clustering.view_match_threshold': view,
                 'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
             yield candidate
     def coordinate(key, values):
@@ -147,7 +149,7 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False, compare_scene_strategies=False):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False, compare_scene_strategies=False, strict=None):
     from .solver_execution import current as execution_plan
     runtime = execution_plan()
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside, outsiders
@@ -172,21 +174,36 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_domains import normalize, support_baseline_changes
     input_config = config
     baseline_changes = support_baseline_changes(config)
+    if strict is None:
+        strict = input_config.data['execution']['solver_strict']
+    strict_policy = None
+    repair_alternatives = []
+    if strict:
+        from .solver_config_policy import StrictPolicy
+        strict_policy = StrictPolicy(input_config)
+        repairs = strict_policy.repairs(input_config, baseline_changes, initial=True)
+        if not repairs:
+            blockers = strict_policy.blocked(patched(input_config, baseline_changes))
+            return dict(status='strict_config_blocked', selected_trial=None, best_result=None, recommendation=None,
+                        config_policy=dict(mode='strict', blockers=blockers, input_issues=strict_policy.input_issues),
+                        interrupted=False, simulation=dict(trials={}, selection=[]),
+                        search=dict(executed=0, attempted=0, restored_trials=0, failed_trials=0, max_trials=maximum,
+                        stop_reason='strict_config_blocked'))
+        baseline_changes, *repair_alternatives = repairs
     if baseline_changes:
-        config = patched(config, baseline_changes)
+        config = patched(input_config, baseline_changes)
+    compare_input = bool(strict and baseline_changes)
+    candidate_budget = maximum - int(compare_input)
     from .merge_solver_profiles import anchor_rule_profiles, profiles
     from .merge_solver_report import observation_locations, trim_completed
     locations = observation_locations(goals) if compact_report or getattr(progress, 'show_winner', False) else {}
-    rule_profiles = anchor_rule_profiles(config)[:maximum-1] if compare_anchor_rules else ()
-    search_limit = maximum - len(rule_profiles)
+    rule_profiles = anchor_rule_profiles(config)[:candidate_budget-1] if compare_anchor_rules else ()
+    search_limit = candidate_budget - len(rule_profiles)
     tightening = Tightener(config)
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
     from .solver_progress import heartbeat
-    with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
-                          resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
     from .merge_solver_diagnostics import diagnostic_record, latest_decisions
@@ -201,6 +218,16 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_index import current as goal_index
     inputs = {}
     replay_scope, scans = _selection(db, config, None, goals['scope'], allow_partial=True, diagnostics=inputs)
+    if scans and compare_input and maximum == 1:
+        return dict(status='strict_config_budget', selected_trial=None, best_result=None, recommendation=None,
+                    config_policy=dict(mode='strict', input_issues=strict_policy.input_issues,
+                                       minimum_trials=2, baseline_repair=proposal(input_config, baseline_changes)),
+                    interrupted=False, simulation=dict(trials={}, selection=[]),
+                        search=dict(executed=0, attempted=0, restored_trials=0, failed_trials=0, max_trials=maximum,
+                    stop_reason='strict_config_budget'))
+    with heartbeat('initialization', progress, 'Validate solver checkpoint'):
+        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,strict=strict,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
+                          resume=resume,winner=winner_writer) if checkpoint else None
     replay_selection = replay_scope, scans, inputs
     from .merge_solver_feasibility import Feasibility, resource_limit
     from collections import deque
@@ -278,6 +305,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         if baseline_changes:
             return proposal(input_config, baseline_changes | changes_for(name))
         return patches[name] if name in patches else proposal(input_config, {})
+    def check_proposal(changes):
+        if strict_policy:
+            strict_policy.verify(patched(input_config, changes))
     def ranking(name):
         solved = summaries[name]['fully_solved']
         # Hard goals/exclusions and collateral safety precede assignment coverage.
@@ -290,13 +320,34 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return (solved,)+safety+coverage+strength+ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
     def selected(name):
         status=summaries[name]
+        patch = input_patch(name)
+        check_proposal({row['parameter']: row['proposed'] for row in patch['changes']})
         return dict(trial=name,quality=('fully_solved' if status['fully_solved'] else
             'partial_solution' if status['admissible'] else 'best_effort'),
             fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
             goal_diagnostics=goal_diagnostics(status),
             assignment_coverage=status['assignment_coverage'],
-            **input_patch(name))
+            **patch)
     outside_comparison = None
+    def capture_control(observations, retained, predicted):
+        nonlocal baseline, baseline_outsiders
+        baseline = predicted
+        status = assess(goals, observations, retained, predicted)
+        if 'new_outsider_observations' in outside_limits:
+            baseline_outsiders = outsiders(status, predicted, target_ids)
+        from .solver_slot_index import Slots
+        assigned = (predicted.db.execute('SELECT COUNT(baseline) FROM slots').fetchone()[0]
+                    if isinstance(predicted, Slots) else sum(v is not None for v in predicted.values()))
+        return dict(assigned=assigned, unassigned=len(predicted) - assigned,
+                    goal_diagnostics=goal_diagnostics(status), fully_solved=status['fully_solved'],
+                    admissible=status['admissible'], unmet_conditions=unmet_conditions(status))
+    control_restored = False
+    def restore_control():
+        nonlocal control_restored
+        if journal is not None and 'baseline' in journal.records:
+            control_restored = True
+            return saved_baseline(journal.get('baseline')['state'])
+        return None
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline, baseline_outsiders, outside_comparison
         status = assess(goals, observations, retained, predicted)
@@ -322,7 +373,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             baseline, predicted, target_ids, outside, status['groups'])
         status['construction'] = feasibility.assess(status, observations, predicted,
                                                     latest_feedback['provenance']['blocker_trace'])
-        patch = patches.get(name, {'changes': []})
+        patch = input_patch(name) if compare_input else patches.get(name, {'changes': []})
         magnitude = mutation_magnitude(patch['changes'])
         established_outsiders = sum(g['outsider_observations'] for g in status['groups']) - coverage['recovered_target_attachments']
         rank = objective(status) + (-established_outsiders, -outside['coverage_lost'], -outside['split_pairs'],
@@ -390,8 +441,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         nonlocal search, bidirectional, stop_reason, retire
         trials, attempts, probes_attempted = 1, 0, 0
         previous_name, previous_changes = 'baseline', {}
+        from .config_check import DEFAULT_SCORE_GAP
+        gap = DEFAULT_SCORE_GAP if strict else 0.
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
-                     'face': lambda changes: _face_neighbours(config, changes, options)}
+                     'face': lambda changes: _face_neighbours(config, changes, options, gap=gap)}
         if not config.data['sapiensid']['enabled']:
             del factories['hybrid']
         def factory(parent, changes, family, refine):
@@ -415,7 +468,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             active = source['provenance']['active_parameters']
             scoped_options = dict(sorted(scoped_options.items(), key=lambda kv: (-active.get(kv[0],0),kv[0])))
             candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
-                          if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
+                          if family == 'hybrid' else _face_neighbours(config, changes, scoped_options, gap=gap))
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
@@ -461,11 +514,39 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         {v[3] for v in pending_search.values()}):
                 del feedback[old]
         retire = completed
+        for repair in repair_alternatives:
+            if trials >= search_limit:
+                break
+            changes = {k: repair.get(k, parameter(input_config.data, k)) for k in baseline_changes.keys() | repair.keys()}
+            # Every alternative used as a search parent must share the same numeric
+            # dimensions. Portrait preferences and optional gate activation stay fixed.
+            if any(v != parameter(config.data, k) and (k in strict_policy.portrait_domains or
+                   v is None or parameter(config.data, k) is None) for k, v in changes.items()):
+                continue
+            patch = proposal(config, changes)
+            key = digest(patch['yaml_patch'])
+            if not patch['changes'] or key in seen:
+                continue
+            variant = patched(config, changes)
+            strict_policy.verify(variant)
+            seen.add(key)
+            name = f'trial-{trials}'
+            patches[name], families[name] = patch, 'face'
+            origins[name] = dict(search_phase='config_repair', search_parent='baseline', search_strategy='alternative_repair')
+            pending_search[name] = changes_for(name), 'face', 'config_repair', 'baseline', 'alternative_repair'
+            transitions[name] = transition(previous_name, previous_changes, changes)
+            yield name, variant
+            previous_name, previous_changes = name, changes
+            trials += 1
+        while pending_search:
+            yield None
         if compare_scene_strategies:
             from .scene_strategy_validation import training_profiles, tuning_profiles
             def scene_trial(label,parent,changes,phase):
                 nonlocal trials,previous_name,previous_changes
                 changes = normalize(config,changes)
+                if strict_policy and strict_policy.violations(patched(config, changes), record=True):
+                    return None
                 patch = proposal(config,changes)
                 key = digest(patch['yaml_patch'])
                 if not patch['changes']:
@@ -587,6 +668,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             attempts += 1
             try:
                 changes = normalize(config, changes)
+                if strict_policy:
+                    candidates = strict_policy.repairs(config, changes)
+                    if not candidates:
+                        search.rejected(family, strategy)
+                        continue
+                    changes = candidates[0]
             except ValueError:
                 search.rejected(family,strategy)
                 continue
@@ -632,14 +719,22 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             request.independent = True
             for profile, rules in rule_profiles:
                 changes = changes_for(parent) | {PARAMETER: rules}
+                variant = patched(config, changes)
+                if strict_policy and strict_policy.violations(variant, record=True):
+                    continue
                 name = f'trial-{trials}'
                 patches[name] = proposal(config, changes)
                 transitions[name] = transition(previous_name, previous_changes, changes)
                 origins[name] = dict(search_phase='anchor_rules', search_parent=parent, search_strategy=profile)
                 families[name] = 'hybrid'
-                yield name, patched(config, changes)
+                yield name, variant
                 trials += 1
                 previous_name, previous_changes = name, changes
+    def saved_baseline(state):
+        if 'baseline_delta' in state:
+            from .solver_slot_index import apply_baseline
+            return apply_baseline(state['baseline_delta'])
+        return state['baseline']
     def restore(name,settings):
         nonlocal baseline,baseline_outsiders,best,best_rank,restored_count,restored_name
         if journal is None or name not in journal.records:return None
@@ -665,12 +760,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         options.clear();options.update(state['options'])
         hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
         robustness.clear();robustness.update(state['robustness'])
-        if name=='baseline':
-            if 'baseline_delta' in state:
-                from .solver_slot_index import apply_baseline
-                baseline = apply_baseline(state['baseline_delta'])
-            else:
-                baseline = state['baseline']
+        if name=='baseline' and not compare_input:
+            baseline = saved_baseline(state)
             if 'new_outsider_observations' in outside_limits:
                 baseline_outsiders=outsiders(summaries[name],baseline,target_ids)
         best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
@@ -773,7 +864,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
             restore_trial=restore,record_trial=record,prepared_selection=replay_selection,trial_error=trial_error,
             parallel_request=request if runtime and runtime.trials > 1 else None,
-            parallel_accept=accept, journal=journal, compact_trial_reports=True)
+            parallel_accept=accept, journal=journal, compact_trial_reports=True,
+            input_control=(input_config, capture_control, restore_control) if compare_input else None)
     def finish(*, interrupted=False):
         if interrupted:result['interrupted'] = True
         # Ctrl-C can land after consume ranks a trial but before replay records it.
@@ -813,7 +905,14 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             phases += ('scene_strategy','scene_refinement')
         if compare_anchor_rules:
             phases += ('anchor_rules',)
-        return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
+        if compare_input:
+            phases += ('config_repair',)
+        policy_report = dict(mode='strict' if strict else 'off')
+        if strict_policy:
+            policy_report.update(input_issues=strict_policy.input_issues, baseline_repair=proposal(input_config, baseline_changes),
+                                 rejected_by_rule=dict(strict_policy.rejected), rejection_examples=strict_policy.examples, input_control_replays=int('input_control' in result and not control_restored),
+                                 input_control_restored=control_restored)
+        return dict(config_policy=policy_report, measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
             feasibility=(dict(format=1, status='interrupted', groups=[], probe_budget=probe_budget,
                 joint_witness_trial=None,
                 probes_completed=sum(t.get('search_phase')=='feasibility' for t in result['trials'].values()),
@@ -832,10 +931,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             search=dict(scene_finalists={k:{c['parameter']:c['proposed'] for c in input_patch(
                             max((n for n in scene_trials[k] if n in ranks),key=ranking))['changes']}
                                          for k in finalists},scene_families_tested=len(scene_trials),
-                        max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
+                        max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']) + int('input_control' in result),restored_trials=restored_count + int(control_restored),
                         recovered_evaluations=sum(bool(t.get('recovered_evaluation')) for items in
                             (result['trials'], failures) for n,t in items.items() if n not in restored_names),
-                        attempted=len(result['trials'])+len(failures), failed_trials=len(failures),
+                        attempted=len(result['trials'])+len(failures) + int('input_control' in result), failed_trials=len(failures),
                         scheduling='targeted_then_feasibility_and_bidirectional_beam_then_tightening',
                         tightening=tightening.report(changes_for(best) if best is not None else None),
                         execution=runtime.document() if runtime else None,
@@ -858,7 +957,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
                             for name in result['trials']) for phase in phases},
                         tested_hybrid_values=tested_hybrid,
-                        budget_exhausted=len(result['trials'])+len(failures) >= maximum,
+                        budget_exhausted=len(result['trials'])+len(failures) >= candidate_budget,
                         selection_scope='completed_trials_including_baseline',
                         proves_optimality=False, proves_infeasibility=False))
 

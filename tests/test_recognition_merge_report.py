@@ -23,7 +23,8 @@ from stash_ai.recognition.strict_partition import resolve, summary_views
 
 def seeded(tmp_path, vectors=None, *, count=3, recognition=None, clustering=None):
     path = tmp_path / 'faces.yml'
-    settings = dict(version=1, recognition=dict(match_threshold=.9),
+    # This fixture tests individual search gates, including intentionally conflicting thresholds.
+    settings = dict(version=1, execution=dict(solver_strict=False), recognition=dict(match_threshold=.9),
         clustering=dict(cohesion_threshold=.85, max_anchor_pose_deviation=.2, anchor_view_matching=True))
     settings['recognition'].update(recognition or {})
     settings['clustering'].update(clustering or {})

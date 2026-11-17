@@ -197,6 +197,9 @@ class SolverDisplay:
         return None
 
     def finish(self, result):
+        if result.get('status') in ('strict_config_blocked', 'strict_config_budget'):
+            from .merge_goal_output import summary
+            return summary(result)
         search = result.get('search', {})
         best = result.get('best_result')
         if best:

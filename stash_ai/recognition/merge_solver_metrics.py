@@ -11,7 +11,7 @@ def scale(key, current):
 
 
 def magnitude(changes):
-    return sum(1. if c.get('direction') == 'replace' else
+    return sum(1. if c.get('direction') in ('replace', 'enable', 'disable') else
                abs(float(c['proposed'])-float(c['current']))/scale(c['parameter'],c['current']) for c in changes)
 
 
