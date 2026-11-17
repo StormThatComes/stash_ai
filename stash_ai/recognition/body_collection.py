@@ -114,6 +114,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measurement['frame_size'] = list(image.size)
             if captured and captured[0]==cue and captured[1] is not None:
                 measurement['view_shot'] = captured[1]
+                measurement['transition_verified'] = bool(len(captured)>4 and captured[4])
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     # A single pose containing distinct accepted faces is still an unresolved pair.

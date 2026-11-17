@@ -126,6 +126,10 @@ class RefinedPMPose:
                          if previous and self.previous_cue else {})
                 indices = borrow(previous, self.previous_cue, i, indices, settings['min_prompt_points'],
                                  record, local=local)
+                future = getattr(self,'next_cue',None)
+                if future and 'temporal_prompts' not in record:
+                    local = prompt_recovery.local_candidates(points,scores,tests,valid,i)
+                    indices = borrow(future,self.previous_cue,i,indices,settings['min_prompt_points'],record,local=local)
                 if 'temporal_prompts' in records[i]:
                     minimum = settings['min_prompt_points']
                 records[i]['prompt_minimum'] = minimum
@@ -160,6 +164,18 @@ class RefinedPMPose:
         return prompts, neighbours, negatives
 
     def refine_many(self, frames, predictions):
+        if self.settings.get('bidirectional_prompts',False):
+            from .temporal_prompts import capture
+            results=[]
+            for index,((image,bounds),prediction) in enumerate(zip(frames,predictions)):
+                self.next_cue=None
+                if index+1<len(frames):
+                    (following,boxes),raw=frames[index+1],predictions[index+1]
+                    valid,_=prompt_recovery.eligible(*raw,boxes,self.settings)
+                    self.next_cue=capture(following,boxes,raw[0],valid)
+                results.append(self.refine(image,bounds,prediction))
+            self.next_cue=None
+            return results
         from .refinement_batches import refine_many
         return refine_many(self, frames, predictions)
 

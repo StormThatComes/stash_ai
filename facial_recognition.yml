@@ -126,6 +126,9 @@ pose:
     # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
     max_mask_combinations: 256
     # Maximum complete mask combinations; exceeding it preserves unresolved conflicts. Range: 1..4096.
+    bidirectional_prompts: false
+    # Use one following raw cue inside an inference batch for PMPose prompt recovery; requires second-pass
+    # confirmation. Never propagates recovered points. Experimental.
     negative_limb_prompts: false
     # Include high-confidence foreign limb chains in negative prompts. Experimental.
     joint_limb_ownership: false
@@ -368,6 +371,12 @@ matching:
       # Scene-local body identities and attachments.
       enabled: true
       # Create body identities within scenes. Requires body.collection.enabled.
+      contact_max_cues: 12
+      # Maximum contact window in VTT cue indices, independent of timestamps. Range: 2..64.
+      contact_max_hidden: 2
+      # Maximum one-person hidden layers in a two-person contact. Range: 0..8.
+      contact_max_people: 4
+      # Maximum jointly resolved contact roster. Range: 2..4.
       tracklet_matching: true
       # Link short SapiensID paths before individual matches. Anonymous paths stay local. Compare on retained
       # VTT evidence.

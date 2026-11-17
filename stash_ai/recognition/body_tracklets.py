@@ -5,6 +5,7 @@ import uuid
 import numpy as np
 
 from .perspective_shots import change
+from .cue_continuity import continuous as cue_continuous
 from .track_geometry import rejection, torso_points, translation
 
 
@@ -54,7 +55,7 @@ def paths(rows, settings, scores, occupied=(), *, extended=False, gap_boxes=None
         qa,_,_,sa = geometry[left_valid[0]['id']]
         qb,_,_,sb = geometry[right_valid[0]['id']]
         offset = translation(qa,qb,sa,sb)
-        continuous = (np.abs(sa-sb).mean()<=8 or offset is not None) if skipped else change(sa,sb,True)=='continuous'
+        continuous = (np.abs(sa-sb).mean()<=8 or offset is not None) if skipped else cue_continuous(qa['frame_signature'],qb['frame_signature'],verified=qb.get('transition_verified',False))
         if qa['view_shot']!=qb['view_shot'] or not (continuous or verified):
             continue
         edges = {}

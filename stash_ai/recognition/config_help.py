@@ -326,3 +326,10 @@ HELP = {
     'names': 'Optional performer name overrides.',
     'names.file': 'Performer-name YAML path, relative to this YAML; null disables overrides.',
 }
+
+HELP.update({
+    'pose.refinement.bidirectional_prompts': 'Use one following raw cue inside an inference batch for PMPose prompt recovery; requires second-pass confirmation. Never propagates recovered points. Experimental.',
+    'matching.body.identities.contact_max_cues': 'Maximum contact window in VTT cue indices, independent of timestamps. Range: 2..64.',
+    'matching.body.identities.contact_max_hidden': 'Maximum one-person hidden layers in a two-person contact. Range: 0..8.',
+    'matching.body.identities.contact_max_people': 'Maximum jointly resolved contact roster. Range: 2..4.',
+})

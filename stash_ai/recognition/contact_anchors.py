@@ -64,7 +64,7 @@ def questionable_links(rows,settings,scores,graph=()):
         for i,r in enumerate(chain):
             if not r.get('face_anchor') or crowded_link(json.loads(r['quality'])['quality']):
                 continue
-            if previous is not None and i-previous<=12:
+            if previous is not None and i-previous<=settings.get('contact_max_cues',12):
                 first = chain[previous]
                 owner = r['face_person']
                 middle = chain[previous+1:i]
@@ -88,12 +88,12 @@ def body_pair_queries(rows,decisions):
         cues[row['cue']].append(row)
     eligible = []
     for members in cues.values():
-        if len(members)!=2 or any(r.get('_face_vector') is not None or r.get('face_person') for r in members):
+        if not 2<=len(members)<=4 or any(r.get('_face_vector') is not None or r.get('face_person') for r in members):
             continue
         old = [decisions[r['id']] for r in members]
-        if any(d.get('reason') not in mutable for d in old) or all(d['person'] for d in old) and old[0]['person']!=old[1]['person']:
+        if any(d.get('reason') not in mutable for d in old) or all(d['person'] for d in old) and len({d['person'] for d in old})==len(members):
             continue
-        if pair([json.loads(r['geometry']) for r in members]) is not None:
+        if _distinct(members):
             eligible.extend(members)
     return eligible
 
@@ -106,18 +106,18 @@ def joint_body_claims(rows, decisions, rankings, settings, *, reflection_thresho
     for row in rows:
         cues[row['cue']].append(row)
     for members in cues.values():
-        if len(members)!=2 or any(r['id'] not in rankings for r in members):
+        if not 2<=len(members)<=4 or any(r['id'] not in rankings for r in members):
             continue
         qualities = [json.loads(r['quality']).get('quality',{}) for r in members]
-        if any(q.get('query_only') or max(q.get('expected_people',0),q.get('detected_people',0))>2 for q in qualities):
+        if any(q.get('query_only') or max(q.get('expected_people',0),q.get('detected_people',0))>len(members) for q in qualities):
             continue
-        if pair([json.loads(r['geometry']) for r in members]) is None:
+        if not _distinct(members):
             continue
         faces = [r.get('_face_vector') for r in members]
-        if all(v is not None for v in faces) and len(faces[0])==len(faces[1]) and float(faces[0] @ faces[1])>=reflection_threshold:
+        if len(faces)==2 and all(v is not None for v in faces) and len(faces[0])==len(faces[1]) and float(faces[0] @ faces[1])>=reflection_threshold:
             continue
         previous = [decisions[r['id']] for r in members]
-        if all(d['person'] for d in previous) and previous[0]['person']!=previous[1]['person']:
+        if all(d['person'] for d in previous) and len({d['person'] for d in previous})==len(members):
             continue
         margin = max(.000001,settings['ambiguity_margin'])
         domains = []
@@ -132,7 +132,7 @@ def joint_body_claims(rows, decisions, rankings, settings, *, reflection_thresho
                 continue
             oid = members[i]['id']
             # Only the other physically occupied owner's mode is explained away.
-            rival = max((v[5] for v in rankings[oid] if v[2] not in (owner,winner[1-i][0])),default=-1.)
+            rival = max((v[5] for v in rankings[oid] if v[2] not in {owner,*(choice[0] for j,choice in enumerate(winner) if j!=i)}),default=-1.)
             if score-rival<margin:
                 break
         else:
@@ -170,3 +170,9 @@ def bridge_faces(graph, decisions, settings, uncertain, guard):
                             decisions[k['id']] = dict(person=owner,status='accepted',role='auxiliary',
                                 reason='adjacent_face_body_bridge',witness_ids=[first['id'],row['id']])
             last = i
+
+
+def _distinct(members):
+    from .crowd_context import pair
+    geometry=[json.loads(r['geometry']) for r in members]
+    return all(pair([a,b]) is not None for i,a in enumerate(geometry) for b in geometry[i+1:])
