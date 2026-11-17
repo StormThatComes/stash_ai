@@ -138,9 +138,16 @@ own default and limit.
 ### Strict solver configuration
 
 Solver search defaults to `execution.solver.strict: true` (v1 `execution.solver_strict`).
-Every recommended configuration must pass all active `recognition check-config`
-rules, including tuning advice and the default 0.02 score gap. This applies to
-both full YAML and diffs. The merge goal policy is controlled separately.
+The adjacent-cue body threshold must be at least 0.02 below the ordinary local body
+match threshold when independent body identities are active. A null track threshold
+inherits local cohesion. Strict recommendations preserve enabled matching routes and
+the retained scan contract. These checks apply to full YAML and diffs. The merge
+goal policy is controlled separately.
+
+Equal scan and sample floors are valid. Route capacity warnings, score headroom,
+soft ranking targets and other diagnostic notes in `check-config` allow search to
+start from the original YAML. Portrait selection and weights stay under user
+control. Explicit holdout comparisons can disable a route to measure its effect.
 
 When the input needs repair, the solver tries bounded alternatives using the
 existing evidence, keeps active input routes and compares the original assignments

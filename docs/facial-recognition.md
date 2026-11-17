@@ -65,10 +65,12 @@ inherits local body cohesion. With a scene bonus of `0.06` and local cohesion
 of `0.84`, the same-scene roster route still needs every witness to score at
 least `0.84`, so the mean can drop at most `0.01` below `0.85`.
 
-`warning` identifies a bound or prerequisite that limits a particular gate or
-route. `advice` also reports narrow tuning intervals and intentional shared
-cutoffs. `--min-score-gap 0.02` sets the default advisory spacing for normalized
-scores. Use `0` to suppress notes about strictly positive narrow intervals.
+`warning` identifies a prerequisite or capacity that limits a specific route.
+Shared quality floors, ranking targets and effective maxima are valid and visible
+with `--all`. `--min-score-gap` sets the diagnostic spacing for adjacent-cue
+body continuity (default 0.02). A zero gap setting still reports an equal or
+reversed cutoff. JSON rows identify matching constraints with
+`solver_constraint`. Only these rules constrain default merge recommendations.
 Counts, pixels and sharpness use their own units. A static check describes
 which scores could pass. Use [labelled replay](recognition/evaluation.md) to
 measure changes in actual assignments.
