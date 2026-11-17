@@ -72,7 +72,7 @@ def _build(config, left_id, right_id, *, scope=None, by_performer=False, simulat
         return analyse_pair(db, config, left_id, right_id, scope=scope, by_performer=by_performer, simulate=simulate)
 
 
-def analyse_pair(db, config, left_id, right_id, *, scope, by_performer=False, simulate=False, view_matrix=None):
+def analyse_pair(db, config, left_id, right_id, *, scope, by_performer=False, simulate=False, view_matrix=None, inspect_catalogue=None):
     """Analyse both labels in the caller's consistent, alias-aware read snapshot."""
     model_namespace = namespace(config)
     with alias_scope(db):
@@ -140,7 +140,10 @@ def analyse_pair(db, config, left_id, right_id, *, scope, by_performer=False, si
         def views(candidate):
             return catalogue(db, candidate, left['scope'], model_namespace,
                 usage=_usage(candidate, groups), scan_policy=scan_identity(candidate, model_namespace), complete=True)
-        result['paths'].append(analyse(db, config, identities, 'confirmed_views', views, matrix=view_matrix))
+        def inspect(views, current):
+            optional('pair_strategies', lambda: inspect_catalogue(summaries, views, current), None)
+        result['paths'].append(analyse(db, config, identities, 'confirmed_views', views, matrix=view_matrix,
+                                      inspect_current=inspect if inspect_catalogue is not None else None))
         if config.data['sapiensid']['enabled']:
             from .hybrid_report import analyse as hybrid_analyse
             result['paths'].append(optional('hybrid_path',lambda:hybrid_analyse(db,config,identities,left['scope'],model_namespace),

@@ -59,6 +59,8 @@ def quality(row):
 
 
 def anchor(row,settings):
+    if settings.get('_inspection_omit_body_anchors') and row['id'] in settings['_inspection_omit_body_anchors']:
+        return False
     return anchor_gate(row['quality'],settings)['eligible']
 
 
@@ -554,7 +556,8 @@ def rebuild(database,selected,config,result):
     if not selected or not available(database.connection):return result
     db=database.connection
     from .body_cache import cached,stamp as cache_stamp
-    if cached(db,selected,config):
+    from .replay_intervention import controlled
+    if not controlled() and cached(db,selected,config):
         from .staged_aliases import waiting
         if enabled(config) and waiting(db,selected,config):
             from .body_global import reconcile

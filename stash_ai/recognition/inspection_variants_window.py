@@ -5,7 +5,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from .inspection_pair_replay import experiment
+from .inspection_pair_replay import experiment, replay_controls, strategy_summary
 from .inspection_pair_variants import preflight
 from .inspection_runtime import Worker
 
@@ -31,7 +31,7 @@ class VariantsWindow:
         self.options = {}
         self.choices = tk.Listbox(self.window,selectmode='extended',exportselection=False,height=7)
         self.choices.pack(fill='x',padx=5)
-        self.choices.bind('<<ListboxSelect>>', self.update_actions)
+        self.choices.bind('<<ListboxSelect>>', lambda _: self.prepare())
         selected = comparison.tree.selection()
         for key,(route,patch) in comparison.items.items():
             if patch is not None:
@@ -48,10 +48,10 @@ class VariantsWindow:
         self.cancel.pack(side='left')
         self.status = ttk.Label(controls)
         self.status.pack(side='left',padx=4)
-        cols = ('result','join','protected','withheld','extra','yaml','seconds')
+        cols = ('result','join','protected','controls','withheld','extra','yaml','seconds')
         self.table = ttk.Treeview(self.window,columns=cols,show='headings',selectmode='browse')
-        for col,label,width in zip(cols,('Variant','A+B fully joined','C separate','Unassigned¹','Extra identities','YAML keys','Seconds'),
-                                   (145,120,90,145,110,90,85)):
+        for col,label,width in zip(cols,('Variant','A+B fully joined','C separate','Auto controls','Unassigned¹','Extra identities','YAML keys','Seconds'),
+                                   (125,110,85,95,115,100,85,75)):
             self.table.heading(col,text=label)
             self.table.column(col,width=width,minwidth=50)
         self.table.pack(fill='both',expand=True,padx=5)
@@ -76,7 +76,7 @@ class VariantsWindow:
 
     def add(self, label, patch):
         for i, (old, _) in enumerate(self.options.values()):
-            if old['yaml'] == patch['yaml']:
+            if all(old.get(k) == patch.get(k) for k in ('yaml','controls','watch','birth_source','omit_face_anchors','omit_body_anchors')):
                 return i
         index = len(self.options)
         name = f'V{index+1}'
@@ -99,7 +99,10 @@ class VariantsWindow:
             self.update_actions()
             if then:
                 then()
-        self.worker.request(partial(preflight,self.config,self.scan['scope'],self.ids,self.scan['scene'],self.full.get(),self.revision),
+        selected = set(self.choices.curselection())
+        controls = replay_controls({name:p for i,(name,(p,_)) in enumerate(self.options.items()) if i in selected})
+        people = tuple(dict.fromkeys((*self.ids,*sorted(controls))))
+        self.worker.request(partial(preflight,self.config,self.scan['scope'],people,self.scan['scene'],self.full.get(),self.revision),
                             ready,self.failed)
 
     def scope_label(self):
@@ -111,6 +114,8 @@ class VariantsWindow:
         name = selection[0] if selection else None
         patch = self.patches.get(name)
         verified = self.result and name in self.result['trials'] and self.result['trials'][name]['success']
+        if self.result and name:
+            self.estimate.configure(text=strategy_summary(self.result,name))
         self.run.state(['!disabled'] if ready and self.choices.curselection() else ['disabled'])
         self.cancel.state(['!disabled'] if self.busy else ['disabled'])
         self.diff.state(['!disabled'] if self.result and name else ['disabled'])
@@ -142,8 +147,10 @@ class VariantsWindow:
             for name,trial in result['trials'].items():
                 patch = self.patches.get(name, {})
                 c = trial['protected']
+                checks = trial.get('controls',{})
+                auto = f"{sum(v is True for v in checks.values())}/{len(checks)}" if checks else '—'
                 self.table.insert('', 'end', iid=name,values=(name,'Yes' if trial['joined'] else 'No',
-                    '—' if c is None else 'Yes' if c else 'No',trial['unassigned'],len(trial['outsiders']),
+                    '—' if c is None else 'Yes' if c else 'No',auto,trial['unassigned'],len(trial['outsiders']),
                     len(patch.get('changes',())),f"{trial['elapsed']:.2f}"))
             best = 'minimized' if 'minimized' in result else next(iter(patches))
             self.table.selection_set(best)

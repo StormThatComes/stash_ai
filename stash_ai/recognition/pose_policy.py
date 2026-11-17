@@ -12,6 +12,8 @@ def compact_quality(raw):
     try:
         record=metadata(raw)
         selected={}
+        if record.get('_inspection_auxiliary_only'):
+            selected['_inspection_auxiliary_only'] = True
         for key in ('pixels','sharpness','pose_deviation','roll_deviation',
                     'alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage'):
             number=record.get(key)
@@ -66,6 +68,10 @@ def measurement_required(config):
 
 
 def is_anchor(quality, grouping):
+    if grouping.get('_inspection_omit_anchors'):
+        record = metadata(quality) if isinstance(quality,str) else quality
+        if record.get('_inspection_auxiliary_only'):
+            return False
     if not quality_allows(quality,grouping,anchor=True) or not visibility_allows(quality,anchor_visibility(grouping)):
         return False
     maximum=grouping['max_anchor_pose_deviation']
@@ -99,6 +105,8 @@ def anchor_sql(alias, grouping):
     pose=('1=1' if maximum is None else
           f"COALESCE(json_type({alias}.quality,'$.pose_deviation') IN ('integer','real') AND "
           f"json_extract({alias}.quality,'$.pose_deviation') BETWEEN 0 AND {maximum!r},0)")
+    if grouping.get('_inspection_omit_anchors'):
+        pose += f" AND COALESCE(json_extract({alias}.quality,'$._inspection_auxiliary_only'),0)=0"
     return '('+pose+') AND ('+visibility_sql(alias,anchor_visibility(grouping))+') AND ('+quality_sql(alias,grouping,anchor=True)+')'
 
 

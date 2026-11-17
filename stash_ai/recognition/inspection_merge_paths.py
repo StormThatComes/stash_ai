@@ -116,7 +116,7 @@ def _catalogue_routes(db, config, report):
                 refs.append(witness('Supporting faces','face',banks[0][0],banks[1][0]))
         elif component and all(component.get('cores',{}).get(i) for i in ids):
             refs.append(witness('Supporting body cores','body',*(component['cores'][i][0] for i in ids)))
-        yield dict(title=title, status=status, notes=notes, patches=patches, steps=steps, witnesses=refs)
+        yield dict(title=title, family=name, status=status, notes=notes, patches=patches, steps=steps, witnesses=refs)
 
 
 def _local_face(db, config, scan, ids, report):
@@ -164,7 +164,7 @@ def _local_face(db, config, scan, ids, report):
                 patches.append(patch)
         notes.append(f"Review {_name(config, 'recognition.min_merge_support')} = {settings['min_merge_support']}.")
         routes.append(dict(title='Same-scene face core and nominations' if same_scene else 'Merge by independent face nominations',
-                           status='Rebuild hypothesis' if patches else 'Measured only', notes=notes, patches=patches,
+                           family='local_face' if same_scene else 'nominations', status='Rebuild hypothesis' if patches else 'Measured only', notes=notes, patches=patches,
                            steps=[threshold('Cross mean',pair['cross_mean'],local['effective_match_threshold'] if same_scene else settings['match_threshold']),
                                   threshold('Cross cohesion',pair['cross_minimum'],local['effective_cohesion_threshold'] if same_scene else grouping['cohesion_threshold']),
                                   threshold('Validated nomination timestamps',count,settings['min_merge_support']),
@@ -184,7 +184,7 @@ def _local_body_core(db, config, scan, ids):
         "AND json_extract(m.proof,'$.reason')='body_scene_core'", (scan['id'], contract(config), body_policy(config), *ids)))
     if len(set(owners.values())) != 2:
         return []
-    route = dict(title='Form one local body core', status='Measured only', notes=[], patches=[])
+    route = dict(title='Form one local body core', family='local_body', status='Measured only', notes=[], patches=[])
     notes = route['notes']
     try:
         _, rows, _, _, _ = _load_scene(db, scan['id'], config)
@@ -301,6 +301,10 @@ def analyse(reader, scan, ids):
         groups[ids[1]] = find_identity(reader,scan['scope'],ids[1])
         if groups[ids[1]]['identity'] != ids[1]:
             raise ValueError('The selected identity changed. Refresh the scene.')
+    from .inspection_catalogue_strategies import face_catalogue
+    from .inspection_merge_strategies import strategies
+    catalogue_routes, controls = [], {}
+    report = None
     matrix = {}
     hybrid = {}
     labels = {i: f"Performer {groups[i]['performer']}" if groups[i]['performer'] else i for i in ids}
@@ -310,7 +314,12 @@ def analyse(reader, scan, ids):
             raise ValueError('Recognition results changed. Refresh the scene and compare again.')
         check_cancelled()
         try:
-            report = merge_report.analyse_pair(db, config, *ids, scope=scan['scope'], view_matrix=matrix)
+            def inspect(summaries, views, current):
+                extra, nearest = face_catalogue(db, config, ids, summaries, views, current)
+                catalogue_routes.extend(extra)
+                controls.update(nearest)
+            report = merge_report.analyse_pair(db, config, *ids, scope=scan['scope'], view_matrix=matrix,
+                                             inspect_catalogue=inspect)
         except ResourceLimit as error:
             coverage = {'catalogue': dict(complete=False, detail=str(error))}
             routes = [dict(title='Catalogue comparison', status='Incomplete', notes=[str(error)], patches=[])]
@@ -334,6 +343,7 @@ def analyse(reader, scan, ids):
             routes.extend(_local_body_core(db, config, scan, ids))
             routes.extend(_local_body_links(db, config, scan, ids))
         routes.extend(alternatives(db, config, scan, ids, labels))
+        routes.extend(strategies(db, config, scan, ids, routes, catalogue_routes, controls, report))
     summary = ('Catalogue routes compare retained references across the scope. Local routes use scene '+scan['scene']+
                '. YAML changes apply globally. Rebuild both identities to check final ownership and unassigned observations.')
     for name, detail in coverage.items():

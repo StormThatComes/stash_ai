@@ -334,9 +334,29 @@ The comparison uses the loaded YAML and a consistent read of the recognition dat
 - **Verify option by replay** runs the baseline and selected change against retained scans in the scope. It can take as long as a rebuild. The result shows whether both sets of observations reached one destination, how many were withheld, and which other identities shared their destinations. A frozen-planner result or a demoted anchor alone cannot establish that outcome.
 - **Choose C…** adds an optional protected performer. Success requires every current selected observation of A and B to reach one owner and every observation of C to reach one separate owner.
 - **Observation changes…** compares the baseline replay to the selected variant. Filter owner changes, anchor-to-auxiliary transitions or withheld observations, then open the recorded cue. The summary identifies a consolidation or an avoided core when the decision history ties it to the pair. Some runs retain only the final assignments.
-- **Compare YAML variants…** accepts multiple options (Ctrl/Shift selection). Identical patches share one trial. **Entry and identity scenes** selects the entry scene plus all current scenes containing A, B or C. Other scenes remain frozen history. **Full scope** replays every current scene in the selected scope. Preflight counts scenes and face/body observations before a replay starts.
+- **Compare YAML variants…** accepts multiple options (Ctrl/Shift selection). Identical patches share one trial. **Entry and identity scenes** selects the entry scene plus all current scenes containing A, B, C or an automatic control for the selected options. Other scenes remain frozen history. **Full scope** replays every current scene in the selected scope. Preflight counts scenes and face/body observations before a replay starts.
 - Compare the complete join, protection of C, unassigned observations, additional identities, patch size and elapsed time against one shared baseline per experiment. Open a row for its observation changes. **Validate on full scope** reruns that exact option with a full-scope baseline.
 - **Minimize selected patch** starts with a successful option, removes settings and probes stricter thresholds using production replays. Every accepted probe preserves the join, the optional C constraint, and the original option's limits on collateral identities and coverage loss. The probe budget bounds additional trials. **Copy tested YAML** copies the selected result in the loaded configuration format. Quick results apply to their selected scenes.
+
+The pair comparison also evaluates these strategies.
+
+| Strategy | Evidence and replay |
+| --- | --- |
+| Follow a body through a turn | Follow a physically separated body path between compatible face endpoints in one shot. Inspect the first similarity blocker and the alternative body at that cue. |
+| Resolve a crossing | Compare both endpoint assignments around a contact, the co-present partner and the interior assignments supported by the two-person tracker. Ambiguous face endpoints remain visible. |
+| Prevent a birth and recover its samples | Combine a directional face/body core demotion with measured attachment gates in one replay. Inspect the earliest recorded seed/core member when available. |
+| Isolate an influential anchor | Compare single face references and repeated-crop groups on frozen cores. Replay the best candidate as an auxiliary-only query. For local body cores, probe each endpoint of the weakest cross comparison and its repeated appearances. Diagnostic trials have no YAML to copy. |
+| Bridge appearances through a View | Inspect A/intermediate, intermediate/B and direct A/B witnesses, their support, original core minima and the closest outside View. A bridge involving a third owner protects that owner during replay. |
+| Compare local/global modality order | Try local body paths followed by global face/View matching and the converse local-face/global-body option. Inspect the recorded merge route at the configured global similarity floors. |
+| Recover an unassigned bridge | Follow a shot-local path through currently unassigned body observations. Replay reports each watched observation's destination and the complete A/B outcome independently. |
+| Challenge a strategy with its closest rival | Face centroids, confirmed View medoids, measured hybrid/body competitors and the co-present partner provide route-specific controls. Every observation of each selected control must remain at a single separate destination for that option to succeed. |
+
+Expand a strategy to inspect its evidence and then select **Verify option by replay**.
+**Compare YAML variants…** includes diagnostic replays and shows the first changed
+A/B cue, its recorded decision, pair coverage and extra owners for the selected
+result. Replays use retained VTT inputs. A frozen diagnostic reports what its
+reference comparison established, while a replay reports final assignments on
+the selected scenes.
 
 `Unassigned in this scene` includes every current face without membership and
 every current body without accepted membership, including withheld and
