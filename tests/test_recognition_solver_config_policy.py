@@ -181,3 +181,85 @@ def test_parallel_search_only_returns_compliant_trials(tmp_path, monkeypatch):
     assert 2 < result['search']['executed'] <= 7 and result['search']['failed_trials'] == 0
     for row in trials.values():
         assert clean(patched(config, {c['parameter']: c['proposed'] for c in row.get('changes', [])}))
+
+
+def test_strict_preserves_reachable_routes_and_allows_diagnostic_controls():
+    source = Path(__file__).resolve().parents[1] / 'facial_recognition_solver.yml'
+    config = patched(load(source), {'execution.max_cues': 6, 'clustering.max_samples_per_person': 4,
+                                    'sapiensid.identities.track_similarity_threshold': .80})
+    policy = StrictPolicy(config)
+    cases = (
+        ({'clustering.same_scene_match_bonus': 0.}, {'context-view-source', 'body-scene-bonus'}),
+        ({'recognition.min_identity_support': 1}, {'provisional-face-birth'}),
+        ({'sapiensid.identities.min_support': 7}, {'local-body-cue-cap-min_support'}),
+        ({'clustering.same_scene_min_support': 6}, {'body-roster-cue-cap'}),
+        ({'clustering.view_attach_min_support': 5}, {'early-view-core-repair'}),
+        ({'sapiensid.matching.min_support': 5}, {'hybrid-selected-bank-support'}),
+        ({'sapiensid.identities.scene_match_bonus': 0.}, {'body-scene-bonus'}),
+        ({'sapiensid.identities.cohesion_threshold': .85}, {'body-scene-bonus'}),
+    )
+    for changes, expected in cases:
+        variant = patched(config, changes)
+        assert set(policy.violations(variant)) == expected
+        assert policy.repairs(config, changes) == []
+        assert not policy.violations(variant, diagnostic=True)
+    assert policy.examples['body-scene-bonus']['measures']['input_state'] == 'ready'
+    # Equality with a hard capacity and even a very small working discount are valid.
+    boundary = {'sapiensid.identities.min_support': 6, 'clustering.view_attach_min_support': 4,
+                'sapiensid.matching.min_support': 4, 'clustering.same_scene_min_support': 5,
+                'sapiensid.identities.cohesion_threshold': .8499}
+    assert policy.repairs(config, boundary) == [boundary]
+
+
+def test_preexisting_capacity_limits_and_disabled_bonuses_allow_search():
+    source = Path(__file__).resolve().parents[1] / 'facial_recognition_solver.yml'
+    config = patched(load(source), {'execution.max_cues': 4, 'sapiensid.identities.min_support': 6,
+                                    'clustering.same_scene_match_bonus': 0.,
+                                    'sapiensid.identities.track_similarity_threshold': .8})
+    policy = StrictPolicy(config)
+    assert {r['rule'] for r in policy.input_issues} == {'local-body-cue-cap-min_support', 'context-view-source'}
+    assert policy.repairs(config, {}, initial=True) == [{}]
+    assert policy.blocked(config) == []
+    repair = {'sapiensid.identities.min_support': 4}
+    assert policy.repairs(config, repair) == [repair]
+    # An explicitly disabled body bonus can remain off, or be enabled with a working discount.
+    assert not policy.violations(patched(config, {'sapiensid.identities.cohesion_threshold': .85}))
+    assert not policy.violations(patched(config, {'sapiensid.identities.scene_match_bonus': .01}))
+    ineffective = patched(config, {'sapiensid.identities.scene_match_bonus': .01,
+                                   'sapiensid.identities.cohesion_threshold': .85})
+    assert policy.violations(ineffective) == ['body-scene-bonus']
+    row = next(r for r in report(ineffective)['checks'] if r['rule'] == 'body-scene-bonus')
+    assert row['status'] == 'warning' and row['measures']['gap'] == 0.
+
+
+def test_face_tie_and_copresence_advice_allow_strict_candidates():
+    source = Path(__file__).resolve().parents[1] / 'facial_recognition_solver.yml'
+    config = load(source)
+    match = config.data['recognition']['match_threshold']
+    for reflection in (match, match-.01):
+        edits = {'recognition.ambiguity_margin': 0., 'recognition.cooccurrence_merge_threshold': reflection}
+        variant = patched(config, edits)
+        advice = {r['rule'] for r in report(variant)['checks'] if r['status'] == 'advice' and not r['solver_constraint']}
+        assert advice == {'face-ambiguity-margin', 'face-reflection'}
+        assert StrictPolicy(config).repairs(config, edits) == [edits]
+    above = patched(config, {'recognition.cooccurrence_merge_threshold': match+.001})
+    assert not [r for r in report(above)['checks'] if r['status'] == 'advice']
+
+
+def test_capacity_regression_is_filtered_before_replay(tmp_path, monkeypatch):
+    from tests.test_recognition_solver_coverage import proposals, recovery_fixture
+    config, goals = recovery_fixture(tmp_path)
+    config = patched(config, {'recognition.cross_scene_provisional': True, 'recognition.min_identity_support': 2})
+    unsafe = {'recognition.min_identity_support': 1}
+    for strict in (True, False):
+        proposals(monkeypatch, [unsafe, {'sapiensid.matching.face_floor': .78}])
+        with closing(_open_readonly(config.database)) as db:
+            result = solve(config, goals, db, strict=strict, maximum=2)
+        assert result['search']['executed'] == 2
+        trial = result['simulation']['trials']['trial-1']
+        parameters = {item['parameter'] for item in trial['changes']}
+        if strict:
+            assert result['config_policy']['rejected_by_rule']['provisional-face-birth'] == 1
+            assert parameters == {'sapiensid.matching.face_floor'}
+        else:
+            assert parameters == set(unsafe)

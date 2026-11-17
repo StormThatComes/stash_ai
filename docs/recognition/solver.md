@@ -144,10 +144,22 @@ inherits local cohesion. Strict recommendations preserve enabled matching routes
 the retained scan contract. These checks apply to full YAML and diffs. The merge
 goal policy is controlled separately.
 
-Equal scan and sample floors are valid. Route capacity warnings, score headroom,
-soft ranking targets and other diagnostic notes in `check-config` allow search to
-start from the original YAML. Portrait selection and weights stay under user
-control. Explicit holdout comparisons can disable a route to measure its effect.
+When the input supports Context View enrichment or cross-scene provisional face
+groups, strict search keeps the face scene bonus positive or the local birth
+support at two or more, respectively. For a working body scene bonus, the
+effective bonus must stay positive and local cohesion must allow a mean below
+the ordinary match cutoff. Even a small positive discount qualifies. A null
+body bonus inherits the face bonus.
+
+Local support requirements must fit the scan's finite cue limit when that route
+was reachable on input. The early View repair and the selected-bank hybrid
+fallback each check their own reference capacity. Existing unreachable routes
+are reported and search can proceed. A proposal that introduces a new capacity
+warning is rejected before replay. Explicit holdout controls can disable a route
+to measure its effect.
+
+Equal scan and sample floors are valid. Face ambiguity and co-presence advice
+allow search to continue. Portrait selection and weights stay under user control.
 
 When the input needs repair, the solver tries bounded alternatives using the
 existing evidence, keeps active input routes and compares the original assignments

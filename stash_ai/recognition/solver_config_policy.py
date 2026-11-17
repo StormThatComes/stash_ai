@@ -14,11 +14,27 @@ class SolverChecks(Checks):
         self.config = config
         self.score_gap = DEFAULT_SCORE_GAP
         self.issues = {}
+        self.routes = {}
         solver_constraints(self)
 
     def add(self, rule, paths, status, effect, suggestion, *, solver_constraint, **measures):
         if status != 'ok':
             self.issues[rule] = (paths, measures)
+
+    def route(self, rule, paths, reachable, effect, suggestion, *, enabled=True, **measures):
+        state = 'ready' if reachable else 'unreachable'
+        self.routes[rule] = (state if enabled else 'disabled', paths, measures)
+
+    def route_regressions(self, initial_states):
+        """Keep inherited warnings visible without charging them to every proposal."""
+        failures = {}
+        for rule, (state, paths, measures) in self.routes.items():
+            previous = initial_states.get(rule)
+            lost_route = previous == 'ready' and state != 'ready'
+            new_warning = state == 'unreachable' and previous != 'unreachable'
+            if lost_route or new_warning:
+                failures[rule] = (paths, dict(measures, input_state=previous, proposed_state=state))
+        return failures
 
 
 class StrictPolicy:
@@ -31,6 +47,7 @@ class StrictPolicy:
         self.scan_key = scan_identity(config, self.namespace)
         self.examples = {}
         self.input_issues = [r for r in report(config, solver_only=True)['checks'] if r['status'] != 'ok']
+        self.input_routes = {rule: state for rule, (state, _, _) in SolverChecks(config).routes.items()}
         self.rejected = Counter()
         self.protected = self.enabled_routes(config)
 
@@ -55,7 +72,10 @@ class StrictPolicy:
 
     def violations(self, config, *, record=False, diagnostic=False):
         checks = SolverChecks(config)
-        issues = set(checks.issues)
+        failures = dict(checks.issues)
+        if not diagnostic:
+            failures.update(checks.route_regressions(self.input_routes))
+        issues = set(failures)
         if not diagnostic:
             issues.update(self.protected - self.enabled_routes(config))
         portraits = config.data['portraits']
@@ -65,9 +85,9 @@ class StrictPolicy:
             issues.add('retained-scan-contract')
         if record:
             self.rejected.update(issues)
-            for rule, (paths, measures) in checks.issues.items():
+            for rule, (paths, measures) in failures.items():
                 self.examples.setdefault(rule, dict(settings={p: checks.value(p) for p in paths}, measures=measures))
-            for rule in issues - checks.issues.keys():
+            for rule in issues - failures.keys():
                 reason = {'retained-scan-contract': 'retained evidence incompatible',
                           'portrait-settings-changed': 'portrait settings are fixed during merge search'}.get(rule, 'input route disabled')
                 self.examples.setdefault(rule, dict(reason=reason))
@@ -84,7 +104,7 @@ class StrictPolicy:
         issues = self.violations(config)
         if not issues:
             return [changes]
-        if issues != ['body-adjacent-cues']:
+        if 'body-adjacent-cues' not in issues:
             self.violations(config, record=True)
             return []
 
@@ -114,8 +134,9 @@ class StrictPolicy:
         return [p for _, p in repairs] if initial else [repairs[0][1]]
 
     def blocked(self, config):
-        rows = [r for r in report(config, solver_only=True)['checks'] if r['status'] != 'ok']
+        violations = self.violations(config)
+        rows = [r for r in report(config, solver_only=True)['checks'] if r['rule'] in violations]
         for row in rows:
             row['solver_parameters'] = list(row['settings'])
-            row['repair_scope'] = 'Review the local match and effective adjacent-cue thresholds.'
+            row['repair_scope'] = row['suggestion']
         return rows

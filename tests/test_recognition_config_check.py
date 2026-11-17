@@ -57,9 +57,10 @@ def test_composed_gates_and_unit_specific_counts(tmp_path):
         'execution.scan.max_cues': 4,
     }))
     r = rows(config)
-    for key in ('view-match_threshold', 'view-ambiguity_margin', 'face-reflection',
+    for key in ('view-match_threshold', 'view-ambiguity_margin',
                 'hybrid-face-match_threshold', 'hybrid-face-cohesion_threshold'):
         assert r[key]['status'] == 'ok' and not r[key]['solver_constraint']
+    assert r['face-reflection']['status'] == 'advice' and not r['face-reflection']['solver_constraint']
     assert r['view-match_threshold']['measures']['effective'] == max(r['view-match_threshold']['settings'].values())
     assert r['body-scene-bonus']['measures']['gap'] == pytest.approx(.01)
     assert r['body-scene-bonus']['settings']['matching.face.same_scene.match_bonus'] == .06
@@ -67,7 +68,7 @@ def test_composed_gates_and_unit_specific_counts(tmp_path):
     assert r['body-turn-discount-cap']['status'] == 'ok'
     assert r['global-local-body-match_threshold']['status'] == 'ok'
     assert r['local-anchor-view-support']['measures']['effective'] == 5
-    assert r['local-view-cue-cap']['status'] == 'warning' and not r['local-view-cue-cap']['solver_constraint']
+    assert r['local-view-cue-cap']['status'] == 'warning' and r['local-view-cue-cap']['preserve_input']
     assert r['body-roster-cue-cap']['measures']['required'] == 6
     assert 'hybrid-cue-cap' not in r  # Hybrid independent support can pool scenes.
 
