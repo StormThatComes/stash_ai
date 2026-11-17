@@ -27,6 +27,18 @@ class FrozenSeeds:
             for mode in modes:
                 self.support[id(mode)] = len(independent(mode,settings))
 
+    def add_scene_anchors(self, additions):
+        banks = {owner: [*self.seeds[owner], *extra] for owner, extra in additions.items()}
+        expanded = FrozenSeeds(banks, self.scores, self.settings)
+        self.seeds = {**self.seeds, **banks}
+        for owner, extra in additions.items():
+            local_ids = {row['id'] for row in extra}
+            for mode in expanded.modes[owner]:
+                if any(row['id'] in local_ids for row in mode):
+                    # Also retain the original strict mode as a scoring option.
+                    self.modes[owner].append(mode)
+                    self.support[id(mode)] = expanded.support[id(mode)]
+
     def rank(self,row,guard):
         from .body_identity import copresent
         settings=self.settings;ranked=[]

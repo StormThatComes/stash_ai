@@ -7,6 +7,7 @@ from .database import encoded
 from .scan_heads import predicate
 from .identity_merges import canonical
 from .crowd_context import pair
+from .reference_roles import global_body_anchor_sql
 
 
 class MissingReferences:
@@ -23,7 +24,7 @@ class MissingReferences:
         body = ("SELECT s.scene,m.person FROM body_observations b JOIN body_members m ON m.observation=b.id "
                 "JOIN scans s ON s.id=b.scan WHERE b.rejected IS NULL AND "+clause)
         if incompatible is not None:
-            body += (" AND m.role='anchor' AND m.status IN ('accepted','provisional') AND "+predicate()+
+            body += (" AND "+global_body_anchor_sql()+" AND m.status IN ('accepted','provisional') AND "+predicate()+
                      " AND b.contract NOT IN (SELECT value FROM json_each(?))")
             entries = db.execute(body,(*params,encoded(incompatible)))
         else:
@@ -56,7 +57,7 @@ class MissingReferences:
                "JOIN body_members n ON n.observation=b.id JOIN observations z ON z.id=b.face "
                "JOIN members g ON g.observation=z.id WHERE m.person=? AND n.person<>m.person "
                "AND f.person=m.person AND g.person=n.person AND m.status='accepted' AND n.status='accepted' "
-               "AND m.role='anchor' AND n.role='anchor' AND a.rejected IS NULL AND b.rejected IS NULL "
+               "AND "+global_body_anchor_sql('m')+" AND "+global_body_anchor_sql('n')+" AND a.rejected IS NULL AND b.rejected IS NULL "
                "AND o.rejected IS NULL AND z.rejected IS NULL AND s.scope=? AND s.namespace=? "
                "AND s.status='complete' AND "+strict_sql('o','f')+" AND "+strict_sql('z','g')+" AND "+predicate())
         for scan,scene,torso,other_torso,face,other_face,other in self.db.execute(sql,(person,*self.namespace)):
