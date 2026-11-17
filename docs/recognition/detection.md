@@ -21,6 +21,12 @@ Only **Run detection** loads models and computes an annotated image. Each detect
 uses only the selected cue, independently of navigation history. Edits are local to the
 window. The recognition database and Stash identities are never modified.
 
+To preview ViTPose++ with the bundled YAML, set `pose.estimator.backend` to
+`vitpose_plus_large` and choose **Run detection**. The tuner applies refinement and
+pose deduplication only to PMPose. Switching back restores that panel's PMPose
+settings. Body and anchor sharpness floors apply during recognition collection and
+matching, so they can stay set while previewing a detector without SAM.
+
 Enable **Compare A/B** to show two copies of the same cue. Select **B** under
 **Edit configuration**, use **Copy A to B** or enter a second file path and choose
 **Load YAML**. You can also start with both files:

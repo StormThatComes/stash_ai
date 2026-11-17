@@ -47,7 +47,7 @@ def defaults():
         storage=dict(retain_person_crops=True, retain_body_masks=True))
 
 
-def validate(settings):
+def validate(settings, *, detection_preview=False):
     from .config import _number
     pose = settings['pose']
     if pose['backend'] not in ('yolo', 'vitpose_plus_large', 'sapiens', 'pmpose'):
@@ -65,10 +65,11 @@ def validate(settings):
     _number(pose['pmpose_batch_size'], 'sapiensid.pose.pmpose_batch_size', 1, 16, integer=True)
     for key in ('pmpose_presence_threshold', 'pmpose_visibility_threshold'):
         _number(pose[key], 'sapiensid.pose.' + key, 0, 1)
-    from .pose_refinement_config import validate as validate_refinement
-    validate_refinement(pose)
-    from .pose_deduplication_config import validate as validate_deduplication
-    validate_deduplication(pose)
+    if not detection_preview or pose['backend'] == 'pmpose':
+        from .pose_refinement_config import validate as validate_refinement
+        from .pose_deduplication_config import validate as validate_deduplication
+        validate_refinement(pose)
+        validate_deduplication(pose)
     collection=settings['collection']
     if type(collection['enabled']) is not bool:
         raise ValueError('sapiensid.collection.enabled must be boolean.')

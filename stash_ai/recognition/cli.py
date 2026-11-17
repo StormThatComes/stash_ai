@@ -381,7 +381,7 @@ def parser():
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
-                  device=getattr(args, 'device', None))
+                  device=getattr(args, 'device', None), detection_preview=args.command == 'tune-detection')
     if args.command == 'check-config':
         from .config_check import display, report
         display(report(config, args.min_score_gap), show_all=args.show_all, as_json=args.json)

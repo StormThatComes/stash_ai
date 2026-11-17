@@ -13,12 +13,14 @@ def validate(pose):
     from .config import _number
     settings = pose['refinement']
     prefix = 'sapiensid.pose.refinement.'
-    for key in ('enabled', 'expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries'):
+    if type(settings['enabled']) is not bool:
+        raise ValueError(prefix + 'enabled must be boolean.')
+    if not settings['enabled']:
+        return
+    for key in ('expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
-    if settings['masked_identity_crop'] and not settings['enabled']:
-        raise ValueError(prefix + 'masked_identity_crop requires refinement.enabled.')
-    if settings['enabled'] and pose['backend'] != 'pmpose':
+    if pose['backend'] != 'pmpose':
         raise ValueError(prefix + 'enabled requires sapiensid.pose.backend: pmpose.')
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')

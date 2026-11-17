@@ -160,7 +160,7 @@ pose:
     max_side_expansion: 0.5
     # Maximum extension on any side, relative to original width or height. Range: 0..2.
     masked_identity_crop: true
-    # Mask the identity encoder crop when refinement separates overlapping bodies. Requires refinement.enabled.
+    # Mask the identity encoder crop when active refinement separates overlapping bodies.
   deduplication:
     # Optional suppression of duplicate PMPose predictions.
     enabled: true

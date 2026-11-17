@@ -7,7 +7,7 @@ from .config import _freeze, effective_data
 from .config_layout import INTERNAL_PATHS, VITPOSE_BATCH, get, put, v2_document
 
 
-def apply_edits(config, edits):
+def apply_edits(config, edits, *, detection_preview=False):
     """Apply all leaf changes together so interdependent backends/gates can switch atomically."""
     if not edits:
         return config, {}
@@ -29,6 +29,6 @@ def apply_edits(config, edits):
         put(document, public, value)
         if parameter == 'sapiensid.pose.batch_size':
             put(document, VITPOSE_BATCH, value)
-    _, data = effective_data(document)
+    _, data = effective_data(document, detection_preview=detection_preview)
     source = yaml.safe_dump(document, sort_keys=False).encode()
     return replace(config, data=_freeze(data), source=source, document_version=2), previous
