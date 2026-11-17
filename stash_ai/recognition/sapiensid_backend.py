@@ -55,6 +55,9 @@ def identity_contract(config):
     elif settings['pose'].get('backend', 'yolo') == 'pmpose':
         from .pmpose_registry import contract as pmpose_contract
         result['pose_refiner'] = pmpose_contract(settings['pose'])
+    if settings['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens') and settings['pose'].get('refinement',{}).get('enabled'):
+        from .pose_refinement_config import contract
+        result['pose_mask'] = contract(settings['pose']['refinement'])
     from .inference_precision import contract as precision_contract
     result.update(precision_contract(config))
     return result
@@ -115,6 +118,10 @@ class SapiensIDFaces(YuNetDetector):
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'pmpose':
                 from .pmpose_pose import load
                 self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
+            if (self.pose_refiner is not None and config.data['sapiensid']['pose']['backend'] != 'pmpose'
+                    and config.data['sapiensid']['pose']['refinement']['enabled']):
+                from .pose_masks import wrap
+                self.pose_refiner = wrap(self.pose_refiner, config, self.device)
             if self.pose_refiner is not None:
                 from .cached_pose import Pose
                 self.pose_refiner=Pose(self.pose_refiner,config,self.device)
@@ -236,9 +243,10 @@ class SapiensIDFaces(YuNetDetector):
             kps = raw.copy()
             usable = (confidence > settings['keypoint_score_threshold']) & (kps >= 0).all(axis=1)
             usable &= (kps[:,0]>=left)&(kps[:,0]<right)&(kps[:,1]>=top)&(kps[:,1]<bottom)
-            details = {}
+            details = dict(keypoint_scores=confidence.tolist(), keypoint_score_kind='confidence',
+                           keypoint_visibility_measured=False)
             if settings.get('backend') == 'pmpose':
-                details = dict(keypoint_scores=confidence.tolist(), keypoint_score_kind='expected_oks')
+                details = dict(keypoint_scores=confidence.tolist(), keypoint_score_kind='expected_oks', keypoint_visibility_measured=True)
                 for key in ('presence', 'visibility'):
                     values = probabilities[key][index]
                     details['keypoint_' + key] = values.tolist()

@@ -7,7 +7,7 @@ def contract(config):
     for name,active in (('rfdetr_precision',pose.get('detector')=='rfdetr_xl'),
                         ('vitpose_precision',pose.get('backend')=='vitpose_plus_large'),
                         ('pmpose_precision',pose.get('backend')=='pmpose'),
-                        ('sam_precision',pose.get('backend')=='pmpose' and pose.get('refinement',{}).get('enabled'))):
+                        ('sam_precision',pose.get('refinement',{}).get('enabled'))):
         value=settings.get(name,'fp32')
         if active and value!='fp32':result[name]=value
     if pose.get('backend')=='vitpose_plus_large' and settings.get('vitpose_device_decode'):

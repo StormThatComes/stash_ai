@@ -257,7 +257,7 @@ def validate(data, *, detection_preview=False):
     for name,active in (('rfdetr_precision',data['sapiensid']['pose']['detector']=='rfdetr_xl'),
                         ('vitpose_precision',data['sapiensid']['pose']['backend']=='vitpose_plus_large'),
                         ('pmpose_precision',data['sapiensid']['pose']['backend']=='pmpose'),
-                        ('sam_precision',data['sapiensid']['pose']['backend']=='pmpose' and data['sapiensid']['pose']['refinement']['enabled'])):
+                        ('sam_precision',data['sapiensid']['pose']['refinement']['enabled'])):
         if detection_preview and not active:
             continue
         value=data['execution'][name]

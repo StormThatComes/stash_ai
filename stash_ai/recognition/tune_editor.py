@@ -8,7 +8,7 @@ from .config_layout import POINT_FIELDS, get, leaf_items, v2_document
 from .detection_parameters import apply_edits
 
 
-PMPOSE_SWITCHES = ('pose.refinement.enabled', 'pose.deduplication.enabled')
+PMPOSE_SWITCHES = ('pose.deduplication.enabled',)
 
 CHOICES = {
     'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet'),
@@ -74,6 +74,8 @@ class Settings:
         allowed = ['face.detector', 'pose.detector',
                    'pose.detector.' + ('dfine' if box.startswith('dfine') else box),
                    'pose.estimator', 'pose.estimator.' + estimator]
+        if estimator in ('sapiens','vitpose_plus_large'):
+            allowed.extend(('pose.point_quality','pose.refinement'))
         if estimator == 'pmpose':
             allowed.extend(('pose.point_quality', 'pose.refinement', 'pose.deduplication'))
         available = {key.rpartition('.')[0] for key in self.base}

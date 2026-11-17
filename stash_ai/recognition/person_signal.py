@@ -65,10 +65,10 @@ def validate(settings, *, detection_preview=False):
     _number(pose['pmpose_batch_size'], 'sapiensid.pose.pmpose_batch_size', 1, 16, integer=True)
     for key in ('pmpose_presence_threshold', 'pmpose_visibility_threshold'):
         _number(pose[key], 'sapiensid.pose.' + key, 0, 1)
-    if not detection_preview or pose['backend'] == 'pmpose':
-        from .pose_refinement_config import validate as validate_refinement
-        from .pose_deduplication_config import validate as validate_deduplication
-        validate_refinement(pose)
+    from .pose_refinement_config import validate as validate_refinement
+    from .pose_deduplication_config import validate as validate_deduplication
+    validate_refinement(pose)
+    if not detection_preview or pose['backend']=='pmpose':
         validate_deduplication(pose)
     collection=settings['collection']
     if type(collection['enabled']) is not bool:
