@@ -24,6 +24,10 @@ def fuse(i, offset, original, refined, mask, box, settings):
         if (score <= settings['min_keypoint_score'] or probs['presence'] <= settings['min_presence']
                 or not (box[0] <= point[0] < box[2] and box[1] <= point[1] < box[3])):
             return False
+        if (joint in PARENT and rival_chain(original, i, joint, point, tolerance) <= tolerance
+                and (confidence[PARENT[joint]] <= 0 or
+                     np.linalg.norm(point-joints[PARENT[joint]]) > 5*tolerance)):
+            return False
         nearest_peer = np.inf
         if joint in PARENT:
             pair = [joint, OPPOSITE[joint]]

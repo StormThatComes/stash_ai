@@ -227,6 +227,10 @@ class DeduplicatedPMPose:
             final[1][slot] = np.where(usable,recovered[1][owner],0)
             for key in final[2]:
                 final[2][key][slot] = np.where(usable,recovered[2][key][owner],0)
+            from .limb_ownership import maskless
+            snapshot = (final[0].copy(), final[1].copy(), {k:v.copy() for k,v in final[2].items()})
+            removed = maskless(snapshot,slot,bounds[keep[slot]],image.size,final,self.settings)
+            record['withheld_rival_joints'] = sorted(set(record.get('withheld_rival_joints', ())) | set(removed))
             record['contact_pose_recovered'] = True
         for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))

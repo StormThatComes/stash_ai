@@ -7,7 +7,7 @@ import numpy as np
 
 
 def crowded_link(q):
-    return q.get('detected_people',1)>1 and q.get('overlap',0)>=.25
+    return q.get('detected_people',1)>1 and max(q.get('overlap',0), q.get('box_overlap',0))>=.25
 
 
 def questionable_links(rows,settings,scores,graph=()):
