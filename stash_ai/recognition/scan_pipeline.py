@@ -185,7 +185,11 @@ def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
     # Semantic foreground can differ from the ellipse in either direction.
     # Decide sharpness only after FaceOcc when visibility is being measured.
     if measurement_required(config):policy=dict(policy,min_sharpness=0.)
-    reason=('face_detection_score' if face.score<=config.data['detection']['score_threshold']
+    floor=policy.get('candidate_score_threshold')
+    if floor is not None and face.score<=policy['score_threshold']:
+        quality['query_only']=True
+        quality['query_only_reason']='weak_face_detection'
+    reason=('face_detection_score' if face.score<=(policy['score_threshold'] if floor is None else floor)
             else rejection(quality,policy))
     return dict(index=index,face=face,quality=quality,reason=reason,tensor=None,
                 visibility_input=None,vector=None,crop=None)

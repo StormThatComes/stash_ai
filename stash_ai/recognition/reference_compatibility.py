@@ -26,10 +26,10 @@ def fallback_sql(db,config,namespace,*,observation='o'):
                 quality=json.loads(raw)
                 face=checked_detection(json.loads(geometry))
                 rectangle=json.loads(rect)
-                if (quality.get('pose_contract')!='eye-frame-v2' or
+                if (quality.get('pose_contract') not in ('eye-frame-v2','profile-frame-v3') or
                     quality.get('alignment_valid') is not True or
                     quality.get('geometry_contract')!=geometry_contract(face,SimpleNamespace(rect=rectangle)) or
-                    face.score<=policy['score_threshold']):
+                    face.score<=(policy.get('candidate_score_threshold') if policy.get('candidate_score_threshold') is not None else policy['score_threshold'])):
                     return 0
                 for key in ('pixels','sharpness','pose_deviation'):
                     value=quality.get(key)

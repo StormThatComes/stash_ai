@@ -38,7 +38,9 @@ def test_default_can_read_existing_scans_and_tuning_changes_measurement_keys(tmp
                   min_face_source_fraction=.85, require_complete_face=True)
     legacy_sha = digest(dict(namespace=ns, detection=legacy, max_cues=default.data['execution']['max_cues'],
                              quality_format=5, visibility_contract=CONTRACT_ID))
-    assert scan_identity(default, ns) == legacy_sha != scan_identity(tuned, ns)
+    # Profile-frame v3 changes measured pose quality and requires fresh scans.
+    assert scan_identity(default, ns) != legacy_sha
+    assert scan_identity(default, ns) != scan_identity(tuned, ns)
     assert policy_identity(default) != policy_identity(tuned)
     for config in (default, tuned):
         data = plain(config.data)

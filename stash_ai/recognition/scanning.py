@@ -20,16 +20,20 @@ from .pose_policy import measurement_required
 def scan_identity(config, namespace):
     visibility_contract = CONTRACT_ID if measurement_required(config) else None
     detection = dict(config.data['detection'])
+    if detection.get('candidate_score_threshold') is None:
+        detection.pop('candidate_score_threshold',None)
+    if not detection.get('alignment_retry_error'):
+        detection.pop('alignment_retry_error',None)
     from .rotated_faces import enabled
     if enabled(config):
         from .body_observations import contract
-        detection['pose_guided_rotation'] = ['rotated-head-v1',contract(config)]
+        detection['pose_guided_rotation'] = ['rotated-head-v2',contract(config)]
     else:
         detection.pop('pose_guided_rotation',None)
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
         detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
     return digest({'namespace': namespace, 'detection': detection,
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 5,
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 6,
                    'visibility_contract': visibility_contract})
 
 
@@ -74,10 +78,10 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                     raise ValueError('Retained face observation has an invalid cue.')
                 cue = source.cues[row['cue']]
                 stamp = geometry_contract(face, cue)
-                if quality.get('geometry_contract') != stamp or face.score <= config.data['detection']['score_threshold']:
+                if quality.get('geometry_contract') != stamp or face.score <= (config.data['detection'].get('candidate_score_threshold') if config.data['detection'].get('candidate_score_threshold') is not None else config.data['detection']['score_threshold']):
                     quality['alignment_valid'] = alignable(face, SimpleNamespace(width=cue.rect[2], height=cue.rect[3]))
                     quality['geometry_contract'] = stamp
-                    reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
+                    reason = ('face_detection_score' if face.score <= (config.data['detection'].get('candidate_score_threshold') if config.data['detection'].get('candidate_score_threshold') is not None else config.data['detection']['score_threshold'])
                               else None if quality['alignment_valid'] else 'face_landmarks_invalid')
                     if reason:
                         # Earlier SFace scans may already have matching memberships.

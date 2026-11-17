@@ -53,15 +53,21 @@ def alignable(detection, image=None):
     return alignment_measurements(detection, image)['alignment_valid']
 
 
-def pose_measurements(landmarks):
+def pose_measurements(landmarks, size=None):
     """Yaw/pitch proxies in the eye coordinate frame; roll is aligned away."""
     import numpy as np
     points = np.asarray(landmarks, dtype=np.float64)
     eye = points[1] - points[0]
     distance = float(np.linalg.norm(eye))
-    if distance <= 1:
-        return dict(pose_deviation=1., roll_deviation=1., pose_contract='eye-frame-v2')
-    horizontal = eye / distance
+    from .face_frame import axis
+    from .visibility import VisibilityGeometryError
+    dimensions = size or np.maximum(np.ptp(points,axis=0),1)
+    try:
+        horizontal, profile = axis(points,*dimensions)
+    except VisibilityGeometryError:
+        return dict(pose_deviation=1.,roll_deviation=1.,pose_contract='profile-frame-v3')
+    if profile:
+        distance=max(distance,.6*np.linalg.norm(points[3:].mean(axis=0)-points[:2].mean(axis=0)))
     vertical = np.array([-horizontal[1], horizontal[0]])
     origin = (points[0] + points[1]) / 2
     nose = points[2] - origin
@@ -70,14 +76,14 @@ def pose_measurements(landmarks):
     mouth_height = float(mouth @ vertical)
     pitch = abs(float(nose @ vertical) / max(mouth_height, 1.) - .5)
     return dict(pose_deviation=max(yaw, pitch),
-                roll_deviation=abs(float(eye[1])) / distance, pose_contract='eye-frame-v2')
+                roll_deviation=abs(float(eye[1])) / distance, pose_contract='profile-frame-v3')
 
 
 @pipeline_stage('quality')
 def assess(image,detection):
     from .inference_cache import many,current
     if current() is None:return _assess(image,detection)
-    return many('face_quality','face-quality-v3-roll-foreground',[(image,tuple(detection.row))],
+    return many('face_quality','face-quality-v4-profile-frame',[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
@@ -103,12 +109,17 @@ def _assess(image, detection):
                    & (points[:, 1] >= y) & (points[:, 1] <= y + height)).all())
     eye_distance = float(np.linalg.norm(points[0] - points[1]))
     eye_mid, mouth_mid = (points[0] + points[1]) / 2, (points[3] + points[4]) / 2
-    eye=points[1]-points[0]
-    vertical=np.array([-eye[1],eye[0]]) / max(eye_distance,1.)
-    nose_height=float((points[2]-eye_mid) @ vertical)
-    mouth_height=float((mouth_mid-eye_mid) @ vertical)
-    ordered = bool(eye_distance > 1 and 0 < nose_height < mouth_height)
-    pose = pose_measurements(points)
+    from .face_frame import axis
+    from .visibility import VisibilityGeometryError
+    try:
+        horizontal,_=axis(points,width,height)
+        vertical=np.array([-horizontal[1],horizontal[0]])
+        nose_height=float((points[2]-eye_mid) @ vertical)
+        mouth_height=float((mouth_mid-eye_mid) @ vertical)
+        ordered=bool(0<nose_height<mouth_height)
+    except VisibilityGeometryError:
+        ordered=False
+    pose = pose_measurements(points,(width,height))
     from .foreground_quality import face_geometry
     foreground = face_geometry(image,detection)
     return dict(complete=complete, landmarks_inside=inside and ordered, **alignment_measurements(detection, image),

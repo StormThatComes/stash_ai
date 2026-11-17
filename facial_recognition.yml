@@ -21,6 +21,12 @@ face:
     pose_guided_rotation: true
     # Retry one rotated head crop when a measured sideways head has no face. Requires SCRFD and body collection.
     # Range: true or false.
+    candidate_score_threshold: null
+    # Optional lower SCRFD candidate floor; detections below score_threshold can query identities but cannot
+    # seed face anchors. Null disables. Range: 0..score_threshold.
+    alignment_retry_error: 0.0
+    # Retry one local SCRFD crop when normalized five-point alignment error exceeds this value. 0 disables.
+    # Range: 0..1.
   quality:
     # Scan admission. Rejected faces cannot seed or attach to identities.
     min_face_pixels: 32

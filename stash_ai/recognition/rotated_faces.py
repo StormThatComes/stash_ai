@@ -20,6 +20,16 @@ def head_crop(person, size):
     points = person.get('keypoints', ())
     if len(points)<3:
         return None
+    usable=[p for p in points[:5] if len(p)==2 and all(math.isfinite(v) and v>=0 for v in p)]
+    if len(usable)<2:
+        return None
+    if len(points)<3 or any(min(p)<0 for p in points[:3]):
+        span=max(math.dist(a,b) for a in usable for b in usable)
+        if span<4:return None
+        cx,cy=(sum(p[i] for p in usable)/len(usable) for i in (0,1))
+        radius=2.6*span
+        return (max(0,math.floor(cx-radius)),max(0,math.floor(cy-radius)),
+                min(size[0],math.ceil(cx+radius)),min(size[1],math.ceil(cy+radius))),0
     nose, left, right = points[:3]
     vis = person.get('keypoint_visibility')
     if (vis is not None and min(vis[:3])<.5 or
@@ -27,7 +37,7 @@ def head_crop(person, size):
         return None
     dx,dy = left[0]-right[0], left[1]-right[1]
     eyes = math.hypot(dx,dy)
-    if eyes<4 or abs(dy)<1.73*abs(dx) or math.dist(nose,left)>2*eyes or math.dist(nose,right)>2*eyes:
+    if eyes<4 or math.dist(nose,left)>2*eyes or math.dist(nose,right)>2*eyes:
         return None
     cx,cy = (sum(p[i] for p in (nose,left,right))/3 for i in (0,1))
     radius = 2.6*eyes
@@ -35,7 +45,9 @@ def head_crop(person, size):
            min(size[0],math.ceil(cx+radius)),min(size[1],math.ceil(cy+radius)))
     if min(box[2]-box[0],box[3]-box[1])<8:
         return None
-    return box, dy>0
+    if abs(dy)>=1.73*abs(dx):
+        return box, dy>0
+    return box, 180 if nose[1] < (left[1]+right[1])/2 else 0
 
 
 def restore(face, box, ccw):
@@ -43,11 +55,13 @@ def restore(face, box, ccw):
     l,t,r,b = box
     def point(x,y,edge=False):
         offset = 0 if edge else 1
+        if type(ccw) is int:
+            return (r-offset-x,b-offset-y) if ccw==180 else (l+x,t+y)
         return (r-offset-y,t+x) if ccw else (l+y,b-offset-x)
     x,y,w,h = face.box
     a,c = point(x,y,True),point(x+w,y+h,True)
     marks = [v for xy in face.landmarks for v in point(*xy)]
-    return checked_detection([min(a[0],c[0]),min(a[1],c[1]),h,w,*marks,face.score])
+    return checked_detection([min(a[0],c[0]),min(a[1],c[1]),(w if type(ccw) is int else h),(h if type(ccw) is int else w),*marks,face.score])
 
 
 def recover(db, scan, source, config, acquire, visibility, release):
@@ -64,9 +78,9 @@ def recover(db, scan, source, config, acquire, visibility, release):
     def certify():
         if durable:
             with db:
-                store(db,'rotated-head-v1',scan,expected,version(db,'raw-body',scan),expected)
+                store(db,'rotated-head-v2',scan,expected,version(db,'raw-body',scan),expected)
     if durable and db.execute('SELECT 1 FROM evidence_fingerprints WHERE kind=? AND key=? AND policy=? AND version=? AND digest=?',
-                              ('rotated-head-v1',scan,expected,version(db,'raw-body',scan),expected)).fetchone():
+                              ('rotated-head-v2',scan,expected,version(db,'raw-body',scan),expected)).fetchone():
         return
     planned = {}
     for row in db.execute("""SELECT id,cue,geometry FROM body_observations WHERE scan=? AND contract=?
@@ -102,14 +116,14 @@ def recover(db, scan, source, config, acquire, visibility, release):
                                 db.execute("UPDATE body_observations SET quality=json_set(quality,'$.rotated_face_checked',1) WHERE id=?",(row['id'],))
                                 if len(faces)>=config.data['detection']['max_faces_per_frame']:
                                     continue
-                                with image.crop(box) as tile, tile.transpose(Image.Transpose.ROTATE_90 if ccw else Image.Transpose.ROTATE_270) as upright:
+                                with image.crop(box) as tile, (tile.copy() if type(ccw) is int and ccw==0 else tile.transpose(Image.Transpose.ROTATE_180 if ccw==180 else Image.Transpose.ROTATE_90 if ccw else Image.Transpose.ROTATE_270)) as upright:
                                     found = backend.detect(upright)
                                 if len(found)!=1:
                                     continue
                                 face = restore(found[0],box,ccw)
                                 # An existing face at this location or a contested assignment vetoes recovery.
                                 x,y,w,h = face.box
-                                if any(min(x+w,a+c)>max(x,a) and min(y+h,b+d)>max(y,b) for a,b,c,d in (f.box for f in faces)):
+                                if any(duplicate_face(face,other) for other in faces):
                                     continue
                                 if associate(faces+[face],people)[-1]!=i:
                                     continue
@@ -119,8 +133,8 @@ def recover(db, scan, source, config, acquire, visibility, release):
                                 for _,face,quality,reason,vector,crop in records:
                                     if reason is not None:
                                         continue
-                                    oid = str(uuid.uuid5(uuid.UUID(scan),encoded(['rotated-head-v1',index,row['id']])))
-                                    quality.update(rotated_head_source=row['id'],rotated_head_degrees=90 if ccw else -90)
+                                    oid = str(uuid.uuid5(uuid.UUID(scan),encoded(['rotated-head-v2',index,row['id']])))
+                                    quality.update(rotated_head_source=row['id'],rotated_head_degrees=ccw if type(ccw) is int else 90 if ccw else -90)
                                     shot = db.execute("SELECT json_extract(quality,'$.quality.view_shot') FROM body_observations WHERE id=?",(row['id'],)).fetchone()[0]
                                     if shot is not None:
                                         quality['view_shot'] = shot
@@ -137,3 +151,12 @@ def recover(db, scan, source, config, acquire, visibility, release):
         finally:
             release()
     certify()
+
+
+def duplicate_face(face,other):
+    x,y,w,h=face.box; a,b,c,d=other.box
+    intersection=max(0,min(x+w,a+c)-max(x,a))*max(0,min(y+h,b+d)-max(y,b))
+    if intersection/max(1,min(w*h,c*d))<.5:return False
+    import numpy as np
+    distance=np.median(np.linalg.norm(np.asarray(face.landmarks)-np.asarray(other.landmarks),axis=1))
+    return distance < .4*min(w,h,c,d)

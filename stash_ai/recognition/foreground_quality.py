@@ -13,7 +13,12 @@ def laplacian(values, mask=None):
         interior = (mask[1:-1,1:-1] & mask[:-2,1:-1] & mask[2:,1:-1]
                     & mask[1:-1,:-2] & mask[1:-1,2:])
         response = response[interior]
-    return dict(sharpness=float(response.var()) if response.size else 0.,
+    pixels=values[mask] if mask is not None else values.ravel()
+    contrast=float(np.var(pixels)) if pixels.size else 0.
+    variance=float(response.var()) if response.size else 0.
+    return dict(sharpness_normalized=variance/max(contrast,1.), sharpness_contrast=contrast,
+                sharpness_noise=float(np.median(np.abs(response-np.median(response)))) if response.size else 0.,
+                sharpness=variance,
                 sharpness_pixels=int(response.size))
 
 
@@ -50,6 +55,14 @@ def device_faces(inputs, masks):
     total = (response*interior).sum(dim=(1,2))
     means = total/counts.clamp_min(1)
     variance = (((response-means[:,None,None])**2)*interior).sum(dim=(1,2))/counts.clamp_min(1)
-    values = torch.stack((variance,counts),dim=1).cpu().tolist()
-    return [dict(sharpness=float(value),sharpness_pixels=int(count),sharpness_method='faceocc_mask')
-            for value,count in values]
+    source_count=masks.sum(dim=(1,2)).clamp_min(1)
+    source_mean=(gray*masks).sum(dim=(1,2))/source_count
+    contrast=(((gray-source_mean[:,None,None])**2)*masks).sum(dim=(1,2))/source_count
+    selected=response.masked_fill(~interior,float('nan')).flatten(1)
+    median=selected.nanquantile(.5,dim=1)
+    noise=(selected-median[:,None]).abs().nanquantile(.5,dim=1).nan_to_num()
+    values = torch.stack((variance,counts,contrast,noise),dim=1).cpu().tolist()
+    return [dict(sharpness=float(value),sharpness_pixels=int(count),sharpness_method='faceocc_mask',
+                 sharpness_normalized=float(value/max(texture,1.)),sharpness_contrast=float(texture),
+                 sharpness_noise=float(noise))
+            for value,count,texture,noise in values]

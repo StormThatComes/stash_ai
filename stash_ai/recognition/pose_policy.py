@@ -68,6 +68,9 @@ def measurement_required(config):
 
 
 def is_anchor(quality, grouping):
+    record = metadata(quality) if isinstance(quality,str) else quality
+    if record.get('query_only'):
+        return False
     if grouping.get('_inspection_omit_anchors'):
         record = metadata(quality) if isinstance(quality,str) else quality
         if record.get('_inspection_auxiliary_only'):
@@ -107,6 +110,7 @@ def anchor_sql(alias, grouping):
           f"json_extract({alias}.quality,'$.pose_deviation') BETWEEN 0 AND {maximum!r},0)")
     if grouping.get('_inspection_omit_anchors'):
         pose += f" AND COALESCE(json_extract({alias}.quality,'$._inspection_auxiliary_only'),0)=0"
+    pose += f" AND COALESCE(json_extract({alias}.quality,'$.query_only'),0)=0"
     return '('+pose+') AND ('+visibility_sql(alias,anchor_visibility(grouping))+') AND ('+quality_sql(alias,grouping,anchor=True)+')'
 
 
