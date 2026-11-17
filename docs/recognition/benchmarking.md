@@ -269,3 +269,60 @@ sqlite3 -readonly faces_state.sqlite3 "SELECT summary FROM runs WHERE finished I
 Include the active YAML and code revision with the report. Compare fresh and
 reused scene/cue counts before comparing timings. A cache lookup miss is not an
 operational error, and a batch maximum does not describe actual batch occupancy.
+
+### Contact and face calibration
+
+Contact profile selection prioritizes partner-joint and wrong-side errors before
+additional point recall. Compare complete reports, including clean-mask coverage;
+a higher recall alone does not establish an improvement.
+
+Run all four existing face recognizers on identical annotated detections:
+
+```bash
+python -m benchmarks.benchmark_face_recognizers faces.json --face-config facial_recognition.yml --false-match-rate 0.001 --output face-comparison.json
+```
+
+The JSON manifest is a list of records with `image` (relative to the manifest),
+`face` (15 detector values: box, five landmarks, score), `identity`, `scene`,
+`split` (`calibration` or `validation`) and `category` (`profile`, `occluded`,
+`small`, or `ordinary`). Both identities and scenes must be disjoint across splits.
+Only cross-scene pairs are evaluated. Each model receives its own threshold from
+calibration impostors; validation never selects the threshold. The report includes
+pair counts and false-match resolution, so an undersized holdout is visible.
+`--max-pairs` bounds work per model and fails rather than silently truncating pairs.
+Models load sequentially and retain their pinned-asset verification.
+
+Evaluate the existing box ROI against the diagnostic profile ROI and calibrate
+foreground sharpness with annotated NPZ arrays:
+
+```bash
+python -m benchmarks.benchmark_face_geometry faces.npz --output geometry-comparison.json
+```
+
+Required arrays: `box_roi`, `profile_roi`, `visible_truth` (N,H,W booleans),
+`sharpness`, `sharpness_normalized`, `blurred` (N). This produces per-face ROI error
+and blur-recall/sharp-face-rejection curves. It does not select production ROI or
+blur thresholds automatically.
+
+### Experimental contact policy switches
+
+SAM is available for PMPose, ViTPose++ and Sapiens. Only PMPose verifies borrowed
+temporal prompts through a second masked pose pass. Other backends retain measured
+keypoint confidence and label prompt visibility as a confidence proxy.
+
+The following options are opt-in until validated on held-out VTT cues:
+
+- `pose.deduplication.contact_crop_variants`: expanded/sideways contact crops.
+- `pose.refinement.negative_limb_prompts` and `joint_limb_ownership`.
+- `pose.refinement.bidirectional_prompts`: next raw cue within the current batch;
+  previous-cue recovery remains available at batch boundaries.
+- `face.detector.candidate_score_threshold`: lower SCRFD candidates remain queries.
+- `face.detector.alignment_retry_error`: one local landmark-repair attempt per face.
+- `matching.body.identities.correct_contact_face_links`: independent clean endpoints
+  may correct a body link and demote its body anchor, with reversible derived proof.
+- `matching.body.identities.defer_contact_births` and `contact_birth_support`.
+- `matching.body.identities.mixed_mask_score_penalty`: calibrate before changing zero.
+
+Contact windows use cue indices, never assumed seconds between VTT thumbnails.
+Raw face membership is preserved during contact body-link correction. Face-anchor
+quarantine remains attachment-only; it is not a general automatic face demotion.
