@@ -8,6 +8,8 @@ from .config_layout import POINT_FIELDS, get, leaf_items, v2_document
 from .detection_parameters import apply_edits
 
 
+PMPOSE_SWITCHES = ('pose.refinement.enabled', 'pose.deduplication.enabled')
+
 CHOICES = {
     'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet'),
     'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo'),
@@ -35,6 +37,8 @@ class Settings:
         self.edits = {}
 
     def value(self, path):
+        if path in PMPOSE_SWITCHES and self.value('pose.estimator.backend') != 'pmpose':
+            return False
         return self.edits.get(path, self.base[path])
 
     def edit(self, path, text):
@@ -60,7 +64,9 @@ class Settings:
             self.edits[path] = value
 
     def effective(self):
-        return apply_edits(self.config, self.edits)[0]
+        edits = {path: value for path, baseline in self.base.items()
+                 if (value := self.value(path)) != baseline}
+        return apply_edits(self.config, edits, detection_preview=True)[0]
 
     def groups(self):
         box = self.value('pose.detector.backend')
@@ -70,10 +76,6 @@ class Settings:
                    'pose.estimator', 'pose.estimator.' + estimator]
         if estimator == 'pmpose':
             allowed.extend(('pose.point_quality', 'pose.refinement', 'pose.deduplication'))
-        # Keep the enable switches reachable when changing away from PMPose.
-        for stage in ('pose.refinement', 'pose.deduplication'):
-            if self.value(stage + '.enabled') and stage not in allowed:
-                allowed.append(stage)
         available = {key.rpartition('.')[0] for key in self.base}
         return [group for group in allowed if group in available]
 

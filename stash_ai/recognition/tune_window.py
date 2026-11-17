@@ -120,7 +120,7 @@ class Tuner:
         try:
             if not self.path.get().strip():
                 raise ValueError('Enter the path to a recognition YAML file.')
-            config = load(self.path.get().strip(), device=self.device)
+            config = load(self.path.get().strip(), device=self.device, detection_preview=True)
             settings = Settings(config)
         except Exception as error:
             self.error(error)
@@ -296,7 +296,7 @@ def execute(args, config, *, services=None):
         raise RuntimeError('The detection tuner requires a graphical desktop and working Tcl/Tk. '
                            'Try python -m tkinter in this environment.') from error
     try:
-        compare = load(args.compare_config, device=args.device) if args.compare_config else None
+        compare = load(args.compare_config, device=args.device, detection_preview=True) if args.compare_config else None
         window = Tuner(root, config, services or Services(), compare_config=compare, device=args.device)
         root.protocol('WM_DELETE_WINDOW', root.quit)
         try:

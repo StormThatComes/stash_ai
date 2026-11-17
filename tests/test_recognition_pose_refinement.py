@@ -243,8 +243,23 @@ def test_active_settings_invalidate_person_body_and_identity_contracts_but_paths
     ('min_visibility',float('nan')),('min_mask_score',1.1),('min_presence',True),('min_prompt_points',4),
     ('max_prompt_points',9),('max_box_area_ratio',.9),('max_side_expansion',-1),('directory',None)])
 def test_invalid_refinement_options_rejected(key,value):
-    data=defaults();data['sapiensid']['pose']['refinement'][key]=value
+    data = defaults()
+    pose = data['sapiensid']['pose']
+    pose['backend'] = 'pmpose'
+    pose['refinement'].update(enabled=True)
+    pose['refinement'][key] = value
     with pytest.raises(ValueError,match='sapiensid.pose.refinement'):
+        validate(data)
+
+
+def test_disabled_refinement_ignores_dormant_options_until_enabled():
+    data = defaults()
+    pose = data['sapiensid']['pose']
+    pose['backend'] = 'pmpose'
+    pose['refinement'].update(enabled=False, masked_identity_crop=True, min_prompt_points=6, max_prompt_points=2)
+    validate(data)
+    pose['refinement']['enabled'] = True
+    with pytest.raises(ValueError, match='min_prompt_points exceeds max_prompt_points'):
         validate(data)
 
 

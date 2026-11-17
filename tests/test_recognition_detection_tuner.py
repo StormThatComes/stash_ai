@@ -1,6 +1,7 @@
 """Desktop event routing and single-owner detection, including a real Tk smoke test."""
 from dataclasses import replace
 import gc
+from pathlib import Path
 import threading
 import time
 
@@ -37,6 +38,60 @@ def test_busy_worker_coalesces_requests_and_closes_on_owner_thread():
     assert [key for key, _ in calls] == [0, 29, 'close']
     assert len({owner for _, owner in calls}) == 1
     assert displayed == [29]
+
+
+def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
+    pytest.importorskip('tkinter')
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.tune_editor import Settings
+
+    config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
+    first, second = Settings(config), Settings(config)
+    second.edit('pose.refinement.min_prompt_points', '3')
+    second.edit('pose.estimator.backend', 'vitpose_plus_large')
+    preview = second.effective().data['sapiensid']
+    assert preview['pose']['backend'] == 'vitpose_plus_large'
+    assert not preview['pose']['refinement']['enabled'] and not preview['pose']['deduplication']['enabled']
+    assert 'pose.refinement' not in second.groups()
+    assert preview['collection']['min_sharpness'] > 0 and preview['identities']['anchor_min_sharpness'] > 0
+    assert first.effective() is config
+
+    second.edit('pose.estimator.backend', 'pmpose')
+    pose = second.effective().data['sapiensid']['pose']
+    assert pose['refinement']['enabled'] and pose['deduplication']['enabled']
+    assert pose['refinement']['min_prompt_points'] == 3
+    assert config.data['sapiensid']['pose']['refinement']['min_prompt_points'] == 2
+    second.edit('pose.refinement.enabled', 'false')
+    pose = second.effective().data['sapiensid']['pose']
+    assert not pose['refinement']['enabled'] and pose['refinement']['masked_identity_crop']
+
+
+def test_tuner_opens_vitpose_yaml_and_checks_options_when_pmpose_is_reactivated(tmp_path, monkeypatch):
+    pytest.importorskip('tkinter')
+    from stash_ai.recognition import cli
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.tune_editor import Settings
+
+    path = tmp_path / 'vitpose.yml'
+    path.write_text('version: 2\npose:\n  estimator: {backend: vitpose_plus_large}\n'
+                    '  refinement: {enabled: true, masked_identity_crop: true, min_prompt_points: 8}\n'
+                    '  deduplication: {enabled: true}\nexecution: {gpu: {sam_precision: fp16}}\n')
+    with pytest.raises(ValueError, match='pose.estimator.backend: pmpose'):
+        load(path)
+    monkeypatch.setattr(cli, '_execute', lambda args, config, services: config)
+    config = cli.main(['tune-detection', '--face-config', str(path), '--device', 'cpu'])
+    settings = Settings(config)
+    assert not settings.effective().data['sapiensid']['pose']['refinement']['enabled']
+    settings.edit('pose.estimator.backend', 'pmpose')
+    with pytest.raises(ValueError, match='min_prompt_points exceeds max_prompt_points'):
+        settings.effective()
+    settings.edit('pose.refinement.min_prompt_points', '2')
+    with pytest.raises(ValueError, match='requires CUDA'):
+        settings.effective()
+    settings.edit('pose.refinement.enabled', 'false')
+    pose = settings.effective().data['sapiensid']['pose']
+    assert pose['deduplication']['enabled'] and not pose['refinement']['enabled']
+    assert path.read_bytes() == config.source
 
 
 @pytest.fixture
@@ -163,7 +218,8 @@ def test_comparison_reuses_a_retries_b_and_releases_models_on_owner(root, tmp_pa
         assert abs(panels['A'].canvas.canvasx(0) - panels['B'].canvas.canvasx(0)) <= 1
         assert all(panel.photo is not None for panel in panels.values())
         react = tmp_path / 'different.yml'
-        react.write_text('version: 2\nface:\n  detector:\n    nms_threshold: 1\n')
+        react.write_text('version: 2\nface: {detector: {nms_threshold: 1}}\n'
+                         'pose: {estimator: {backend: vitpose_plus_large}, refinement: {enabled: true}}\n')
         ui.path.delete(0, 'end')
         ui.path.insert(0, str(react))
         ui.load_yaml()

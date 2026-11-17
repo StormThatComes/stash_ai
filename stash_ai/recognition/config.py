@@ -143,9 +143,9 @@ def _number(value, name, low, high, *, integer=False):
         raise ValueError(f'{name}: expected {"integer" if integer else "finite number"} in [{low}, {high}].')
 
 
-def validate(data):
+def validate(data, *, detection_preview=False):
     from .person_signal import validate as validate_person
-    validate_person(data['sapiensid'])
+    validate_person(data['sapiensid'], detection_preview=detection_preview)
     output_directory = data['storage']['output_directory']
     if output_directory is not None and (not isinstance(output_directory, str) or not output_directory.strip()):
         raise ValueError('storage.output_directory must be a path or null.')
@@ -258,6 +258,8 @@ def validate(data):
                         ('vitpose_precision',data['sapiensid']['pose']['backend']=='vitpose_plus_large'),
                         ('pmpose_precision',data['sapiensid']['pose']['backend']=='pmpose'),
                         ('sam_precision',data['sapiensid']['pose']['backend']=='pmpose' and data['sapiensid']['pose']['refinement']['enabled'])):
+        if detection_preview and not active:
+            continue
         value=data['execution'][name]
         if value not in ('fp32','fp16','bf16'):
             raise ValueError('execution.'+name+' must be fp32, fp16 or bf16.')
@@ -345,8 +347,10 @@ def validate(data):
     if data['names']['file'] is not None and (not isinstance(data['names']['file'], str)
                                              or not data['names']['file'].strip()):
         raise ValueError('names.file must be a path or null.')
-    from .sharpness_policy import validate as validate_sharpness
-    validate_sharpness(data)
+    if not detection_preview:
+        # Detection previews draw candidates before collection, anchor and portrait admission.
+        from .sharpness_policy import validate as validate_sharpness
+        validate_sharpness(data)
 
 
 @dataclass(frozen=True)
@@ -380,7 +384,7 @@ class FaceConfig:
         return digest({name: self.data[name] for name in sections})
 
 
-def effective_data(supplied, *, device=None):
+def effective_data(supplied, *, device=None, detection_preview=False):
     version = supplied.get('version', 1)
     if type(version) is not int or version not in (1, 2):
         raise ValueError('facial_recognition.yml version must be 1 or 2.')
@@ -403,7 +407,7 @@ def effective_data(supplied, *, device=None):
     if device is not None:
         data['models']['device'] = device
     try:
-        validate(data)
+        validate(data, detection_preview=detection_preview)
     except ValueError as error:
         if version == 2:
             from .config_layout import v2_error
@@ -412,7 +416,7 @@ def effective_data(supplied, *, device=None):
     return version, data
 
 
-def load(path=None, *, database=None, device=None, root=None):
+def load(path=None, *, database=None, device=None, root=None, detection_preview=False):
     root = Path.cwd() if root is None else Path(root)
     selected = Path(path).expanduser().resolve() if path is not None else root / 'facial_recognition.yml'
     if path is not None or selected.is_file():
@@ -425,7 +429,7 @@ def load(path=None, *, database=None, device=None, root=None):
         base = selected.parent
     else:
         raw, supplied, base, selected = b'', {}, root.resolve(), None
-    version, data = effective_data(supplied, device=device)
+    version, data = effective_data(supplied, device=device, detection_preview=detection_preview)
     def resolve(value):
         p = Path(value).expanduser()
         return (base / p).resolve() if not p.is_absolute() else p.resolve()
@@ -435,4 +439,4 @@ def load(path=None, *, database=None, device=None, root=None):
                       resolve(data['names']['file']) if data['names']['file'] else None, version,
                       tuple((key, value) for key, value in (
                           ('database', Path(database).expanduser().resolve() if database is not None else None),
-                          ('device', device)) if value is not None))
+                          ('device', device), ('detection_preview', detection_preview or None)) if value is not None))
