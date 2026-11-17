@@ -1,28 +1,19 @@
 """Select SAM prompts and settle mask ownership before running masked PMPose."""
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
 import numpy as np
 
+from .mask_cleanup import clean_mask, inside
 from .pose_mask_capture import mask_observer, mask_history
 from .profiling import pipeline_stage
 
 
-def inside(mask, points):
-    if not len(points):
-        return np.empty(0, dtype=bool)
-    xy = np.floor(points).astype(np.int64)
-    valid = ((xy >= 0).all(axis=1) & (xy[:, 0] < mask.shape[1]) & (xy[:, 1] < mask.shape[0]))
-    result = np.zeros(len(points), dtype=bool)
-    result[valid] = mask[xy[valid, 1], xy[valid, 0]]
-    return result
-
-
 @pipeline_stage('mask_validation')
-def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None, own=(), limbs=(), edits=None, replay=()):
+def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None, own=(), limbs=(),
+               edits=None, replay=None, cuts=None, replay_cuts=None):
     """Return an admitted mask/box or an explicit, auditable rejection reason."""
-    import cv2
     width, height = size
     if mask.dtype != np.bool_ or mask.shape != (height, width):
         raise ValueError('SAM-pose2seg mask must match the full source frame.')
@@ -34,40 +25,8 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
         return None, None, 'low_mask_score'
     if not mask.any():
         return None, None, 'empty_mask'
-    # Remove tiny disconnected speckles without throwing away a disconnected
-    # but substantial hand/foot. Never force a single connected component.
-    _, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
-    keep = stats[:, cv2.CC_STAT_AREA] >= max(4, math.ceil(int(mask.sum()) * .001))
-    original_keep = keep.copy()
-    if len(stats) > 2:
-        def components(points):
-            points = np.asarray(points).reshape(-1, 2)
-            xy = np.floor(points[inside(mask, points)]).astype(int)
-            return labels[xy[:, 1], xy[:, 0]]
-
-        theirs = components(foreign)
-        for parent, tip in limbs:
-            # The visible chain must approach the island from our foreground.
-            segment = np.linspace(parent, tip, 9)
-            island = components([tip])
-            if (len(island) and island[0] not in theirs and
-                    inside(mask, segment[:-1]).sum() >= 6 and
-                    (not len(foreign) or np.linalg.norm(foreign - tip, axis=1).min() > 3)):
-                keep[island[0]] = True
-        if len(own) and len(theirs):
-            ours = components(np.concatenate((prompts, own)))
-            for component in set(theirs) - set(ours):
-                if len(ours) and np.count_nonzero(theirs == component) >= 2:
-                    keep[component] = False
-    for x, y, keep_island in replay:
-        if 0 <= x < width and 0 <= y < height and labels[y,x]:
-            keep[labels[y,x]] = keep_island
-    if edits is not None:
-        for label in np.flatnonzero(keep != original_keep):
-            y, x = np.argwhere(labels == label)[0]
-            edits.append((int(x), int(y), bool(keep[label])))
-    keep[0] = False
-    mask = keep[labels]
+    mask = clean_mask(mask, box, settings, prompts=prompts, own=own, foreign=foreign, limbs=limbs,
+                      edits=edits, replay=replay, cuts=cuts, replay_cuts=replay_cuts)
     if observe is not None:
         observe('cleaned', mask)
     if not mask.any():
@@ -121,7 +80,7 @@ class Candidate:
 
     variant: int = 0
     quality: float = 0.0
-    edits: tuple = ()
+    edits: dict = field(default_factory=dict)
 
     def crop(self):
         x,y,r,b = self.extent
@@ -196,9 +155,14 @@ def regional_seeds(points, indices, temporal):
 def _assessment(raw, score, i, indices, positive, foreign, bounds, peers, points,
                 reliable, evidence, record, settings, size, limbs, observe=None):
     box = bounds[i]
-    edits = []
+    island_edits, bridge_cuts = [], []
     clean, crop, reason = check_mask(raw, score, positive, foreign, box, settings, size,
-                                     observe=observe, own=evidence[i], limbs=limbs, edits=edits)
+                                     observe=observe, own=evidence[i], limbs=limbs, edits=island_edits, cuts=bridge_cuts)
+    edits = {}
+    if island_edits:
+        edits['component_edits'] = island_edits
+    if bridge_cuts:
+        edits['bridge_cuts'] = bridge_cuts
     target = raw if clean is None else clean
     temporal = {k for k, _ in record.get('temporal_prompts', ())}
     if (not peers and settings.get('recover_prompt_points') and
@@ -245,7 +209,7 @@ def _pack(mask, box, indices, variant, score, edits):
     yy, xx = np.nonzero(mask)
     x,y,r,b = int(xx.min()),int(yy.min()),int(xx.max())+1,int(yy.max())+1
     return Candidate(np.packbits(mask[y:b,x:r], axis=None), (x,y,r,b), len(xx),
-                     box, indices, variant, float(score), tuple(edits))
+                     box, indices, variant, float(score), edits)
 
 
 def resolve_options(candidates, options, evidence):
@@ -358,8 +322,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                               prompt_indices=indices.tolist(), prompt_points=positive.tolist(),
                               mask_variant=best)
                 record.pop('component_edits', None)
-                if edits:
-                    record['component_edits'] = edits
+                record.pop('bridge_cuts', None)
+                record.update(edits)
                 if peers:
                     record['negative_points'] = np.asarray(negative).tolist()
                 record['reason'] = reason
@@ -412,7 +376,10 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             mask[y:b,x:r] = candidate.crop()
             if records[i]['mask_variant'] != candidate.variant:
                 records[i].update(mask_variant=candidate.variant, mask_score=candidate.quality,
-                                  mask_pixels=candidate.pixels, separated=False, component_edits=list(candidate.edits))
+                                  mask_pixels=candidate.pixels, separated=False)
+                records[i].pop('component_edits', None)
+                records[i].pop('bridge_cuts', None)
+                records[i].update(candidate.edits)
                 observer = mask_observer(image, records[i])
                 if observer is not None:
                     observer('cleaned', mask)

@@ -133,6 +133,8 @@ def test_cached_run_recovers_only_missing_measured_masks_and_displays_them(tmp_p
     config = settings(tmp_path)
     storage = config.data['sapiensid']['storage']
     storage.update(retain_person_crops=False, retain_body_masks=False)
+    cleanup = config.data['sapiensid']['pose']['refinement']
+    cleanup.update(bridge_radius_pixels=1, max_bridge_lobe_fraction=.2, max_island_gap_fraction=.2)
     config.data['execution']['scan_cpu_workers'] = 1
     media = MediaClient(count=2)
     client = SimpleNamespace(url=media.url, media=media.media, scene=lambda _: media.scene, close=lambda: None)
@@ -141,8 +143,22 @@ def test_cached_run_recovers_only_missing_measured_masks_and_displays_them(tmp_p
     local = np.zeros((20, 20), dtype=bool)
     local[3:14, 2:12] = True
     prompts, negatives = [[15, 28], [16, 27]], [[29, 39]]
-    body = person(bounds, local, detector_bounds=bounds, prompt_points=prompts,
-                  negative_points=negatives, mask_pixels=int(local.sum()))
+    def raw_mask(size):
+        pixels = np.zeros(size[::-1], dtype=bool)
+        pixels[20:40, 10:30] = local
+        pixels[28, 22:25] = True
+        pixels[27:30, 25:28] = True
+        pixels[19:22, 40:43] = True
+        return pixels
+
+    from stash_ai.recognition.mask_candidates import check_mask
+    edits, cuts = [], []
+    measured, _, reason = check_mask(raw_mask((100, 100)), .99, prompts, negatives, bounds,
+                                     cleanup, (100, 100), edits=edits, cuts=cuts)
+    assert reason is None and edits and cuts
+    np.testing.assert_array_equal(measured[20:40, 10:30], local)
+    body = person(bounds, local, detector_bounds=bounds, prompt_points=prompts, component_edits=edits,
+                  bridge_cuts=cuts, negative_points=negatives, mask_pixels=int(local.sum()))
     body['pose_refinement']['encoder_mask'] = body['pose_refinement']['overlap_mask']
     model = SimpleNamespace(frame_people=[body], face_matches=[], person_geometry=lambda *a: None)
     calls = []
@@ -152,9 +168,7 @@ def test_cached_run_recovers_only_missing_measured_masks_and_displays_them(tmp_p
         def predict(points, negative):
             assert points.tolist() == prompts and negative.tolist() == negatives
             calls.append('mask')
-            pixels = np.zeros((image.height, image.width), dtype=bool)
-            pixels[20:40, 10:30] = local
-            return pixels, .99
+            return raw_mask(image.size), .99
         def batched(frames):
             [(frame, [(points, negative)])] = frames
             assert frame is image

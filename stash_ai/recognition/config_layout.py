@@ -31,6 +31,8 @@ _GROUPS = (
     ('pose.refinement', 'sapiensid.pose.refinement',
      'enabled directory mode overlap_threshold min_keypoint_score min_presence min_visibility '
      'min_recovery_mask_score adaptive_decoder_retries recover_prompt_points min_prompt_points max_prompt_points max_negative_prompt_points_per_neighbor min_mask_score min_prompt_coverage max_foreign_coverage '
+     'min_island_pixels min_island_fraction max_island_gap_fraction bridge_radius_pixels max_bridge_lobe_fraction '
+     'min_limb_path_coverage min_limb_foreign_distance_pixels min_foreign_island_points '
      'expand_boxes max_box_area_ratio max_side_expansion masked_identity_crop'),
     ('pose.deduplication', 'sapiensid.pose.deduplication',
      'enabled min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
