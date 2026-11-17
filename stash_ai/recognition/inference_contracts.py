@@ -14,8 +14,8 @@ def detector(config):
     from .sapiensid_registry import POSE_SHA256,POSE_INFERENCE
     from .person_detector import contract
     p=config.data['sapiensid']['pose'];model=p['detector']
-    reserve = model == 'rfdetr_xl' and p['backend'] == 'pmpose' and p['deduplication']['enabled']
-    return ['person-detector-contact-reserve-v2' if reserve else 'person-detector-v1',contract(model) if model!='yolo' else [p['sha256'] or POSE_SHA256,POSE_INFERENCE],
+    reserve = p['backend'] == 'pmpose' and p['deduplication']['enabled']
+    return ['person-detector-contact-reserve-v3' if reserve else 'person-detector-v1',contract(model) if model!='yolo' else [p['sha256'] or POSE_SHA256,POSE_INFERENCE],
             {k:p[k] for k in ('score_threshold','nms_threshold','max_people_per_frame')},
             p['backend']=='yolo',config.data['models']['device'],config.data['execution']['rfdetr_precision']]
 

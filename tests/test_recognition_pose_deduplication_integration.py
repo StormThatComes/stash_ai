@@ -108,6 +108,7 @@ class ArrayTensor:
     def detach(self): return self
     def cpu(self): return self
     def numpy(self): return self.array
+    def __getitem__(self, indices): return ArrayTensor(self.array[indices])
 
 
 @pytest.mark.parametrize('masked', [False, True])
@@ -122,7 +123,8 @@ def test_production_adapter_remaps_scores_faces_and_body_people_in_single_and_ba
     settings['refinement']['enabled'] = masked
     class Boxes:
         def predict(self, source, **kwargs):
-            assert kwargs['iou'] == .7
+            assert kwargs['iou'] == .94
+            assert kwargs['max_det'] == 2 * settings['max_people_per_frame']
             frames = source if isinstance(source, list) else [source]
             return [SimpleNamespace(boxes=SimpleNamespace(
                 xyxy=ArrayTensor(BOXES), conf=ArrayTensor([.99, .8]))) for image in frames]

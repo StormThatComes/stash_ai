@@ -196,6 +196,11 @@ pose:
     # Optional suppression of duplicate PMPose predictions.
     enabled: true
     # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
+    max_contact_attempts: 4
+    # Maximum directed contact recovery attempts per cue. 0 disables recovery. Range: 0..16.
+    contact_crop_variants: false
+    # Try expanded and sideways crops within the contact attempt budget. Experimental; validate ownership before
+    # enabling.
     min_keypoint_score: null
     # Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range:
     # 0..1 or null.

@@ -4,7 +4,7 @@ import numpy as np
 from .limb_ownership import PARENT
 
 
-def recover_pair(pose,image,bounds,prediction,reserves,settings):
+def _recover_one(pose,image,bounds,prediction,reserves,settings):
     if len(bounds) < 2:
         return prediction, None
     from .pose_deduplication import _measurements, _compare
@@ -18,7 +18,7 @@ def recover_pair(pose,image,bounds,prediction,reserves,settings):
         if not intersection:
             continue
         reason, pair = _compare(i,j,boxes,points,valid,settings)
-        if reason != 'insufficient_shared_core' or not .70 < pair['box_iou'] < .91:
+        if reason not in ('insufficient_shared_core','duplicate_core') or not .70 < pair['box_iou'] < .91:
             continue
         scale = min(np.linalg.norm(boxes[n,2:]-boxes[n,:2]) for n in (i,j))
         paired = (scores[i]>.5)&(scores[j]>.5)
@@ -62,3 +62,34 @@ def recover_pair(pose,image,bounds,prediction,reserves,settings):
         # The counterfactual pass is bounded to one pair per cue.
         break
     return prediction, None
+
+
+def recover_pair(pose,image,bounds,prediction,reserves,settings):
+    """Try both owners, prioritizing the most overlapping physical pair."""
+    pairs = [(parent,i) for i,parent in reserves.items()] or [
+        (i,j) for i in range(len(bounds)) for j in range(i+1,len(bounds))]
+    def overlap(pair):
+        a,b = (np.asarray(bounds[i]) for i in pair)
+        area = np.maximum(0,np.minimum(a[2:],b[2:])-np.maximum(a[:2],b[:2])).prod()
+        return area/max(1,min(np.prod(a[2:]-a[:2]),np.prod(b[2:]-b[:2])))
+    pairs.sort(key=overlap,reverse=True)
+    budget = settings.get('max_contact_attempts',4)
+    for a,b in pairs:
+        for first,second in ((a,b),(b,a)):
+            if budget <= 0:
+                return prediction,None
+            budget -= 1
+            result,recovered = _recover_one(pose,image,bounds,prediction,{second:first},settings)
+            if recovered is not None:
+                owner,_,_ = recovered
+                return result,(owner,a,b)
+        if budget and settings.get('contact_crop_variants',False):
+            from .pose_crop_variants import Variant
+            for mode in ('expanded','sideways'):
+                if budget <= 0:
+                    break
+                budget -= 1
+                result,recovered = _recover_one(Variant(pose,mode),image,bounds,prediction,{b:a},settings)
+                if recovered is not None:
+                    return result,(recovered[0],a,b)
+    return prediction,None

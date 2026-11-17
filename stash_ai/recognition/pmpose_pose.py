@@ -176,7 +176,7 @@ class PMPose:
                 dx, dy = ((a % width)-(b % width))/width, ((a // width)-(b // width))/height
                 extras.append((1 - torch.hypot(dx, dy) / .20).clamp(0,1).cpu().numpy())
                 # Keep one distinct local maximum, expressed in source-image units.
-                heat = values[0]
+                heat = torch.maximum(maps,mirrored)
                 primary = heat.flatten(2).argmax(-1)[...,None,None]
                 yy,xx = torch.meshgrid(torch.arange(height,device=heat.device),
                                         torch.arange(width,device=heat.device),indexing='ij')

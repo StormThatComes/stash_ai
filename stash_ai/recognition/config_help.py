@@ -86,6 +86,8 @@ HELP = {
     'pose.refinement.max_box_area_ratio': 'Reject masks whose union box exceeds this multiple of the original area. Range: 1..10.',
     'pose.refinement.max_side_expansion': 'Maximum extension on any side, relative to original width or height. Range: 0..2.',
     'pose.deduplication': 'Optional suppression of duplicate PMPose predictions.',
+    'pose.deduplication.contact_crop_variants': 'Try expanded and sideways crops within the contact attempt budget. Experimental; validate ownership before enabling.',
+    'pose.deduplication.max_contact_attempts': 'Maximum directed contact recovery attempts per cue. 0 disables recovery. Range: 0..16.',
     'pose.deduplication.enabled': 'Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.',
     'pose.deduplication.min_keypoint_score': 'Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range: 0..1 or null.',
     'pose.deduplication.min_presence': 'Minimum presence probability for a point supporting duplicate selection. Null inherits pose.point_quality. Range: 0..1 or null.',
