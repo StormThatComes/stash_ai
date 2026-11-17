@@ -43,6 +43,10 @@ def retain_quality_mask(record, mask, bounds):
         record['overlap_mask'] = base64.b64encode(packed).decode('ascii')
 
 
+class PromptCores(list):
+    pass
+
+
 class RefinedPMPose:
     def __init__(self, pose, segmenter, settings, *, frame_batch_size=4, queue_bytes=134217728, joint_quality=None):
         self.previous_cue = None
@@ -78,6 +82,15 @@ class RefinedPMPose:
                         detector_bounds=list(box), bounds=list(box)) for box in bounds]
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
+        cores = PromptCores(cores)
+        if settings.get('negative_limb_prompts',False):
+            from .limb_ownership import PARENT
+            extra = []
+            for i,box in enumerate(bounds):
+                valid,_ = prompt_recovery.eligible(points,scores,probabilities,bounds,settings)
+                extra.append(list(cores[i]) + [k for k,p in PARENT.items()
+                    if valid[i,k] and valid[i,p] and min(scores[i,k],scores[i,p]) >= .8])
+            cores.negatives = extra
         recovery = settings.get('recover_prompt_points', False)
         from .temporal_prompts import capture, borrow
         previous = self.previous_cue
@@ -140,7 +153,7 @@ class RefinedPMPose:
         if limit:
             tolerance = max(2., .02 * math.hypot(bounds[i][2]-bounds[i][0], bounds[i][3]-bounds[i][1]))
             for j in neighbours:
-                usable = [k for k in cores[j] if np.linalg.norm(prompts - points[j,k], axis=1).min() > tolerance]
+                usable = [k for k in getattr(cores,'negatives',cores)[j] if np.linalg.norm(prompts - points[j,k], axis=1).min() > tolerance]
                 if leaks and j in leaks:
                     usable.sort(key=lambda k: k not in leaks[j])
                 negatives.extend(points[j, spread_indices(points[j], usable, limit)])
@@ -177,6 +190,9 @@ class RefinedPMPose:
         return (*result, records)
 
     def finish_maskless(self,image,bounds,prediction,result,records):
+        if self.settings.get('joint_limb_ownership',False):
+            from .joint_limbs import settle
+            settle(result,bounds,records,self.settings)
         from .limb_ownership import maskless
         for i, record in enumerate(records):
             if not record.get('overlap_mask') and record.get('status') != 'refined':
