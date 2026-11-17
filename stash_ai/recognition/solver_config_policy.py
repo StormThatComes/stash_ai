@@ -67,9 +67,21 @@ class StrictPolicy:
         self.examples = {}
         self.input_issues = [r for r in report(config)['checks'] if r['status'] != 'ok']
         self.rejected = Counter()
-        self.protected = {key for key in ('sapiensid.identities.tracklet_matching',
-            'sapiensid.identities.body_first_matching', 'sapiensid.identities.endpoint_matching',
-            'clustering.anchor_view_matching') if parameter(config.data, key) is True}
+        self.protected = self.enabled_routes(config)
+
+    @staticmethod
+    def enabled_routes(config):
+        from .body_identity import turn_feature
+        from .fragment_endpoints import enabled as endpoints
+        identity = config.data['sapiensid']['identities']
+        active = {key for key in ('tracklet_matching', 'body_first_matching') if identity[key]}
+        active.update(key for key in ('extended_track_graph', 'turn_recovery') if turn_feature(identity, key))
+        if endpoints(identity):
+            active.add('endpoint_matching')
+        paths = {'sapiensid.identities.' + key for key in active}
+        if config.data['clustering']['anchor_view_matching']:
+            paths.add('clustering.anchor_view_matching')
+        return paths
 
     def compatible(self, config):
         from .person_signal import same_contract
@@ -79,7 +91,7 @@ class StrictPolicy:
     def check(self, config):
         state = ActiveChecks(config)
         missing = self.required - state.active
-        missing.update(k for k in self.protected if not parameter(config.data, k))
+        missing.update(self.protected - self.enabled_routes(config))
         return state, missing
 
     def reject(self, state, missing):
@@ -88,7 +100,7 @@ class StrictPolicy:
             if rule not in self.examples:
                 self.examples[rule] = dict(settings={p: state.value(p) for p in paths}, measures=measures)
         for rule in missing:
-            self.examples.setdefault(rule, dict(reason='input route disabled'))
+            self.examples.setdefault(rule, dict(reason='retained evidence incompatible' if rule == 'retained-scan-contract' else 'input route disabled'))
 
     def moves(self, config, rule, paths, measures):
         if rule == 'body-track-features':
@@ -190,11 +202,16 @@ class StrictPolicy:
             self.reject(state, set())
         return solutions
 
-    def verify(self, config):
+    def violations(self, config, *, record=False):
         state, missing = self.check(config)
-        issues = sorted(set(state.issues) | missing)
         if not self.compatible(config):
-            issues.append('retained-scan-contract')
+            missing.add('retained-scan-contract')
+        if record:
+            self.reject(state, missing)
+        return sorted(state.issues.keys() | missing)
+
+    def verify(self, config):
+        issues = self.violations(config)
         if issues:
             raise ValueError('Strict solver config failed: ' + ', '.join(issues))
 
@@ -204,7 +221,7 @@ class StrictPolicy:
             paths = [internal_path(k) for k in row['settings']]
             row['solver_parameters'] = [public_path(k) for k in paths if k in self.domains]
             canonical = row['settings'] if config.document_version == 2 else (public_path(k) for k in paths)
-            if not row['solver_parameters'] and any(k.startswith(('pose.', 'face.quality.', 'pose.body.collection.'))
+            if not row['solver_parameters'] and any(k.startswith(('pose.', 'face.quality.', 'body.collection.'))
                                                     for k in canonical):
                 row['repair_scope'] = 'scan settings; review YAML and recollect affected scenes'
             else:

@@ -200,9 +200,9 @@ def validate_winner(config, training, result, manifest_path, *, manifest=None, p
             return variants
         accepted = {}
         for name, variant in variants.items():
-            checks, missing = policy.check(variant)
-            if checks.issues or missing:
-                skipped[name] = sorted(checks.issues.keys() | missing)
+            issues = policy.violations(variant)
+            if issues:
+                skipped[name] = issues
             else:
                 accepted[name] = variant
         return accepted

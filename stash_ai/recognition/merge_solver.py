@@ -545,11 +545,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             def scene_trial(label,parent,changes,phase):
                 nonlocal trials,previous_name,previous_changes
                 changes = normalize(config,changes)
-                if strict_policy:
-                    issues, missing = strict_policy.check(patched(config, changes))
-                    if issues.issues or missing:
-                        strict_policy.reject(issues, missing)
-                        return None
+                if strict_policy and strict_policy.violations(patched(config, changes), record=True):
+                    return None
                 patch = proposal(config,changes)
                 key = digest(patch['yaml_patch'])
                 if not patch['changes']:
@@ -722,14 +719,15 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             request.independent = True
             for profile, rules in rule_profiles:
                 changes = changes_for(parent) | {PARAMETER: rules}
-                if strict_policy:
-                    strict_policy.verify(patched(config, changes))
+                variant = patched(config, changes)
+                if strict_policy and strict_policy.violations(variant, record=True):
+                    continue
                 name = f'trial-{trials}'
                 patches[name] = proposal(config, changes)
                 transitions[name] = transition(previous_name, previous_changes, changes)
                 origins[name] = dict(search_phase='anchor_rules', search_parent=parent, search_strategy=profile)
                 families[name] = 'hybrid'
-                yield name, patched(config, changes)
+                yield name, variant
                 trials += 1
                 previous_name, previous_changes = name, changes
     def saved_baseline(state):

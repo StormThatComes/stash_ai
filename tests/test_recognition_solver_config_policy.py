@@ -45,6 +45,11 @@ def test_projection_preserves_routes_and_couples_adjacent_and_view_thresholds():
         results = policy.repairs(config, changes)
         assert results and all(clean(patched(config, patch)) for patch in results)
     assert not policy.repairs(config, {'clustering.same_scene_match_bonus': 0.})
+    inherited = patched(config, {'sapiensid.identities.tracklet_matching': True,
+                                 'sapiensid.identities.endpoint_matching': None})
+    policy = StrictPolicy(inherited)
+    disabled = patched(inherited, {'sapiensid.identities.endpoint_matching': False})
+    assert 'sapiensid.identities.endpoint_matching' in policy.violations(disabled)
 
 
 @pytest.mark.parametrize('mode', ['full', 'diff'])
