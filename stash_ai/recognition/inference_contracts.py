@@ -42,6 +42,9 @@ def pose(config):
         numerical=precision_contract(config).get('inference_precision',{})
         active={key:value for key,value in numerical.items() if key in ('pmpose_precision','sam_precision')}
         if active:model['inference_precision']=active
+    if backend != 'pmpose' and p.get('refinement',{}).get('enabled'):
+        from .pose_refinement_config import contract as mask_contract
+        model = [model, mask_contract(p['refinement']), 'confidence-proxy-mask-v1']
     return ['pose-estimator-v1',model,config.data['models']['device'],
             config.data['execution']['vitpose_precision'] if backend=='vitpose_plus_large' else 'fp32']
 

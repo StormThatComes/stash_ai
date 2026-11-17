@@ -14,7 +14,7 @@ def fuse(i, offset, original, refined, mask, box, settings):
     confidence = new_scores[offset].copy()
     evidence = {k: v[offset].copy() for k, v in new_probs.items()}
     diagonal = np.hypot(box[2]-box[0], box[3]-box[1])
-    tolerance = max(2., diagonal * .035)
+    tolerance = max(settings.get('limb_peer_min_pixels',2.), diagonal * settings.get('limb_peer_distance_fraction',.035))
     peer_valid = (raw_scores > settings['min_keypoint_score']) & (
         raw_probs['visibility'] > settings['min_visibility']) & (raw_probs['presence'] > settings['min_presence'])
     peer_valid[i] = False
@@ -26,7 +26,7 @@ def fuse(i, offset, original, refined, mask, box, settings):
             return False
         if (joint in PARENT and rival_chain(original, i, joint, point, tolerance) <= tolerance
                 and (confidence[PARENT[joint]] <= 0 or
-                     np.linalg.norm(point-joints[PARENT[joint]]) > 5*tolerance)):
+                     np.linalg.norm(point-joints[PARENT[joint]]) > settings.get('limb_contact_reach_ratio',5.)*tolerance)):
             return False
         nearest_peer = np.inf
         if joint in PARENT:
@@ -126,7 +126,7 @@ def maskless(original, i, box, size, result, settings):
     xy, scores, probs = original
     if len(xy) < 2:
         return []
-    limit = max(2., .035*np.hypot(box[2]-box[0],box[3]-box[1]))
+    limit = max(settings.get('limb_peer_min_pixels',2.), settings.get('limb_peer_distance_fraction',.035)*np.hypot(box[2]-box[0],box[3]-box[1]))
     withheld = []
     for k,parent in PARENT.items():
         point = xy[i,k]
@@ -135,7 +135,7 @@ def maskless(original, i, box, size, result, settings):
         root = xy[i,parent]
         tip_distance = np.linalg.norm(point-root)
         # Retain credible contact when both people can anatomically reach it.
-        if scores[i,parent] > settings['min_keypoint_score'] and tip_distance <= limit*5:
+        if scores[i,parent] > settings['min_keypoint_score'] and tip_distance <= limit*settings.get('limb_contact_reach_ratio',5.):
             continue
         other = alternate(original,i,k,size)
         if (other is not None and scores[i,parent] > settings['min_keypoint_score'] and

@@ -93,5 +93,4 @@ def test_partial_v2_defaults_supply_masks_and_explicit_opt_out_is_not_overwritte
 def test_explicit_incompatible_refinement_reports_the_public_backend_path(tmp_path):
     path=tmp_path/'bad.yml'
     path.write_text('version: 2\npose: {estimator: {backend: vitpose_plus_large}, refinement: {enabled: true}}\n')
-    with pytest.raises(ValueError,match='pose.estimator.backend: pmpose'):
-        load(path)
+    assert load(path).data['sapiensid']['pose']['refinement']['enabled']

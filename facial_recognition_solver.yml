@@ -117,13 +117,21 @@ pose:
   refinement:
     # Optional SAM-pose2seg mask and second PMPose pass.
     enabled: true
-    # PMPose -> SAM-pose2seg mask -> masked PMPose; requires backend: pmpose.
+    # SAM masks for top-down pose estimators; PMPose also runs a masked second pass.
     directory: ''
     # Optional asset folder; empty uses execution.models.directory/sam_pose2seg/<pinned revision>.
     mode: all
     # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
     overlap_threshold: 0.2
     # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
+    max_decoder_attempts: 3
+    # Maximum SAM attempts per person, including the first. Range: 1..8.
+    limb_peer_distance_fraction: 0.035
+    # Rival endpoint tolerance as a box diagonal fraction. Range: 0.001..0.2.
+    limb_peer_min_pixels: 2.0
+    # Minimum rival endpoint tolerance in source pixels. Range: 0..32.
+    limb_contact_reach_ratio: 5.0
+    # Short shared-contact limb reach in multiples of endpoint tolerance. Range: 1..10.
     min_keypoint_score: null
     # Minimum expected OKS for head/torso points used as segmentation prompts. Null inherits pose.point_quality.
     # Range: 0..1 or null.
@@ -227,8 +235,8 @@ body:
     min_person_pixels: 64
     # Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.
     min_sharpness: 10.0
-    # Minimum sharpness inside the SAM mask at source resolution. Positive values require PMPose,
-    # refinement.enabled: true and mode: all; missing masks reject the body. Independent of
+    # Minimum sharpness inside the SAM mask at source resolution. Positive values require a top-down pose
+    # backend, refinement.enabled: true and mode: all; missing masks reject the body. Independent of
     # masked_identity_crop. 0 disables this gate. Range: 0..1000000.
     min_keypoints: 4
     # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
@@ -389,8 +397,9 @@ matching:
       # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor. Range: 1..8192
       # or null.
       min_sharpness: 25.0
-      # Minimum SAM-mask sharpness for body/hybrid anchors. Positive values require PMPose, refinement.enabled:
-      # true and mode: all; missing masks cannot qualify. 0 disables this floor. Range: 0..1000000.
+      # Minimum SAM-mask sharpness for body/hybrid anchors. Positive values require a top-down pose backend,
+      # refinement.enabled: true and mode: all; missing masks cannot qualify. 0 disables this floor. Range:
+      # 0..1000000.
       keypoint_rules:
         # Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop
         # before the SapiensID nose and eye filter.

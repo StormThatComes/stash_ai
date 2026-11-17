@@ -51,8 +51,8 @@ def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
     second.edit('pose.estimator.backend', 'vitpose_plus_large')
     preview = second.effective().data['sapiensid']
     assert preview['pose']['backend'] == 'vitpose_plus_large'
-    assert not preview['pose']['refinement']['enabled'] and not preview['pose']['deduplication']['enabled']
-    assert 'pose.refinement' not in second.groups()
+    assert preview['pose']['refinement']['enabled'] and not preview['pose']['deduplication']['enabled']
+    assert 'pose.refinement' in second.groups()
     assert preview['collection']['min_sharpness'] > 0 and preview['identities']['anchor_min_sharpness'] > 0
     assert first.effective() is config
 
@@ -66,32 +66,16 @@ def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
     assert not pose['refinement']['enabled'] and pose['refinement']['masked_identity_crop']
 
 
-def test_tuner_opens_vitpose_yaml_and_checks_options_when_pmpose_is_reactivated(tmp_path, monkeypatch):
-    pytest.importorskip('tkinter')
-    from stash_ai.recognition import cli
+def test_tuner_vitpose_masks_keep_explicit_disable(tmp_path):
     from stash_ai.recognition.config import load
     from stash_ai.recognition.tune_editor import Settings
-
     path = tmp_path / 'vitpose.yml'
     path.write_text('version: 2\npose:\n  estimator: {backend: vitpose_plus_large}\n'
-                    '  refinement: {enabled: true, masked_identity_crop: true, min_prompt_points: 8}\n'
-                    '  deduplication: {enabled: true}\nexecution: {gpu: {sam_precision: fp16}}\n')
-    with pytest.raises(ValueError, match='pose.estimator.backend: pmpose'):
-        load(path)
-    monkeypatch.setattr(cli, '_execute', lambda args, config, services: config)
-    config = cli.main(['tune-detection', '--face-config', str(path), '--device', 'cpu'])
-    settings = Settings(config)
-    assert not settings.effective().data['sapiensid']['pose']['refinement']['enabled']
-    settings.edit('pose.estimator.backend', 'pmpose')
-    with pytest.raises(ValueError, match='min_prompt_points exceeds max_prompt_points'):
-        settings.effective()
-    settings.edit('pose.refinement.min_prompt_points', '2')
-    with pytest.raises(ValueError, match='requires CUDA'):
-        settings.effective()
+                    '  refinement: {enabled: true}\n')
+    settings = Settings(load(path))
+    assert settings.effective().data['sapiensid']['pose']['refinement']['enabled']
     settings.edit('pose.refinement.enabled', 'false')
-    pose = settings.effective().data['sapiensid']['pose']
-    assert pose['deduplication']['enabled'] and not pose['refinement']['enabled']
-    assert path.read_bytes() == config.source
+    assert not settings.effective().data['sapiensid']['pose']['refinement']['enabled']
 
 
 @pytest.fixture

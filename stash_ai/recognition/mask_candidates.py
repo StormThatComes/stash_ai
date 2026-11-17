@@ -365,7 +365,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             conflicts = resolve_options(candidates, options_by_person, evidence) | blocked
             active = [(i, available, foreign) for i, available, foreign in jobs
                       if i not in blocked and i not in exhausted and (i in rejected or i in conflicts)
-                      and ((adaptive and records[i]['mask_attempts'] < 3) or
+                      and ((adaptive and records[i]['mask_attempts'] < settings.get('max_decoder_attempts',3)) or
                            (not adaptive and len(records[i]['prompt_indices']) < len(available)))]
 
     for i in conflicts:
