@@ -17,20 +17,19 @@ def capture(image, bounds, points, valid):
         return None
     people = [(tuple(box), {int(k): points[i,k].copy() for k in np.flatnonzero(valid[i])})
               for i,box in enumerate(bounds)]
-    return (scan, *signature[:3]), people
+    return (scan, *signature[:3], bool(len(signature)>4 and signature[4])), people
 
 
 def adjacent(previous, current):
     if not previous or not current:
         return False
-    (scan, cue, shot, pixels), _ = previous
-    (other, index, group, image), _ = current
-    if (other, index, group) != (scan, cue+1, shot):
+    scan,cue,shot,pixels = previous[0][:4]
+    other,index,group,image = current[0][:4]
+    if other != scan or group != shot or abs(index-cue)!=1:
         return False
-    from .perspective_shots import change
-    def decode(value):
-        return np.frombuffer(bytes.fromhex(value), dtype='uint8').reshape(16,3).astype(float)
-    return change(decode(pixels),decode(image),True)=='continuous'
+    later = current if index>cue else previous
+    from .cue_continuity import continuous
+    return continuous(pixels,image,verified=len(later[0])>4 and later[0][4])
 
 
 def borrow(previous, current, i, indices, minimum, record, *, local=None):
@@ -52,9 +51,14 @@ def borrow(previous, current, i, indices, minimum, record, *, local=None):
         x,y = point
         return rect[0]-pad <= x <= rect[2]+pad and rect[1]-pad <= y <= rect[3]+pad
 
+    from .cue_continuity import intrudes
+    peer_joints = {tuple(b): js for _,members in (previous,current) for b,js in members}
+    def blocked(point,b):
+        return intrudes(np.asarray(point),b,peer_joints.get(tuple(b),{}))
+
     def transport(owner, old_box, old):
         stable = [k for k in TORSO if k in joints and k in old and k in indices and
-                  not any(inside(joints[k],b,2) for b in peers)]
+                  not any(blocked(joints[k],b) for b in peers)]
         if not stable or sum(k in old for k in TORSO) < 2:
             return None
         before = np.array([old[k] for k in stable])
@@ -82,7 +86,7 @@ def borrow(previous, current, i, indices, minimum, record, *, local=None):
             return None
         old_peers = [other for j, (other, _) in enumerate(previous[1]) if j != owner]
         def uncontested(xy, boxes):
-            return all(not inside(xy, other, 2) for other in boxes)
+            return all(not blocked(xy, other) for other in boxes)
         added = []
         for joint in wanted:
             if joint not in old or joint in indices:

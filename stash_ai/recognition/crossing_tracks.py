@@ -54,7 +54,7 @@ def _window(pairs, owners, roots, decisions, transition, raw, margin, claims, *,
                     physical.append(key)
                     values.append(cache[key])
                 if all(score is not None for score,_ in values):
-                    table[i,j] = sum(s for s,_ in values)/2, all(ok for _,ok in values), frozenset(physical)
+                    table[i,j] = sum(s for s,_ in values)/len(values), all(ok for _,ok in values), frozenset(physical)
         edges.append(table)
     admissible = [*edges[:-1],{key:v for key,v in edges[-1].items() if key[1] in terminal}]
     winner = _path(layers,admissible)
@@ -80,19 +80,19 @@ def _window(pairs, owners, roots, decisions, transition, raw, margin, claims, *,
     return certified
 
 
-def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=None, visible_single=None):
+def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=None, visible_single=None, max_cues=12, max_hidden=2, max_people=4):
     claims = {}
     for start,first in sorted(by_cue.items()):
-        if len(first)!=2 or not any(r['id'] in roots for r in first):
+        if not 2<=len(first)<=max_people or not any(r['id'] in roots for r in first):
             continue
         pairs = [first]
         hidden = []
-        for cue in range(start+1,start+13):
+        for cue in range(start+1,start+max_cues+1):
             people = by_cue.get(cue,())
-            if len(people)==1 and cue in occluded and len(hidden)<2:
+            if len(first)==2 and len(people)==1 and cue in occluded and len(hidden)<max_hidden:
                 hidden.append((len(pairs)-1,people[0]))
                 continue
-            if len(people)!=2:
+            if len(people)!=len(first):
                 break
             pairs.append(people)
             final_roots = [roots.get(r['id']) for r in people]
@@ -102,7 +102,7 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
             complete_end = all(final_roots)
             owners = sorted(set(first_roots+final_roots)-{None})
             complementary = not complete_end and not all(first_roots)
-            if len(owners)==2 and (len(pairs)>2 or hidden):
+            if len(owners)==len(first) and (len(pairs)>2 or hidden):
                 ends = _window(pairs,owners,roots,decisions,transition,raw,margin,claims,
                                complementary=complementary)
                 if ends:

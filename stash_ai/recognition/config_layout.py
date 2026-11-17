@@ -29,7 +29,7 @@ _GROUPS = (
      'directory=pmpose_directory batch_size=pmpose_batch_size '
      'presence_threshold=pmpose_presence_threshold visibility_threshold=pmpose_visibility_threshold'),
     ('pose.refinement', 'sapiensid.pose.refinement',
-     'enabled directory mode overlap_threshold max_mask_combinations negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
+     'enabled directory mode overlap_threshold max_mask_combinations bidirectional_prompts negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
      'min_recovery_mask_score adaptive_decoder_retries recover_prompt_points min_prompt_points max_prompt_points max_negative_prompt_points_per_neighbor min_mask_score min_prompt_coverage max_foreign_coverage '
      'min_island_pixels min_island_fraction max_island_gap_fraction bridge_radius_pixels max_bridge_lobe_fraction '
      'min_limb_path_coverage min_limb_foreign_distance_pixels min_foreign_island_points '
@@ -68,7 +68,7 @@ _GROUPS = (
      'provisional=cross_scene_provisional min_merge_support cooccurrence_merge_threshold'),
 
     ('matching.body.identities', 'sapiensid.identities',
-     'enabled tracklet_matching body_first_matching extended_track_graph turn_recovery turn_similarity_discount endpoint_matching match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus scene_bonus_mode ambiguity_margin min_support attach_min_support '
+     'enabled contact_max_cues contact_max_hidden contact_max_people tracklet_matching body_first_matching extended_track_graph turn_recovery turn_similarity_discount endpoint_matching match_threshold cohesion_threshold track_similarity_threshold scene_match_bonus scene_bonus_mode ambiguity_margin min_support attach_min_support '
      'min_appearance_distance'),
     ('matching.body.anchors', 'sapiensid.identities',
      'min_keypoints=anchor_min_keypoints min_person_pixels=anchor_min_person_pixels '

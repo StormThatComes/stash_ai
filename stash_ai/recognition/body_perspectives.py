@@ -422,6 +422,8 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                 and shot_ids.get(cue-1)==shot_ids.get(cue)==shot_ids.get(cue+1)}
     crossed = crossings({cue:members for cue,members in by_cue.items() if cue not in partial or cue in occluded},
                         root,decisions,transition,margin,occluded=occluded,
+                        max_cues=settings.get('contact_max_cues',12), max_hidden=settings.get('contact_max_hidden',2),
+                        max_people=settings.get('contact_max_people',4),
                         raw=lambda a,b:transition(a,b,raw=True),
                         visible_single=lambda row: row['cue'] not in partial and len(torsos.get(row['id'],{}))>=3
                         and not geometry[row['id']][0].get('query_only'))

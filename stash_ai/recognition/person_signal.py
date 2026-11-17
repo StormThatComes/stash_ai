@@ -81,6 +81,8 @@ def validate(settings, *, detection_preview=False):
     _number(collection['min_sharpness'],'sapiensid.collection.min_sharpness',0,1000000)
     _number(collection['max_overlap'],'sapiensid.collection.max_overlap',0,1)
     identity=settings['identities']
+    for key,low,high in (('contact_max_cues',2,64),('contact_max_hidden',0,8),('contact_max_people',2,4)):
+        _number(identity[key],'sapiensid.identities.'+key,low,high,integer=True)
     from .pose_anchor_rules import validate as validate_anchor_rules
     validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:

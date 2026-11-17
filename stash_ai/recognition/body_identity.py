@@ -16,7 +16,7 @@ from .person_anchor import pixel_gate,anchor_gate
 
 
 def defaults():
-    return dict(enabled=False,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+    return dict(enabled=False, contact_max_cues=12, contact_max_hidden=2, contact_max_people=4,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, turn_similarity_discount=.06, extended_track_graph=None, turn_recovery=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
                 anchor_keypoint_rules=dict(all=[],any=[]))
