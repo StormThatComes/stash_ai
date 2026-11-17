@@ -1,17 +1,21 @@
-"""Use at most one preceding VTT cue as a source of missing SAM torso prompts."""
+"""Use at most one preceding VTT cue as a source of regional SAM prompts."""
 import math
 
 import numpy as np
 
 TORSO = (5, 6, 11, 12)
+# Mobile landmarks need current-cue support along the same anatomical chain.
+SUPPORT = {7: (5,), 8: (6,), 13: (11,), 14: (12,),
+           9: (7, 5), 10: (8, 6), 15: (13, 11), 16: (14, 12),
+           0: (1, 2), 1: (0,), 2: (0,), 3: (1, 0), 4: (2, 0)}
 
 
-def capture(image, bounds, points, cores):
+def capture(image, bounds, points, valid):
     signature = getattr(image, '_recognition_cue_signature', None)
     scan = getattr(image, '_recognition_scan', None)
     if scan is None or signature is None or signature[1] is None:
         return None
-    people = [(tuple(box), {k: points[i,k].copy() for k in TORSO if k in cores[i]})
+    people = [(tuple(box), {int(k): points[i,k].copy() for k in np.flatnonzero(valid[i])})
               for i,box in enumerate(bounds)]
     return (scan, *signature[:3]), people
 
@@ -29,10 +33,19 @@ def adjacent(previous, current):
     return change(decode(pixels),decode(image),True)=='continuous'
 
 
-def borrow(previous, current, i, indices, minimum, record):
-    if len(indices)>=minimum or not adjacent(previous,current):
+def borrow(previous, current, i, indices, minimum, record, *, local=None):
+    if not previous or not current:
         return indices
     box, joints = current[1][i]
+    sparse = len(indices) < minimum
+    # A complete face does not fill a missing shoulder or hip region.
+    wanted = [k for group in (TORSO[:2], TORSO[2:]) for k in group
+              if k not in joints and (sparse or all(other not in joints for other in group))]
+    local = local or {}
+    wanted.extend(k for k, chain in SUPPORT.items()
+                  if k in local and all(root in joints for root in chain))
+    if not wanted or not adjacent(previous, current):
+        return indices
     peers = [other for j,(other,_) in enumerate(current[1]) if j != i]
     tolerance = max(3., .09*math.hypot(box[2]-box[0],box[3]-box[1]))
     def inside(point, rect, pad=0):
@@ -40,9 +53,9 @@ def borrow(previous, current, i, indices, minimum, record):
         return rect[0]-pad <= x <= rect[2]+pad and rect[1]-pad <= y <= rect[3]+pad
 
     def transport(owner, old_box, old):
-        stable = [k for k in joints if k in old and k in indices and
+        stable = [k for k in TORSO if k in joints and k in old and k in indices and
                   not any(inside(joints[k],b,2) for b in peers)]
-        if not stable or len(old)<2:
+        if not stable or sum(k in old for k in TORSO) < 2:
             return None
         before = np.array([old[k] for k in stable])
         after = np.array([joints[k] for k in stable])
@@ -67,17 +80,31 @@ def borrow(previous, current, i, indices, minimum, record):
         predicted = np.r_[corners.min(axis=0),corners.max(axis=0)]
         if np.max(abs(predicted-np.array(box))) > tolerance:
             return None
+        old_peers = [other for j, (other, _) in enumerate(previous[1]) if j != owner]
+        def uncontested(xy, boxes):
+            return all(not inside(xy, other, 2) for other in boxes)
         added = []
-        for joint in TORSO:
+        for joint in wanted:
             if joint not in old or joint in indices:
                 continue
             point = move(old[joint])
+            if joint in SUPPORT:
+                chain = SUPPORT[joint]
+                if any(k not in old or not uncontested(old[k], old_peers)
+                       or not uncontested(joints[k], peers) for k in chain):
+                    continue
+                # Follow the measured parent, then require a nearby peak from THIS cue.
+                parent = chain[0]
+                expected = joints[parent] + move(old[joint]) - move(old[parent])
+                point = local[joint]
+                if np.linalg.norm(point - expected) > tolerance:
+                    continue
             path = np.linspace(old[joint],point,5)
-            if (inside(point,box,-.01) and not any(inside(p,b,2) for p in path for b in peers)
-                    and not any(inside(old[joint],b,2) for j,(b,_) in enumerate(previous[1]) if j != owner)):
+            if (inside(point, box, -.01) and uncontested(old[joint], old_peers)
+                    and all(uncontested(p, peers) for p in path)):
                 added.append((joint,point.tolist()))
-            if len(indices)+len(added)>=minimum:
-                return added
+                if len(indices)+len(added)>=minimum:
+                    return added
         return None
 
     paths = []

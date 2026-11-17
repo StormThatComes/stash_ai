@@ -55,6 +55,31 @@ def eligible(points, scores, probabilities, bounds, settings):
     return np.logical_and.reduce(list(tests.values())), tests
 
 
+def record_points(record, points, tests, i, core, distinct):
+    # Source pixels suffice for inspection. One 17-bit mask per failed gate
+    # avoids repeating gate names in every persisted COCO17 observation.
+    record['first_pass_pixels'] = np.rint(points).astype(int).tolist()
+    exclusions = {}
+    for name, passed in tests.items():
+        failed = np.flatnonzero(~passed[i])
+        if len(failed):
+            exclusions[name] = sum(1 << int(k) for k in failed)
+    contested = set(core) - set(distinct)
+    if contested:
+        exclusions['near_peer'] = sum(1 << int(k) for k in contested)
+    record['point_exclusions'] = exclusions
+
+
+def local_candidates(points, scores, tests, valid, i):
+    # A temporal hint may corroborate one weak localization or visibility score.
+    # Crop, presence and flip gates still apply to the current measurement.
+    plausible = (tests['crop'][i] & tests['presence'][i] & (scores[i] > 0)
+                 & (tests['score'][i] | tests['visibility'][i]) & ~valid[i])
+    if 'flip' in tests:
+        plausible &= tests['flip'][i]
+    return {int(k): points[i,k] for k in np.flatnonzero(plausible)}
+
+
 def recover(i, indices, points, valid, scores, probabilities, bounds, face, foreign, settings, record):
     box = bounds[i]
     scale = math.hypot(box[2] - box[0], box[3] - box[1])

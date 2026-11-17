@@ -82,6 +82,14 @@ class DiagnosticWindow:
                 child=tree.insert(item,'end',text=check['label'],values=(check['status'],check['value'],check['note']),tags=(check['status'],))
                 if 'reference' in check:
                     ref=check['reference'];self.action(tree,child,partial(self.navigate,ref['kind'],ref['observation']))
+        if self.row and self.row['kind'] == 'body':
+            from .inspection_diagnostics import pose_landmarks
+            landmarks = self.tree('Pose landmarks', ('first_pass', 'prompt_gates', 'sam_input', 'final_pose'))
+            rows = pose_landmarks(self.detail.get('geometry', {}))
+            for name, *values in rows:
+                landmarks.insert('', 'end', text=name, values=values)
+            if not rows:
+                landmarks.insert('', 'end', text='First-pass diagnostics were not retained for this observation.')
         rivals=self.tree('Recorded rivals',('identity','score','policy'))
         records=retained_rivals(self.detail)
         for record in records:rivals.insert('','end',text=record['route'],values=(record['identity'] or 'Not retained',record['score'] if record['score'] is not None else 'Unknown',record['policy']))
