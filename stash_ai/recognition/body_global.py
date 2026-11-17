@@ -211,7 +211,9 @@ def reconcile(database,selected,config):
         expire(db,scope,namespace,current_policy,selection)
     proof_bytes=0
     fresh = None
-    for decision in result['decisions']:
+    from .replay_intervention import allow
+    decisions = result['decisions'] if config.data['sapiensid']['global_matching']['enabled'] and allow('global_body_merge') else ()
+    for decision in decisions:
         if decision['outcome']!='merge':continue
         people=decision['people'];scenes=_scenes(db,people)
         if not scenes<=selection:

@@ -138,7 +138,7 @@ def alternatives(db, config, scan, ids, labels):
             if not patches:
                 notes.append('No measured quality or support boundary separates these scene cores while preserving a target witness.')
             by_source.setdefault(source, {})[kind] = patches
-            routes.append(dict(title=title, status='Rebuild hypothesis' if patches else 'No separating boundary',
+            routes.append(dict(title=title, birth_source=source, birth_kind=kind, status='Rebuild hypothesis' if patches else 'No separating boundary',
                                notes=notes, patches=patches))
     for source, target in (ids, ids[::-1]):
         options = by_source.get(source, {})
@@ -154,7 +154,7 @@ def alternatives(db, config, scan, ids, labels):
                         combined.append(patch)
             if combined:
                 routes.append(dict(title=f"Prevent both separate cores · {labels[source]} → {labels[target]}",
-                    status='Rebuild hypothesis', patches=combined,
+                    status='Rebuild hypothesis', birth_source=source, birth_kind='both', patches=combined,
                     notes=["The source has two ways to establish an independent identity in this scene.",
                            "Apply one measured face option and one body option together, then check attachment to the surviving target.",
                            "Replay counts withheld samples and checks final ownership."]))

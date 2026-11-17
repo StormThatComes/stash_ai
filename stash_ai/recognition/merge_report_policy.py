@@ -154,9 +154,13 @@ def _thresholds(config, proof, route, isolate):
     return changes
 
 
-def analyse(db, config, identities, route, make_views, *, matrix=None):
+def analyse(db, config, identities, route, make_views, *, matrix=None, inspect_current=None):
     """Rebuild changed view catalogues; never reuse cohorts after changing their gates."""
-    current = check(db, make_views(config), config, identities, route, matrix=matrix)
+    views = make_views(config)
+    current = check(db, views, config, identities, route, matrix=matrix)
+    if inspect_current is not None:
+        inspect_current(views, current)
+    del views
     result = dict(route=route, current=current, attempts=[], recommendations=[])
     if current['can_merge_in_frozen_catalogue']:
         result['recommendations'].append(dict(proposal(config, {}), verification=current))

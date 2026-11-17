@@ -217,7 +217,10 @@ class MergeWindow:
             parent = self.tree.insert('', 'end', text=route['title'], values=(route['status'],), open=True)
             self.items[parent] = (route, None)
             for patch in route['patches']:
-                item = self.tree.insert(parent, 'end', text=patch['title'].capitalize(), values=('YAML option' if patch['changes'] else 'Current YAML',))
+                label = 'YAML option' if patch['changes'] else 'Current YAML'
+                if patch.get('omit_face_anchors') or patch.get('omit_body_anchors'):
+                    label = 'Diagnostic replay'
+                item = self.tree.insert(parent, 'end', text=patch['title'].capitalize(), values=(label,))
                 self.items[item] = (route, patch)
         if self.items:
             self.tree.selection_set(next(iter(self.items)))
@@ -243,7 +246,7 @@ class MergeWindow:
             for change in patch['changes']:
                 key = change.get('yaml_parameter',change['parameter'])
                 lines.append(f"{key}: {change['current']} → {change['proposed']}")
-            lines.extend(('', patch['yaml'].rstrip() or 'Use the current YAML.'))
+            lines.extend(('', patch['yaml'].rstrip() or ('Private anchor ablation.' if patch.get('omit_face_anchors') or patch.get('omit_body_anchors') else 'Use the current YAML.')))
         elif route and route['patches']:
             lines.extend(('', 'Select a YAML option below this route to inspect its changes or verify it by replay.'))
         if item in self.replays:

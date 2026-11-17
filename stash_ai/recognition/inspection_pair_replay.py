@@ -114,6 +114,28 @@ def outcome(ids, rows, retained, predicted):
                 outsider_destinations=sorted(by_destination), counts=counts, lost=lost, outsiders=sorted(outsiders), destinations={p:sorted(v) for p,v in dest.items()})
 
 
+def replay_controls(patches):
+    return {person for patch in patches.values() for person in patch.get('controls', ())}
+
+
+def control_results(rows, predicted, destinations):
+    """A protected rival must retain every sample at one distinct destination."""
+    owners = defaultdict(set)
+    for key, row in rows.items():
+        owners[row['source']].add(predicted.get(key))
+    return {p: len(values) == 1 and None not in values and not values.intersection(destinations)
+            for p, values in owners.items()}
+
+
+def apply_controls(trial, patch):
+    if not patch.get('controls') and not patch.get('watch') and not trial.get('watched'):
+        return trial
+    checks = {p: trial['control_results'].get(p) for p in patch.get('controls', ())}
+    watched = {k:trial['watched'].get(k) for k in patch.get('watch', ())}
+    return dict(trial, controls=checks, watched=watched,
+                success=trial['joined'] and trial['protected'] is not False and all(v is True for v in checks.values()))
+
+
 def partial_state(source, owner, ids, outcome):
     target=ids[1] if source==ids[0] else ids[0]
     targets=outcome['destinations'][target]
@@ -161,6 +183,23 @@ def _fresh(config, revision):
         raise ValueError('The database changed. Refresh the scene and analyse the pair again before replay.')
 
 
+def _mark_private_anchors(target, omitted):
+    # Replay shares its immutable embeddings through a TEMP view. Overlay only
+    # the quality projection and keep rowids, indexes and the shared seed intact.
+    if target.execute("SELECT 1 FROM temp.sqlite_master WHERE type='view' AND name='observations'").fetchone():
+        columns = [r[1] for r in target.execute('PRAGMA retained.table_info(observations)')]
+        target.execute('CREATE TEMP TABLE omitted_face_anchors(id TEXT PRIMARY KEY)')
+        target.executemany('INSERT INTO omitted_face_anchors VALUES (?)', [(k,) for k in omitted])
+        fields = ["CASE WHEN id IN omitted_face_anchors THEN json_set(quality,'$._inspection_auxiliary_only',1) "
+                  "ELSE quality END AS quality" if c == 'quality' else c for c in columns]
+        target.execute('DROP VIEW temp.observations')
+        target.execute('CREATE TEMP VIEW observations AS SELECT rowid AS rowid,' + ','.join(fields) +
+                       ' FROM retained.observations')
+    else:
+        target.execute("UPDATE observations SET quality=json_set(quality,'$._inspection_auxiliary_only',1) "
+                       "WHERE id IN (SELECT value FROM json_each(?))", (encoded(omitted),))
+
+
 def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=None, refine_budget=None, omitted_stage=None):
     from .inspection_merge_paths import _cancellable
     from .replay_simulation import replay
@@ -182,20 +221,29 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
         if name == 'baseline':
             raise ValueError('The baseline name is reserved.')
         changes = patch_values(patch)
-        signature = digest([changes,omitted_stage]) if omitted_stage and name=='omitted' else digest(changes)
+        diagnostic = bool(patch.get('omit_face_anchors') or patch.get('omit_body_anchors'))
+        experiment_key = [changes, patch.get('omit_face_anchors',()), patch.get('omit_body_anchors',())]
+        if omitted_stage and name == 'omitted':
+            experiment_key.append(omitted_stage)
+        signature = digest(experiment_key) if diagnostic or (omitted_stage and name=='omitted') else digest(changes)
         if signature not in names:
             variants[name] = patched(config, changes)
             names[signature] = name
         aliases[name] = names[signature]
+    if refinement and (patches['option'].get('omit_face_anchors') or patches['option'].get('omit_body_anchors')):
+        raise ValueError('An anchor ablation is a diagnostic experiment, not a YAML patch.')
     if refinement and aliases['option'] == 'baseline':
         raise ValueError('The selected option already uses the current YAML.')
     trials = {}
     with _cancellable(), snapshot(config, ids[0], scope=scope, other_identifiers=ids[1:]) as db:
         _fresh(config, revision)
         rows = sources(db, config, scope, ids)
+        controls = replay_controls(patches) - set(ids[:2])
+        control_rows = sources(db, config, scope, sorted(controls)) if controls else {}
+        watched = {k for patch in patches.values() for k in patch.get('watch', ())}
         selected_scenes = set(scenes or ())
-        if scenes is not None and any(row['scene'] not in selected_scenes for row in rows.values()):
-            raise ValueError('Replay selection must include every current scene containing A, B and protected C.')
+        if scenes is not None and any(row['scene'] not in selected_scenes for bank in (rows, control_rows) for row in bank.values()):
+            raise ValueError('Replay selection must include every current scene containing A, B and protected controls.')
         totals = defaultdict(int)
         for kind, (_, table) in TABLES.items():
             if kind == 'body' and not (enabled(config) and available(db)):
@@ -207,7 +255,16 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
         if {r['source'] for r in rows.values()} != set(ids):
             raise ValueError('A selected identity has no current observations in this selection.')
         def consume(name, observations, retained, predicted):
-            return dict(pair=outcome(ids, rows, retained, predicted), owners={k:predicted.get(k) for k in rows})
+            pair = outcome(ids, rows, retained, predicted)
+            destinations = set(pair['destinations'][ids[0]]) | set(pair['destinations'][ids[1]])
+            pair['control_results'] = control_results(control_rows,predicted,destinations)
+            pair['watched'] = {}
+            for key in watched:
+                owner = predicted.get(key)
+                sides = [label for label,p in zip('AB',ids) if owner in pair['destinations'][p]]
+                state = 'unassigned' if owner is None else '+'.join(sides) if sides else 'other identity'
+                pair['watched'][key] = state
+            return dict(pair=pair, owners={k:predicted.get(k) for k in rows})
         def collect(name, settings, item, inputs):
             records = item['decision_evidence']
             baseline = trials['baseline']['decisions'] if name != 'baseline' else records
@@ -224,7 +281,7 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
                     trial['partial'][row['source']][state] += 1
             if refinement:
                 values = {} if name=='baseline' else patch_values(patches[name]) if name in patches else refinement.pending
-                refinement.record(name, values, trial)
+                refinement.record(name, values, apply_controls(trial, patches['option']))
                 # Keep details for the incumbent and latest probe until the generator makes its decision.
                 for old in list(trials):
                     if old.startswith('probe-') and old != refinement.best:
@@ -240,14 +297,38 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
 
         def context(name):
             return trial(omitted_stage if name=='omitted' else None,visits[name])
+        def prepare_private(name, target, settings):
+            option = patches.get(name,{})
+            bodies = option.get('omit_body_anchors',())
+            if bodies:
+                if any(k not in rows or rows[k]['kind'] != 'body' or rows[k]['source'] not in ids[:2] for k in bodies):
+                    raise ValueError('Excluded body anchors must belong to the compared pair.')
+                settings.data['sapiensid']['identities']['_inspection_omit_body_anchors'] = list(bodies)
+            omitted = option.get('omit_face_anchors',())
+            if omitted:
+                if any(k not in rows or rows[k]['kind'] != 'face' or rows[k]['source'] not in ids[:2] for k in omitted):
+                    raise ValueError('Excluded anchors must belong to the compared pair.')
+                # This trial owns both the input rows and settings. Ordinary query
+                # eligibility and measurements remain available to auxiliary matching.
+                settings.data['clustering']['_inspection_omit_anchors'] = list(omitted)
+                _mark_private_anchors(target, omitted)
+        private = any(p.get('omit_face_anchors') or p.get('omit_body_anchors') for p in patches.values())
         replayed = replay(config, variants, source=db, scope=scope, scenes=scenes, progress=progress, consume=consume,
                           inspect_trial=lambda trial, settings: decisions(trial, settings, rows, scope),
-                          record_trial=collect, trial_context=context if omitted_stage else None, followup_variants=refinement.variants if refinement else None)
+                          record_trial=collect, prepare_private_trial=prepare_private if private else None,
+                          trial_context=context if omitted_stage else None, followup_variants=refinement.variants if refinement else None)
         _fresh(config, revision)
     if not trials:
         raise ValueError('No compatible scans were available.')
+    projected = {}
+    def projection(name, actual):
+        patch = patches[name]
+        key = actual, tuple(sorted(patch.get('controls',()))), tuple(sorted(patch.get('watch',())))
+        if key not in projected:
+            projected[key] = apply_controls(trials[actual], patch)
+        return projected[key]
     result = dict(ids=ids, rows=rows, patches=dict(patches), scenes=replayed['selection'], totals=dict(totals),
-                  trials={'baseline':trials['baseline'], **{name:trials[actual] for name,actual in aliases.items()}})
+                  trials={'baseline':trials['baseline'], **{name:projection(name,actual) for name,actual in aliases.items()}})
     if omitted_stage:
         entries = {name: sum(visits[aliases[name]].get(stage, 0) for stage in members(omitted_stage))
                    for name in ('enabled', 'omitted')}
@@ -256,7 +337,10 @@ def experiment(config, scope, ids, patches, revision, *, scenes=None, progress=N
     if refinement:
         result.update(minimized=proposal(config,refinement.values), probe_count=refinement.count,
                       budget_reached=not refinement.finished)
-        result['trials']['minimized'] = trials[refinement.best]
+        for field in ('controls','watch'):
+            if field in patches['option']:
+                result['minimized'][field] = patches['option'][field]
+        result['trials']['minimized'] = apply_controls(trials[refinement.best],result['minimized'])
         result['patches']['minimized'] = result['minimized']
     return result
 
@@ -267,6 +351,12 @@ def describe(result, name):
     lines = ['Replay on retained scans: ' + ('both identities fully joined.' if item['joined'] else 'pair did not fully join.'),
              'Current YAML baseline: ' + ('pair fully joined.' if baseline['joined'] else 'pair did not fully join.'),
              item['attribution']]
+    lines.append(strategy_summary(result, name))
+    for key, state in item.get('watched', {}).items():
+        lines.append(f"Witness {key}: {state}.")
+    for person, separate in item.get('controls', {}).items():
+        status = 'separate' if separate else 'unavailable' if separate is None else 'lost, split or absorbed'
+        lines.append(f"Automatic control {person}: {status}.")
     if item['protected'] is not None:
         lines.append('Protected C fully assigned and separate: ' + ('yes' if item['protected'] else 'no'))
     for label, person in zip('ABC', result['ids']):
@@ -279,3 +369,19 @@ def describe(result, name):
     if item['outsiders']:
         lines.append('Additional identities sharing a destination: ' + ', '.join(item['outsiders']))
     return '\n'.join(lines)
+
+def strategy_summary(result, name):
+    from .inspection_first_difference import changed, order
+    before, after = result['trials']['baseline'], result['trials'][name]
+    rows, ids = result['rows'], result['ids'][:2]
+    first = min((k for k,r in rows.items() if r['source'] in ids and changed(k,before,after)),
+                key=lambda k:(order(rows[k]),k), default=None)
+    first_cue = 'No changed pair cue'
+    if first is not None:
+        r = rows[first]
+        decision = after['decisions'].get(first,{})
+        first_cue = f"Scene {r['scene']} cue {r['cue']} · {decision.get('route') or 'owner changed'}"
+    joined = sum(after['partial'][p].get('joined target',0) for p in ids)
+    total = sum(after['counts'][p] for p in ids)
+    lost = sum(after['lost'][p] for p in ids)
+    return f"{first_cue} · {joined}/{total} at opposite side's unique owner · {lost} pair unassigned · {len(after['outsiders'])} extra identities"

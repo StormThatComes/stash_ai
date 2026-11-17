@@ -116,7 +116,7 @@ def prepared_replay(db, config, scope, ns, installation, reuse_history, progress
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
             progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
             prepared_selection=None, trial_error=None, parallel_request=None, parallel_accept=None, journal=None,
-            compact_trial_reports=False, followup_variants=None, trial_context=None, input_control=None):
+            compact_trial_reports=False, followup_variants=None, trial_context=None, input_control=None, prepare_private_trial=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -125,7 +125,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
     Serial callers may generate followup_variants from their record_trial results.
     These use the same baseline, snapshot and contract checks as initial variants.
     """
-    if trial_context and (parallel_request or restore_trial or variant_stream):
+    if (trial_context or prepare_private_trial) and (parallel_request or restore_trial or variant_stream):
         raise ValueError('Stage interventions require fresh serial trials.')
     ns = namespace(config)
     for name, variant in variants.items():
@@ -260,10 +260,14 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                                 from .trial_evaluation import evaluate
                                 from .solver_execution import scope as execution_scope
                                 baseline_runtime = replace(runtime, trials=1, inner_workers=max(1, runtime.cpus-1)) if runtime and name == 'baseline' else runtime
+                                def rebuild_private(state, selected, settings):
+                                    prepare_private_trial(name, state.connection, settings)
+                                    return rebuild_selected(state, selected, settings)
                                 with execution_scope(baseline_runtime), trial_context(name) if trial_context else nullcontext():
                                     evaluated = evaluate(name, settings, seed=seed, source=db, scope=scope,
                                         namespace=ns, installation=installation, scans=scans, observations=observations,
-                                        rebuild=rebuild_selected, inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
+                                        rebuild=rebuild_private if prepare_private_trial else rebuild_selected,
+                                        inspect_trial=inspect_trial, progress=progress, copy_inputs=copy_history)
                             if variant_stream is not None and baseline is not None and 'predictions' in evaluated:
                                 full = evaluated.pop('predictions')
                                 evaluated['prediction_delta'] = {k:v for k,v in full.items() if baseline[k] != v}

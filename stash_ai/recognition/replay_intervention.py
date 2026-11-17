@@ -11,11 +11,14 @@ STAGES = {
     'global_whole_view': 'Global whole-View attachment',
     'global_view_query': 'Global View query attachment',
     'strict_partition': 'Strict core consolidation',
+    'global_face_consolidation': 'Global strict face and View consolidation',
+    'global_body_merge': 'Global body consolidation',
     'anchor_view_query': 'Scene anchor View attachment',
     'auxiliary_view_query': 'Auxiliary View attachment',
 }
 
 _GROUPS = {
+    'global_face_consolidation': ('strict_partition', 'global_view_merge'),
     'hybrid': ('hybrid_merge', 'hybrid_query'),
     'confirmed_views': ('global_view_merge', 'global_whole_view', 'global_view_query',
                         'anchor_view_query', 'auxiliary_view_query'),
