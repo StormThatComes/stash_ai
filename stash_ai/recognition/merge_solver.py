@@ -100,18 +100,19 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     return options
 
 
-def _face_neighbours(config, changes, options, *, gap=0.):
+def _face_neighbours(config, changes, options):
     # Joint candidates avoid spending the entire budget on isolated threshold changes.
     def joint():
         for value in spread(options['recognition.match_threshold'],
                             changes.get('recognition.match_threshold', config.data['recognition']['match_threshold'])):
             candidate = dict(changes)
-            cohesion = max(0., round(value - gap, 6)) if gap else value
-            view = min(1., round(value + gap, 6)) if gap else value
-            candidate.update({'recognition.match_threshold': value,
-                'clustering.cohesion_threshold': min(cohesion, config.data['clustering']['cohesion_threshold']),
-                'clustering.view_match_threshold': view,
-                'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
+            grouping = config.data['clustering']
+            candidate['recognition.match_threshold'] = value
+            candidate['clustering.cohesion_threshold'] = min(value, grouping['cohesion_threshold'])
+            if (changes.get('clustering.anchor_view_matching', grouping['anchor_view_matching'])
+                    or grouping['view_prototypes_enabled']):
+                candidate['clustering.view_match_threshold'] = value
+                candidate['clustering.view_cohesion_threshold'] = min(value, grouping['view_cohesion_threshold'])
             yield candidate
     def coordinate(key, values):
         current = changes.get(key, parameter(config.data,key))
@@ -441,10 +442,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         nonlocal search, bidirectional, stop_reason, retire
         trials, attempts, probes_attempted = 1, 0, 0
         previous_name, previous_changes = 'baseline', {}
-        from .config_check import DEFAULT_SCORE_GAP
-        gap = DEFAULT_SCORE_GAP if strict else 0.
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
-                     'face': lambda changes: _face_neighbours(config, changes, options, gap=gap)}
+                     'face': lambda changes: _face_neighbours(config, changes, options)}
         if not config.data['sapiensid']['enabled']:
             del factories['hybrid']
         def factory(parent, changes, family, refine):
@@ -468,7 +467,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             active = source['provenance']['active_parameters']
             scoped_options = dict(sorted(scoped_options.items(), key=lambda kv: (-active.get(kv[0],0),kv[0])))
             candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
-                          if family == 'hybrid' else _face_neighbours(config, changes, scoped_options, gap=gap))
+                          if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
@@ -518,11 +517,6 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             if trials >= search_limit:
                 break
             changes = {k: repair.get(k, parameter(input_config.data, k)) for k in baseline_changes.keys() | repair.keys()}
-            # Every alternative used as a search parent must share the same numeric
-            # dimensions. Portrait preferences and optional gate activation stay fixed.
-            if any(v != parameter(config.data, k) and (k in strict_policy.portrait_domains or
-                   v is None or parameter(config.data, k) is None) for k, v in changes.items()):
-                continue
             patch = proposal(config, changes)
             key = digest(patch['yaml_patch'])
             if not patch['changes'] or key in seen:

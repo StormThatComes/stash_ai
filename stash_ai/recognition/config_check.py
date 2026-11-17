@@ -1,6 +1,5 @@
 """Read-only diagnostics for the effective recognition policy."""
 import json
-import math
 import sys
 
 from .config import parse_yaml, plain
@@ -20,7 +19,7 @@ class Checks:
     def value(self, path):
         return get(self.config.data, PUBLIC_PATHS[path])
 
-    def add(self, rule, paths, status, effect, suggestion, **measures):
+    def add(self, rule, paths, status, effect, suggestion, *, solver_constraint=False, **measures):
         values = {}
         for path in paths:
             if self.config.document_version == 1:
@@ -32,22 +31,18 @@ class Checks:
                     and parts[2] in POINT_FIELDS and self.pose_source.get(parts[1], {}).get(parts[2]) is None):
                 values['pose.point_quality.' + parts[2]] = values[path]
                 values[path] = None
-        self.rows.append(dict(rule=rule, status=status, settings=values, measures=measures,
+        self.rows.append(dict(rule=rule, status=status, solver_constraint=solver_constraint, settings=values, measures=measures,
                               effect=effect, suggestion=suggestion if status != 'ok' else ''))
 
-    def band(self, rule, paths, upper, lower, effect, suggestion, *, minimum=None,
-             collision='warning'):
-        """Width of a desired interval. Only normalized scores use the tuning margin."""
-        gap = upper - lower
-        minimum = self.score_gap if minimum is None else minimum
-        if gap <= 0:
-            status = collision
-        elif gap < minimum and not math.isclose(gap, minimum, rel_tol=1e-12):
-            status = 'advice'
-        else:
-            status = 'ok'
-        self.add(rule, paths, status, effect, suggestion, lower=lower, upper=upper,
-                 gap=gap, minimum_gap=minimum)
+    def detail(self, rule, paths, effect, **measures):
+        """Describe effective settings for --all, including valid equal cutoffs."""
+        self.add(rule, paths, 'ok', effect, '', **measures)
+
+    def interval(self, rule, paths, upper, lower, effect):
+        self.detail(rule, paths, effect, lower=lower, upper=upper, gap=upper-lower)
+
+    def effective_max(self, rule, paths, values, effect):
+        self.detail(rule, paths, effect, effective=max(values))
 
     def covers(self, rule, paths, available, required, effect, suggestion):
         self.add(rule, paths, 'warning' if available < required else 'ok', effect, suggestion,
@@ -61,18 +56,20 @@ class Checks:
                         'Increase the scan cue limit or review the independent support requirement.')
 
 
-def run_rules(checks):
-    from .config_check_matching import matching
+def run_rules(checks, *, solver_only=False):
+    from .config_check_matching import matching, solver_constraints
     from .config_check_quality import quality
-    quality(checks)
-    matching(checks)
+    if not solver_only:
+        quality(checks)
+        matching(checks)
+    solver_constraints(checks)
 
 
-def report(config, score_gap=DEFAULT_SCORE_GAP):
+def report(config, score_gap=DEFAULT_SCORE_GAP, *, solver_only=False):
     if not 0 <= score_gap <= 1:
         raise ValueError('--min-score-gap must be in [0, 1].')
     checks = Checks(config, score_gap)
-    run_rules(checks)
+    run_rules(checks, solver_only=solver_only)
     counts = {status: sum(r['status'] == status for r in checks.rows)
               for status in ('warning', 'advice', 'ok')}
     return dict(config=str(config.source_path) if config.source_path else 'built-in defaults',
@@ -90,7 +87,8 @@ def display(result, *, show_all=False, as_json=False, stream=None):
     print(f"Recognition config check ({result['config']}, v{result['version']}): "
           f"warnings={counts['warning']}, tuning notes={counts['advice']}, passed={counts['ok']}.", file=stream)
     for row in rows:
-        print(f"[{row['status'].upper()}] {row['rule']}  {row['effect']}", file=stream)
+        scope = ' [strict solver]' if row['solver_constraint'] else ''
+        print(f"[{row['status'].upper()}]{scope} {row['rule']}  {row['effect']}", file=stream)
         print('  ' + ', '.join(f'{p}={json.dumps(v)}' for p, v in row['settings'].items()), file=stream)
         if row['measures']:
             fields = (f'{key}={format(value, ".8g") if isinstance(value, float) else value}'

@@ -20,6 +20,7 @@ def test_damage_counts_each_physical_person_once():
 
 def test_all_strategy_families_share_retained_observations(tmp_path):
     config = configuration(tmp_path)
+    config.data['sapiensid']['identities']['tracklet_matching'] = True
     ns = namespace(config)
     with FaceDatabase(config.database) as state:
         db=state.connection
@@ -31,9 +32,10 @@ def test_all_strategy_families_share_retained_observations(tmp_path):
                                         series=[['1',0,0]])))
     with closing(sqlite3.connect(':memory:')) as training:
         training.execute('CREATE TABLE scans(scope,namespace,scene)')
-        result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[])),
+        result=validate_winner(config,training,dict(scope='scope',namespace=ns,best_result=dict(changes=[]),config_policy={'mode': 'strict'}),
                                manifest,compare_strategies=True)
     strategies = result['scene_strategies']
+    assert result['skipped_config_rules'] == {}
     assert len(strategies)==24
     assert sum(name.startswith('order-') for name in strategies)==8
     assert strategies['body-first']['body_first_matching']

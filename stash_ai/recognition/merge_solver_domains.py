@@ -98,9 +98,6 @@ def normalize(config, changes):
             else:
                 patch[lower] = b
     ordered('clustering.cohesion_threshold', 'recognition.match_threshold')
-    for section in ('identities','global_matching'):
-        if 'sapiensid.'+section+'.match_threshold' in domains:
-            ordered('sapiensid.'+section+'.cohesion_threshold','sapiensid.'+section+'.match_threshold')
     for suffix in ('face_pixels', 'sharpness', 'visible_face_fraction'):
         ordered('clustering.min_auxiliary_'+suffix, 'clustering.min_anchor_'+suffix)
     key = 'clustering.anchor_view_matching'

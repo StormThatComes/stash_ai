@@ -287,7 +287,7 @@ HELP = {
     'execution.rebuild.body.reference_mb': 'Budget in MB for body/hybrid reference banks, metadata and lookup working arrays. Range: >= 9.5367431640625e-07 MB; fractions allowed.',
     'execution.rebuild.body.plan_mb': 'Budget in MB for retained body/hybrid matching plans and decision proofs. Range: >= 9.5367431640625e-07 MB; fractions allowed.',
     'execution.solver': 'Solver configuration policy and strategy comparison on labelled validation scenes.',
-    'execution.solver.strict': 'Require solver recommendations to pass all active config checks, including tuning advice. Override with --no-strict.',
+    'execution.solver.strict': 'Enforce matching constraints on solver recommendations. Override with --no-strict.',
     'execution.solver.compare_scene_strategies': 'Compare scene matching strategies when solving with a validation manifest and body identities enabled.',
     'execution.portraits': 'Portrait CPU workers, inference batches and ranking cache.',
     'execution.portraits.cpu_threads': 'Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.',

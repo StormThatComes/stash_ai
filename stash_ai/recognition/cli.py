@@ -134,7 +134,7 @@ def parser():
     check.add_argument('--json', action='store_true', help='Print a machine-readable report.')
     from .config_check import DEFAULT_SCORE_GAP
     check.add_argument('--min-score-gap', type=float, default=DEFAULT_SCORE_GAP,
-        help='Advisory spacing for normalized scores (0..1, default %(default)s).')
+        help='Adjacent-cue body score spacing (0..1, default %(default)s).')
     migration = commands.add_parser('migrate-config', allow_abbrev=False,
         help='Write a complete v2 recognition YAML from the effective input policy (offline).')
     migration.add_argument('--face-config', type=Path, required=True, help='Existing recognition YAML.')
@@ -346,7 +346,7 @@ def parser():
         help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
     merge_report.add_argument('--solver-cpus', type=int, help='Joint CPU budget, 1..16; enables bounded solver execution.')
     merge_report.add_argument('--strict', action=argparse.BooleanOptionalAction, default=None,
-                              help='Require solver proposals to pass every check-config rule (YAML default: enabled). Use --no-strict for unconstrained search.')
+                              help='Enforce matching constraints on solver recommendations (YAML default: enabled). Use --no-strict for unconstrained search.')
     merge_report.add_argument('--solver-trials', type=int, default=1, help='Requested simultaneous trial capacity (default: 1); errors if CPU/RAM admission would reduce it.')
     merge_report.add_argument('--solver-memory-mb', type=mb_argument, metavar='MB',
         help='Total trial memory admission budget in MB (1 MB = 1048576 bytes; fractions allowed); not a hard RSS limit.')

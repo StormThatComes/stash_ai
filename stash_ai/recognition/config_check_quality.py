@@ -16,29 +16,24 @@ def _face(c):
         all_paths.extend((scan, query, anchor))
         floor = max(c.value(scan), c.value(query) or 0)
         if c.value(query) is not None:
-            c.add('face-query-' + key, (scan, query),
-                  'advice' if c.value(query) == c.value(scan) and floor > 0 else 'ok',
-                  'The effective query minimum on newly scanned faces is the higher of the two floors.',
-                  'Raise the query minimum only if queries should be filtered further after collection.',
-                  effective_floor=floor)
+            c.detail('face-query-' + key, (scan, query),
+                     'The effective query minimum on newly scanned faces is the higher of the two floors.',
+                     effective_floor=floor)
         if c.value(anchor) is not None:
             has_band |= c.value(anchor) > floor
-            c.band('face-anchor-' + key, (scan, query, anchor), c.value(anchor), floor,
-                   'The anchor cutoff can separate anchor and auxiliary faces on this measurement.',
-                   'Raise the anchor floor if this dimension should distinguish the roles.',
-                   minimum=c.score_gap if key == 'min_visible_face_fraction' else 0, collision='advice')
+            c.interval('face-anchor-' + key, (scan, query, anchor), c.value(anchor), floor,
+                       'Anchor and query admission can share this quality floor.')
     scan, anchor = 'face.quality.max_pose_deviation', ANCHOR + 'max_pose_deviation'
     all_paths.extend((scan, anchor))
     limit = 1. if c.value(scan) is None else c.value(scan)
     if c.value(anchor) is not None:
         has_band |= c.value(anchor) < limit
-        c.band('face-anchor-pose', (scan, anchor), limit, c.value(anchor),
-               'Lower maximum pose deviation makes anchor admission stricter than scan admission.',
-               'Lower the anchor maximum if off-axis faces should be auxiliary.', collision='advice')
+        c.interval('face-anchor-pose', (scan, anchor), limit, c.value(anchor),
+                   'A lower anchor maximum keeps more off-axis faces eligible as queries only.')
     if c.value('matching.face.auxiliary.enabled'):
         c.add('face-auxiliary-quality-band', all_paths, 'ok' if has_band else 'advice',
               'An auxiliary face needs to pass query admission and miss at least one anchor requirement.',
-              'Separate an anchor and query cutoff on visibility, pose, size or sharpness '
+              'If a distinct auxiliary quality band is desired, separate one anchor and query cutoff '
               'to admit a distinct band of fully measured auxiliary faces.')
 
 
@@ -47,10 +42,8 @@ def _pose(c):
     for key in ('min_person_pixels', 'min_sharpness', 'min_keypoints'):
         first, second = collection + key, anchor + key
         if c.value(second) is not None and c.value(second) > 0:
-            c.band('body-anchor-' + key, (first, second), c.value(second), c.value(first),
-                   'Body/hybrid anchors must clear collection quality as well as anchor quality.',
-                   'Raise the anchor requirement if this measurement should distinguish body references.',
-                   minimum=0, collision='advice')
+            c.effective_max('body-anchor-' + key, (first, second), (c.value(first), c.value(second)),
+                            'Body anchors must clear both collection and anchor quality.')
 
     if c.value('pose.estimator.backend') != 'pmpose':
         return
@@ -71,32 +64,24 @@ def _pose(c):
         from .pose_deduplication import CORE
         count, fraction = DEDUP + 'min_shared_points', DEDUP + 'min_match_fraction'
         least_fraction = c.value(count) / len(CORE)
-        c.add('duplicate-core-agreement', (count, fraction), 'advice' if c.value(fraction) <= least_fraction else 'ok',
-              'The minimum matched-point count already implies this fraction even with all core points shared.',
-              'Raise the fraction if it should filter pairs beyond the point count.',
-              fraction_implied_by_count=least_fraction)
+        c.detail('duplicate-core-agreement', (count, fraction),
+                 'The matched-point count already supplies a lower bound on the agreement fraction.',
+                 fraction_implied_by_count=least_fraction, effective_minimum=max(least_fraction, c.value(fraction)))
     if c.value(REFINE + 'enabled'):
         base, recovery = REFINE + 'min_mask_score', REFINE + 'min_recovery_mask_score'
         explicit = c.value(recovery)
         floor = (1 + c.value(base)) / 2 if explicit is None else explicit
-        c.band('recovery-mask-score', (base, recovery), floor, c.value(base),
-               'A weak or sparse mask is tested after the ordinary mask gate. Null uses the midpoint '
-               'between the base score and 1, with an independent-support exception.',
-               'Raise the recovery score if weak masks should need stronger evidence.')
+        c.effective_max('recovery-mask-score', (base, recovery), (floor, c.value(base)),
+                        'Sparse masks first pass the ordinary gate. An inherited recovery floor allows an independent-support exception.')
         minimum, maximum = REFINE + 'min_prompt_points', REFINE + 'max_prompt_points'
         if c.value(REFINE + 'adaptive_decoder_retries'):
-            c.band('mask-retry-prompt-count', (minimum, maximum), c.value(maximum), c.value(minimum),
-                   'Retries starting at the ordinary prompt minimum can add points up to the maximum.',
-                   'Increase the maximum if retries should be able to add another positive point.',
-                   minimum=0, collision='advice')
+            c.interval('mask-retry-prompt-count', (minimum, maximum), c.value(maximum), c.value(minimum),
+                       'Retries can change prompt selection, negative prompts or mask variants at the same point count.')
         coverage = REFINE + 'min_prompt_coverage'
         n = c.value(maximum)
-        threshold = c.value(coverage)
-        c.add('mask-prompt-coverage', (maximum, coverage),
-              'advice' if (n - 1) / n < threshold < 1 else 'ok',
-              'Above this fraction even a single missed positive prompt fails at every allowed prompt count.',
-              'Use a reachable fraction if a mask may miss a positive prompt.',
-              largest_fraction_with_one_miss=(n - 1) / n)
+        c.detail('mask-prompt-coverage', (maximum, coverage),
+                 'Coverage above this fraction requires every positive prompt at all allowed counts.',
+                 largest_fraction_with_one_miss=(n - 1) / n)
         if c.value(REFINE + 'mode') == 'overlap':
             path = 'pose.detector.max_people_per_frame'
             c.covers('overlap-refinement-people', (REFINE + 'mode', path), c.value(path), 2,
@@ -111,9 +96,8 @@ def _portraits(c):
                         ('min_visible_face_fraction', 'visibility'), ('max_pose_deviation', 'frontal'),
                         ('max_clipped_fraction', 'exposure')):
         target, importance = 'portraits.quality.' + key, 'portraits.weights.' + weight
-        c.add('portrait-weight-' + weight, (target, importance), 'advice' if c.value(importance) == 0 else 'ok',
-              'The component weight controls the contribution of this target to the primary face portrait score.',
-              'Use a positive weight if the quality target should influence the primary ranking.')
+        c.detail('portrait-weight-' + weight, (target, importance),
+                 'Zero weight omits this component from the primary portrait score.')
         if c.value('portraits.selection.anchor_only') and key in (*FACE_FIELDS, 'max_pose_deviation') and c.value(importance):
             anchor = ANCHOR + key
             gates = (anchor,) if key == 'max_pose_deviation' else (anchor, QUERY + key)
@@ -121,17 +105,13 @@ def _portraits(c):
             if values:
                 hard = max(values)
                 soft = c.value(target)
-                gap = hard - soft if key == 'max_pose_deviation' else soft - hard
-                c.add('portrait-anchor-' + key, (target, *gates), 'advice' if gap <= 0 else 'ok',
-                      'The soft target adds a shortfall penalty only if an admitted face can miss it.',
-                      'Adjust the portrait target if it should further rank anchor-qualified faces.',
-                      admission_limit=hard, target=soft)
+                c.detail('portrait-anchor-' + key, (target, *gates),
+                         'A soft portrait target adjusts the ranking penalty for missing the target.',
+                         admission_limit=hard, target=soft)
     opened, closed = 'portraits.weights.open_mouth', 'portraits.weights.closed_mouth'
     if c.value(opened) and c.value(closed):
-        c.add('portrait-mouth-weights', (opened, closed), 'advice' if c.value(opened) == c.value(closed) else 'ok',
-              'Open and closed mouth scores are complements. Equal weights cancel the mouth preference '
-              'on faces with expression measurements.',
-              'Give the preferred mouth state the larger weight.')
+        c.detail('portrait-mouth-weights', (opened, closed),
+                 'Equal weights give the same combined score to open and closed mouths with measured expression.')
 
 
 def quality(c):

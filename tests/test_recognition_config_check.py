@@ -57,16 +57,17 @@ def test_composed_gates_and_unit_specific_counts(tmp_path):
         'execution.scan.max_cues': 4,
     }))
     r = rows(config)
-    assert r['view-match_threshold']['status'] == r['view-ambiguity_margin']['status'] == 'warning'
-    assert r['face-reflection']['status'] == 'warning'
-    assert r['hybrid-face-match_threshold']['status'] == 'advice'
-    assert r['hybrid-face-cohesion_threshold']['status'] == 'warning'
+    for key in ('view-match_threshold', 'view-ambiguity_margin', 'face-reflection',
+                'hybrid-face-match_threshold', 'hybrid-face-cohesion_threshold'):
+        assert r[key]['status'] == 'ok' and not r[key]['solver_constraint']
+    assert r['view-match_threshold']['measures']['effective'] == max(r['view-match_threshold']['settings'].values())
     assert r['body-scene-bonus']['measures']['gap'] == pytest.approx(.01)
     assert r['body-scene-bonus']['settings']['matching.face.same_scene.match_bonus'] == .06
     assert r['body-turn-discount']['measures']['lower'] == 0
-    assert r['body-turn-discount-cap']['status'] == 'warning'
-    assert r['global-local-body-match_threshold']['status'] == 'advice'
-    assert r['local-anchor-view-support']['status'] == r['local-view-cue-cap']['status'] == 'warning'
+    assert r['body-turn-discount-cap']['status'] == 'ok'
+    assert r['global-local-body-match_threshold']['status'] == 'ok'
+    assert r['local-anchor-view-support']['measures']['effective'] == 5
+    assert r['local-view-cue-cap']['status'] == 'warning' and not r['local-view-cue-cap']['solver_constraint']
     assert r['body-roster-cue-cap']['measures']['required'] == 6
     assert 'hybrid-cue-cap' not in r  # Hybrid independent support can pool scenes.
 
@@ -88,14 +89,14 @@ def test_quality_pose_masks_and_portraits(tmp_path):
     }))
     r = rows(config)
     assert r['face-auxiliary-quality-band']['status'] == 'advice'
-    assert r['body-anchor-min_keypoints']['status'] == 'advice'
-    assert r['recovery-mask-score']['status'] == 'warning'
-    assert r['mask-prompt-coverage']['status'] == r['duplicate-core-agreement']['status'] == 'advice'
+    assert r['body-anchor-min_keypoints']['status'] == 'ok'
+    assert r['recovery-mask-score']['status'] == 'ok'
+    assert r['mask-prompt-coverage']['status'] == r['duplicate-core-agreement']['status'] == 'ok'
     inherited = r['pose.refinement.min_presence-ceiling']
-    assert inherited['status'] == 'warning'
+    assert inherited['status'] == 'warning' and not inherited['solver_constraint']
     assert inherited['settings'] == {'pose.point_quality.min_presence': 1., 'pose.refinement.min_presence': None}
     assert r['pose.deduplication.min_presence-ceiling']['status'] == 'ok'
-    assert r['portrait-anchor-min_visible_face_fraction']['status'] == r['portrait-mouth-weights']['status'] == 'advice'
+    assert r['portrait-anchor-min_visible_face_fraction']['status'] == r['portrait-mouth-weights']['status'] == 'ok'
 
 
 def test_inactive_routes_and_affiliated_body_evidence(tmp_path):
@@ -122,12 +123,12 @@ def test_v1_and_cli_offline_read_only(tmp_path, capsys):
     assert cli.main(argv) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['version'] == 1 and all(r['status'] != 'ok' for r in result['checks'])
-    reflection = next(r for r in result['checks'] if r['rule'] == 'face-reflection')
-    assert reflection['settings']['recognition.cooccurrence_merge_threshold'] == .66
+    assert not any(r['rule'] == 'face-reflection' for r in result['checks'])
     assert cli.main([*argv, '--all', '--min-score-gap', '0']) == 0
     all_rows = json.loads(capsys.readouterr().out)
     assert len(all_rows['checks']) == sum(all_rows['counts'].values())
-    assert next(r for r in all_rows['checks'] if r['rule'] == 'face-reflection')['status'] == 'ok'
+    reflection = next(r for r in all_rows['checks'] if r['rule'] == 'face-reflection')
+    assert reflection['settings']['recognition.cooccurrence_merge_threshold'] == .66 and reflection['status'] == 'ok'
     assert list(tmp_path.iterdir()) == [path] and path.read_bytes() == initial
     for value in ('nan', 'inf', '-1', '1.01'):
         with pytest.raises(ValueError, match='min-score-gap'):
@@ -139,7 +140,7 @@ def test_v1_and_cli_offline_read_only(tmp_path, capsys):
 
 def test_opt_in_run_preflight_continues_with_same_config(tmp_path, monkeypatch, capsys):
     from stash_ai.recognition import work_locations
-    path = profile(tmp_path, {'matching.face.views.match_threshold': .6})
+    path = profile(tmp_path, {'matching.body.identities.track_similarity_threshold': .845})
     monkeypatch.setattr(work_locations, 'invocation', lambda config: nullcontext())
     seen = []
     def execute(args, config, services):
@@ -150,5 +151,5 @@ def test_opt_in_run_preflight_continues_with_same_config(tmp_path, monkeypatch, 
     assert cli.main(argv) == 17 and capsys.readouterr().err == ''
     assert cli.main([*argv, '--check-config']) == 17
     captured = capsys.readouterr()
-    assert 'view-match_threshold' in captured.err and not captured.out
+    assert 'body-adjacent-cues' in captured.err and not captured.out
     assert len(seen) == 2 and seen[0] == seen[1]
