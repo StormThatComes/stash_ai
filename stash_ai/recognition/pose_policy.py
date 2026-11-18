@@ -12,6 +12,8 @@ def compact_quality(raw):
     try:
         record=metadata(raw)
         selected={}
+        for key in ('query_only','transition_verified'):
+            if type(record.get(key)) is bool:selected[key]=record[key]
         if record.get('_inspection_auxiliary_only'):
             selected['_inspection_auxiliary_only'] = True
         for key in ('pixels','sharpness','pose_deviation','roll_deviation',
@@ -21,7 +23,9 @@ def compact_quality(raw):
                 selected[key]=number
         if type(record.get('view_shot')) is int and record['view_shot'] >= 0:
             selected['view_shot'] = record['view_shot']
-        for key in ('evidence_crop_sha256', 'evidence_pixel_sha256', 'evidence_thumbnail_id'):
+        if isinstance(record.get('evidence_aspect'),(float,int)) and record['evidence_aspect']>0:
+            selected['evidence_aspect']=record['evidence_aspect']
+        for key in ('evidence_crop_sha256', 'evidence_pixel_sha256', 'evidence_thumbnail_id', 'evidence_independence_unit'):
             fingerprint = record.get(key)
             if isinstance(fingerprint,str) and len(fingerprint)==64 and all(c in '0123456789abcdef' for c in fingerprint):
                 selected[key] = fingerprint

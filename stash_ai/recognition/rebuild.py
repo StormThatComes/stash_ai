@@ -593,6 +593,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             # When appending scenes, reuse their shards without rewriting the full image.
             if inputs.reused == 0 or inputs.replace_invalid:
                 inputs.save(replay)
+        from .face_evidence_review import apply as review_face_evidence
+        review_face_evidence(replay,selected,config)
         _copy_bindings(database,replay,selected,scope,namespace)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
@@ -782,6 +784,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 mapping.setdefault(row[0],row[0])
             invalid=invalidated_sources(history,replay,config,mapping)
             if invalid:raise InvalidatedSourceViews(invalid)
+        from .face_evidence_review import publish_proofs
+        publish_proofs(replay)
         replay.commit()
         from .ready_checkpoint import encode as encode_ready
         if checkpoints.enabled:
