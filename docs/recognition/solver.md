@@ -344,7 +344,10 @@ matching:
 ```
 
 The diff omits unchanged keys, path rewrites and schema metadata. An unchanged
-baseline produces `{}`. Comments retain the winning trial, unmet conditions,
+baseline produces `{}`. V2 full exports, diffs and report YAML proposals follow
+the section and parameter order in `facial_recognition.yml`, including nested
+settings. Diffs keep only the changed keys in that order.
+Comments retain the winning trial, unmet conditions,
 partial input scope and baseline configuration hash. Merge the changed leaf values
 into the original configuration, keeping other keys and input overrides; the diff
 is **not a standalone `--face-config` file**. The JSON report records
