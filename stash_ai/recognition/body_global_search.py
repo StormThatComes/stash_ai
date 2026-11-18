@@ -240,10 +240,13 @@ class Search:
         from .parallel_numeric import matrix_tiles
         leaves=(count+block-1)//block
         tree_bytes=max(0,2*leaves-1)*(4096*8+512)
-        if self.tree is None and tree_bytes+self.stats['reference_working_bytes']<self.config.data['sapiensid']['execution']['reference_bytes'] and leaves:
+        if self.tree is None and leaves:
             from .centroid_tree import Tree
-            self.reservation.set(self.stats['reference_working_bytes']+tree_bytes)
-            self.tree=Tree(self,read)
+            paged=tree_bytes+self.stats['reference_working_bytes']>=self.config.data['sapiensid']['execution']['reference_bytes']
+            # The existing 1 MiB scratch margin admits fixed node pages/build scratch.
+            if not paged:self.reservation.set(self.stats['reference_working_bytes']+tree_bytes)
+            self.tree=Tree(self,read,paged=paged)
+            self.stats['centroid_tree_paged']=paged
         def offsets():
             if self.tree is not None:
                 yield from self.tree.pairs(active,floor)
@@ -281,31 +284,29 @@ class Search:
     def dense_nominations(self,focus, *, incident_only=False):
         floor=self.config.data['sapiensid']['global_matching']['match_threshold']
         wanted=np.array([p in focus for p in self.identities])
-        seen=set()
         active = wanted[self.mode_owners] if incident_only else None
         def tile_floor(a,b,c,d):
             # Requested pairs are measured even when they miss the nomination floor.
             return -float('inf') if active[a:b].any() and active[c:d].any() else floor
         threshold = tile_floor if incident_only else None if focus else floor
-        for i,j,values in self.tiles(active,floor=threshold):
-            rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
-            mask=(rows[:,None]!=cols[None,:]) & ((values+ROUNDING>=floor) |
-                  (wanted[rows,None] & wanted[None,cols]))
-            if incident_only:
-                mask &= wanted[rows,None] | wanted[None,cols]
-            if i==j:mask &= np.arange(len(rows))[:,None]<np.arange(len(cols))[None,:]
-            for a,b in zip(*np.nonzero(mask)):
-                pair=tuple(sorted((self.identities[rows[a]],self.identities[cols[b]])))
-                if pair in seen:continue
-                seen.add(pair)
-                if len(seen)*256>self.config.data['sapiensid']['execution']['plan_bytes']:
-                    raise ResourceLimit('Global body nominations exceed sapiensid.execution.plan_bytes.')
-                self.stats['candidate_pairs']+=1
-                limit=self.config.data['sapiensid']['execution']['max_candidate_pairs']
-                if self.stats['candidate_pairs']>limit:
-                    raise ResourceLimit(f"Global body candidate pairs {self.stats['candidate_pairs']} exceed "
-                        f'sapiensid.execution.max_candidate_pairs={limit}; identities={len(self.identities)}.')
-                yield pair
+        from .paged_pairs import Pairs
+        with Pairs(self.config.data['sapiensid']['execution']['plan_bytes']) as seen:
+            for i,j,values in self.tiles(active,floor=threshold):
+                rows=self.mode_owners[i:i+values.shape[0]];cols=self.mode_owners[j:j+values.shape[1]]
+                mask=(rows[:,None]!=cols[None,:]) & ((values+ROUNDING>=floor) |
+                      (wanted[rows,None] & wanted[None,cols]))
+                if incident_only:
+                    mask &= wanted[rows,None] | wanted[None,cols]
+                if i==j:mask &= np.arange(len(rows))[:,None]<np.arange(len(cols))[None,:]
+                for a,b in zip(*np.nonzero(mask)):
+                    pair=tuple(sorted((self.identities[rows[a]],self.identities[cols[b]])))
+                    if not seen.add(pair):continue
+                    self.stats['candidate_pairs']+=1
+                    limit=self.config.data['sapiensid']['execution']['max_candidate_pairs']
+                    if self.stats['candidate_pairs']>limit:
+                        raise ResourceLimit(f"Global body candidate pairs {self.stats['candidate_pairs']} exceed "
+                            f'sapiensid.execution.max_candidate_pairs={limit}; identities={len(self.identities)}.')
+                    yield pair
 
     def nearest(self,lanes,pairs):
         """Exact strongest outsider for each group member, including weak rivals.

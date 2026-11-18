@@ -2,6 +2,7 @@
 from stash_ai.byte_units import BYTES_PER_MB, mb_to_bytes
 
 BYTE_LIMITS = {
+    'execution.host_memory_bytes': (0, 1099511627776),
     'execution.refinement_queue_bytes': (1048576, 4294967296),
     'execution.retained_memory_bytes': (1048576, 1099511627776),
     'execution.model_bytes_cache_bytes': (0, 8589934592),

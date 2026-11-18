@@ -12,6 +12,8 @@ _active = ContextVar('recognition_retained_memory', default=None)
 class Budget:
     def __init__(self, limit, model_limit=0):
         self.limit, self.model_limit = limit, model_limit
+        from .host_memory import current
+        self.host=current()
         self.lock = RLock()
         self.owners, self.models = {}, OrderedDict()
         self.used = self.model_bytes = 0
@@ -22,6 +24,7 @@ class Budget:
             if used > self.limit:
                 pipeline_count('retained_memory_admission_misses')
                 return False
+            if self.host is not None and not self.host.replace(('retained',id(self)),used):return False
             if amount:
                 self.owners[owner] = amount
             else:
@@ -57,6 +60,7 @@ class Budget:
             self.models.clear()
             self.owners.clear()
             self.used = self.model_bytes = 0
+            if self.host is not None:self.host.replace(('retained',id(self)),0)
 
 
 def current():

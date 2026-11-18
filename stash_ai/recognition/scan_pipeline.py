@@ -50,13 +50,19 @@ class CpuStage:
         self.images = {}
         self.bytes = self.peak_bytes = 0
         self.lock = threading.Lock()
+        from .host_memory import current
+        self.host=current()
 
     def _acquire_image(self, image):
         key=id(image)
         with self.lock:
             if key not in self.images:
                 size=image.width*image.height*3*8
-                self.images[key]=[image,image.copy(),0,size]
+                if self.host is not None:self.host.replace(('pixels',id(self)),self.bytes+size,required=True)
+                try:self.images[key]=[image,image.copy(),0,size]
+                except BaseException:
+                    if self.host is not None:self.host.replace(('pixels',id(self)),self.bytes)
+                    raise
                 self.bytes+=size
                 self.peak_bytes=max(self.peak_bytes,self.bytes)
             entry=self.images[key];entry[2]+=1
@@ -67,6 +73,7 @@ class CpuStage:
             entry=self.images[key];entry[2]-=1
             if not entry[2]:
                 del self.images[key];self.bytes-=entry[3];entry[1].close()
+                if self.host is not None:self.host.replace(('pixels',id(self)),self.bytes)
 
     @pipeline_stage('pixel_prepare')
     def _call(self, function, image, value, key, cache):
@@ -93,10 +100,15 @@ class CpuStage:
             raise BufferError('Consume recognition CPU results before submitting another job.')
         key,owned = self._acquire_image(image)
         future=OwnedFuture(self)
-        with self.lock:
-            self.pending[future]=extra+4096
-            self.bytes+=extra+4096
-            self.peak_bytes=max(self.peak_bytes,self.bytes)
+        try:
+            with self.lock:
+                if self.host is not None:self.host.replace(('pixels',id(self)),self.bytes+extra+4096,required=True)
+                self.pending[future]=extra+4096
+                self.bytes+=extra+4096
+                self.peak_bytes=max(self.peak_bytes,self.bytes)
+        except BaseException:
+            self._release_image(key)
+            raise
         try:
             from .inference_cache import current
             job = self.executor.submit(pipeline_bind(self._call),function,owned,value,key,current())
@@ -118,10 +130,13 @@ class CpuStage:
     def can_submit(self,image,*,extra=0):
         with self.lock:
             image_size=0 if id(image) in self.images else image.width*image.height*3*8
-            return self.bytes+image_size+extra+4096<=self.limit
+            return (self.bytes+image_size+extra+4096<=self.limit and
+                    (self.host is None or image_size+extra+4096<=self.host.available()))
 
     def retire(self,future):
-        with self.lock:self.bytes-=self.pending.pop(future,0)
+        with self.lock:
+            self.bytes-=self.pending.pop(future,0)
+            if self.host is not None:self.host.replace(('pixels',id(self)),self.bytes)
 
     def ordered(self, function, image, values, *, extra=0):
         size = image.width*image.height*3*8 + extra + 4096
@@ -174,7 +189,9 @@ class CpuStage:
                 wait(futures)
         elif self.executor is not None:
             shutdown.call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
-        with self.lock:self.pending.clear();self.bytes=0
+        with self.lock:
+            self.pending.clear();self.bytes=0
+            if self.host is not None:self.host.replace(('pixels',id(self)),0)
 
 
 def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):

@@ -196,6 +196,8 @@ def _execute(args, config, *, services, display):
         with pipeline_timing('startup'), phase(report, 'Recognition startup'):
             with activity(report, 'Check recognition disk budget'):
                 disk_budget = resources_stack.enter_context(disk_scope(config))
+            from .host_memory import scope as host_scope
+            resources_stack.enter_context(host_scope(config))
             for scope_factory in (retained_scope, inference_scope, model_scope, sprite_scope):
                 resources_stack.enter_context(scope_factory(config))
             resources_stack.enter_context(policy_scope())

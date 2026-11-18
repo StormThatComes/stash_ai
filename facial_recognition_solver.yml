@@ -597,6 +597,10 @@ portraits:
 
 execution:
   # Model locations, concurrency and resource budgets by stage.
+  host_memory_mb: 0
+  # Optional shared host admission ceiling for retained model bytes, sprites, CPU queues and rebuild
+  # allocations. 0 disables it. Uses sampled process RSS and conservative owned-byte accounting, not an OS hard
+  # limit; CUDA VRAM is separate. Range: 0..1048576 MB.
   models:
     # Shared model asset directory and download policy.
     directory: recognition_models

@@ -25,6 +25,14 @@ def scene_range(value):
 class RecognitionParser(argparse.ArgumentParser):
     def parse_args(self, args=None, namespace=None):
         result = super().parse_args(args, namespace)
+        if result.command == 'estimate-capacity':
+            import math
+            if any(getattr(result,k)<=0 for k in ('target_scenes','cues_per_scene','sample_scenes')):
+                self.error('Capacity scene and cue counts must be positive.')
+            values=[result.positive_fraction,result.faces_per_cue,result.bodies_per_cue,result.sqlite_overhead]
+            if not all(math.isfinite(v) and v>=0 for v in values) or not 0<=result.positive_fraction<=1 or result.sqlite_overhead<1:
+                self.error('Capacity rates must be finite/nonnegative, fraction in 0..1, overhead >=1.')
+            if result.sample_scenes>256:self.error('--sample-scenes must be at most 256.')
         if result.command == 'run':
             if not (result.scene_id or result.scene_range or result.all_scenes):
                 self.error('recognition run requires --scene-id, --scene-range or --all-scenes')
@@ -135,6 +143,14 @@ def parser():
     from .config_check import DEFAULT_SCORE_GAP
     check.add_argument('--min-score-gap', type=float, default=DEFAULT_SCORE_GAP,
         help='Adjacent-cue body score spacing (0..1, default %(default)s).')
+    capacity=commands.add_parser('estimate-capacity',allow_abbrev=False,
+        help='Estimate retained evidence sizes from bounded read-only samples; emits JSON.')
+    capacity.add_argument('--face-config',type=Path)
+    capacity.add_argument('--faces-db',type=Path)
+    for name,default in [('target-scenes',10000),('cues-per-scene',300),('sample-scenes',32)]:
+        capacity.add_argument('--'+name,type=int,default=default)
+    for name,default in [('positive-fraction',.7),('faces-per-cue',2.),('bodies-per-cue',2.),('sqlite-overhead',1.35)]:
+        capacity.add_argument('--'+name,type=float,default=default)
     migration = commands.add_parser('migrate-config', allow_abbrev=False,
         help='Write a complete v2 recognition YAML from the effective input policy (offline).')
     migration.add_argument('--face-config', type=Path, required=True, help='Existing recognition YAML.')
@@ -403,6 +419,9 @@ def main(argv=None, *, services=None):
 
 
 def _execute(args, config, services):
+    if args.command == 'estimate-capacity':
+        from .capacity import execute
+        return execute(args,config)
     if args.command == 'migrate-config':
         from .config_export import migrate
         return migrate(config, args.output)
