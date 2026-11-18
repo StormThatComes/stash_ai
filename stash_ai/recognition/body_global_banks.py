@@ -118,7 +118,8 @@ def _banks(db,config,scope,namespace):
         witnesses=independent(rows,settings,presorted=True,paged=True,reserve=reserve)
         selected=diverse_references(witnesses,config.data['sapiensid']['global_matching']['max_references'],reserve)
         if not selected and rows:selected=rows[:1]
-        core=page_rows(dict(id=r['id'],scan=r['scan'],cue=r['cue']) for r in rows)
+        from .body_numeric import domain
+        core=page_rows(dict(id=r['id'],scan=r['scan'],cue=r['cue'],embedding_foreground=domain(r)) for r in rows)
         selected_ids={r['id'] for r in selected}
         references={r['id']:r for r in core if r['id'] in selected_ids}
         bank=dict(refs=[references[r['id']] for r in selected],cores=[core],missing_original=False,

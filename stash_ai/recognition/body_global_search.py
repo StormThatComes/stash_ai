@@ -23,6 +23,7 @@ class Evidence:
         self.stats=stats;self.cache=OrderedDict();self.used=0;self.cache_bytes=cache_bytes
         self.scores=OrderedDict()
         self.prefetched = {}
+        self.mask_penalty=config.data['sapiensid']['identities'].get('mixed_mask_score_penalty',0.)
 
     def feature(self,row,kind='body'):
         key=(kind,row['id'])
@@ -68,7 +69,7 @@ class Evidence:
         if key in self.scores:
             self.stats['score_cache_hits']+=1;self.scores.move_to_end(key);return self.scores[key]
         count=len(left)*len(right)
-        if len(left)+len(right)<=128 and (len(left)+len(right))*(4096*4+512)<=self.cache_bytes//2:
+        if not (kind=='body' and self.mask_penalty) and (len(left)+len(right))*(4096*4+512)<=self.cache_bytes//2:
             from .body_numeric import lookup, publish
             from .body_parallel import _compare
             first = self.features(left, kind)
@@ -82,12 +83,19 @@ class Evidence:
             return found
         self.charge(count,kind)
         total=0.;minimum=float('inf')
+        from .body_numeric import domain
+        domains=[domain(row) for row in right] if kind=='body' and self.mask_penalty else None
+        block=max(1,min(64,self.cache_bytes//(4*(4096*4+512))))
         for a in left:
             first=self.feature(a,kind)
-            for b in right:
-                second=self.feature(b,kind)
-                if len(first)!=len(second):raise ValueError('Incompatible face namespaces in body consolidation.')
-                score=float(np.dot(first,second));total+=score;minimum=min(minimum,score)
+            own=domain(a) if domains is not None else None
+            for offset in range(0,len(right),block):
+                for index,second in enumerate(self.features(right[offset:offset+block],kind),offset):
+                    if len(first)!=len(second):raise ValueError('Incompatible face namespaces in body consolidation.')
+                    score=float(np.dot(first,second))
+                    if domains is not None and own is not None and domains[index] is not None and own!=domains[index]:
+                        score-=self.mask_penalty
+                    total+=score;minimum=min(minimum,score)
         result=(total/count,minimum) if count else (-1.,-1.)
         # Keep the cache small even for large inherited veto banks.
         if len(left)+len(right)<=128:
@@ -306,6 +314,7 @@ class Search:
         witness pair within the conservative rounding envelope of that maximum.
         No top-k truncation or discarded-candidate assumption can hide a rival.
         """
+        slack=2*ROUNDING+self.evidence.mask_penalty
         groups=[np.array([lane.get(self.identities[owner],-1) for owner,_ in self.entries]) for lane in lanes]
         active=np.array([any(g[i]>=0 for g in groups) for i in range(len(self.entries))])
         if not active.any():return [{} for _ in lanes]
@@ -359,7 +368,7 @@ class Search:
                 def rival_floor(begin,end,other,stop):
                     owners=set(self.mode_owners[begin:end])|set(self.mode_owners[other:stop])
                     values=[maxima[lane][owner] for lane,wanted in enumerate(pending) for owner in owners if owner in wanted]
-                    return min(values,default=float('inf'))-2*ROUNDING
+                    return min(values,default=float('inf'))-slack
                 for i,j,values in self.tiles(active,floor=rival_floor):
                     for start,other,tile in rows(i,j,values):
                         for lane,g in enumerate(groups):
@@ -371,7 +380,7 @@ class Search:
                                     maximum=max(maxima[lane][owner],float(tile[r,allowed].max()))
                                     maxima[lane][owner]=maximum
                                     if shortlist is not None:
-                                        near=np.flatnonzero(allowed & (tile[r]+2*ROUNDING>=maximum))
+                                        near=np.flatnonzero(allowed & (tile[r]+slack>=maximum))
                                         if len(shortlist)+len(near)>4096:
                                             shortlist=None
                                         else:
@@ -380,7 +389,7 @@ class Search:
                     if shortlist is not None:
                         self.stats['rival_passes_saved']=self.stats.get('rival_passes_saved',0)+1
                         for lane,index,column,value in shortlist:
-                            if value+2*ROUNDING>=maxima[lane][self.mode_owners[index]]:
+                            if value+slack>=maxima[lane][self.mode_owners[index]]:
                                 yield lane,index,column
                         return
                     for i,j,values in self.tiles(active,floor=rival_floor):
@@ -389,7 +398,7 @@ class Search:
                                 for r in np.flatnonzero(g[start:start+len(tile)]>=0):
                                     index=start+r;owner=self.mode_owners[index]
                                     if owner not in pending[lane]:continue
-                                    allowed=mask(g,index,other,tile.shape[1]) & (tile[r]+2*ROUNDING>=maxima[lane][owner])
+                                    allowed=mask(g,index,other,tile.shape[1]) & (tile[r]+slack>=maxima[lane][owner])
                                     for c in np.flatnonzero(allowed):yield lane,index,other+c
                 def requests():
                     for lane,index,column in contenders():

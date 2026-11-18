@@ -1,4 +1,5 @@
 """Scene-local body appearances derived from disjoint, face-rooted VTT tracks."""
+from .body_numeric import body_similarity
 from collections import defaultdict
 import math
 import json
@@ -153,7 +154,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                             translation=camera_offsets[pair])
         if blocked:
             return fail(*blocked)
-        similarity = scores.face_similarity(a['_vector'],b['_vector'])
+        similarity = body_similarity(scores,a,b)
         if diagnose:
             appearance_edges[a['id'],b['id']] = similarity
         return similarity if raw or similarity >= track_threshold else fail(
@@ -385,11 +386,11 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
                 # Challenge each witness with face-confirmed foreign tracks from
                 # a different shot; reassess exclusions on every evidence rebuild.
                 peers = [r for _,_,r in kept if r is not witness]
-                rivals = [(scores.face_similarity(witness['_vector'],r['_vector']), other,r['id'])
+                rivals = [(body_similarity(scores,witness,r), other,r['id'])
                           for other,bank in seeds.items() if other!=key[0] for r in bank
                           if r['id'] in geometry and shot_ids[r['cue']]!=shot_ids[witness['cue']]]
                 if rivals:
-                    own = min((scores.face_similarity(witness['_vector'],r['_vector']) for r in peers),default=-1.)
+                    own = min((body_similarity(scores,witness,r) for r in peers),default=-1.)
                     rival,other,rid = max(rivals)
                     if rival >= settings['match_threshold'] and own-rival < settings['ambiguity_margin']:
                         decisions[witness['id']]['view_exclusion'] = dict(reason='held_out_rival',
@@ -496,7 +497,7 @@ def recover(rows, decisions, seeds, settings, scores, guard, *, occupied=(), cut
             required = 1 if row['id'] in source_paths else max(2,settings['attach_min_support'])
             if len(external)<required:
                 continue
-            comparisons = [scores.face_similarity(row['_vector'], w['_vector']) for w, _ in external]
+            comparisons = [body_similarity(scores,row,w) for w, _ in external]
             mean, low = sum(comparisons)/len(comparisons), min(comparisons)
             bonus = owner_bonus(decision,owner,settings.get('scene_context_bonus',0.))
             if mean < settings['match_threshold']-bonus or low < settings['cohesion_threshold']:

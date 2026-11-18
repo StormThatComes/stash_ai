@@ -67,7 +67,7 @@ class RawPMPose(Pose):
     def __init__(self,model,device,*,precision='fp32', check_flip=False):
         from .pmpose_registry import SHA256,INFERENCE
         self.model=model;self.contract=[SHA256,INFERENCE,str(device)]
-        if check_flip:self.contract.append('flip-alternate-peak-v2')
+        if check_flip:self.contract.append('flip-alternate-peak-v3-max-views')
         if precision!='fp32':self.contract.append({'precision':precision})
 
     def predict(self,image,bounds,masks=None):

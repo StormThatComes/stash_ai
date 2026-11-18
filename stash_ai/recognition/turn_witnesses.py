@@ -1,4 +1,5 @@
 """Frozen, independently rooted appearance evidence for scene-local turns."""
+from .body_numeric import body_similarity
 from collections import defaultdict
 
 from .body_identity import independent, quality
@@ -48,7 +49,7 @@ class TurnWitnesses:
             if (set(roots).intersection(ends) or row['cue']==member['cue'] or
                     outside_shot is not None and shot==outside_shot):
                 continue
-            score = self.scores.face_similarity(row['_vector'], member['_vector'])
+            score = body_similarity(self.scores,row,member)
             if score>=self.settings['match_threshold']:
                 eligible.append((member,ends,shot,score))
         eligible.sort(key=lambda item:(-item[3],item[0]['id'],tuple(item[1])))
@@ -65,7 +66,7 @@ class TurnWitnesses:
                 continue
             if len(independent([self.lookup[k] for k in (*a[1],*b[1])],self.settings))<4:
                 continue
-            similarity = self.scores.face_similarity(a[0]['_vector'],b[0]['_vector'])
+            similarity = body_similarity(self.scores,a[0],b[0])
             # A novel appearance cannot borrow the identity of a tightly
             # repeated rear view. Calibrate only from the two external episodes.
             floor = max(self.settings['match_threshold'],1-2*(1-similarity)-.0001)
