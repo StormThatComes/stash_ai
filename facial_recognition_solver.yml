@@ -65,7 +65,8 @@ pose:
   detector:
     # Select the box detector and its per-frame limits.
     backend: rfdetr_xl
-    # Person boxes: yolo, dfine_l, dfine_x or rfdetr_xl; non-YOLO detectors require a separate pose backend.
+    # Person boxes: yolo, dfine_l, dfine_x, rfdetr_xl or experimental rtmo. RTMO requires estimator rtmo and
+    # does not load another detector.
     score_threshold: 0.5
     # Minimum person detection confidence (0..1).
     nms_threshold: 0.7
@@ -92,10 +93,19 @@ pose:
   estimator:
     # Select the keypoint model operating on the detected people.
     backend: pmpose
-    # Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.
+    # Keypoints: yolo, vitpose_plus_large, sapiens, pmpose or experimental rtmo. RTMO supplies both boxes and
+    # keypoints; set both backend selectors to rtmo.
     keypoint_score_threshold: 0.5
     # Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model.
     # Range: 0..1.
+    rtmo:
+      # Experimental pinned RTMO-S body7 ONNX one-stage COCO17 backend.
+      directory: ''
+      # Local folder containing the verified end2end.onnx; empty uses
+      # execution.models.directory/rtmo_s/<SHA256>.
+      torso_nms: false
+      # Retain overlapping boxes when two distinct reliable torsos are measured; false uses ordinary box NMS.
+      # Does not recover predictions removed inside the exported graph.
     vitpose_plus_large:
       # ViTPose++ Large weights and crop batch.
       directory: ''
@@ -229,7 +239,8 @@ pose:
   deduplication:
     # Optional suppression of duplicate PMPose predictions.
     enabled: true
-    # Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.
+    # Suppress duplicate first-pass COCO17 candidates before SAM and face matching; supports pmpose,
+    # vitpose_plus_large and sapiens.
     max_contact_attempts: 4
     # Maximum directed contact recovery attempts per cue. 0 disables recovery. Range: 0..16.
     contact_crop_variants: false

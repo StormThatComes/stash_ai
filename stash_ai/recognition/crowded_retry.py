@@ -34,6 +34,8 @@ def retry_people(model, image, faces, people):
     if len(faces) > 2 or len(people) != 1 or getattr(model, 'pose_refiner', None) is None:
         return people
     settings = model.config.data['sapiensid']['pose']
+    # The one-stage graph has no independent top-down crop estimator.
+    if settings.get('backend','yolo')=='rtmo':return people
     if settings['max_people_per_frame'] < 2:
         return people
     left, top, right, bottom = people[0]['bounds']

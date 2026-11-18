@@ -265,7 +265,7 @@ def test_disabled_refinement_ignores_dormant_options_until_enabled():
 
 def test_refinement_requires_pmpose():
     data=defaults();data['sapiensid']['pose']['refinement']['enabled']=True
-    with pytest.raises(ValueError,match='top-down pose backend'):
+    with pytest.raises(ValueError,match='supported COCO17 pose backend'):
         validate(data)
 
 

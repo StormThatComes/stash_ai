@@ -22,6 +22,7 @@ _GROUPS = (
     ('pose.detector.dfine', 'sapiensid.pose', 'directory=dfine_directory'),
     ('pose.detector.rfdetr_xl', 'sapiensid.pose', 'directory=rfdetr_directory'),
     ('pose.estimator', 'sapiensid.pose', 'backend keypoint_score_threshold'),
+    ('pose.estimator.rtmo', 'sapiensid.pose', 'directory=rtmo_directory torso_nms=rtmo_torso_nms'),
     ('pose.estimator.vitpose_plus_large', 'sapiensid.pose', 'directory=vitpose_directory batch_size=vitpose_batch_size'),
     ('pose.estimator.sapiens', 'sapiensid.pose',
      'directory=sapiens_directory variant=sapiens_variant batch_size=sapiens_batch_size'),

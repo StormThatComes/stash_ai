@@ -51,7 +51,7 @@ def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
     second.edit('pose.estimator.backend', 'vitpose_plus_large')
     preview = second.effective().data['sapiensid']
     assert preview['pose']['backend'] == 'vitpose_plus_large'
-    assert preview['pose']['refinement']['enabled'] and not preview['pose']['deduplication']['enabled']
+    assert preview['pose']['refinement']['enabled'] and preview['pose']['deduplication']['enabled']
     assert 'pose.refinement' in second.groups()
     assert preview['collection']['min_sharpness'] > 0 and preview['identities']['anchor_min_sharpness'] > 0
     assert first.effective() is config

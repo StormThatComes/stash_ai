@@ -11,7 +11,7 @@ LOCAL_PATHS = (
     'sapiensid.model.source_directory', 'sapiensid.model.checkpoint_directory',
     'sapiensid.pose.path', 'sapiensid.pose.vitpose_directory',
     'sapiensid.pose.sapiens_directory', 'sapiensid.pose.dfine_directory',
-    'sapiensid.pose.pmpose_directory', 'sapiensid.pose.rfdetr_directory',
+    'sapiensid.pose.rtmo_directory', 'sapiensid.pose.pmpose_directory', 'sapiensid.pose.rfdetr_directory',
     'sapiensid.pose.refinement.directory',
 )
 

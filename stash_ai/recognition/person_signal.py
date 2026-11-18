@@ -36,7 +36,7 @@ def defaults():
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100,backend='yolo',detector='yolo',dfine_directory='',rfdetr_directory='',
-                  vitpose_directory='',batch_size=4,
+                  vitpose_directory='',batch_size=4,rtmo_directory='',rtmo_torso_nms=False,
                   sapiens_variant='0.3b',sapiens_directory='',sapiens_batch_size=1,
                   pmpose_directory='',pmpose_batch_size=1,pmpose_presence_threshold=.5,pmpose_visibility_threshold=0.,
                   refinement=refinement_defaults(), deduplication=deduplication_defaults()),
@@ -50,10 +50,13 @@ def defaults():
 def validate(settings, *, detection_preview=False):
     from .config import _number
     pose = settings['pose']
-    if pose['backend'] not in ('yolo', 'vitpose_plus_large', 'sapiens', 'pmpose'):
-        raise ValueError('sapiensid.pose.backend must be yolo, vitpose_plus_large, sapiens or pmpose.')
-    if pose['detector'] not in ('yolo', 'dfine_l', 'dfine_x', 'rfdetr_xl'):
-        raise ValueError('sapiensid.pose.detector must be yolo, dfine_l, dfine_x or rfdetr_xl.')
+    if pose['backend'] not in ('yolo', 'vitpose_plus_large', 'sapiens', 'pmpose', 'rtmo'):
+        raise ValueError('sapiensid.pose.backend must be yolo, vitpose_plus_large, sapiens, pmpose or rtmo.')
+    if pose['detector'] not in ('yolo', 'dfine_l', 'dfine_x', 'rfdetr_xl', 'rtmo'):
+        raise ValueError('sapiensid.pose.detector must be yolo, dfine_l, dfine_x, rfdetr_xl or rtmo.')
+    if (pose['detector']=='rtmo') != (pose['backend']=='rtmo'):
+        raise ValueError('RTMO requires both pose.detector.backend and pose.estimator.backend to be rtmo; it supplies both outputs.')
+    if type(pose['rtmo_torso_nms']) is not bool:raise ValueError('RTMO torso_nms must be boolean.')
     if pose['detector'] != 'yolo' and pose['backend'] == 'yolo':
         raise ValueError('sapiensid.pose.detector '+str(pose['detector'])+
                          ' requires pose.backend: sapiens, vitpose_plus_large or pmpose; '
@@ -161,7 +164,7 @@ def validate(settings, *, detection_preview=False):
         raise ValueError('sapiensid.execution.batch_size must be in [1,16].')
     for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path'),
                         ('pose','vitpose_directory'),('pose','sapiens_directory'),('pose','dfine_directory'),
-                        ('pose','pmpose_directory'),('pose','rfdetr_directory')):
+                        ('pose','pmpose_directory'),('pose','rfdetr_directory'),('pose','rtmo_directory')):
         value=settings[section][key]
         if not isinstance(value,str) or '\x00' in value or value and not value.strip():
             raise ValueError(f'sapiensid.{section}.{key} requires a local path.')
@@ -180,7 +183,7 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     evidence=dict(format='sapiensid-person-v3' if legacy_boundaries else CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items()
               if k not in ('refinement','deduplication','path','backend','vitpose_directory','batch_size','vitpose_batch_size',
-                           'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory','rfdetr_directory',
+                           'sapiens_variant','sapiens_directory','sapiens_batch_size','detector','dfine_directory','rfdetr_directory','rtmo_directory','rtmo_torso_nms',
                            'pmpose_directory','pmpose_batch_size','pmpose_presence_threshold','pmpose_visibility_threshold')})
     if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
         evidence['pose_inference'] = POSE_INFERENCE
@@ -189,6 +192,9 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
         evidence['person_detector'] = detector_contract(s['pose']['detector'])
         evidence['pose'].pop('sha256')
         evidence.pop('pose_inference', None)
+    if s['pose'].get('backend','yolo')=='rtmo':
+        from .rtmo_registry import contract as rtmo_contract
+        evidence['person_detector']=rtmo_contract(s['pose'])
     # Historical run snapshots predate this selector and always used YOLO.
     if s['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract

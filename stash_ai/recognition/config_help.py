@@ -1,6 +1,9 @@
 """Operator help for the bundled, migrated and solver-generated v2 YAML."""
 
 HELP = {
+    'pose.estimator.rtmo': 'Experimental pinned RTMO-S body7 ONNX one-stage COCO17 backend.',
+    'pose.estimator.rtmo.directory': 'Local folder containing the verified end2end.onnx; empty uses execution.models.directory/rtmo_s/<SHA256>.',
+    'pose.estimator.rtmo.torso_nms': 'Retain overlapping boxes when two distinct reliable torsos are measured; false uses ordinary box NMS. Does not recover predictions removed inside the exported graph.',
     'execution.host_memory_mb': 'Optional shared host admission ceiling for retained model bytes, sprites, CPU queues and rebuild allocations. 0 disables it. Uses sampled process RSS and conservative owned-byte accounting, not an OS hard limit; CUDA VRAM is separate. Range: 0..1048576 MB.',
     'version': 'Recognition YAML layout. Use 2 for this schema.',
     'face': 'Face detection, scan admission and embeddings.',
@@ -22,7 +25,7 @@ HELP = {
     'face.recognizer.backend': 'Face embedding model: sface, auraface, lvface_b or adaface_ir50.',
     'pose': 'Find people and estimate COCO17 keypoints in each VTT frame.',
     'pose.detector': 'Select the box detector and its per-frame limits.',
-    'pose.detector.backend': 'Person boxes: yolo, dfine_l, dfine_x or rfdetr_xl; non-YOLO detectors require a separate pose backend.',
+    'pose.detector.backend': 'Person boxes: yolo, dfine_l, dfine_x, rfdetr_xl or experimental rtmo. RTMO requires estimator rtmo and does not load another detector.',
     'pose.detector.score_threshold': 'Minimum person detection confidence (0..1).',
     'pose.detector.nms_threshold': 'Body-box IoU threshold for duplicate suppression in YOLO, D-FINE and RF-DETR-XL. Range: 0..1.',
     'pose.detector.max_people_per_frame': 'Maximum body detections per thumbnail, independent of the face detection limit. Range: positive integer.',
@@ -35,7 +38,7 @@ HELP = {
     'pose.detector.rfdetr_xl': 'Local assets for RF-DETR-XL person detection.',
     'pose.detector.rfdetr_xl.directory': 'RF-DETR-XL weight folder; empty uses execution.models.directory/rfdetr_xl/<SHA256>. Requires requirements-cpu.txt or requirements-gpu.txt.',
     'pose.estimator': 'Select the keypoint model operating on the detected people.',
-    'pose.estimator.backend': 'Keypoints: yolo, vitpose_plus_large, sapiens or pmpose; all except yolo use separate person boxes.',
+    'pose.estimator.backend': 'Keypoints: yolo, vitpose_plus_large, sapiens, pmpose or experimental rtmo. RTMO supplies both boxes and keypoints; set both backend selectors to rtmo.',
     'pose.estimator.keypoint_score_threshold': 'Minimum pose score: expected OKS for PMPose, heatmap score for ViTPose/Sapiens. Calibrate per model. Range: 0..1.',
     'pose.estimator.vitpose_plus_large': 'ViTPose++ Large weights and crop batch.',
     'pose.estimator.vitpose_plus_large.directory': 'ViTPose asset folder; empty uses execution.models.directory/vitpose_plus_large/<pinned revision>.',
@@ -93,7 +96,7 @@ HELP = {
     'pose.deduplication': 'Optional suppression of duplicate PMPose predictions.',
     'pose.deduplication.contact_crop_variants': 'Try expanded and sideways crops within the contact attempt budget. Experimental; validate ownership before enabling.',
     'pose.deduplication.max_contact_attempts': 'Maximum directed contact recovery attempts per cue. 0 disables recovery. Range: 0..16.',
-    'pose.deduplication.enabled': 'Suppress duplicate first-pass PMPose candidates before SAM and face matching; requires pmpose.',
+    'pose.deduplication.enabled': 'Suppress duplicate first-pass COCO17 candidates before SAM and face matching; supports pmpose, vitpose_plus_large and sapiens.',
     'pose.deduplication.min_keypoint_score': 'Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range: 0..1 or null.',
     'pose.deduplication.min_presence': 'Minimum presence probability for a point supporting duplicate selection. Null inherits pose.point_quality. Range: 0..1 or null.',
     'pose.deduplication.min_visibility': 'Minimum visibility probability. Null inherits pose.point_quality. Range: 0..1 or null.',

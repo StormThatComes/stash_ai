@@ -30,8 +30,12 @@ def validate(pose):
     for key in ('generic_second_pass','expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
-    if pose['backend'] not in ('pmpose', 'sapiens', 'vitpose_plus_large'):
-        raise ValueError(prefix + 'enabled requires a top-down pose backend.')
+    if pose['backend'] not in ('pmpose', 'sapiens', 'vitpose_plus_large', 'rtmo'):
+        raise ValueError(prefix + 'enabled requires a supported COCO17 pose backend.')
+    if pose['backend']=='rtmo' and settings['generic_second_pass']:
+        raise ValueError(prefix+'generic_second_pass is unsupported for RTMO; use mask-only refinement.')
+    if pose['backend']=='rtmo' and settings['bidirectional_prompts']:
+        raise ValueError(prefix+'bidirectional_prompts requires a top-down estimator with an independent second pass.')
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')
     _number(settings['max_mask_combinations'], prefix+'max_mask_combinations', 1, 4096, integer=True)
