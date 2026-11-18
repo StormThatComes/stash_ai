@@ -24,3 +24,21 @@ def test_overlap_alone_is_not_a_duplicate_face():
     row=np.asarray(face.row).copy();row[0]+=25;row[4:14:2]+=25
     assert not duplicate_face(face,checked_detection(row))
     assert duplicate_face(face,face)
+
+
+def test_partial_head_requires_reliable_uncontested_points():
+    person=dict(keypoints=[[-1,-1],[40,40],[50,40],[-1,-1],[-1,-1]],keypoint_scores=[0,.2,.9,0,0])
+    assert head_crop(person,(100,100)) is None
+    person['keypoint_scores'][1]=.9
+    assert head_crop(person,(100,100)) is not None
+    person['keypoint_states']=['unavailable','conflicted','measured','unavailable','unavailable']
+    assert head_crop(person,(100,100)) is None
+
+
+def test_calibrated_sharpness_units_and_profile_floor_are_explicit():
+    from stash_ai.recognition.quality import sharpness_failed
+    q=dict(sharpness=100,sharpness_normalized=1.,face_profile=True)
+    policy=dict(min_sharpness=2.,sharpness_metric='normalized',profile_min_sharpness=.5)
+    assert not sharpness_failed(q,policy)
+    assert sharpness_failed(dict(q,face_profile=False),policy)
+    assert not sharpness_failed(q,dict(policy,sharpness_metric='raw'))

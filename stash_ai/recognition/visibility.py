@@ -256,7 +256,7 @@ def foreground_mask(pixel_logits, region, threshold):
     return (pixel_logits > threshold) & region
 
 
-def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD):
+def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD, diagnostics=True):
     foreground = foreground_mask(_pixel_logits(logits), region, threshold)
     count = int(region.sum())
     if count <= 0:
@@ -265,7 +265,7 @@ def measurement(logits, region, device, *, blob=None, face_pixels=None, threshol
     result = _counts(visible, count, device, face_pixels, threshold)
     if blob is not None:
         from .foreground_quality import face
-        result.update(face(blob,foreground,'faceocc_mask'))
+        result.update(face(blob,foreground,'faceocc_mask',diagnostics=diagnostics))
     return result
 
 
@@ -281,7 +281,7 @@ def _counts(visible, source_count, device, face_pixels, threshold):
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
 
-def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD):
+def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD,diagnostics=True):
     """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
@@ -299,7 +299,7 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,thr
                for value, count, total in zip(visible, counts, totals, strict=True)]
     if inputs is not None:
         from .foreground_quality import device_faces
-        for result,quality in zip(results,device_faces(inputs,foreground)):
+        for result,quality in zip(results,device_faces(inputs,foreground,diagnostics=diagnostics)):
             result.update(quality)
     return results
 
@@ -307,6 +307,7 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,thr
 
 class FaceVisibility:
     def __init__(self, config, paths):
+        self.diagnostics=config.data['detection'].get('quality_diagnostics',False)
         self.logit_threshold = config.data['detection']['faceocc_logit_threshold']
         self.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
         import torch
@@ -379,10 +380,12 @@ class FaceVisibility:
                     values=logits.cpu().numpy()
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
-                    measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i], threshold=self.logit_threshold)
+                    measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i], threshold=self.logit_threshold,
+                                                diagnostics=getattr(self,'diagnostics',False))
                                     for i, region in enumerate(regions)]
                 else:
-                    measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals,threshold=self.logit_threshold)
+                    measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals,threshold=self.logit_threshold,
+                                                     diagnostics=getattr(self,'diagnostics',False))
             for index,value in zip(positions,measurements):result[index]=value
         return result
 

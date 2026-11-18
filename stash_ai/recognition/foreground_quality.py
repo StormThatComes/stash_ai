@@ -1,8 +1,19 @@
 """Sharpness inside measured foreground, excluding artificial mask boundaries."""
 import numpy as np
+from contextvars import ContextVar
+from contextlib import contextmanager
+
+_diagnostics=ContextVar('face_quality_diagnostics',default=False)
 
 
-def laplacian(values, mask=None):
+@contextmanager
+def diagnostics(enabled):
+    token=_diagnostics.set(enabled)
+    try:yield
+    finally:_diagnostics.reset(token)
+
+
+def laplacian(values, mask=None, *, diagnostics=True):
     values = np.asarray(values, dtype=np.float32)
     response = (4*values[1:-1,1:-1]-values[:-2,1:-1]-values[2:,1:-1]
                 -values[1:-1,:-2]-values[1:-1,2:])
@@ -17,30 +28,30 @@ def laplacian(values, mask=None):
     contrast=float(np.var(pixels)) if pixels.size else 0.
     variance=float(response.var()) if response.size else 0.
     return dict(sharpness_normalized=variance/max(contrast,1.), sharpness_contrast=contrast,
-                sharpness_noise=float(np.median(np.abs(response-np.median(response)))) if response.size else 0.,
+                sharpness_noise=(float(np.median(np.abs(response-np.median(response)))) if response.size else 0.) if diagnostics else None,
                 sharpness=variance,
                 sharpness_pixels=int(response.size))
 
 
-def face(blob, mask, method):
+def face(blob, mask, method, *, diagnostics=True):
     """Measure the existing FaceOcc 256px input, without another image/model pass."""
     rgb = np.asarray(blob,dtype=np.float32)[0].transpose(1,2,0)
     rgb = (rgb*np.asarray([.229,.224,.225],dtype=np.float32)
            +np.asarray([.485,.456,.406],dtype=np.float32))*255
     gray = rgb @ np.asarray([.299,.587,.114],dtype=np.float32)
-    return dict(laplacian(gray,mask),sharpness_method=method)
+    return dict(laplacian(gray,mask,diagnostics=diagnostics),sharpness_method=method)
 
 
-def face_geometry(image, detection):
+def face_geometry(image, detection, *, diagnostics=False):
     from .visibility import prepare, VisibilityGeometryError
     try:
         blob, region = prepare(image,detection,allow_partial=True)
     except VisibilityGeometryError:
         return dict(sharpness=0.,sharpness_pixels=0,sharpness_method='unavailable')
-    return face(blob,region,'face_ellipse')
+    return face(blob,region,'face_ellipse',diagnostics=diagnostics)
 
 
-def device_faces(inputs, masks):
+def device_faces(inputs, masks, *, diagnostics=True):
     """Same measurement on the model device; transfer only scalar diagnostics."""
     import torch
     rgb = (inputs.float()*inputs.new_tensor([.229,.224,.225])[None,:,None,None]
@@ -58,11 +69,13 @@ def device_faces(inputs, masks):
     source_count=masks.sum(dim=(1,2)).clamp_min(1)
     source_mean=(gray*masks).sum(dim=(1,2))/source_count
     contrast=(((gray-source_mean[:,None,None])**2)*masks).sum(dim=(1,2))/source_count
-    selected=response.masked_fill(~interior,float('nan')).flatten(1)
-    median=selected.nanquantile(.5,dim=1)
-    noise=(selected-median[:,None]).abs().nanquantile(.5,dim=1).nan_to_num()
+    noise=torch.zeros_like(variance)
+    if diagnostics:
+        selected=response.masked_fill(~interior,float('nan')).flatten(1)
+        median=selected.nanquantile(.5,dim=1)
+        noise=(selected-median[:,None]).abs().nanquantile(.5,dim=1).nan_to_num()
     values = torch.stack((variance,counts,contrast,noise),dim=1).cpu().tolist()
     return [dict(sharpness=float(value),sharpness_pixels=int(count),sharpness_method='faceocc_mask',
                  sharpness_normalized=float(value/max(texture,1.)),sharpness_contrast=float(texture),
-                 sharpness_noise=float(noise))
+                 sharpness_noise=float(noise) if diagnostics else None)
             for value,count,texture,noise in values]

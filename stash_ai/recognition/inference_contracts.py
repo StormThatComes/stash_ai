@@ -5,7 +5,7 @@ from .config import plain
 def face(config):
     from .models import ASSETS
     model=config.data['models']['detector']
-    return ['face-detector-v1',model,ASSETS[model].sha256,
+    return ['face-detector-v2-owned-repair',model,ASSETS[model].sha256,
             {k:config.data['detection'][k] for k in ('score_threshold','nms_threshold','max_faces_per_frame','candidate_score_threshold','alignment_retry_error')},
             config.data['models']['device']]
 

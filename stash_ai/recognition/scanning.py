@@ -27,7 +27,7 @@ def scan_identity(config, namespace):
     from .rotated_faces import enabled
     if enabled(config):
         from .body_observations import contract
-        detection['pose_guided_rotation'] = ['rotated-head-v2',contract(config)]
+        detection['pose_guided_rotation'] = ['rotated-head-v3',contract(config)]
     else:
         detection.pop('pose_guided_rotation',None)
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:

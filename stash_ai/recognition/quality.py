@@ -82,8 +82,9 @@ def pose_measurements(landmarks, size=None):
 @pipeline_stage('quality')
 def assess(image,detection):
     from .inference_cache import many,current
+    from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality','face-quality-v4-profile-frame',[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v5-profile-frame',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
@@ -112,20 +113,29 @@ def _assess(image, detection):
     from .face_frame import axis
     from .visibility import VisibilityGeometryError
     try:
-        horizontal,_=axis(points,width,height)
+        horizontal,profile=axis(points,width,height)
         vertical=np.array([-horizontal[1],horizontal[0]])
         nose_height=float((points[2]-eye_mid) @ vertical)
         mouth_height=float((mouth_mid-eye_mid) @ vertical)
         ordered=bool(0<nose_height<mouth_height)
     except VisibilityGeometryError:
         ordered=False
+        profile=False
     pose = pose_measurements(points,(width,height))
-    from .foreground_quality import face_geometry
-    foreground = face_geometry(image,detection)
+    from .foreground_quality import face_geometry, _diagnostics
+    foreground = face_geometry(image,detection,diagnostics=_diagnostics.get())
     return dict(complete=complete, landmarks_inside=inside and ordered, **alignment_measurements(detection, image),
                 pixels=float(min(width, height)), crop_sharpness=sharpness, exposure=exposure, **foreground,
                 clipped_fraction=clipped, **pose,
-                visibility_method='five-landmark-geometry-estimate-v1')
+                face_profile=profile,visibility_method='five-landmark-geometry-estimate-v1')
+
+
+def sharpness_failed(quality,policy):
+    metric=policy.get('sharpness_metric','raw')
+    threshold=policy.get('profile_min_sharpness') if quality.get('face_profile') else None
+    threshold=policy['min_sharpness'] if threshold is None else threshold
+    value=quality.get('sharpness_normalized') if metric=='normalized' else quality.get('sharpness')
+    return threshold>0 and (value is None or value<threshold)
 
 
 def rejection(quality, policy):
@@ -134,7 +144,7 @@ def rejection(quality, policy):
         return 'face_landmarks_invalid'
     if quality['pixels'] < policy['min_face_pixels']:
         return 'face_too_small'
-    if quality['sharpness'] < policy['min_sharpness']:
+    if sharpness_failed(quality,policy):
         return 'face_blurred'
     if policy['require_complete_face'] and not quality['complete']:
         return 'face_incomplete'

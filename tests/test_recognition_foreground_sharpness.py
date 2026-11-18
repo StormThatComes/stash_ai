@@ -8,6 +8,15 @@ import pytest
 
 from stash_ai.recognition.foreground_quality import laplacian
 from stash_ai.recognition.visibility import measurement, device_measurements
+
+
+def test_disabled_noise_diagnostics_never_run_device_quantiles(monkeypatch):
+    import torch
+    from stash_ai.recognition.foreground_quality import device_faces
+    def forbidden(*args,**kwargs):raise AssertionError('noise quantile should not run')
+    monkeypatch.setattr(torch.Tensor,'nanquantile',forbidden)
+    values=device_faces(torch.zeros((2,3,256,256)),torch.ones((2,256,256),dtype=torch.bool),diagnostics=False)
+    assert all(v['sharpness_noise'] is None and v['sharpness_pixels']>0 for v in values)
 from tests.helpers.recognition import FACE, Backend, MediaClient, Visibility
 from tests.test_recognition_body_mask_overlap import person
 

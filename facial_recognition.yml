@@ -34,6 +34,15 @@ face:
     min_sharpness: 10.0
     # Minimum sharpness inside the FaceOcc mask at 256px input scale; mask edges excluded. Positive values
     # require an active face visibility floor; 0 disables this gate. Range: 0..100000.
+    sharpness_metric: raw
+    # raw uses Laplacian variance; normalized divides it by foreground contrast. Calibrate min_sharpness for the
+    # chosen units before changing this.
+    profile_min_sharpness: null
+    # Optional separate sharpness floor for geometrically identified profiles; null inherits min_sharpness. Uses
+    # sharpness_metric units.
+    quality_diagnostics: false
+    # Retain expensive median noise diagnostics. Off avoids CPU median/GPU quantile work; sharpness gates are
+    # unchanged.
     min_visible_face_fraction: 0.5
     # Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.
     faceocc_logit_threshold: 0.0
