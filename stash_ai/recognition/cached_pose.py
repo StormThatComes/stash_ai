@@ -36,6 +36,7 @@ class Pose:
         self.model=model;self.contract=pose(config),str(device)
         refinement = config.data['sapiensid']['pose'].get('refinement', {})
         self.face_prompts = refinement.get('enabled') and refinement.get('recover_prompt_points')
+        self.refinement_settings=refinement
     def __getattr__(self,name):return getattr(self.model,name)
     def predict(self,image,bounds):return self.predict_many([(image,bounds)])[0]
     def predict_many(self,frames):
@@ -51,6 +52,10 @@ class Pose:
         def key(frame):
             faces = faces_for(frame[0]) if self.face_prompts else ()
             reserves = getattr(frame[0], '_pose_reserves', {})
+            if self.refinement_settings.get('enabled'):
+                from .refinement_budget import Budget
+                return fingerprint((frame,sorted(reserves.items()),[list(f.row) for f in faces],
+                                    Budget(frame[0],self.refinement_settings).remaining))
             if reserves:
                 return fingerprint((frame, sorted(reserves.items()), [list(f.row) for f in faces]))
             return fingerprint((frame, [list(f.row) for f in faces])) if faces else fingerprint(frame)

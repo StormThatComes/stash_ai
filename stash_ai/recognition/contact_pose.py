@@ -26,6 +26,9 @@ def _recover_one(pose,image,bounds,prediction,reserves,settings):
         same = np.linalg.norm(points[i]-points[j],axis=1) < max(3.,.035*scale)
         if np.count_nonzero(paired & same) < 7:
             continue
+        from .refinement_budget import budget
+        if not budget(image,settings).admit('contact_pose',2):
+            return prediction,None
         from PIL import ImageDraw
         with image.convert('RGB') as residual:
             ring = np.asarray(residual)

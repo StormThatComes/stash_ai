@@ -42,3 +42,19 @@ def test_limb_ownership_is_invariant_to_unequal_box_order():
         settle((xy,scores,prob),[boxes[i] for i in order],records,dict(min_keypoint_score=.5))
         outputs.append(xy[np.argsort(order)])
     np.testing.assert_array_equal(*outputs)
+
+
+def test_independent_contact_components_do_not_multiply_combination_budget():
+    chosen={i:candidate((i//2)*20,(i//2)*20+12) for i in range(8)}
+    options={i:[candidate((i//2)*20+(i%2)*6,(i//2)*20+(i%2)*6+4)] for i in range(8)}
+    assert not resolve_options(chosen,options,[np.empty((0,2))]*8,maximum=4)
+
+
+def test_decoded_candidate_cache_is_bounded_and_immutable():
+    from stash_ai.recognition.mask_candidates import decoded_masks
+    a,b=candidate(0,4),candidate(4,8)
+    with decoded_masks(16):
+        first=a.crop()
+        assert a.crop() is first and not first.flags.writeable
+        b.crop()
+        assert a.crop() is not first

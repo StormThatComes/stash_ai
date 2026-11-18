@@ -68,6 +68,8 @@ class RefinedPMPose:
 
     def predict_many(self, frames):
         frames = list(frames)
+        from .refinement_budget import begin
+        begin(frames,self.settings)
         with pipeline_timing('pmpose_first_pass'):
             predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):
@@ -197,6 +199,13 @@ class RefinedPMPose:
         if selected is None:
             selected = self.candidates(image, bounds, prediction, plan, masks)
         for candidate in selected:
+            if getattr(self,'requires_second_pass',True):
+                from .refinement_budget import budget
+                i,box,mask,_=candidate
+                if not budget(image,self.settings).admit('masked_pose',record=records[i]):
+                    records[i].update(status='skipped',reason='shared_retry_budget')
+                    retain_quality_mask(records[i],mask,records[i]['detector_bounds'])
+                    continue
             pending.append(candidate)
             if len(pending) >= self.pose.batch_size:
                 second_pass(image, pending, result, records, prediction)
@@ -205,6 +214,10 @@ class RefinedPMPose:
             second_pass(image, pending, result, records, prediction)
         if defer is None:
             self.finish_maskless(image,bounds,prediction,result,records)
+        from .refinement_budget import budget
+        used=budget(image,self.settings)
+        for record in records:
+            record['retry_budget']=dict(used=dict(used.used),skipped=dict(used.skipped),remaining=used.remaining)
         return (*result, records)
 
     def finish_maskless(self,image,bounds,prediction,result,records):

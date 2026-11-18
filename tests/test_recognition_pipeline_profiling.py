@@ -173,6 +173,16 @@ def test_sam_and_pose_timings_preserve_masks_points_and_predictor_cleanup():
         def set_image(self, pixels):
             self.shape = pixels.shape[:2]
             self.active = True
+        def set_image_batch(self, pixels):
+            assert len(pixels) == 1
+            self.set_image(pixels[0])
+        def _prep_prompts(self, points, labels, *args, **kwargs):
+            return None, points, labels, None
+        def _predict(self, coordinates, labels, boxes, mask_input, **kwargs):
+            import torch
+            mask, score, _ = self.predict()
+            return (torch.from_numpy(np.repeat(mask[None],len(coordinates),axis=0)),
+                    torch.from_numpy(np.repeat(score[None],len(coordinates),axis=0)), None)
         def predict(self, **kwargs):
             assert self.active
             mask = np.zeros((1, *self.shape), dtype=bool)
