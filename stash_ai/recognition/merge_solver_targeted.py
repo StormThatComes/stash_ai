@@ -76,6 +76,7 @@ def plan(db, config, goals, frozen, membership, feedback, hybrid):
             fragment_scenes={d:[s for s,v in measured['scene_support'].items() if v.get(d)] for d in destinations},
             missing_target_scenes=missing, core_deficit=max(0, measured['set_core_required']-
                 measured['set_core_destinations'].get(target, 0)), performers=members,
+            scene_core_deficits=measured['scene_core_deficits'],
             observed_blockers=Counter(), candidates=[], seen=set(), truncated=False)
         for oid in addresses:by_observation[oid] = index
         for destination in destinations:owners[destination].add(index)

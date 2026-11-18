@@ -16,13 +16,16 @@ def deficits(goals, observations, predicted):
         target = result['set_target']
         missing = [s for s, support in result['scene_support'].items() if not support.get(target)]
         core_gap = max(0, evidence['core_required']-result['set_core_destinations'].get(target, 0))
-        sets.append(dict(set=index, target=target, missing_target_scenes=missing, core_deficit=core_gap))
+        scene_gaps = result['scene_core_deficits']
+        sets.append(dict(set=index, target=target, missing_target_scenes=missing, core_deficit=core_gap,
+                         scene_core_deficits=scene_gaps))
         for scene, frozen in evidence['scenes'].items():
             for unit in frozen['scoring_units']:
                 for row in unit['observations']:
                     if predicted.get(row['id']) != target or target is None:
                         priorities[row['id']] = max(priorities.get(row['id'], 0),
-                            4*int(scene in missing)+int(core_gap > 0)+int(predicted.get(row['id']) is None))
+                            4*int(scene in missing)+2*int(scene in scene_gaps)+
+                            int(core_gap > 0)+int(predicted.get(row['id']) is None))
         for destination in owned:
             destinations[destination] = dict(set=index, target=target,
                 scenes=[s for s, support in result['scene_support'].items() if support.get(destination)],

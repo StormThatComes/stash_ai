@@ -76,7 +76,7 @@ def ownership(goals, observations, predicted):
 
 def assess_set(evidence, observations, predicted, destinations):
     """Separate scene preservation, common-destination progress and soft loss."""
-    raw_core, _ = votes(evidence['core_units'], observations, predicted)
+    raw_core, core_scenes = votes(evidence['core_units'], observations, predicted)
     core = Counter({d: n for d, n in raw_core.items() if d in destinations})
     scene_support, shared, raw_shared = {}, Counter(), Counter()
     squared, raw_squared = Counter(), Counter()
@@ -100,13 +100,22 @@ def assess_set(evidence, observations, predicted, destinations):
     missing = [s for s, support in scene_support.items() if not support]
     preserved = bool(scene_support) and not missing
     # Coverage across several destinations is admissible progress, not a full
-    # merge. One destination must cover every scene and retain pooled core quorum.
+    # merge. One destination must cover every scene and retain both the pooled
+    # and scene-local frozen core quorums. A large scene must not turn one link
+    # in a smaller scene into success while its substantial core stays separate.
+    scene_required = evidence['protected_scenes']
+    scene_core = {s: {d: n for d, n in core_scenes[s].items() if d in destinations}
+                  for s in scene_required}
     complete = {d for d, n in core.items() if n >= evidence['core_required'] and
-                all(support.get(d, 0) for support in scene_support.values())}
+                all(support.get(d, 0) for support in scene_support.values()) and
+                all(scene_core[s].get(d, 0) >= need for s, need in scene_required.items())}
     candidates = complete or shared.keys()
     rank = {d: (shared[d], core[d]) for d in candidates}
     best = max(rank.values(), default=None)
     tied = sorted(d for d, value in rank.items() if value == best)
+    target = tied[0] if tied else None
+    scene_deficits = {s: dict(required=need, assigned=scene_core[s].get(target, 0))
+                      for s, need in scene_required.items() if scene_core[s].get(target, 0) < need}
     soft, _ = votes(evidence['soft_units'], observations, predicted)
     soft_total = len(evidence['soft_units'])
     lost = soft_total-sum(n for d, n in soft.items() if d in destinations)
@@ -120,7 +129,8 @@ def assess_set(evidence, observations, predicted, destinations):
                 required_scenes=scenes, covered_scenes=scenes-len(missing), missing_scenes=missing,
                 scene_coverage_fraction=(scenes-len(missing))/scenes if scenes else 0.,
                 scene_support=scene_support, set_destinations=sorted(destinations),
-                set_target=tied[0] if tied else None, set_target_ties=tied,
+                scene_core_required=dict(scene_required), scene_core_support=scene_core,
+                scene_core_deficits=scene_deficits, set_target=target, set_target_ties=tied,
                 set_core_units=total, set_core_required=evidence['core_required'],
                 set_core_destinations=dict(core), set_core_retention=sum(core.values())/total if total else 0.,
                 set_shared_coverage=max(shared.values(), default=0.)/scenes if scenes else 0.,
