@@ -356,5 +356,5 @@ HELP.update({
  'matching.body.identities.correct_contact_face_links': 'Correct and demote a contact body anchor only between two independent clean same-owner endpoints, above body gates and rival margin. Scene-local derived proof; raw face membership is retained. Experimental.',
  'matching.body.identities.defer_contact_births': 'Keep contact-born body groups provisional until independent clean observations support them. Experimental.',
  'matching.body.identities.contact_birth_support': 'Independent clean observations required to confirm a contact-born group. Range: 1..8.',
- 'matching.body.identities.mixed_mask_score_penalty': 'Calibrated cosine penalty for masked/full body bank comparisons; 0 preserves original scores. Range: 0..0.3.',
+ 'matching.body.identities.mixed_mask_score_penalty': 'Cosine penalty for known masked/full body comparisons in local/global banks, tracks and contact proofs; unknown domains and facial vetoes are unchanged. 0 disables. Range: 0..0.3.',
 })

@@ -1,4 +1,5 @@
 """Short, mutually separated SapiensID paths on retained VTT observations."""
+from .body_numeric import body_similarity
 from collections import defaultdict
 import json
 import uuid
@@ -68,7 +69,7 @@ def paths(rows, settings, scores, occupied=(), *, extended=False, gap_boxes=None
                     if not clear(ba,bb,[gap_boxes.get(i,[None]) for i in middle]):
                         continue
                 if not rejection(ba,bb,ta,tb,translation=offset):
-                    edges[a['id'],b['id']] = scores.face_similarity(a['_vector'],b['_vector'])
+                    edges[a['id'],b['id']] = body_similarity(scores,a,b)
         solo = verified and len(left)==len(right)==1 and not partial
         if gap>2 and solo:
             edges = {key:v for key,v in edges.items() if v>=max(threshold,settings['match_threshold'])}
@@ -176,8 +177,8 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen, *, gra
     def side(row, own, other):
         if own['id'] not in roots or other['id'] not in roots:
             return False
-        score = scores.face_similarity(row['_vector'], own['_vector'])
-        rival = scores.face_similarity(row['_vector'], other['_vector'])
+        score = body_similarity(scores,row,own)
+        rival = body_similarity(scores,row,other)
         if score >= settings['match_threshold'] and score-rival >= max(.025,settings['ambiguity_margin']):
             split_sides[row['id']] = (own['id'], other['id'])
             return True

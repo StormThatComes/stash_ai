@@ -10,7 +10,7 @@ def references(bank,config,evidence):
     if not bank['faces']:return [bank['refs']]
     threshold=config.data['sapiensid']['global_matching']['cohesion_threshold']
     maximum=config.data['sapiensid']['global_matching']['max_references']
-    from .body_numeric import vector_digest
+    from .body_numeric import vector_digest,domain
     ambiguous_modes = {}
     independent = {r['id'] for r in bank['witnesses']}
     modes=[];radii=[];metadata=0
@@ -19,7 +19,7 @@ def references(bank,config,evidence):
         if metadata>config.data['sapiensid']['execution']['reference_bytes']//4:
             raise ResourceLimit('Global body appearances exceed sapiensid.execution.reference_bytes.')
         query=evidence.feature(row);compatible=[]
-        fingerprint = vector_digest(query)
+        fingerprint = (vector_digest(query),domain(row))
         if fingerprint in ambiguous_modes:
             mode = ambiguous_modes[fingerprint]
             offset = 0
@@ -28,11 +28,11 @@ def references(bank,config,evidence):
             continue
         for index,mode in enumerate(modes):
             pivot=evidence.feature(mode[0])
-            if np.array_equal(query,pivot):
+            if np.array_equal(query,pivot) and (not getattr(evidence,'mask_penalty',0.) or domain(row)==domain(mode[0])):
                 compatible.append(index);continue
             score=evidence.compare([row],[mode[0]])[1]
             # Conservative Cauchy bound; inconclusive cases read every witness.
-            lower=score-float(np.linalg.norm(query.astype('float64')))*radii[index]-.001
+            lower=score-float(np.linalg.norm(query.astype('float64')))*radii[index]-.001-getattr(evidence,'mask_penalty',0.)
             if lower>=threshold or evidence.compare([row],mode)[1]>=threshold:
                 compatible.append(index)
         if len(compatible)==1:

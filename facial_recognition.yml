@@ -420,8 +420,8 @@ matching:
       contact_birth_support: 2
       # Independent clean observations required to confirm a contact-born group. Range: 1..8.
       mixed_mask_score_penalty: 0.0
-      # Calibrated cosine penalty for masked/full body bank comparisons; 0 preserves original scores. Range:
-      # 0..0.3.
+      # Cosine penalty for known masked/full body comparisons in local/global banks, tracks and contact proofs;
+      # unknown domains and facial vetoes are unchanged. 0 disables. Range: 0..0.3.
       contact_max_cues: 12
       # Maximum contact window in VTT cue indices, independent of timestamps. Range: 2..64.
       contact_max_hidden: 2

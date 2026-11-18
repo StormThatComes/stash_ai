@@ -32,7 +32,7 @@ def comparisons(evidence, requests):
     cache publication belong to the coordinator; no original core is sampled.
     """
     pool = current()
-    if pool is None or pool.workers == 1:
+    if pool is None or pool.workers == 1 or getattr(evidence,'mask_penalty',0.):
         for metadata, left, right, kind in requests:
             yield metadata, evidence.compare(left, right, kind)
         return

@@ -1,4 +1,5 @@
 """Scene-local, visually verified transitions between sampled cues."""
+from .body_numeric import body_similarity
 from bisect import bisect_right
 from itertools import pairwise
 import numpy as np
@@ -42,7 +43,7 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
                 x,y = a['id'],b['id']
                 ga,gb = geometry[x],geometry[y]
                 if not rejection(ga['bounds'],gb['bounds'],torso_points(ga),torso_points(gb),translation=offset):
-                    edges[x,y] = scores.face_similarity(a['_vector'],b['_vector'])
+                    edges[x,y] = body_similarity(scores,a,b)
         for a in left:
             x = a['id']
             if metadata[x].get('query_only') or not separated(a,left):
@@ -73,9 +74,9 @@ def transitions(by_cue, geometry, metadata, signals, anchors, angles, settings, 
                           and not any(metadata[k].get('overlap',0) for k in
                                       (x,y,other_left[p]['id'],other_right[p]['id']))}
 
-                rival,peer = max([(scores.face_similarity(a['_vector'],r['_vector']),r['id']) for r in right if r is not b
+                rival,peer = max([(body_similarity(scores,a,r),r['id']) for r in right if r is not b
                                      and ((x,r['id']) in edges or anchors.get(r['id']) not in proven)]+
-                                 [(scores.face_similarity(l['_vector'],b['_vector']),l['id']) for l in left if l is not a
+                                 [(body_similarity(scores,l,b),l['id']) for l in left if l is not a
                                   and ((l['id'],y) in edges or anchors.get(l['id']) not in proven)],
                                  default=(-1.,None))
                 turn = angles[x]!=angles[y] and {angles[x],angles[y]} <= {'front','side','back'}

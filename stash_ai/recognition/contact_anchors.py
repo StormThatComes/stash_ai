@@ -1,4 +1,5 @@
 """Corroborate a crowded face/body link before it can train a person's bank."""
+from .body_numeric import body_similarity
 from collections import defaultdict
 import json
 
@@ -46,7 +47,7 @@ def questionable_links(rows,settings,scores,graph=()):
                         offset = translation(q,other,*signatures)
                     if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset):
                         continue
-                    ranked.append((scores.face_similarity(row['_vector'],peer['_vector']),peer['face_person']))
+                    ranked.append((body_similarity(scores,row,peer),peer['face_person']))
                 own = max((v for v,p in ranked if p==row['face_person']),default=-1.)
                 rival = max((v for v,p in ranked if p!=row['face_person']),default=-1.)
                 if own>=settings['cohesion_threshold'] and own-rival>=settings['ambiguity_margin']:

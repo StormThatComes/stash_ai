@@ -51,7 +51,7 @@ def vector(row):
     from .models import normalized_embedding
     data=row['embedding']
     if data is None or len(data)!=4096*4:raise ValueError('Invalid retained person embedding.')
-    return normalized_embedding(np.frombuffer(data,dtype='<f4'),4096)
+    return np.frombuffer(normalized_embedding(np.frombuffer(data,dtype='<f4'),4096).tobytes(),dtype='<f4')
 
 
 def quality(row):
@@ -149,6 +149,7 @@ class Scores:
         self.mask_penalty=config.data['sapiensid'].get('identities',{}).get('mixed_mask_score_penalty',0.)
         self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
         self.banks={};self.cache=OrderedDict()
+        self.fingerprints=OrderedDict()
         self.cache_limit=max(1,min(4096,config.data['sapiensid']['execution']['reference_bytes']//65536))
 
     def bank(self,rows):
@@ -162,7 +163,9 @@ class Scores:
             state['pixels'].add(pixel)
             value=row['_vector']
             feature=row.get('_score_key')
-            if feature is None:feature=row['_score_key']=value.tobytes()
+            if feature is None:
+                from .body_numeric import vector_digest
+                feature=row['_score_key']=vector_digest(value)
             if feature in state['vectors']:state['vectors'][feature][1]+=weight
             else:state['vectors'][feature]=[value,weight]
         state['length']=len(rows)
@@ -180,8 +183,7 @@ class Scores:
         from stash_ai.runtime.cancellation import current
         token=current()
         if token is not None:token.check()
-        from .body_numeric import vector_digest
-        key=('face', *sorted((vector_digest(first),vector_digest(second))))
+        key=('face', *sorted((self._digest(first),self._digest(second))))
         score=self.cache.get(key)
         if score is None:
             from .body_numeric import dot
@@ -189,6 +191,20 @@ class Scores:
             if len(self.cache)>self.cache_limit:self.cache.popitem(last=False)
         else:self.cache.move_to_end(key)
         return score
+
+    def _digest(self,value):
+        from .body_numeric import vector_digest
+        import weakref
+        owner=value
+        while isinstance(owner.base,np.ndarray):owner=owner.base
+        if value.flags.writeable or not isinstance(owner.base,bytes):return vector_digest(value)
+        entry=self.fingerprints.get(id(value))
+        if entry is not None and entry[0]() is value:
+            self.fingerprints.move_to_end(id(value));return entry[1]
+        result=vector_digest(value)
+        self.fingerprints[id(value)]=(weakref.ref(value),result)
+        if len(self.fingerprints)>self.cache_limit:self.fingerprints.popitem(last=False)
+        return result
 
     def certifies(self,row,rows,threshold):
         """Prove every cosine clears a threshold; never approximate rival scores.
@@ -203,7 +219,8 @@ class Scores:
             return self.compare([row],rows)[1]>=threshold
         bank=self.bank(rows);state=self.banks[id(rows)]
         # Preserve the exact score cache for repeated identical features.
-        if len(bank)==1 and row['_vector'].tobytes() in bank:
+        from .body_numeric import vector_digest
+        if len(bank)==1 and vector_digest(row['_vector']) in bank:
             return self.compare([row],rows)[1]>=threshold
         if 'pivot' not in state:
             state.update(pivot=rows[0]['_vector'],radius=0.,max_norm=0.,cap_length=0)
@@ -223,14 +240,16 @@ class Scores:
 
     def compare(self,first,second):
         if self.mask_penalty:
-            values=[]
-            for a in distinct_pixels(first):
-                for b in distinct_pixels(second):
+            from .body_numeric import domain
+            left=[(a,domain(a)) for a in distinct_pixels(first)]
+            right=[(b,domain(b)) for b in distinct_pixels(second)]
+            total=0.;minimum=float('inf');count=0
+            for a,da in left:
+                for b,db in right:
                     score=self.face_similarity(a['_vector'],b['_vector'])
-                    domains=quality(a).get('embedding_foreground'),quality(b).get('embedding_foreground')
-                    if None not in domains and domains[0]!=domains[1]:score-=self.mask_penalty
-                    values.append(score)
-            return (sum(values)/len(values),min(values)) if values else (-1.,-1.)
+                    if da is not None and db is not None and da!=db:score-=self.mask_penalty
+                    total+=score;minimum=min(minimum,score);count+=1
+            return (total/count,minimum) if count else (-1.,-1.)
         bank=self.bank(second);total=0.;minimum=float('inf');count=0
         pixels=set()
         for row in first:
@@ -238,7 +257,9 @@ class Scores:
             fresh=pixel not in pixels;pixels.add(pixel)
             value=row['_vector']
             feature=row.get('_score_key')
-            if feature is None:feature=row['_score_key']=value.tobytes()
+            if feature is None:
+                from .body_numeric import vector_digest
+                feature=row['_score_key']=vector_digest(value)
             for other,(sample,weight) in bank.items():
                 key=(feature,other) if feature<=other else (other,feature)
                 score=self.cache.get(key)

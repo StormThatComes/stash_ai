@@ -1,4 +1,5 @@
 """Correct a contact body link only between independently measured clean roots."""
+from .body_numeric import body_similarity
 import json
 from .contact_anchors import crowded_link
 
@@ -19,8 +20,8 @@ def correct(rows,graph,settings,scores):
             for row in chain[a+1:b]:
                 if not row.get('face_person') or row['face_person']==owner:continue
                 if not crowded_link(json.loads(row['quality']).get('quality',{})):continue
-                support=min(scores.face_similarity(row['_vector'],r['_vector']) for r in (left,right))
-                rival=max((scores.face_similarity(row['_vector'],r['_vector']) for r in clean if r['face_person']!=owner),default=-1.)
+                support=min(body_similarity(scores,row,r) for r in (left,right))
+                rival=max((body_similarity(scores,row,r) for r in clean if r['face_person']!=owner),default=-1.)
                 if support<max(settings['match_threshold'],settings['cohesion_threshold']) or support-rival<settings['ambiguity_margin']:continue
                 repairs[row['id']]=dict(row,face_person=owner,face_anchor=False,_face_vector=None,
                     _contact_correction=dict(original_owner=row['face_person'],owner=owner,

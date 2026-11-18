@@ -1,4 +1,5 @@
 """Frozen complete-link body appearances of an already known face identity."""
+from .body_numeric import body_similarity
 
 
 class FrozenSeeds:
@@ -60,7 +61,7 @@ class FrozenSeeds:
                 if len(refs)>=settings['attach_min_support']:
                     refs=independent(refs,settings)
                     if len(refs)>=settings['attach_min_support']:
-                        low=min(self.scores.face_similarity(row['_vector'],r['_vector']) for r in refs)
+                        low=min(body_similarity(self.scores,row,r) for r in refs)
                         valid.append((low,low,person,refs,True))
             chosen=max(valid or choices,key=lambda c:(c[0],c[1]))
             ranked.append((*chosen,max(c[0] for c in choices)))
@@ -77,7 +78,7 @@ def paired_order(rows, settings, scores, guard):
         for b in candidates[i+1:i+9]:
             if a['cue']==b['cue']:
                 continue
-            score=scores.face_similarity(a['_vector'],b['_vector'])
+            score=body_similarity(scores,a,b)
             if score<max(settings['match_threshold'],settings['cohesion_threshold']):
                 continue
             if not guard.allows(a,[b]) or not guard.allows(b,[a]):
