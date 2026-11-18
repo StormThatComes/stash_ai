@@ -127,6 +127,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     shot_state = json.loads(checkpoint_shot[0]) if checkpoint_shot else None
     collector=getattr(on_cue,'__self__',None)
     grouped=callable(getattr(collector,'collect_records',None))
+    if grouped:
+        collector.context_source = source
     columns=('id','scan','cue','seconds','source','rect','geometry','quality','rejected','dimensions','embedding','crop')
 
     shots_key = 'cue-view-shots:' + identifier
@@ -163,7 +165,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         image = images[index]
                         next_shot = advance(image,index,shot_state,evidence=True)
                         motion.append('1' if next_shot[4] else '0')
-                        image._recognition_cue_signature = next_shot[:3]
+                        image._recognition_cue_signature = next_shot
                         start=len(pending)
                         for face_index, face, quality, reason, vector, crop in records:
                             if next_shot[1] is not None:

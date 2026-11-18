@@ -25,3 +25,11 @@ def test_contact_birth_needs_clean_support():
     group=[row(0,'a',True),row(1,'a',True)]
     assert not birth_ready(group,settings,lambda rows,s:rows)
     assert birth_ready(group+[row(2,'a',False),row(3,'a',False)],settings,lambda rows,s:rows)
+
+
+def test_contact_window_counts_actual_cues_not_path_rows():
+    rows=[row(0,'a',False),row(2,'b',True),row(4,'a',False)]
+    settings=dict(correct_contact_face_links=True,contact_max_cues=2,
+                  match_threshold=.8,cohesion_threshold=.8,ambiguity_margin=.1)
+    result=correct(rows,[(rows,[.99,.99])],settings,SimpleNamespace(face_similarity=lambda a,b:float(a@b)))
+    assert result[1]['face_person']=='b'

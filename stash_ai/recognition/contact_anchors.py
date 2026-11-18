@@ -39,8 +39,9 @@ def questionable_links(rows,settings,scores,graph=()):
                     if q.get('frame_signature') and other.get('frame_signature'):
                         signatures = [np.frombuffer(bytes.fromhex(v['frame_signature']), np.uint8).astype(float).reshape(-1,3)
                                       for v in (q,other)]
-                        from .perspective_shots import change
-                        if change(*signatures,True)!='continuous':
+                        from .cue_continuity import continuous
+                        later = other if cue>row['cue'] else q
+                        if not continuous(q['frame_signature'],other['frame_signature'],verified=later.get('transition_verified',False)):
                             continue
                         offset = translation(q,other,*signatures)
                     if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset):
@@ -64,7 +65,7 @@ def questionable_links(rows,settings,scores,graph=()):
         for i,r in enumerate(chain):
             if not r.get('face_anchor') or crowded_link(json.loads(r['quality'])['quality']):
                 continue
-            if previous is not None and i-previous<=settings.get('contact_max_cues',12):
+            if previous is not None and r['cue']-chain[previous]['cue']<=settings.get('contact_max_cues',12):
                 first = chain[previous]
                 owner = r['face_person']
                 middle = chain[previous+1:i]
@@ -154,7 +155,7 @@ def bridge_faces(graph, decisions, settings, uncertain, guard):
         for i,row in enumerate(chain):
             if not row.get('face_anchor') or row['id'] in uncertain:
                 continue
-            if last is not None and 1<i-last<=6:
+            if last is not None and i-last>1 and row['cue']-chain[last]['cue']<=settings.get('contact_max_cues',12):
                 first = chain[last]
                 owner = decisions[row['id']]['person']
                 between = chain[last+1:i]

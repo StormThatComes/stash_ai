@@ -13,7 +13,7 @@ def correct(rows,graph,settings,scores):
         endpoints=[(i,r) for i,r in enumerate(chain) if r['id'] in clean_ids]
         for (a,left),(b,right) in zip(endpoints,endpoints[1:]):
             owner=left.get('face_person')
-            if not owner or owner!=right.get('face_person') or b-a>settings.get('contact_max_cues',12):continue
+            if not owner or owner!=right.get('face_person') or right['cue']-left['cue']>settings.get('contact_max_cues',12):continue
             refs=[dict(scan=r['scan'],seconds=r['seconds'],quality=r.get('face_quality') or '{}') for r in (left,right)]
             if count(refs)<2:continue
             for row in chain[a+1:b]:

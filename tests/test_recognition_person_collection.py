@@ -227,7 +227,7 @@ def test_separate_pose_phase_receives_same_shot_labels_as_face_scan(tmp_path):
     seen = {}
     class Observer(Person):
         def detect(self,image,faces=None):
-            index,shot,_ = image._recognition_cue_signature
+            index,shot,*_ = image._recognition_cue_signature
             seen[index] = shot
             return faces
     collector = PersonCollector(settings,{},factory=Observer)

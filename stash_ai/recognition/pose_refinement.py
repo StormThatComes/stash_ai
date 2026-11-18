@@ -94,6 +94,12 @@ class RefinedPMPose:
         recovery = settings.get('recover_prompt_points', False)
         from .temporal_prompts import capture, borrow
         previous = self.previous_cue
+        context = getattr(self, 'cue_contexts', None)
+        signature = getattr(image, '_recognition_cue_signature', None)
+        if context is not None and signature:
+            scan = getattr(image, '_recognition_scan', None)
+            previous = context.get((scan, signature[0]-1))
+            self.next_cue = context.get((scan, signature[0]+1))
         self.previous_cue = None
         if recovery:
             valid, tests = prompt_recovery.eligible(points, scores, probabilities, bounds, settings)
@@ -165,17 +171,13 @@ class RefinedPMPose:
 
     def refine_many(self, frames, predictions):
         if self.settings.get('bidirectional_prompts',False):
-            from .temporal_prompts import capture
-            results=[]
-            for index,((image,bounds),prediction) in enumerate(zip(frames,predictions)):
-                self.next_cue=None
-                if index+1<len(frames):
-                    (following,boxes),raw=frames[index+1],predictions[index+1]
-                    valid,_=prompt_recovery.eligible(*raw,boxes,self.settings)
-                    self.next_cue=capture(following,boxes,raw[0],valid)
-                results.append(self.refine(image,bounds,prediction))
-            self.next_cue=None
-            return results
+            from .pose_context import contexts
+            self.cue_contexts = contexts(self, frames, predictions)
+            try:
+                from .refinement_batches import refine_many
+                return refine_many(self, frames, predictions)
+            finally:
+                self.cue_contexts = self.next_cue = None
         from .refinement_batches import refine_many
         return refine_many(self, frames, predictions)
 
