@@ -137,35 +137,52 @@ class ScrfdDetector:
         return self.decode(outputs, scale_x=scale_x, scale_y=scale_y, config=self.config)
 
     def detect(self,bgr):
-        found=self._raw(bgr)
+        return self.detect_many([bgr])[0]
+
+    def detect_many(self,images):
+        images=list(images)
+        found=self._raw_many(images)
         threshold=self.config.data['detection'].get('alignment_retry_error',0.)
         if not threshold:return found
         from .quality import alignment_measurements
         from .rotated_faces import duplicate_face
-        result=[]
-        for face in found:
-            error=alignment_measurements(face).get('alignment_error',1.)
-            if error<=threshold:
-                result.append(face);continue
-            x,y,w,h=face.box
-            l,t=max(0,int(x-.25*w)),max(0,int(y-.25*h))
-            r,b=min(bgr.shape[1],math.ceil(x+1.25*w)),min(bgr.shape[0],math.ceil(y+1.25*h))
-            candidates=[]
-            if r>l and b>t:
-                for other in self._raw(bgr[t:b,l:r]):
+        from types import SimpleNamespace
+        requests=[];addresses=[]
+        result=[list(faces) for faces in found]
+        for frame,(bgr,faces) in enumerate(zip(images,found)):
+            for index,face in enumerate(faces):
+                error=alignment_measurements(face).get('alignment_error',1.)
+                if error<=threshold:continue
+                x,y,w,h=face.box
+                l,t=max(0,int(x-.25*w)),max(0,int(y-.25*h))
+                r,b=min(bgr.shape[1],math.ceil(x+1.25*w)),min(bgr.shape[0],math.ceil(y+1.25*h))
+                if r>l and b>t:
+                    requests.append(bgr[t:b,l:r]);addresses.append((frame,index,l,t,error))
+        maximum=max(1,min(8,self.config.data['execution']['detector_batch_size']))
+        for start in range(0,len(requests),maximum):
+            repairs=self._raw_many(requests[start:start+maximum])
+            for (frame,index,l,t,error),alternatives in zip(addresses[start:start+maximum],repairs,strict=True):
+                face=found[frame][index];candidates=[]
+                image=SimpleNamespace(width=images[frame].shape[1],height=images[frame].shape[0])
+                for other in alternatives:
                     row=list(other.row);row[0]+=l;row[1]+=t
                     for k in range(4,14,2):row[k]+=l;row[k+1]+=t
                     candidate=checked_detection(row)
-                    if duplicate_face(face,candidate):candidates.append(candidate)
-            better=min(candidates,key=lambda f:alignment_measurements(f).get('alignment_error',1.),default=face)
-            result.append(better if alignment_measurements(better).get('alignment_error',1.)<error else face)
+                    if not duplicate_face(face,candidate):continue
+                    # A better aligned neighbour cannot replace the original head.
+                    if any(j!=index and duplicate_face(candidate,peer) for j,peer in enumerate(found[frame])):continue
+                    x,y,w,h=face.box;cx,cy,cw,ch=candidate.box
+                    if math.hypot(cx+cw/2-x-w/2,cy+ch/2-y-h/2)>.2*min(w,h):continue
+                    quality=alignment_measurements(candidate,image)
+                    if not quality['alignment_valid'] or quality.get('alignment_error',1.)>=error:continue
+                    if not all(cx<=px<=cx+cw and cy<=py<=cy+ch for px,py in candidate.landmarks):continue
+                    candidates.append((quality['alignment_error'],candidate.row,candidate))
+                if candidates:result[frame][index]=min(candidates,key=lambda r:r[:2])[2]
         return result
 
-    def detect_many(self,images):
-        if self.config.data['detection'].get('alignment_retry_error',0.):
-            return [self.detect(image) for image in images]
+    def _raw_many(self,images):
         if len(images) <= 1:
-            return [self.detect(image) for image in images]
+            return [self._raw(image) for image in images]
         if not getattr(self,'dynamic_batch',False):
             return self._static_many(images)
         import numpy as np
@@ -181,7 +198,7 @@ class ScrfdDetector:
         settings = self.config.data['execution']
         # Reserve space for current/next 640x640 float blobs and resize buffers.
         if settings['scan_cpu_workers'] < 2 or settings['scan_queue_bytes'] < 32*1024**2:
-            return [self.detect(image) for image in images]
+            return [self._raw(image) for image in images]
         if self.pixel_pool is None:
             self.pixel_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='scrfd-pixels')
         preparing = self.pixel_pool.submit(self._blob,images[0])

@@ -179,12 +179,15 @@ class CpuStage:
 
 def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
     index,face=pair
-    quality=assess(image,face);quality['geometry_contract']=geometry_contract(face,cue)
+    from .foreground_quality import diagnostics
+    with diagnostics(config.data['detection'].get('quality_diagnostics',False)):
+        quality=assess(image,face)
+    quality['geometry_contract']=geometry_contract(face,cue)
     from .pose_policy import measurement_required
     policy=config.data['detection']
     # Semantic foreground can differ from the ellipse in either direction.
     # Decide sharpness only after FaceOcc when visibility is being measured.
-    if measurement_required(config):policy=dict(policy,min_sharpness=0.)
+    if measurement_required(config):policy=dict(policy,min_sharpness=0.,profile_min_sharpness=0.)
     floor=policy.get('candidate_score_threshold')
     if floor is not None and face.score<=policy['score_threshold']:
         quality['query_only']=True
@@ -241,6 +244,7 @@ def cue_visibility(frames,prepared,visibility,config,stage):
 
 
 def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False, prepared_records=None):
+    from .quality import sharpness_failed
     """Yield complete face records; caller checkpoints only after the whole cue."""
     from .models import normalized_embedding
     from .pose_policy import measurement_required
@@ -341,7 +345,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                             entry['quality'].update(measurement)
                             if measurement['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
                                 entry['reason'] = 'face_occluded'
-                            elif entry['quality']['sharpness'] < config.data['detection']['min_sharpness']:
+                            elif sharpness_failed(entry['quality'],config.data['detection']):
                                 entry['reason'] = 'face_blurred'
                 accepted = [entry for entry in batch if entry['reason'] is None]
                 # JPEG workers can overlap owner-thread inference. Their owned

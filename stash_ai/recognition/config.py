@@ -24,6 +24,7 @@ def defaults():
         'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
         'detection': {'score_threshold': .9, 'nms_threshold': .3, 'pose_guided_rotation': False, 'candidate_score_threshold': None, 'alignment_retry_error': 0.,
+                      'sharpness_metric': 'raw', 'profile_min_sharpness': None, 'quality_diagnostics': False,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
                       'min_face_source_fraction': DEFAULT_MIN_FACE_SOURCE_FRACTION,
@@ -181,6 +182,12 @@ def validate(data, *, detection_preview=False):
     if data['detection']['candidate_score_threshold'] is not None:
         _number(data['detection']['candidate_score_threshold'],'detection.candidate_score_threshold',0,data['detection']['score_threshold'])
     _number(data['detection']['alignment_retry_error'],'detection.alignment_retry_error',0,1)
+    if data['detection']['sharpness_metric'] not in ('raw','normalized'):
+        raise ValueError('detection.sharpness_metric must be raw or normalized.')
+    if data['detection']['profile_min_sharpness'] is not None:
+        _number(data['detection']['profile_min_sharpness'],'detection.profile_min_sharpness',0,MAX_FLOAT32)
+    if type(data['detection']['quality_diagnostics']) is not bool:
+        raise ValueError('detection.quality_diagnostics must be boolean.')
     if type(data['detection']['pose_guided_rotation']) is not bool:
         raise ValueError('detection.pose_guided_rotation must be boolean.')
     if data['detection']['max_pose_deviation'] is not None:

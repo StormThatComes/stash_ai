@@ -20,10 +20,18 @@ def head_crop(person, size):
     points = person.get('keypoints', ())
     if len(points)<3:
         return None
-    usable=[p for p in points[:5] if len(p)==2 and all(math.isfinite(v) and v>=0 for v in p)]
+    confidence=person.get('keypoint_scores')
+    visibility=person.get('keypoint_visibility')
+    states=person.get('keypoint_states')
+    def reliable(i,p):
+        return (len(p)==2 and all(math.isfinite(v) and v>=0 for v in p)
+                and (confidence is None or confidence[i]>=.5)
+                and (visibility is None or visibility[i]>=.5)
+                and (states is None or states[i] not in ('conflicted','occluded','unavailable','recovered')))
+    usable=[p for i,p in enumerate(points[:5]) if reliable(i,p)]
     if len(usable)<2:
         return None
-    if len(points)<3 or any(min(p)<0 for p in points[:3]):
+    if not all(reliable(i,p) for i,p in enumerate(points[:3])):
         span=max(math.dist(a,b) for a in usable for b in usable)
         if span<4:return None
         cx,cy=(sum(p[i] for p in usable)/len(usable) for i in (0,1))
@@ -78,9 +86,9 @@ def recover(db, scan, source, config, acquire, visibility, release):
     def certify():
         if durable:
             with db:
-                store(db,'rotated-head-v2',scan,expected,version(db,'raw-body',scan),expected)
+                store(db,'rotated-head-v3',scan,expected,version(db,'raw-body',scan),expected)
     if durable and db.execute('SELECT 1 FROM evidence_fingerprints WHERE kind=? AND key=? AND policy=? AND version=? AND digest=?',
-                              ('rotated-head-v2',scan,expected,version(db,'raw-body',scan),expected)).fetchone():
+                              ('rotated-head-v3',scan,expected,version(db,'raw-body',scan),expected)).fetchone():
         return
     planned = {}
     for row in db.execute("""SELECT id,cue,geometry FROM body_observations WHERE scan=? AND contract=?
@@ -133,7 +141,7 @@ def recover(db, scan, source, config, acquire, visibility, release):
                                 for _,face,quality,reason,vector,crop in records:
                                     if reason is not None:
                                         continue
-                                    oid = str(uuid.uuid5(uuid.UUID(scan),encoded(['rotated-head-v2',index,row['id']])))
+                                    oid = str(uuid.uuid5(uuid.UUID(scan),encoded(['rotated-head-v3',index,row['id']])))
                                     quality.update(rotated_head_source=row['id'],rotated_head_degrees=ccw if type(ccw) is int else 90 if ccw else -90)
                                     shot = db.execute("SELECT json_extract(quality,'$.quality.view_shot') FROM body_observations WHERE id=?",(row['id'],)).fetchone()[0]
                                     if shot is not None:

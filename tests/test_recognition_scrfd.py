@@ -170,3 +170,21 @@ def test_shared_face_adapter_selects_scrfd_and_retains_yunet_api(tmp_path,monkey
     finally:
         backend.close()
     assert state['closed']==[True]
+
+
+def test_alignment_retry_keeps_primary_batch_and_batches_only_repair_rois():
+    from stash_ai.recognition.config import defaults
+    from stash_ai.recognition.models import checked_detection
+    detector=object.__new__(ScrfdDetector);data=defaults()
+    data['detection']['alignment_retry_error']=.000001
+    data['execution']['detector_batch_size']=2
+    detector.config=SimpleNamespace(data=data)
+    face=checked_detection([20,20,60,60,35,35,65,35,50,70,40,65,60,65,.99])
+    calls=[]
+    def raw(images):
+        calls.append(len(images))
+        return [[face] if len(calls)==1 else [] for _ in images]
+    detector._raw_many=raw
+    images=[np.zeros((100,100,3),np.uint8) for _ in range(3)]
+    assert detector.detect_many(images)==[[face]]*3
+    assert calls==[3,2,1]
