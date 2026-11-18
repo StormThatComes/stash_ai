@@ -1,5 +1,8 @@
 """Select SAM prompts and settle mask ownership before running masked PMPose."""
 from contextlib import ExitStack
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections import OrderedDict
 from dataclasses import dataclass, field
 import math
 
@@ -8,6 +11,18 @@ import numpy as np
 from .mask_cleanup import clean_mask, inside
 from .pose_mask_capture import mask_observer, mask_history
 from .profiling import pipeline_stage
+
+_decoded=ContextVar('decoded_pose_masks',default=None)
+
+
+@contextmanager
+def decoded_masks(limit=8*1024**2):
+    if _decoded.get() is not None:
+        yield
+        return
+    token=_decoded.set([OrderedDict(),0,limit])
+    try:yield
+    finally:_decoded.reset(token)
 
 
 @pipeline_stage('mask_validation')
@@ -83,8 +98,18 @@ class Candidate:
     edits: dict = field(default_factory=dict)
 
     def crop(self):
+        pool=_decoded.get(); key=id(self)
+        if pool is not None and key in pool[0]:
+            pool[0].move_to_end(key)
+            return pool[0][key][1]
         x,y,r,b = self.extent
-        return np.unpackbits(self.bits, count=(r-x)*(b-y)).reshape(b-y,r-x).view(bool)
+        result=np.unpackbits(self.bits, count=(r-x)*(b-y)).reshape(b-y,r-x).view(bool)
+        result.flags.writeable=False
+        if pool is not None and result.nbytes<=pool[2]:
+            while pool[0] and pool[1]+result.nbytes>pool[2]:
+                _,(_,old)=pool[0].popitem(last=False);pool[1]-=old.nbytes
+            pool[0][key]=(self,result);pool[1]+=result.nbytes
+        return result
 
     def hits(self, points):
         return inside(self.crop(), points - self.extent[:2])
@@ -214,7 +239,30 @@ def _pack(mask, box, indices, variant, score, edits):
 
 
 def resolve_options(candidates, options, evidence, maximum=256):
-    """Choose the complete bounded group, never a sequence of pairwise winners."""
+    """Choose complete interacting components; independent masks share no budget."""
+    with decoded_masks():
+        return _resolve_components(candidates,options,evidence,maximum)
+
+
+def _resolve_components(candidates,options,evidence,maximum):
+    domains={i:[c,*options.get(i,())] for i,c in candidates.items()}
+    pending=set(domains)
+    def connected(i,j):
+        return any(a.extent[0]<b.extent[2] and b.extent[0]<a.extent[2] and
+                   a.extent[1]<b.extent[3] and b.extent[1]<a.extent[3]
+                   for a in domains[i] for b in domains[j])
+    while pending:
+        component={min(pending)};pending-=component;front=list(component)
+        while front:
+            i=front.pop(); neighbours={j for j in pending if connected(i,j)}
+            component.update(neighbours);pending-=neighbours;front.extend(neighbours)
+        subset={i:candidates[i] for i in sorted(component)}
+        _resolve_group(subset,options,evidence,maximum)
+        candidates.update(subset)
+    return shared_masks(candidates,evidence)
+
+
+def _resolve_group(candidates, options, evidence, maximum):
     from itertools import product
     keys = sorted(candidates)
     domains = [[candidates[i], *options.get(i,())] for i in keys]
@@ -222,9 +270,16 @@ def resolve_options(candidates, options, evidence, maximum=256):
         return shared_masks(candidates,evidence)
     best = None
     selected = None
+    pair_cache={}
     for choices in product(*domains):
         proposal = dict(zip(keys,choices))
-        conflicts = shared_masks(proposal,evidence)
+        conflicts=set()
+        for n,i in enumerate(keys):
+            for j in keys[:n]:
+                key=id(proposal[i]),id(proposal[j])
+                if key not in pair_cache:
+                    pair_cache[key]=shared_masks({i:proposal[i],j:proposal[j]},evidence)
+                conflicts.update(pair_cache[key])
         rank = (-len(conflicts),sum(int(c.hits(evidence[i]).sum()) for i,c in proposal.items()),
                 sum(c.quality for c in choices))
         if best is None or rank > best:
@@ -248,6 +303,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
     packed_bytes = 0
     supplied = iter(initial_masks) if initial_masks is not None else None
     with ExitStack() as stack:
+        stack.enter_context(decoded_masks(min(32*1024**2,getattr(owner,'queue_bytes',32*1024**2)//4)))
         frame_open = False
         while active:
             if supplied is None and decoder is None and not frame_open:
@@ -284,6 +340,11 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 if supplied is not None:
                     variants = [next(supplied)]
                 else:
+                    if attempt>1:
+                        from .refinement_budget import budget
+                        if not budget(image,settings).admit('sam_decoder',record=record):
+                            exhausted.add(i)
+                            continue
                     multi = adaptive and attempt > 1
                     options = getattr(owner.segmenter, 'predict_options', None)
                     if decoder is not None:
@@ -374,6 +435,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             x,y,r,b = candidate.extent
             mask = np.zeros((image.height,image.width), bool)
             mask[y:b,x:r] = candidate.crop()
+            from .mask_uncertainty import boundary_fraction
+            records[i]['mask_boundary_fraction']=boundary_fraction(mask)
             if records[i]['mask_variant'] != candidate.variant:
                 records[i].update(mask_variant=candidate.variant, mask_score=candidate.quality,
                                   mask_pixels=candidate.pixels, separated=False)

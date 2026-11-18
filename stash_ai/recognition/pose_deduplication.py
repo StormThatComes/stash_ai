@@ -156,6 +156,8 @@ class DeduplicatedPMPose:
     def predict_many(self, frames):
         from .pose_deduplication_audit import active, publish
         frames = list(frames)
+        from .refinement_budget import begin
+        begin(frames,self.refined.settings if self.refined else self.settings)
         with pipeline_timing('pmpose_first_pass'):
             predictions = self.pose.predict_many(frames)
         if len(predictions) != len(frames):

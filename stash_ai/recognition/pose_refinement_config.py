@@ -9,7 +9,8 @@ LEGACY_CLEANUP = dict(min_island_pixels=4, min_island_fraction=.001,
 
 
 def defaults():
-    return dict(enabled=False, directory='', mode='all', overlap_threshold=.2,
+    return dict(enabled=False, directory='', mode='all', overlap_threshold=.2, generic_second_pass=False,
+                max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
                 max_mask_combinations=256, bidirectional_prompts=False, negative_limb_prompts=False, joint_limb_ownership=False, max_limb_length_ratio=3.,
                 max_decoder_attempts=3, limb_peer_distance_fraction=.035, limb_peer_min_pixels=2., limb_contact_reach_ratio=5.,
@@ -26,7 +27,7 @@ def validate(pose):
         raise ValueError(prefix + 'enabled must be boolean.')
     if not settings['enabled']:
         return
-    for key in ('expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
+    for key in ('generic_second_pass','expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
     if pose['backend'] not in ('pmpose', 'sapiens', 'vitpose_plus_large'):
@@ -34,6 +35,8 @@ def validate(pose):
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')
     _number(settings['max_mask_combinations'], prefix+'max_mask_combinations', 1, 4096, integer=True)
+    _number(settings['max_retry_jobs_per_cue'],prefix+'max_retry_jobs_per_cue',1,1024,integer=True)
+    _number(settings['max_retry_jobs_per_scene'],prefix+'max_retry_jobs_per_scene',1,1000000,integer=True)
     _number(settings['max_limb_length_ratio'], prefix+'max_limb_length_ratio', 1, 10)
     _number(settings['max_decoder_attempts'], prefix+'max_decoder_attempts', 1, 8, integer=True)
     _number(settings['limb_peer_distance_fraction'], prefix+'limb_peer_distance_fraction', .001, .2)
@@ -71,8 +74,7 @@ def contract(settings):
     if settings.get('bridge_radius_pixels') and settings.get('max_bridge_lobe_fraction'):
         active.update(bridge_radius_pixels=settings['bridge_radius_pixels'],
                       max_bridge_lobe_fraction=settings['max_bridge_lobe_fraction'])
-    return dict(version=('pmpose-sam-pose2seg-refinement-v18' if settings.get('recover_prompt_points')
-                         else 'pmpose-sam-pose2seg-refinement-v14'),
+    return dict(version='coco17-sam-pose2seg-refinement-v19',
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,
                 **active)

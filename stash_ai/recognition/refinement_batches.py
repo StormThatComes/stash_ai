@@ -5,7 +5,7 @@ from .profiling import pipeline_timing, pipeline_count, pipeline_max
 def refine_many(owner, frames, predictions):
     if len(frames) != len(predictions):
         raise ValueError('PMPose refinement requires one prediction per frame.')
-    if not callable(getattr(owner.segmenter, 'predict_frames', None)) or not getattr(owner.pose, 'supports_masked_batches', False):
+    if not callable(getattr(owner.segmenter, 'predict_frames', None)):
         return [owner.refine(image, bounds, prediction) for (image,bounds),prediction in zip(frames,predictions)]
     results, window, charge = [], [], 0
 
@@ -49,6 +49,11 @@ def refine_many(owner, frames, predictions):
         def second_pass():
             nonlocal people
             if not pending:
+                return
+            if not getattr(owner,'requires_second_pass',True) or not getattr(owner.pose,'supports_masked_batches',False):
+                for image,jobs,result,records,original in pending:
+                    owner._second_pass(image,jobs,result,records,original)
+                pending.clear();people=0
                 return
             with pipeline_timing('pmpose_masked_second_pass'):
                 predicted = owner.pose.predict_many([(image,[box for _,box,_,_ in jobs],

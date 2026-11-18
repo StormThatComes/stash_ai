@@ -130,6 +130,14 @@ pose:
     # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
     overlap_threshold: 0.2
     # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
+    generic_second_pass: false
+    # Run and validate a masked second ViTPose/Sapiens pass; confidence remains a proxy, never measured
+    # visibility. Off by default.
+    max_retry_jobs_per_cue: 16
+    # Shared maximum person jobs for contact recovery, SAM decoder retries and masked second passes (1-1024).
+    max_retry_jobs_per_scene: 4096
+    # Scene retry envelope (1-1000000), divided deterministically by cue index so batching and resume preserve
+    # decisions.
     max_mask_combinations: 256
     # Maximum complete mask combinations; exceeding it preserves unresolved conflicts. Range: 1..4096.
     bidirectional_prompts: false
