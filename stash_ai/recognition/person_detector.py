@@ -2,6 +2,9 @@
 
 
 def contract(detector):
+    if detector == 'rtmo':
+        from .rtmo_registry import contract as selected
+        return selected()
     if detector == 'rfdetr_xl':
         from .rfdetr_registry import contract as selected
     else:

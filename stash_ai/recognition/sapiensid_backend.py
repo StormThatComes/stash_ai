@@ -46,6 +46,9 @@ def identity_contract(config):
         result['person_detector'] = detector_contract(settings['pose']['detector'])
         result.pop('pose_sha256')
         result.pop('pose_inference')
+    if settings['pose'].get('backend','yolo')=='rtmo':
+        from .rtmo_registry import contract as rtmo_contract
+        result['person_detector']=rtmo_contract(settings['pose'])
     if settings['pose'].get('backend', 'yolo') == 'vitpose_plus_large':
         from .vitpose_registry import contract as vitpose_contract
         result['pose_refiner'] = vitpose_contract()
@@ -55,7 +58,7 @@ def identity_contract(config):
     elif settings['pose'].get('backend', 'yolo') == 'pmpose':
         from .pmpose_registry import contract as pmpose_contract
         result['pose_refiner'] = pmpose_contract(settings['pose'])
-    if settings['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens') and settings['pose'].get('refinement',{}).get('enabled'):
+    if settings['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens', 'rtmo') and settings['pose'].get('refinement',{}).get('enabled'):
         from .pose_refinement_config import contract
         result['pose_mask'] = contract(settings['pose']['refinement'])
     if settings['pose'].get('backend','yolo')!='pmpose' and settings['pose'].get('deduplication',{}).get('enabled'):
@@ -121,6 +124,9 @@ class SapiensIDFaces(YuNetDetector):
             elif config.data['sapiensid']['pose'].get('backend', 'yolo') == 'pmpose':
                 from .pmpose_pose import load
                 self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
+            if config.data['sapiensid']['pose']['backend']=='rtmo' and config.data['sapiensid']['pose']['refinement']['enabled']:
+                from .rtmo_detector import SeededPose
+                self.pose_refiner=SeededPose()
             if (self.pose_refiner is not None and config.data['sapiensid']['pose']['backend'] != 'pmpose'
                     and (config.data['sapiensid']['pose']['refinement']['enabled']
                          or config.data['sapiensid']['pose']['deduplication']['enabled'])):
@@ -179,6 +185,9 @@ class SapiensIDFaces(YuNetDetector):
             parents = getattr(result, 'reserve_parents', None)
             image._pose_reserves = {} if parents is None else {
                 k:selected.index(int(parents[i])) for k,i in enumerate(selected) if int(parents[i]) in selected}
+            if settings['pose']['backend']=='rtmo' and self.pose_refiner is not None:
+                image._rtmo_points=(bounds,result.keypoints.xy.detach().cpu().numpy()[selected],
+                                    result.keypoints.conf.detach().cpu().numpy()[selected])
             if self.pose_refiner is not None:
                 if _defer is not None:
                     _defer.append((image, faces, bounds, [float(scores[i]) for i in selected]))

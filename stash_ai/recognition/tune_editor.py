@@ -12,8 +12,8 @@ PMPOSE_SWITCHES = ('pose.deduplication.enabled',)
 
 CHOICES = {
     'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet'),
-    'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo'),
-    'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo'),
+    'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo', 'rtmo'),
+    'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo', 'rtmo'),
     'pose.estimator.sapiens.variant': ('0.3b', '0.6b', '1b'),
     'pose.refinement.mode': ('all', 'overlap'),
 }
@@ -37,7 +37,7 @@ class Settings:
         self.edits = {}
 
     def value(self, path):
-        if path in PMPOSE_SWITCHES and self.value('pose.estimator.backend') != 'pmpose':
+        if path in PMPOSE_SWITCHES and self.value('pose.estimator.backend') not in ('pmpose','vitpose_plus_large','sapiens'):
             return False
         return self.edits.get(path, self.base[path])
 
@@ -58,6 +58,11 @@ class Settings:
                 value = int(text) if type(default) is int else float(text)
             except ValueError as error:
                 raise ValueError(f'Enter a number for {path}.') from error
+        if path in ('pose.detector.backend','pose.estimator.backend'):
+            peer='pose.estimator.backend' if path=='pose.detector.backend' else 'pose.detector.backend'
+            if value=='rtmo':self.edits[peer]='rtmo'
+            elif self.value(peer)=='rtmo':
+                self.edits[peer]='yolo' if value=='yolo' else ('vitpose_plus_large' if peer=='pose.estimator.backend' else 'rfdetr_xl')
         if original == value:
             self.edits.pop(path, None)
         else:
@@ -74,8 +79,9 @@ class Settings:
         allowed = ['face.detector', 'pose.detector',
                    'pose.detector.' + ('dfine' if box.startswith('dfine') else box),
                    'pose.estimator', 'pose.estimator.' + estimator]
+        if estimator=='rtmo':allowed.extend(('pose.point_quality','pose.refinement'))
         if estimator in ('sapiens','vitpose_plus_large'):
-            allowed.extend(('pose.point_quality','pose.refinement'))
+            allowed.extend(('pose.point_quality','pose.refinement','pose.deduplication'))
         if estimator == 'pmpose':
             allowed.extend(('pose.point_quality', 'pose.refinement', 'pose.deduplication'))
         available = {key.rpartition('.')[0] for key in self.base}

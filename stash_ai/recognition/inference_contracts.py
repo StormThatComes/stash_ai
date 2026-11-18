@@ -14,6 +14,9 @@ def detector(config):
     from .sapiensid_registry import POSE_SHA256,POSE_INFERENCE
     from .person_detector import contract
     p=config.data['sapiensid']['pose'];model=p['detector']
+    if p['backend']=='rtmo':
+        from .rtmo_registry import contract as rtmo_contract
+        return ['rtmo-detection-v1',rtmo_contract(p),{k:p[k] for k in ('score_threshold','nms_threshold','max_people_per_frame')},config.data['models']['device']]
     reserve = p['backend'] == 'pmpose' and p['deduplication']['enabled']
     return ['person-detector-contact-reserve-v3' if reserve else 'person-detector-v1',contract(model) if model!='yolo' else [p['sha256'] or POSE_SHA256,POSE_INFERENCE],
             dict({k:p[k] for k in ('score_threshold','nms_threshold','max_people_per_frame')},
@@ -23,7 +26,10 @@ def detector(config):
 
 def pose(config):
     p=config.data['sapiensid']['pose'];backend=p['backend']
-    if backend=='vitpose_plus_large':
+    if backend=='rtmo':
+        from .rtmo_registry import contract
+        model=[contract(p),detector(config)]
+    elif backend=='vitpose_plus_large':
         from .vitpose_registry import contract
         model=contract()
         if config.data['execution'].get('vitpose_device_decode'):
