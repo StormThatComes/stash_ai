@@ -58,6 +58,9 @@ def identity_contract(config):
     if settings['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens') and settings['pose'].get('refinement',{}).get('enabled'):
         from .pose_refinement_config import contract
         result['pose_mask'] = contract(settings['pose']['refinement'])
+    if settings['pose'].get('backend','yolo')!='pmpose' and settings['pose'].get('deduplication',{}).get('enabled'):
+        from .pose_deduplication_config import contract
+        result['pose_deduplication']=contract(settings['pose']['deduplication'])
     from .inference_precision import contract as precision_contract
     result.update(precision_contract(config))
     return result
@@ -119,7 +122,8 @@ class SapiensIDFaces(YuNetDetector):
                 from .pmpose_pose import load
                 self.pose_refiner = Stage('pose_refiner',lambda:load(config,self.device),self.device) if lazy else load(config,self.device)
             if (self.pose_refiner is not None and config.data['sapiensid']['pose']['backend'] != 'pmpose'
-                    and config.data['sapiensid']['pose']['refinement']['enabled']):
+                    and (config.data['sapiensid']['pose']['refinement']['enabled']
+                         or config.data['sapiensid']['pose']['deduplication']['enabled'])):
                 from .pose_masks import wrap
                 self.pose_refiner = wrap(self.pose_refiner, config, self.device)
             if self.pose_refiner is not None:
@@ -160,7 +164,7 @@ class SapiensIDFaces(YuNetDetector):
                     or any(not np.isfinite(a).all() for a in (boxes, scores))
                     or np.any((scores < 0) | (scores > 1))):
                 raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
-            if len(boxes) > settings['pose']['max_people_per_frame']:
+            if len(boxes) > settings['pose']['max_people_per_frame']*(2 if settings['pose']['deduplication']['enabled'] else 1):
                 raise ValueError('SapiensID pose detector exceeded the configured result count.')
             selected, bounds = [], []
             for index, (box, score) in enumerate(zip(boxes, scores)):
@@ -203,7 +207,7 @@ class SapiensIDFaces(YuNetDetector):
         if deduplication is not None:
             kept = deduplication['kept_indices']
             suppressed = deduplication['suppressed_by']
-            if (settings.get('backend') != 'pmpose' or not settings.get('deduplication', {}).get('enabled')
+            if (not settings.get('deduplication', {}).get('enabled')
                     or len(scores) != len(bounds) or len(suppressed) != len(bounds)
                     or any(type(i) is not int or not 0 <= i < len(bounds) for i in kept)
                     or kept != sorted(set(kept)) or bool(bounds) != bool(kept)
@@ -256,6 +260,8 @@ class SapiensIDFaces(YuNetDetector):
             kps[~usable] = -1
             if refinements is not None:
                 details['pose_refinement'] = refinements[index]
+            from .joint_evidence import states
+            details['keypoint_states']=states(usable,details,refinements[index] if refinements else {})
             if deduplication is not None:
                 original = kept[index]
                 details['pose_deduplication'] = dict(detector_index=original,
@@ -280,11 +286,12 @@ class SapiensIDFaces(YuNetDetector):
         reserve = (settings['backend']=='pmpose' and settings['deduplication']['enabled']
                    and settings['detector']!='rfdetr_xl')
         values = self.pose.predict(source=source, device=self.device, verbose=False, nms=True,
-            conf=settings['score_threshold'], iou=.94 if reserve else settings['nms_threshold'],
+            conf=settings['score_threshold'], iou=settings['deduplication']['contact_max_iou'] if reserve else settings['nms_threshold'],
             max_det=settings['max_people_per_frame']*(2 if reserve else 1))
         if reserve:
             from .contact_reserves import select
-            values = [select(v,settings['nms_threshold'],settings['max_people_per_frame']) for v in values]
+            values = [select(v,settings['nms_threshold'],settings['max_people_per_frame'],
+                             contact_max_iou=settings['deduplication']['contact_max_iou']) for v in values]
         return values
 
     def detect_many(self, frames):

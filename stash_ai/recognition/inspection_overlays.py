@@ -199,4 +199,6 @@ def point_info(geometry,size,x,y):
                 scores=[] if face else data.get('keypoint_scores')
                 confidence=scores[i] if isinstance(scores,(list,tuple)) and i<len(scores) else None
                 found.append((d,f'{"Face landmark "+str(i) if face else POINTS[i]} · source ({p[0]:g}, {p[1]:g}) · confidence: {confidence if confidence is not None else "not retained"}'))
+                states=[] if face else data.get('keypoint_states',[])
+                if i<len(states):found[-1]=(d,found[-1][1]+' · evidence: '+states[i])
     return min(found,key=lambda p:p[0])[1] if found else ''

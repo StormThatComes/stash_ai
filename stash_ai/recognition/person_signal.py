@@ -236,6 +236,12 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     from .inference_precision import contract as precision_contract
     evidence.update(precision_contract(config))
     refinement = s['pose'].get('refinement',{})
+    if s['pose'].get('backend','yolo')!='pmpose' and refinement.get('enabled'):
+        from .pose_refinement_config import contract as mask_contract
+        evidence['pose_mask']=mask_contract(refinement)
+    if s['pose'].get('backend','yolo')!='pmpose' and s['pose'].get('deduplication',{}).get('enabled'):
+        from .pose_deduplication_config import contract as dedup_contract
+        evidence['pose_deduplication']=dedup_contract(s['pose']['deduplication'])
     if (refinement.get('enabled') and refinement.get('masked_identity_crop')
             and not legacy_mask_quality and not legacy_association and not legacy_boundaries):
         evidence['body_mask_quality'] = 'interior-laplacian-v1'

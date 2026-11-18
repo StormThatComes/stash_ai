@@ -218,6 +218,11 @@ pose:
     contact_crop_variants: false
     # Try expanded and sideways crops within the contact attempt budget. Experimental; validate ownership before
     # enabling.
+    contact_min_iou: 0.7
+    # Minimum box IoU for counterfactual copied-pose recovery (0-1); separate head/torso evidence is checked
+    # first.
+    contact_max_iou: 0.94
+    # Shared upper IoU for contact reserves and copied-pose recovery (0-1; above contact_min_iou).
     min_keypoint_score: null
     # Minimum expected OKS for a point supporting duplicate selection. Null inherits pose.point_quality. Range:
     # 0..1 or null.

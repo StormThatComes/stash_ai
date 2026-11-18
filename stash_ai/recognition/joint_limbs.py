@@ -7,12 +7,13 @@ def settle(result,bounds,records,settings):
     xy,scores,prob=result[:3]
     snapshot=xy.copy(); confidence=scores.copy(); remove=set()
     for i,box in enumerate(bounds):
-        tolerance=max(settings.get('limb_peer_min_pixels',2.),
-                      settings.get('limb_peer_distance_fraction',.035)*np.linalg.norm(np.subtract(box[2:],box[:2])))
         for k,parent in PARENT.items():
             if confidence[i,k]<=settings['min_keypoint_score']:
                 continue
             for j in range(i):
+                scale=min(np.linalg.norm(np.subtract(b[2:],b[:2])) for b in (box,bounds[j]))
+                tolerance=max(settings.get('limb_peer_min_pixels',2.),
+                              settings.get('limb_peer_distance_fraction',.035)*scale)
                 for other in (k,OPPOSITE[k]):
                     root=PARENT[other]
                     if confidence[j,other]<=settings['min_keypoint_score'] or np.linalg.norm(snapshot[i,k]-snapshot[j,other])>tolerance:
@@ -34,7 +35,7 @@ def settle(result,bounds,records,settings):
                         remove.add((j,other))
                     elif a is None or b is None:
                         remove.update(((i,k),(j,other)))
-    for i,k in remove:
+    for i,k in sorted(remove):
         xy[i,k],scores[i,k]=-1,0
         for value in prob.values():value[i,k]=0
         records[i].setdefault('joint_ownership_withheld',[]).append(k)

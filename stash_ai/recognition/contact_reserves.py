@@ -2,7 +2,7 @@
 import numpy as np
 
 
-def select(result, iou, maximum):
+def select(result, iou, maximum, *, contact_max_iou=.94):
     import torch
     from types import SimpleNamespace
     boxes, scores = result.boxes.xyxy, result.boxes.conf
@@ -22,7 +22,7 @@ def select(result, iou, maximum):
     occupied = set(primary)
     for slot, index in enumerate(primary):
         overlap = overlaps(index)
-        options = [j for j in range(len(xy)) if j not in occupied and iou < overlap[j] < .94]
+        options = [j for j in range(len(xy)) if j not in occupied and iou < overlap[j] < contact_max_iou]
         if options:
             j = max(options,key=lambda j:float(confidence[j]))
             chosen.append(j); parents.append(slot); occupied.add(j)

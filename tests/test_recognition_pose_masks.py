@@ -20,3 +20,16 @@ def test_generic_mask_preserves_geometry_and_marks_unknown_visibility():
     assert result[3][0]['status'] == 'masked'
     assert result[3][0]['visibility_measured'] is False
     assert result[3][0]['overlap_mask']
+
+
+def test_generic_copied_skeleton_is_suppressed_without_measured_visibility():
+    from stash_ai.recognition.pose_masks import ConfidencePose
+    from stash_ai.recognition.pose_deduplication import DeduplicatedPMPose
+    from stash_ai.recognition.pose_deduplication_config import defaults as dedup_defaults
+    from tests.test_recognition_pose_refinement import pose_points
+    xy=np.array([pose_points()]*2); scores=np.full((2,17),.9)
+    pose=ConfidencePose(SimpleNamespace(predict_many=lambda frames:[(xy,scores)]))
+    model=DeduplicatedPMPose(pose,dedup_defaults())
+    with Image.new('RGB',(100,100)) as image:
+        result=model.predict(image,[[0,0,100,100]]*2)
+    assert result[-1]['kept_indices']==[0] and result[0].shape==(1,17,2)

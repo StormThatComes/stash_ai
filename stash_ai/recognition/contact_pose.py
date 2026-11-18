@@ -18,7 +18,8 @@ def _recover_one(pose,image,bounds,prediction,reserves,settings):
         if not intersection:
             continue
         reason, pair = _compare(i,j,boxes,points,valid,settings)
-        if reason not in ('insufficient_shared_core','duplicate_core') or not .70 < pair['box_iou'] < .91:
+        if (reason not in ('insufficient_shared_core','duplicate_core') or not
+                settings.get('contact_min_iou',.70) < pair['box_iou'] < settings.get('contact_max_iou',.94)):
             continue
         scale = min(np.linalg.norm(boxes[n,2:]-boxes[n,:2]) for n in (i,j))
         paired = (scores[i]>.5)&(scores[j]>.5)
@@ -74,11 +75,19 @@ def recover_pair(pose,image,bounds,prediction,reserves,settings):
         return area/max(1,min(np.prod(a[2:]-a[:2]),np.prod(b[2:]-b[:2])))
     pairs.sort(key=overlap,reverse=True)
     budget = settings.get('max_contact_attempts',4)
+    original=pose
+    class Counted:
+        def predict_many(self,frames):
+            nonlocal budget
+            budget-=1
+            from .profiling import pipeline_count
+            pipeline_count('contact_pose_model_attempts')
+            return original.predict_many(frames)
+    pose=Counted()
     for a,b in pairs:
         for first,second in ((a,b),(b,a)):
             if budget <= 0:
                 return prediction,None
-            budget -= 1
             result,recovered = _recover_one(pose,image,bounds,prediction,{second:first},settings)
             if recovered is not None:
                 owner,_,_ = recovered
@@ -88,7 +97,6 @@ def recover_pair(pose,image,bounds,prediction,reserves,settings):
             for mode in ('expanded','sideways'):
                 if budget <= 0:
                     break
-                budget -= 1
                 result,recovered = _recover_one(Variant(pose,mode),image,bounds,prediction,{b:a},settings)
                 if recovered is not None:
                     return result,(recovered[0],a,b)
