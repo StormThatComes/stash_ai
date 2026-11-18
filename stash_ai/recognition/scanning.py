@@ -170,6 +170,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         for face_index, face, quality, reason, vector, crop in records:
                             if next_shot[1] is not None:
                                 quality['view_shot'] = next_shot[1]
+                            quality['transition_verified'] = next_shot[4]
                             observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                             pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))

@@ -41,6 +41,8 @@ def defaults():
                        'context_view_enrichment': False, 'strict_appearance_matching': False,
                        'corroborated_view_enrichment': True,
                        'anchor_outlier_quarantine': False, 'adaptive_view_witnesses': False,
+                       'revalidate_face_anchors': False, 'anchor_review_max_cues': 3,
+                       'near_duplicate_pixel_rms': 0., 'near_duplicate_similarity': .995,
                        'deduplicate_detections': False, 'max_view_witnesses': 32,
                        'min_anchor_face_pixels': None, 'min_anchor_sharpness': None,
                        'min_auxiliary_face_pixels': None, 'min_auxiliary_sharpness': None,
@@ -199,7 +201,10 @@ def validate(data, *, detection_preview=False):
     b=data['clustering']['min_auxiliary_visible_face_fraction']
     if a is not None and b is not None and b>a:
         raise ValueError('min_auxiliary_visible_face_fraction must not exceed min_anchor_visible_face_fraction.')
-    for key in ('anchor_outlier_quarantine','adaptive_view_witnesses','deduplicate_detections'):
+    _number(data['clustering']['anchor_review_max_cues'],'clustering.anchor_review_max_cues',1,12,integer=True)
+    _number(data['clustering']['near_duplicate_pixel_rms'],'clustering.near_duplicate_pixel_rms',0,16)
+    _number(data['clustering']['near_duplicate_similarity'],'clustering.near_duplicate_similarity',.9,1)
+    for key in ('revalidate_face_anchors','anchor_outlier_quarantine','adaptive_view_witnesses','deduplicate_detections'):
         if type(data['clustering'][key]) is not bool:
             raise ValueError('clustering.'+key+' must be boolean.')
     if data['clustering']['anchor_outlier_quarantine'] and not data['clustering']['anchor_view_matching']:

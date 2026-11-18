@@ -307,6 +307,11 @@ matching:
       # Face observations allowed to seed an identity.
       min_identity_support: 2
       # Independent anchor observations needed to confirm a new face identity. Range: 1..1000.
+      revalidate_face_anchors: false
+      # Demote a contradicted face anchor in replay using independent, continuous-cue witnesses on both sides;
+      # raw evidence is preserved.
+      anchor_review_max_cues: 3
+      # Maximum cue distance on each side for reversible anchor review (1-12); no assumed time interval.
       quality:
         # Extra requirements above the shared query floor.
         min_face_pixels: null
@@ -319,6 +324,13 @@ matching:
         # Minimum visible fraction for anchor references; null adds no extra anchor floor. Range: 0..1 or null.
         max_pose_deviation: 0.2
         # Maximum pose deviation to seed an identity; null adds no anchor pose limit. Range: 0..1 or null.
+    evidence:
+      # Independent evidence accounting; reducing duplicate votes never merges people.
+      near_duplicate_pixel_rms: 0.0
+      # Maximum RGB thumbnail RMS for near-identical same-scene evidence; 0 disables (0-16). Requires matching
+      # geometry and embeddings.
+      near_duplicate_similarity: 0.995
+      # Minimum cosine similarity to collapse near-identical evidence votes (0.9-1).
     auxiliary:
       # Attach eligible non-anchor observations to existing identities.
       enabled: true

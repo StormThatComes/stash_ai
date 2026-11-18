@@ -51,6 +51,8 @@ _GROUPS = (
     ('matching.face.samples.references', 'clustering',
      'max_samples_per_person max_people_per_lookup max_reference_mb=max_reference_bytes'),
     ('matching.face.anchors', 'recognition', 'min_identity_support'),
+    ('matching.face.anchors', 'clustering', 'revalidate_face_anchors anchor_review_max_cues'),
+    ('matching.face.evidence', 'clustering', 'near_duplicate_pixel_rms near_duplicate_similarity'),
     ('matching.face.anchors.quality', 'clustering',
      'min_face_pixels=min_anchor_face_pixels min_sharpness=min_anchor_sharpness '
      'min_visible_face_fraction=min_anchor_visible_face_fraction '

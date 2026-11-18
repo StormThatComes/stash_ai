@@ -118,6 +118,7 @@ class _Cluster:
     shots: list = field(default_factory=list)
     total: object = field(default=None,repr=False)
     pose_hints: set = field(default_factory=set)
+    perspective_votes: dict = field(default_factory=dict)
     scene_minimum: int = 0
     scene_witnesses: dict = field(default_factory=dict)
     metadata_reservation: object = field(default=None, repr=False)
@@ -141,6 +142,13 @@ class _Cluster:
 
         time, pixel = stamp(row), unit(row)
         q = metadata(row['quality']) if 'quality' in row.keys() else {}
+        geometry = row['geometry'] if 'geometry' in row.keys() else None
+        if geometry is not None:
+            label = pose_view(geometry)
+            # An uncertain five-point orientation cannot buy a diversity slot.
+            premium,_ = pose_fallback(geometry,label)
+            if label!='unknown' and premium==0 and q.get('alignment_valid',True):
+                self.perspective_votes.setdefault(label,Votes()).add(row)
         score = quality(row['quality']) if 'quality' in row.keys() else 0.
         shot = (row['scan'], 'shot', q['view_shot']) if q.get('view_shot') is not None else time
         record = (row['id'],score,query,shot,row['scene'] if 'scene' in row.keys() else None,
@@ -324,7 +332,9 @@ def prioritized(slots,maximum,cohesion=.8,*,primary=False,reserves=False):
         def priority(index):
             slot=remaining[index]
             gain = len(hits[id(slot)] - covered)
-            different = slot.pose in ('left','right','neutral') and all(slot.pose!=item.pose for item in chosen)
+            verified = {p for p,votes in slot.perspective_votes.items() if len(votes)>=2}
+            occupied = {p for item in chosen for p,votes in item.perspective_votes.items() if len(votes)>=2}
+            different = bool(verified-occupied)
             distance = 1-max((float(np.dot(slot.medoid()[0], item.medoid()[0])) for item in chosen),default=1.)
             return (bool(gain),different and bool(gain),gain,distance,len(slot.cues),slot.first)
         if chosen:
