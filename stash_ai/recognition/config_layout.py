@@ -288,9 +288,14 @@ def public_value(path, value):
 
 
 def v2_patch(internal_patch):
+    # Proposals arrive sorted by internal parameter names. Emit their public
+    # paths in the same pipeline order as full exports and the shipped YAML.
+    values = {INTERNAL_PATHS[path]: public_value(path, value)
+              for path, value in leaf_items(internal_patch)}
     result = {}
-    for path, value in leaf_items(internal_patch):
-        put(result, INTERNAL_PATHS[path], public_value(path, value))
+    for path in PUBLIC_PATHS:
+        if path in values:
+            put(result, path, values[path])
     return result
 
 
