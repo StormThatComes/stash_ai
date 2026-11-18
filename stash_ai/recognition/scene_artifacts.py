@@ -145,5 +145,5 @@ def body_key(db, scan, config):
     local=signed('body-scene-input-v2',digest([scan,expected]),queries,'scene',scene_key(db,scan))
     shot_map = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
     motion = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-continuity:'+scan,)).fetchone()
-    return digest([motion[0] if motion else None,scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,
+    return digest(['contact-proof-graph-v2',motion[0] if motion else None,scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,
                    shot_map[0] if shot_map else None])

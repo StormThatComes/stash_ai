@@ -18,6 +18,10 @@ def test_two_clean_endpoints_correct_and_demote_contact_body_link_only():
     assert result[1]['face_person']=='a' and not result[1]['face_anchor']
     assert result[1]['_contact_correction']['original_owner']=='b'
     assert rows[1]['face_person']=='b'  # raw evidence remains intact
+    from stash_ai.recognition.contact_identity_proof import rebind
+    graph=rebind([(rows,[.99,.99])],result)
+    assert graph[0][0][1] is result[1]
+    assert graph[0][0][1]['face_person']=='a'
 
 
 def test_contact_birth_needs_clean_support():
@@ -33,3 +37,13 @@ def test_contact_window_counts_actual_cues_not_path_rows():
                   match_threshold=.8,cohesion_threshold=.8,ambiguity_margin=.1)
     result=correct(rows,[(rows,[.99,.99])],settings,SimpleNamespace(face_similarity=lambda a,b:float(a@b)))
     assert result[1]['face_person']=='b'
+
+
+def test_pending_proof_changes_when_new_clean_evidence_arrives():
+    from stash_ai.recognition.contact_identity_proof import pending_proof
+    settings=dict(contact_birth_support=2)
+    group=[row(0,'a',True),row(1,'a',False)]
+    before=pending_proof(group,settings,lambda rows,s:rows)
+    after=pending_proof(group+[row(2,'a',False)],settings,lambda rows,s:rows)
+    assert len(before['clean_witness_ids'])==1 and len(after['clean_witness_ids'])==2
+    assert before['evidence_generation']!=after['evidence_generation']

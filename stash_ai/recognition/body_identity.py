@@ -43,7 +43,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v50-scene-body-anchors',contract(config),matching_policy(config),
+    return digest(['body-local-v51-contact-proofs',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -343,11 +343,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     from .body_guards import FaceGuard,resolve_claims
     scores=Scores(config);guard=FaceGuard(db,config,scores=scores,frozen=frozen_faces)
     graph = None
-    if settings.get('tracklet_matching') and settings.get('body_first_matching'):
+    if (settings.get('tracklet_matching') and settings.get('body_first_matching')
+            or settings.get('correct_contact_face_links')):
         from .body_tracklets import paths
         graph = list(paths(rows, settings, scores, record.get('occupied_cues', ()), extended=turn_feature(settings,'extended_track_graph'), gap_boxes=record.get('gap_boxes'), motion=record.get('motion','')))
-    from .contact_identity_proof import correct
+    from .contact_identity_proof import correct, rebind
     rows=correct(rows,graph,settings,scores)
+    graph=rebind(graph,rows)
     seeds={};decisions={}
     from .contact_anchors import questionable_links
     uncertain = questionable_links(rows,settings,scores,graph)
@@ -483,9 +485,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
         from .contact_identity_proof import birth_ready
         deferred=not birth_ready(group,settings,independent)
         if deferred:status='provisional'
+        from .contact_identity_proof import pending_proof
+        proof = pending_proof(group,settings,independent) if deferred else None
         for row in group:
             decisions[row['id']]=dict(person=person,status=status,role='auxiliary' if deferred else 'anchor',reason='contact_birth_pending' if deferred else 'body_scene_core',independent_support=support,
                 required_support=settings['min_support'])
+            if proof is not None:
+                decisions[row['id']].update(contact_birth=proof, anonymous_fragment=person)
     # Weak observations may attach to frozen accepted cores but never train them.
     banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']
     for row in weak:
