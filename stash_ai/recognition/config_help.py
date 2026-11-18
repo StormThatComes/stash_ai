@@ -1,6 +1,7 @@
 """Operator help for the bundled, migrated and solver-generated v2 YAML."""
 
 HELP = {
+    'execution.host_memory_mb': 'Optional shared host admission ceiling for retained model bytes, sprites, CPU queues and rebuild allocations. 0 disables it. Uses sampled process RSS and conservative owned-byte accounting, not an OS hard limit; CUDA VRAM is separate. Range: 0..1048576 MB.',
     'version': 'Recognition YAML layout. Use 2 for this schema.',
     'face': 'Face detection, scan admission and embeddings.',
     'face.detector': 'Find face boxes and landmarks in VTT frames.',

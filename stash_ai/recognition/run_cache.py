@@ -21,6 +21,8 @@ class Cache:
         self.limit, self.matrix_limit = limit, min(limit, matrix_limit)
         self.entries, self.size, self.peak = OrderedDict(), 0, 0
         self.matrices, self.matrix_bytes = OrderedDict(), 0
+        from .host_memory import current as host_current
+        self.host=host_current()
         self.working = None
         self.reservations = {}
         self.reserved_size = 0
@@ -38,6 +40,10 @@ class Cache:
         total = self.reserved_size - self.reservations.get(owner, 0) + size
         if total > self.working:
             raise self.resource_error(owner, total)
+        if self.host is not None:
+            while self.entries and total+self.size>self.reserved_size+self.host.available()+self.size:
+                self._remove(next(iter(self.entries)))
+            self.host.replace(('rebuild',id(self)),total+self.size,required=True)
         self.reserved_size = total
         if size:
             self.reservations[owner] = size
@@ -101,6 +107,7 @@ class Cache:
     def _remove(self, key):
         _, size = self.entries.pop(key)
         self.size -= size
+        if self.host is not None:self.host.replace(('rebuild',id(self)),self.reserved_size+self.size)
         if key[0] == 'matrix':
             self.matrices.pop(key)
             self.matrix_bytes -= size
@@ -111,6 +118,8 @@ class Cache:
         if key in self.entries:
             self._remove(key)
         limit = self.matrix_limit if key[0] == 'matrix' else self.limit
+        if self.host is not None:
+            limit=min(limit,self.host.available())
         if size > limit:
             count('ram_' + key[0] + '_oversize')
             return value
@@ -123,6 +132,7 @@ class Cache:
                 count('ram_evictions')
             self.matrices[key] = None
             self.matrix_bytes += size
+        if self.host is not None and not self.host.replace(('rebuild',id(self)),self.reserved_size+self.size+size):return value
         self.entries[key] = value, size
         self.size += size
         self.peak = max(self.peak, self.size)
@@ -137,6 +147,7 @@ class Cache:
         self.entries.clear()
         self.matrices.clear()
         self.size = self.matrix_bytes = 0
+        if self.host is not None:self.host.replace(('rebuild',id(self)),self.reserved_size)
 
     def retain_numeric(self):
         # Closed trial database handles, ownership plans and evidence partitions
@@ -177,6 +188,14 @@ def scope(config):
     # The cache borrows the shared budget left by live pages, queues and banks.
     from .resource_plan import plan
     limit = plan(config).cache
+    from .host_memory import scope as host_scope
+    with host_scope(config):
+        with _scope(config,limit,settings) as value:yield value
+
+
+@contextmanager
+def _scope(config,limit,settings):
+    from .resource_plan import plan
     value = Cache(limit, settings['rebuild_matrix_cache_bytes'])
     value.configure_working(plan(config).working, settings.get('rebuild_cache_bytes',0))
     token = _active.set(value)
@@ -188,6 +207,7 @@ def scope(config):
         count('ram_working_peak_bytes', value.reserved_peak)
         count('ram_working_limit_bytes', value.working)
         value.clear()
+        if value.host is not None:value.host.replace(('rebuild',id(value)),0)
         _active.reset(token)
 
 

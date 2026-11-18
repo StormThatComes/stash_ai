@@ -657,3 +657,35 @@ peak VRAM and output tolerance on a real CUDA machine with the manual benchmark;
 no full 10,000-scene inference is part of CI.
 
 During recognition, the SSD line names the volume with the least remaining capacity under either the data cap or the free-space reserve, including the age of that measurement. VTT prefetch reports ready inputs over all pickups and time actually spent waiting. CUDA OOM recovery reports the failed batch size, the reduced size and retry count even with VRAM logging disabled. Process VRAM comes from a rate-limited background query and can be unavailable on some drivers. Rejection counts for an unchanged scan reuse its retained evidence revisions and active face/body contracts.
+
+### Large-library capacity and shared host admission
+
+`python stash_ai.py recognition estimate-capacity --face-config facial_recognition.yml`
+reads bounded samples from current completed scans in the configured face-model
+namespace and prints JSON. Defaults describe
+10,000 scenes, 300 cues per scene, 70% positive cues and two faces/two bodies per
+positive cue (3 million frames, 4.2 million rows of each kind). Override these with
+`--target-scenes`, `--cues-per-scene`, `--positive-fraction`, `--faces-per-cue` and
+`--bodies-per-cue`. `--sample-scenes` selects up to 256 evenly spaced current scans.
+
+The report resolves cold crop addresses and counts compressed body masks. It shows
+mean payload projections, a largest-sample sensitivity scenario, observed scan
+history, current database/WAL sizes, and configured cache/scratch ceilings separately.
+`--sqlite-overhead` is an explicit assumed multiplier (default 1.35), not a measured
+confidence bound. Models, identity indices, publication history and WAL peaks still
+need headroom. Empty samples produce unknown estimates. This command does not run
+models, mutate the database or predict throughput.
+
+`execution.host_memory_mb` optionally coordinates retained model bytes/sprites,
+CPU result queues and rebuild allocations. Zero (default) disables this additional
+ceiling. Enabled admission uses current process RSS and conservative owned-byte
+accounting. CPU queues drain before accepting more work; optional caches decline
+new entries, while mandatory allocations report a resource error. Native allocations
+and child-process RSS are not hard-capped; CUDA VRAM retains its separate controls.
+
+Global body nominations now deduplicate in run-owned scratch SQLite. Large centroid
+trees use fixed disk records with bounded node caching instead of reverting to all
+block pairs. Small incremental catalogues remain reusable; oversized catalogues are
+streamed exactly without retaining a second Python list. Candidate/comparison limits
+remain explicit failure guards, never silent top-k truncation. Scratch files use the
+configured work location and existing shared disk accounting.

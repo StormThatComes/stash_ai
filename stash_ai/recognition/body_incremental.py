@@ -31,7 +31,7 @@ def nominations(search):
     store=current()
     settings=search.config.data['sapiensid']['global_matching']
     floor=settings['match_threshold']
-    key=digest(['body-centroids-v1',floor])
+    key=digest(['body-centroids-v2',floor])
     versions=search.mean_versions
     previous=store.get('body-centroid-catalogue',key) if store else None
     old=previous['owners'] if previous else {}
@@ -39,19 +39,32 @@ def nominations(search):
     if previous is None or len(changed)*4>max(1,len(versions)):
         # Preserve efficient bounded BLAS tiles and geometric exclusion for a
         # cold/mostly changed catalogue. Delta rows are for small updates.
-        pairs=list(search.dense_nominations({}))
-        if store:store.put('body-centroid-catalogue',key,dict(owners=versions,pairs=pairs))
-        yield from pairs
+        # Cache only small catalogues; large runs stay streamed and remain exact.
+        pairs=[];keep=True
+        budget=min(search.config.data['sapiensid']['execution']['plan_bytes']//4,
+                   store.budget//8 if store else 0)
+        for pair in search.dense_nominations({}):
+            if keep:
+                if (len(pairs)+1)*256>budget:pairs.clear();keep=False
+                else:pairs.append(pair)
+            yield pair
+        if store and keep:store.put('body-centroid-catalogue',key,dict(owners=versions,pairs=pairs))
         return
-    pairs={tuple(p) for p in previous['pairs'] if all(x in versions and x not in changed for x in p)} if previous else set()
+    # Warm catalogues are admitted only when small; changed pairs still spill.
+    from .paged_pairs import Pairs
+    with Pairs(search.config.data['sapiensid']['execution']['plan_bytes']) as pairs:
+        yield from _delta(search,store,key,previous,versions,changed,pairs)
+
+
+def _delta(search,store,key,previous,versions,changed,pairs):
+    for pair in previous['pairs']:
+        if all(x in versions and x not in changed for x in pair):pairs.add(pair)
     limit=search.config.data['sapiensid']['execution']['max_candidate_pairs']
-    budget=search.config.data['sapiensid']['execution']['plan_bytes']
-    if len(pairs)>limit or len(pairs)*256>budget:
-        raise ResourceLimit('Global body nominations exceed configured candidate or plan budget.')
+    budget=min(search.config.data['sapiensid']['execution']['plan_bytes']//4,store.budget//8)
     def admit(pair):
-        pairs.add(pair)
-        if len(pairs)>limit or len(pairs)*256>budget:
-            raise ResourceLimit('Global body nominations exceed configured candidate or plan budget.')
+        if pairs.add(pair) and pairs.count>limit:
+            raise ResourceLimit('Global body nominations exceed configured candidate budget.')
+    floor=search.config.data['sapiensid']['global_matching']['match_threshold']
     # Read bounded tiles, with only a single changed row on the left. This also
     # avoids evaluating the unchanged portion of the same centroid tile.
     from .body_global_search import ROUNDING
@@ -72,7 +85,9 @@ def nominations(search):
             for j,score in zip(chosen,scores):
                 if score+ROUNDING>=floor:admit(tuple(sorted((person,search.identities[owners[j]]))))
     if previous and len(changed)<len(versions):search.stats['centroid_catalogue_hits']=len(versions)-len(changed)
-    if store:store.put('body-centroid-catalogue',key,dict(owners=versions,pairs=sorted(pairs)))
-    for pair in sorted(pairs):
+    if pairs.count>limit:raise ResourceLimit('Global body nominations exceed configured candidate budget.')
+    if store and pairs.count*256<=budget:
+        store.put('body-centroid-catalogue',key,dict(owners=versions,pairs=list(pairs)))
+    for pair in pairs:
         search.stats['candidate_pairs']+=1
         yield pair

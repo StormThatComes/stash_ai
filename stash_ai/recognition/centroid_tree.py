@@ -29,8 +29,8 @@ def reorder(search):
 
 
 class Tree:
-    def __init__(self,search,read):
-        self.search=search;self.read=read;self.nodes=[]
+    def __init__(self,search,read,*,paged=False):
+        self.search=search;self.read=read;self.nodes=PagedNodes(search) if paged else []
         leaves=list(range(0,len(search.entries),search.block))
         def build(starts):
             if len(starts)==1:
@@ -62,3 +62,35 @@ class Tree:
                 l,r=x[3];pending.extend(((r,b),(l,b)))
             else:
                 l,r=y[3];pending.extend(((a,r),(a,l)))
+
+
+class PagedNodes:
+    """Fixed records preserve the same conservative tree under a small RAM cap."""
+    def __init__(self,search):
+        import struct
+        from collections import OrderedDict
+        from .scratch_space import file
+        self.stream=search.stack.enter_context(file(prefix='stash-body-tree-'))
+        self.header=struct.Struct('<qqddqq')
+        self.record=self.header.size+4096*8
+        self.count=0;self.cache=OrderedDict();self.stats=search.stats
+    def __len__(self):return self.count
+    def append(self,node):
+        begin,end,(center,norm,radius),children=node
+        self.stream.seek(self.count*self.record)
+        self.stream.write(self.header.pack(begin,end,norm,radius,*(children or (-1,-1))))
+        self.stream.write(np.asarray(center,dtype='<f8').tobytes())
+        self.count+=1
+        self.stats['centroid_tree_disk_bytes']=self.count*self.record
+    def __getitem__(self,index):
+        if index in self.cache:
+            self.cache.move_to_end(index);return self.cache[index]
+        self.stream.seek(index*self.record)
+        data=self.stream.read(self.record)
+        if len(data)!=self.record:raise ValueError('Incomplete centroid tree node.')
+        begin,end,norm,radius,left,right=self.header.unpack_from(data)
+        value=(begin,end,(np.frombuffer(data,dtype='<f8',offset=self.header.size),norm,radius),
+               () if left<0 else (left,right))
+        self.cache[index]=value
+        if len(self.cache)>4:self.cache.popitem(last=False)
+        return value

@@ -93,6 +93,7 @@ _GROUPS = (
     ('portraits.source', 'portraits', 'kind=source ffmpeg time_offsets timeout_seconds max_video_mb=max_video_bytes'),
     ('portraits.output', 'portraits', 'jpeg_quality'),
 
+    ('execution', 'execution', 'host_memory_mb=host_memory_bytes'),
     ('execution.models', 'models', 'directory download_missing'),
     ('execution.models', 'execution', 'verified_cache_mb=model_bytes_cache_bytes'),
     ('execution.gpu', 'models', 'device'),
