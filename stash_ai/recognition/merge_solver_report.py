@@ -123,6 +123,10 @@ def condition_examples(conditions):
             example['scene_count'] = len(row['scene_support'])
         if isinstance(row.get('core_support'), dict):
             example['strongest_core_support'] = max(row['core_support'].values(), default=0)
+        if row.get('scene_core_deficits'):
+            deficits = row['scene_core_deficits']
+            example['scene_core_deficit_count'] = len(deficits)
+            example['scene_core_deficits'] = dict(list(deficits.items())[:4])
         examples.append(example)
     return examples
 
@@ -145,6 +149,8 @@ class SetHistory:
                      'largest_complete_performers complete_components fragments assigned observations missing withheld '
                      'required_scenes covered_scenes set_shared_coverage fully_merged identity_fully_merged')
         row['construction'] = fields(construction, 'merged core_support core_required')
+        if 'scene_core_deficits' in group:
+            row['scene_core_deficit_count'] = len(group['scene_core_deficits'])
         row['observed_blockers'] = construction.get('observed_blockers', [])
         signature = digest(row)
         if signature not in self.state_ids:

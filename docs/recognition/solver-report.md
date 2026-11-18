@@ -149,7 +149,7 @@ runs no trials, exports no YAML, and exits 2. Plain `--simulate`, evaluation and
 threshold tuning retain their requirement that the whole requested selection be
 compatible; their error now identifies the affected scenes and reasons.
 
-The default **`--goal-policy identity`** (version 3) treats each set as one declared
+The default **`--goal-policy identity`** (version 4) treats each set as one declared
 person and previous memberships as noisy fragments. It preserves that person's
 appearances in the set's original scenes and rewards consolidation, without
 joining different sets' substantial core evidence. A weak fragment may disappear
@@ -181,9 +181,20 @@ Goals freeze evidence roles, independent units and thresholds **before any trial
   soft overlap cannot establish scene coverage for either set.
 - Full consolidation requires **one destination** covering every original scene
   and retaining `max(min(2,n), n-max(1,floor(0.2*n)))` of the **set's** `n` frozen
-  core units. Thus 1/1, 2/2, 2/3, 4/5 or 8/10 suffice. Scene coverage alone cannot
-  certify two substantial core fragments as merged. Raising trial admission
-  thresholds cannot remove evidence from the frozen goal.
+  core units. The same destination must also meet this quorum separately in
+  every scene with at least two frozen core units. Thus 1/1, 2/2, 2/3, 4/5 or 8/10
+  suffice, applied globally and in each protected scene. A large scene cannot
+  hide an unmerged smaller scene: 100 core units joined from one scene plus 1/5
+  from another is partial success, even though 101/105 passes the pooled quorum.
+  Soft-only scenes still need only one independent membership link. Raising
+  trial admission thresholds cannot remove evidence from the frozen goal.
+  `scene_core_required`, `scene_core_support`, and `scene_core_deficits` explain
+  the per-scene result; deficits are measured against `set_target`. Compact
+  reports retain the deficit count and up to four examples in unmet conditions.
+  Search prioritizes off-target evidence from these scenes even when the pooled
+  quorum and scene coverage are already satisfied.
+  Version 3 checkpoints must be restarted so earlier false successes are not
+  reused under the corrected policy.
 - Soft units retained in any destination of the same set are not lost. Missing,
   withheld, ambiguous or foreign-set units contribute to set-level soft loss.
   The allowance `min(n, max(3, floor(0.2*n)))` now applies to pooled soft units and

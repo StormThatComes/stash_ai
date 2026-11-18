@@ -6,7 +6,7 @@ receives these goals; only the offline evaluator and proposal diagnostics do.
 from collections import Counter, defaultdict
 from math import floor
 
-POLICY = dict(name='identity', version=3, preservation='set_scene_coverage', core_outlier_fraction=.2,
+POLICY = dict(name='identity', version=4, preservation='set_scene_coverage', core_outlier_fraction=.2,
               minimum_core_outlier_allowance=1, minimum_core_support=2,
               soft_loss_fraction=.2, minimum_soft_loss_allowance=3,
               protected_scene_support=2)
@@ -164,7 +164,8 @@ def unmet(status):
         if not group['identity_fully_merged']:
             result.append(dict(reason='incomplete_identity_set', set=group['index'],
                                core_required=group['set_core_required'],
-                               core_support=group['set_core_destinations'], scene_support=group['scene_support']))
+                               core_support=group['set_core_destinations'], scene_support=group['scene_support'],
+                               target=group['set_target'], scene_core_deficits=group['scene_core_deficits']))
     result.extend(dict(reason='cross_set_merge', **c) for c in status['conflicts'])
     return result
 
