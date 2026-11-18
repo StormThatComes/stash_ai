@@ -197,8 +197,8 @@ def test_invalid_settings_are_rejected(key, value):
         validate(data)
 
 
-def test_deduplication_requires_pmpose():
+def test_deduplication_requires_top_down_pose():
     data = defaults()
     data['sapiensid']['pose']['deduplication']['enabled'] = True
-    with pytest.raises(ValueError, match='requires pose.backend: pmpose'):
+    with pytest.raises(ValueError, match='requires a top-down COCO17 pose backend'):
         validate(data)

@@ -149,6 +149,8 @@ HELP = {
     'matching.face.evidence': 'Independent evidence accounting; reducing duplicate votes never merges people.',
     'matching.face.evidence.near_duplicate_pixel_rms': 'Maximum RGB thumbnail RMS for near-identical same-scene evidence; 0 disables (0-16). Requires matching geometry and embeddings.',
     'matching.face.evidence.near_duplicate_similarity': 'Minimum cosine similarity to collapse near-identical evidence votes (0.9-1).',
+    'pose.deduplication.contact_min_iou': 'Minimum box IoU for counterfactual copied-pose recovery (0-1); separate head/torso evidence is checked first.',
+    'pose.deduplication.contact_max_iou': 'Shared upper IoU for contact reserves and copied-pose recovery (0-1; above contact_min_iou).',
     'matching.face.views.context_view_enrichment': 'Add views after 2+ contextual cues pass strict-core checks; needs anchor_view_matching.',
     'matching.face.views.corroborated_view_enrichment': 'Recover alternate views corroborated by independent scenes and rooted views; one generation only.',
     'matching.face.views.adaptive_view_witnesses': "Grow each view's supporting reference set as independent evidence increases.",

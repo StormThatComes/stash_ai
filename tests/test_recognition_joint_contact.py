@@ -30,3 +30,15 @@ def test_thin_mask_has_more_boundary_uncertainty():
     solid=np.ones((20,20),bool)
     thin=np.zeros_like(solid); thin[:,9:11]=True
     assert boundary_fraction(thin)>boundary_fraction(solid)
+
+
+def test_limb_ownership_is_invariant_to_unequal_box_order():
+    original=np.full((2,17,2),-1.); confidence=np.zeros((2,17))
+    original[:,9]=[[40,40],[44,40]]; original[:,7]=[[10,10],[70,10]]; confidence[:,9]=.9
+    boxes=[[0,0,200,200],[0,0,50,50]]; outputs=[]
+    for order in ([0,1],[1,0]):
+        xy=original[order].copy(); scores=confidence[order].copy()
+        prob=dict(presence=scores.copy(),visibility=scores.copy()); records=[{},{}]
+        settle((xy,scores,prob),[boxes[i] for i in order],records,dict(min_keypoint_score=.5))
+        outputs.append(xy[np.argsort(order)])
+    np.testing.assert_array_equal(*outputs)

@@ -16,7 +16,8 @@ def detector(config):
     p=config.data['sapiensid']['pose'];model=p['detector']
     reserve = p['backend'] == 'pmpose' and p['deduplication']['enabled']
     return ['person-detector-contact-reserve-v3' if reserve else 'person-detector-v1',contract(model) if model!='yolo' else [p['sha256'] or POSE_SHA256,POSE_INFERENCE],
-            {k:p[k] for k in ('score_threshold','nms_threshold','max_people_per_frame')},
+            dict({k:p[k] for k in ('score_threshold','nms_threshold','max_people_per_frame')},
+                 **({'contact_max_iou':p['deduplication']['contact_max_iou']} if reserve else {})),
             p['backend']=='yolo',config.data['models']['device'],config.data['execution']['rfdetr_precision']]
 
 
@@ -44,7 +45,10 @@ def pose(config):
         if active:model['inference_precision']=active
     if backend != 'pmpose' and p.get('refinement',{}).get('enabled'):
         from .pose_refinement_config import contract as mask_contract
-        model = [model, mask_contract(p['refinement']), 'confidence-proxy-mask-v1']
+        model = [model, mask_contract(p['refinement']), 'confidence-proxy-mask-v2']
+    if backend!='pmpose' and p.get('deduplication',{}).get('enabled'):
+        from .pose_deduplication_config import contract
+        model=[model,contract(p['deduplication'])]
     return ['pose-estimator-v1',model,config.data['models']['device'],
             config.data['execution']['vitpose_precision'] if backend=='vitpose_plus_large' else 'fp32']
 

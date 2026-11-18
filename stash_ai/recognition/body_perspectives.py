@@ -14,8 +14,12 @@ def frame_signature(image):
 def orientation_measurement(person):
     points = person['keypoints']
     visibility = person.get('keypoint_visibility')
+    confidence = person.get('keypoint_scores')
+    def strength(i):
+        return min(visibility[i] if visibility is not None else 1.,
+                   confidence[i] if confidence is not None else 1.)
     def visible(i):
-        return min(points[i]) >= 0 and (visibility is None or visibility[i] >= .5)
+        return min(points[i]) >= 0 and strength(i)>=.5
     visible_torso = [i for i in (5,6,11,12) if visible(i)]
     evidence = dict(label='unknown', visible_torso=visible_torso, confidence=0.)
     if len(visible_torso)==3 and not all(visible(i) for i in (1,2)):
@@ -49,7 +53,7 @@ def orientation_measurement(person):
         label = 'unknown' if all(visible(i) for i in (1,2)) else 'back'
         if label=='unknown':
             evidence.update(possible='back', conflict='predicted_eyes')
-    confidence = min((visibility[i] if visibility is not None else 1.) for i in visible_torso)
+    confidence = min(strength(i) for i in visible_torso)
     evidence.update(label=label,confidence=float(confidence) if label!='unknown' else 0.)
     return evidence
 

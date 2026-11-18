@@ -34,3 +34,26 @@ def test_maskless_ambiguous_wrist_uses_distinct_second_peak_or_abstains():
             np.testing.assert_allclose(out[0][0,9],[22,55])
         else:
             assert 9 in removed and out[1][0,9]==0
+
+
+def test_contact_attempts_only_charge_actual_model_inference():
+    from PIL import Image
+    from stash_ai.recognition.contact_pose import recover_pair
+    class Pose:
+        calls=0
+        def predict_many(self,frames):
+            self.calls+=1
+            return [prediction([pose_points(),pose_points()])]
+    model=Pose()
+    raw=prediction([pose_points()]*3)
+    with Image.new('RGB',(120,120)) as image:
+        recover_pair(model,image,[[0,0,100,100],[3,0,103,100],[10,0,110,100]],raw,{},
+                     dict(defaults(),max_contact_attempts=2))
+    assert model.calls==2
+
+
+def test_generic_low_confidence_torso_has_no_certain_orientation():
+    from stash_ai.recognition.body_perspectives import orientation_measurement
+    xy=pose_points(); xy[[5,6,11,12]]=[[70,20],[30,20],[65,80],[35,80]]
+    value=orientation_measurement(dict(keypoints=xy.tolist(),keypoint_scores=[.21]*17,keypoint_visibility_measured=False))
+    assert value['label']=='unknown' and value['confidence']==0
