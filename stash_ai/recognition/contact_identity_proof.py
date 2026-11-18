@@ -35,3 +35,21 @@ def birth_ready(group,settings,independent):
     if not any(crowded_link(quality(r)) for r in group):return True
     clean=[r for r in group if not crowded_link(quality(r)) and not quality(r).get('query_only')]
     return len(independent(clean,settings))>=settings.get('contact_birth_support',2)
+
+
+def rebind(graph, rows):
+    """All graph consumers must see corrected ownership, without changing edges."""
+    if graph is None:
+        return None
+    current = {row['id']:row for row in rows}
+    return [([current[row['id']] for row in chain], strengths) for chain,strengths in graph]
+
+
+def pending_proof(group, settings, independent):
+    from .config import digest
+    clean = [r for r in group if not crowded_link(json.loads(r['quality']).get('quality',{}))
+             and not json.loads(r['quality']).get('quality',{}).get('query_only')]
+    witnesses = sorted(r['id'] for r in independent(clean,settings))
+    return dict(required_clean_support=settings.get('contact_birth_support',2),
+                clean_witness_ids=witnesses, evidence_generation=digest([
+                    (r['id'],r['quality'],r.get('face_person')) for r in sorted(group,key=lambda r:r['id'])]))

@@ -89,8 +89,8 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
         hidden = []
         for cue in range(start+1,start+max_cues+1):
             people = by_cue.get(cue,())
-            if len(first)==2 and len(people)==1 and cue in occluded and len(hidden)<max_hidden:
-                hidden.append((len(pairs)-1,people[0]))
+            if 0<len(people)<len(first) and cue in occluded and len(hidden)<max_hidden:
+                hidden.append((len(pairs)-1,people))
                 continue
             if len(people)!=len(first):
                 break
@@ -106,32 +106,43 @@ def crossings(by_cue, roots, decisions, transition, margin, *, occluded=(), raw=
                 ends = _window(pairs,owners,roots,decisions,transition,raw,margin,claims,
                                complementary=complementary)
                 if ends:
-                    for position,row in hidden:
+                    for position,members in hidden:
                         before = ends[max(i for i in ends if i<=position)]
                         after = ends[min(i for i in ends if i>position)]
-                        decision = decisions[row['id']]
-                        if row.get('face_person') or decision.get('track_blocker',{}).get('reason')=='different_face_root':
-                            continue
-                        choices = []
-                        if visible_single and visible_single(row):
-                            for owner,left,right in zip(owners,before,after):
-                                edges = [transition(left,row),transition(row,right)]
-                                if all(value is not None for value in edges):
-                                    choices.append((min(edges),owner,left,right))
-                        if choices and raw is not None:
-                            score,owner,left,right = max(choices,key=lambda choice:choice[0])
-                            rivals = []
-                            for person,a,b in zip(owners,before,after):
-                                if person!=owner:
-                                    values = raw(a,row),raw(row,b)
-                                    if None not in values:
-                                        rivals.append(min(values))
-                            if not rivals or score-max(rivals)>=margin:
-                                index = owners.index(owner)
-                                claims.setdefault(row['id'],{})[owner] = owner,ends[0][index],ends[len(pairs)-1][index],score
-                                continue
-                        decision.update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
-                                        track_blocker=dict(reason='unresolved_partner',cue=row.get('cue',cue)))
+                        _partial_cue(members,owners,before,after,ends[0],ends[len(pairs)-1],
+                                     decisions,transition,raw,visible_single,margin,claims)
             if complete_end:
                 break
     return {oid:next(iter(options.values())) for oid,options in claims.items() if len(options)==1}
+
+
+def _partial_cue(members,owners,before,after,first,last,decisions,transition,raw,visible,margin,claims):
+    """Visible lanes compete jointly; an absent lane never supplies a witness."""
+    from .joint_claims import solve
+    fixed = {decisions[r['id']].get('person') for r in members if r.get('face_person')}
+    # A measured entrant starts another episode, rather than taking an absent lane.
+    if fixed - {None,*owners}:
+        return
+    queries = [r for r in members if not r.get('face_person') and
+               decisions[r['id']].get('track_blocker',{}).get('reason')!='different_face_root']
+    domains=[]
+    for row in queries:
+        options=[]
+        if raw is not None and visible and visible(row):
+            for i,(owner,a,b) in enumerate(zip(owners,before,after)):
+                values=transition(a,row),transition(row,b)
+                if owner in fixed or None in values:
+                    continue
+                score=min(values)
+                rivals=[min(v) for j,(x,y) in enumerate(zip(before,after))
+                        if j!=i and None not in (v:=(raw(x,row),raw(row,y)))]
+                if not rivals or score-max(rivals)>=margin:
+                    options.append((owner,score,i))
+        domains.append(options)
+    solution=solve(domains,lambda i,a,j,b:a[0]!=b[0],max(margin,1e-12)*len(domains))
+    for row in queries:
+        decisions[row['id']].update(person=None,status='withheld',role='auxiliary',reason='unresolved_partner',
+            track_blocker=dict(reason='unresolved_partner',cue=row.get('cue')))
+    if solution:
+        for row,(owner,score,index) in zip(queries,solution):
+            claims.setdefault(row['id'],{})[owner]=owner,first[index],last[index],score
