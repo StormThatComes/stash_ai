@@ -1,4 +1,8 @@
-"""Reversible raw-evidence review inside the disposable recognition replay."""
+"""Reversible raw-evidence review inside the disposable recognition replay.
+
+Read through the observations view to retain shared embeddings, but write only
+to main.observations: quality metadata is private and shared vectors stay read-only.
+"""
 import json
 import numpy as np
 from .database import encoded
@@ -64,7 +68,7 @@ def apply(db, selected, config):
             collapse(db,rows,grouping)
         if grouping.get('revalidate_face_anchors'):
             for oid,proof in review(rows,grouping).items():
-                db.execute("UPDATE observations SET quality=json_set(quality,'$.query_only',json('true'),"
+                db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
                     "'$.anchor_review',json(?)) WHERE id=?",(encoded(proof),oid))
 
 
@@ -91,7 +95,7 @@ def collapse(db, rows, grouping):
             for target,record in ((row,q),(representative,other)):
                 record['evidence_independence_unit']=unit
                 target['quality']=encoded(record)
-                db.execute('UPDATE observations SET quality=? WHERE id=?',(target['quality'],target['id']))
+                db.execute('UPDATE main.observations SET quality=? WHERE id=?',(target['quality'],target['id']))
             break
         else:
             representatives.append((row,q,value,pixels,geometry))
