@@ -21,6 +21,7 @@ class PersonCollector:
         self.pose_bytes = 0
         self.resume_rows=None
         self.resume_bytes=self.resume_cues=0
+        self.context_source = None
 
     @cached_property
     def person_contract(self):
@@ -62,6 +63,7 @@ class PersonCollector:
 
     @pipeline_stage('body_enrichment')
     def enrich(self, db, scan, source):
+        self.context_source = source
         if not self.config.data['sapiensid']['enabled']:
             return 0
         from .body_observations import enabled,repair_projections
@@ -76,6 +78,8 @@ class PersonCollector:
         from .body_perspectives import frame_signature
         saved_shots = next(iter(db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,))),None)
         shots = json.loads(saved_shots[0]) if saved_shots else []
+        saved_motion = next(iter(db.execute('SELECT value FROM metadata WHERE key=?', ('cue-continuity:'+scan,))),None)
+        motion = saved_motion[0] if saved_motion else ''
         # Old face scans have no durable cue-to-shot map. During their first
         # body backfill, traverse the VTT once but infer only missing poses.
         reconstruct = enabled(self.config) and (not shots or shots[0][0]!=0 or shots[0][1] is None)
@@ -98,7 +102,7 @@ class PersonCollector:
                         with image:
                             if reconstruct:
                                 from .perspective_shots import advance
-                                shot = advance(image,index,shot)
+                                shot = advance(image,index,shot,evidence=True)
                                 image._recognition_cue_signature = shot
                                 if not shots or shots[-1][1]!=shot[1]:
                                     shots.append([index,shot[1]])
@@ -112,7 +116,8 @@ class PersonCollector:
                                         lookup[row['cue']].append(row)
                                 which = bisect_right(starts,index)-1
                                 if which>=0:
-                                    image._recognition_cue_signature = (index,shots[which][1],frame_signature(image))
+                                    image._recognition_cue_signature = (index,shots[which][1],frame_signature(image),None,
+                                        index<len(motion) and motion[index]=='1')
                                 rows=lookup[index]
                                 self.collect_records(db,scan,index,image,rows,seconds=cue.start,defer=False,fresh=False)
                                 progress.advance()
@@ -182,6 +187,8 @@ class PersonCollector:
         try:
             if self.config.data['sapiensid']['enabled']:
                 self._load()
+                if self.context_source is not None:
+                    image._recognition_pose_source = (self.context_source, self.model)
                 if callable(getattr(self.model, 'detect_many', None)):
                     size = image.width*image.height*3+4096
                     limit = self.config.data['execution']['scan_queue_bytes']//4
@@ -192,6 +199,8 @@ class PersonCollector:
                         lease.image._recognition_scan = scan
                         if lease.image is not image and hasattr(image,'_recognition_cue_signature'):
                             lease.image._recognition_cue_signature = image._recognition_cue_signature
+                        if hasattr(image,'_recognition_pose_source'):
+                            lease.image._recognition_pose_source = image._recognition_pose_source
                         self.pose_frames.append((db, scan, index, lease.image, rows, seconds, fresh, lease))
                         self.pose_bytes += size
                         if len(self.pose_frames) >= self.config.data['sapiensid']['pose']['batch_size']:

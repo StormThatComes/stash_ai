@@ -212,7 +212,7 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen, *, gra
                     root_id, position, floor = chain[i]['id'], i, 1.
                 elif root_id is not None:
                     floor = min(floor, strengths[i-1 if step==1 else i])
-                    routes[i] = (floor, -abs(i-position), root_id)
+                    routes[i] = (floor, -abs(chain[i]['cue']-chain[position]['cue']), root_id)
         contact = {j for j,r in enumerate(chain) if decisions.get(r['id'],{}).get('reason')=='unconfirmed_contact_face'}
         indices = {r['id']:j for j,r in enumerate(chain)}
         for i,row in enumerate(chain):
@@ -222,7 +222,7 @@ def plan(record, rows, seeds, decisions, settings, scores, guard, frozen, *, gra
                 continue
             bracketed = i in left_routes and i in right_routes
             routes = [bank[i] for bank in (left_routes,right_routes)
-                      if i in bank and (bank[i][1]>=-12 or bracketed)]
+                      if i in bank and (bank[i][1]>=-settings.get('contact_max_cues',12) or bracketed)]
             if contact and not bracketed:
                 routes = [route for route in routes if not any(
                     min(i,indices[route[2]])<j<max(i,indices[route[2]]) for j in contact)]

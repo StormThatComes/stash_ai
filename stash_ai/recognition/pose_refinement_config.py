@@ -71,7 +71,7 @@ def contract(settings):
     if settings.get('bridge_radius_pixels') and settings.get('max_bridge_lobe_fraction'):
         active.update(bridge_radius_pixels=settings['bridge_radius_pixels'],
                       max_bridge_lobe_fraction=settings['max_bridge_lobe_fraction'])
-    return dict(version=('pmpose-sam-pose2seg-refinement-v17' if settings.get('recover_prompt_points')
+    return dict(version=('pmpose-sam-pose2seg-refinement-v18' if settings.get('recover_prompt_points')
                          else 'pmpose-sam-pose2seg-refinement-v14'),
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,

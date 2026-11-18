@@ -104,7 +104,9 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
         seconds = rows[0]['seconds']
     else:
         import numpy as np
-        from .perspective_shots import change
+        from .cue_continuity import continuous
+        saved = db.execute('SELECT value FROM metadata WHERE key=?',('cue-continuity:'+scan,)).fetchone()
+        motion = saved[0] if saved else ''
         expected = contract(config)
         signature = np.frombuffer(bytes.fromhex(frame_signature(image)),dtype='uint8').astype(float).reshape(-1,3)
         bounds = []
@@ -116,7 +118,9 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
                 if not q.get('frame_signature') or q.get('view_shot')!=shot:
                     return
                 other = np.frombuffer(bytes.fromhex(q['frame_signature']),dtype='uint8').astype(float).reshape(-1,3)
-                if change(other,signature,True)!='continuous':
+                transition = max(cue,side)
+                if not continuous(q['frame_signature'],frame_signature(image),
+                        verified=transition<len(motion) and motion[transition]=='1'):
                     return
                 person = json.loads(geometry)
                 people.append(person)
@@ -126,7 +130,9 @@ def _retry(model,db,config,scan,cue,image,rows,shot,support,*,seconds=None):
     faces = list(db.execute('SELECT id,geometry,rejected FROM observations WHERE scan=? AND cue=? ORDER BY id',
                             (scan,cue)))
     detections = [checked_detection(json.loads(r['geometry'])) for r in faces]
-    image._recognition_cue_signature = cue,shot,frame_signature(image)
+    saved = db.execute('SELECT value FROM metadata WHERE key=?',('cue-continuity:'+scan,)).fetchone()
+    motion = saved[0] if saved else ''
+    image._recognition_cue_signature = cue,shot,frame_signature(image),None,cue<len(motion) and motion[cue]=='1'
     image._recognition_crowd = scan,cue,shot,seconds,support
     recovered = retry_people(model,image,detections,[dict(bounds=box)])
     if len(recovered)!=2 or not all(p.get('crowded_box_retry') for p in recovered):

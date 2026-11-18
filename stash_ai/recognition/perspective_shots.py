@@ -64,6 +64,9 @@ def boundaries(by_cue, geometry):
         if previous is not None:
             before, earlier = previous
             kind = change(earlier,signature,cue==before+1)
+            quality = geometry[by_cue[cue][0]['id']][0]
+            if cue==before+1 and quality.get('transition_verified'):
+                kind = 'continuous'
             if kind == 'cut':
                 shot += 1
         captured = geometry[by_cue[cue][0]['id']][0].get('view_shot')
