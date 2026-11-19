@@ -726,3 +726,64 @@ Set `pose.refinement.masked_identity_crop: true` with refinement enabled to test
 neutral background pixels for separated, overlapping people. The identity-input
 contract changes and affected body inputs must be recollected. Stored portrait
 crops continue to use the source image.
+
+## Alternative instance mask backends
+
+`pose.refinement.backend` selects the mask model independently of the person
+box detector and pose estimator. The default remains `sam_pose2seg`.
+
+| Backend | Model | Download / requirements |
+| --- | --- | --- |
+| `sam3` | SAM 3 visual segmentation (Transformers `Sam3TrackerModel`) | Pinned `facebook/sam3` safetensors and processor; Transformers >=5.19. Requires approved Hugging Face access and `hf auth login` or `HF_TOKEN`. |
+| `hq_sam2_large` | HQ-SAM 2 Hiera Large | Public checkpoint and SHA256-pinned inference source subset, downloaded automatically. No extra SAM package, Git installation or compiled CUDA extension required. |
+| `rfdetr_seg_large` | RF-DETR-Seg Large | Public SHA256-pinned checkpoint; uses the existing rfdetr==1.11.2 runtime. |
+
+Merge into an existing v2 configuration:
+
+```yaml
+pose:
+  refinement:
+    enabled: true
+    backend: hq_sam2_large
+    mode: all
+```
+
+Install either `requirements-cpu.txt` or `requirements-gpu.txt`. Assets download
+on first inference into `execution.models.directory/<backend>/<revision>`;
+`pose.refinement.directory` overrides that directory. Existing assets are
+verified before loading. `execution.models.download_missing: false` prevents
+all downloads and requires the complete assets locally. SAM 3 access must be
+approved at https://huggingface.co/facebook/sam3 before its automatic download
+can succeed. Credentials remain in the Hugging Face login/token environment,
+never in recognition YAML. No model or dependency installation occurs merely
+by loading YAML or opening the editor.
+
+SAM 3 uses positive/negative visual points on individual VTT images, without
+propagating video state across cues. HQ-SAM 2 uses the same batched image/prompt
+path as SAM-pose2seg. SAM 3 and RF-DETR-Seg process one image at a time and reuse
+its features/instance masks for all people and retries. Their image batch size
+is one regardless of `execution.gpu.sam_frame_batch_size`.
+
+RF-DETR produces independent person instances, then selects up to three masks
+covering all positive prompts and none of the negative prompts. It never unions
+instances to cover a pose. No compatible instance returns an empty mask and
+is rejected by the shared admission checks. Its `min_mask_score` is a **person
+detection confidence**, not SAM's predicted mask IoU; recalibrate this and
+`min_recovery_mask_score` when comparing models. Changing prompts can select a
+different RF-DETR instance but does not redraw its boundary.
+
+All backends retain common cleanup, foreign-core checks, competing-mask checks,
+masked pose passes, body quality measurements, audit panels and Inspect Scene
+mask retention. They work in Tune Detection using the same backend selector.
+Switching backend invalidates body evidence; run recognition again before
+comparing identities or using the solver. Unchanged SAM-pose2seg settings keep
+their historical inference contract. These alternatives are experimental until
+compared on representative overlapping VTT people; a successful model smoke
+test verifies integration, not segmentation accuracy.
+
+For an opt-in pretrained CPU integration smoke (including downloads), set
+`STASH_AI_MASK_BACKEND_SMOKE` to one of the three new backend names and run
+`python -m pytest -q tests/test_recognition_mask_backends_smoke.py`.
+`STASH_AI_MASK_DIRECTORY` can point to existing assets. SAM 3 still requires
+approved model access. The test checks loading, masks, alternatives and batched
+API geometry on a synthetic image; use real audit cues for accuracy comparisons.

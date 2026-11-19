@@ -69,10 +69,10 @@ class _Sources(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 @contextmanager
-def source_imports(sources):
+def source_imports(sources, namespace='bboxmaskpose'):
     loader = _Sources(sources)
     for name, module in tuple(sys.modules.items()):
-        if name == 'bboxmaskpose' or name.startswith('bboxmaskpose.'):
+        if name == namespace or name.startswith(namespace + '.'):
             if (name not in loader.modules and name not in loader.packages or
                     getattr(module, '__stash_sam_source__', None) != loader.fingerprint(name)):
                 raise RuntimeError('SAM-pose2seg cannot reuse foreign Python package ' + name)
@@ -85,6 +85,10 @@ def source_imports(sources):
 
 @pipeline_stage('sam_model_load')
 def load(config, device):
+    backend = config.data['sapiensid']['pose']['refinement'].get('backend', 'sam_pose2seg')
+    if backend != 'sam_pose2seg':
+        from .mask_backends import load as load_backend
+        return load_backend(config, device, backend)
     from .inference_precision import validate
     validate(device,config.data['execution']['sam_precision'])
     try:
