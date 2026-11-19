@@ -68,8 +68,8 @@ class RecognitionParser(argparse.ArgumentParser):
                 self.error('Outside impact limits must be nonnegative.')
             if any(v is not None for v in outside) and not result.solve:
                 self.error('Outside impact limits require --solve.')
-            if result.compare_scene_strategies and not result.solver_validation:
-                self.error('--compare-scene-strategies requires --solver-validation')
+            if result.compare_scene_strategies and not result.solve:
+                self.error('--compare-scene-strategies requires --solve')
             if result.physical_pair and result.goal_policy != 'identity-physical':
                 self.error('--physical-pair requires --goal-policy identity-physical')
             if result.solver_validation and not result.solve:
@@ -329,7 +329,7 @@ def parser():
     merge_report.add_argument('--solver-validation', type=Path, help='After choosing the winner, replay a labelled holdout manifest and up to three omitted cue series.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--compare-scene-strategies',action='store_true',
-        help='Screen tracklet, endpoint and scene-support families on training goals and compare them on the labelled holdout.')
+        help='Screen tracklet, endpoint and scene-support families on training goals; optionally validate on a labelled holdout.')
     merge_report.add_argument('--include-performer-observation', action='append', type=performer_observation,
         metavar='PERFORMER_ID:OBSERVATION_ID', help='Require this retained physical observation to join a goal performer. Repeatable.')
     merge_report.add_argument('--include-performer-track', action='append', type=performer_observation,

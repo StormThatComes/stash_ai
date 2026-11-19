@@ -171,8 +171,12 @@ class BeamSearch:
         self.restarts = 0
         self.restart_pending = None
         self.restart_executed = 0
+        self.initial_mechanisms = {}
+        self.mechanism_due = []
+        self.mechanism_parents = set()
 
-    def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=(), phase=None):
+    def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=(), phase=None,
+                mechanisms=None, admissible=True):
         # Patch-size tie-breaks must not turn a plateau into endless "progress".
         improved = self.best_quality is None or rank[:-2] > self.best_quality
         gain = quality_gain(self.best_quality, rank[:-2])
@@ -204,17 +208,36 @@ class BeamSearch:
                 stat['gain'] += gain
                 stat['information'] += information
                 stat['recent'] = (stat['recent']+[gain])[-4:]
-        candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers))
+        milestones = {r['key']: 3 if r['supported'] else 2 if r['rooted'] else 1 if r['admitted'] else 0
+                      for r in (mechanisms or {}).get('cohorts', ())}
+        if name == 'baseline':
+            self.initial_mechanisms = milestones
+        progress = tuple(sorted((key, value) for key, value in milestones.items()
+                                if key in self.initial_mechanisms and value > self.initial_mechanisms[key])) if admissible else ()
+        candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers), mechanisms=progress)
         pool = dict(self.beam, **{name: candidate})
         ordered = sorted(pool, key=lambda n: pool[n]['rank'], reverse=True)
         self.incumbent = ordered[0]
         if improved and self.incumbent != 'baseline':
             self.focus_due = True
-        selected, signatures = [], set()
+        selected, signatures = [ordered[0]], set()
+        # Reserve at most two existing beam slots for useful construction
+        # milestones. They cannot replace the winner or change its objective.
+        construction = sorted((n for n in ordered if pool[n].get('mechanisms')),
+                              key=lambda n:(max(v for _,v in pool[n]['mechanisms']),pool[n]['rank']), reverse=True)
+        for n in construction:
+            signature = pool[n]['mechanisms']
+            if n not in selected and signature not in signatures:
+                selected.append(n)
+                signatures.add(signature)
+            if len(selected) >= min(3, self.width):
+                break
         # Prefer distinct partitions; reserve two places for distinct parameter
         # routes on a plateau (e.g. face vs body), without retaining every trial.
         for key, limit in ((lambda c: c['outcome'], max(1, self.width-2)),
                            (lambda c: (c['outcome'], c['blockers'], parameter_signature(c['changes'],self.config)), self.width)):
+            if len(selected) >= limit:
+                continue
             signatures = {key(pool[n]) for n in selected}
             for n in ordered:
                 signature = key(pool[n])
@@ -225,6 +248,11 @@ class BeamSearch:
                 if len(selected) >= limit:
                     break
         self.beam = {n: pool[n] for n in selected[:self.width]}
+        if name in self.beam and progress and name != self.incumbent:
+            previous = {p.get('mechanisms', ()) for n,p in pool.items() if n != name}
+            if progress not in previous:
+                self.mechanism_due.append(name)
+        self.mechanism_due = [n for n in self.mechanism_due if n in self.beam]
         self.peak_beam = max(self.peak_beam, len(self.beam))
         if name in self.beam:
             self.admitted += 1
@@ -308,6 +336,8 @@ class BeamSearch:
         # otherwise alias with the modulo schedule and can starve the winner.
         baseline_first = (self.normal_completed - self.last_root >= 3 or
             not self.focus_due and self.explored < BASELINE_WARMUP and self.incumbent == 'baseline')
+        if self.mechanism_due and self.normal_completed - self.last_root < 3:
+            baseline_first = False
         for root in (baseline_first, not baseline_first):
             for family in self._family_order():
                 if root:
@@ -327,6 +357,7 @@ class BeamSearch:
                         others = others[offset:] + others[:offset]
                     parents = (winner + others if self.focus_due or self.adaptive_completed % 2 == 0
                                else others + winner)
+                    parents = list(dict.fromkeys(self.mechanism_due + parents))
                     for n in parents:
                         key = n, family
                         if key not in self.streams:
@@ -346,6 +377,10 @@ class BeamSearch:
         if phase == 'adaptive':
             self.adaptive_completed += 1
             self.focus_due = False
+            selected = parent if parent is not None else self.last_parent
+            if selected in self.mechanism_due:
+                self.mechanism_due.remove(selected)
+                self.mechanism_parents.add(selected)
             if (parent if parent is not None else self.last_parent) != self.incumbent:
                 self.parent_turn += 1
         if phase == 'baseline_exploration':

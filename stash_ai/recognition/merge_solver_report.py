@@ -74,6 +74,12 @@ def feedback_summary(feedback, hybrid, config, changes, locations):
                     'label_probes':[dict(observation=oid,**row) for oid,row in samples[:16]]} if samples else {}),
                 query=fields(query, 'truncated truncation_reasons skipped_query_visits comparisons'),
                 targeted_truncated=targeted.get('truncated', False), examples=list(examples.values()),
+                mechanisms={**fields(feedback.get('mechanisms', {}), 'sampled truncated missing_retained coverage'),
+                    'cohorts': [fields(row, 'key set scene pose independent_support required_support minimum_similarity '
+                                      'blockers admitted rooted supported witnesses')
+                                for row in feedback.get('mechanisms', {}).get('cohorts', ())[:8]],
+                    'plans': [fields(row, 'strategy title stages cohort')
+                              for row in feedback.get('mechanisms', {}).get('plans', ())[:8]]},
                 fallback_references=feedback.get('fallback_references', 0))
 
 
@@ -215,7 +221,7 @@ def compact_document(result, config):
         evidence = {g['index']: g for g in construction.get('groups', ())}
         refs = [states.add(name, group, evidence.get(group['index'], {})) for group in status['groups']]
         item = fields(trial, 'previous_trial changes_from_previous search_family search_phase search_parent search_strategy '
-                      'best_trial best_trial_number elapsed_seconds yaml_patch outside_impact')
+                      'best_trial best_trial_number elapsed_seconds yaml_patch outside_impact search_mechanism')
         item['goal_result'] = dict(fields(status, 'fully_solved admissible disjoint strict_disjoint strict_fully_solved assignment_coverage'),
                                    set_states=refs, unmet=unmet_summary(status), construction_status=construction.get('status'))
         if status.get('positive_observations'):

@@ -26,6 +26,7 @@ def test_eight_routes_and_private_anchor_ablation(tmp_path):
         'birth_recovery',
         'anchor_influence',
         'view_bridge',
+        'view_formation',
         'local_global',
         'gap',
         'rival_control',
@@ -165,7 +166,8 @@ def test_local_global_variants_keep_global_similarity_floors(tmp_path):
         ]
     )
     route = local_global(config, report, [])
-    body_first, face_first = route['patches']
+    body_preserved, body_first, face_first = route['patches']
+    assert 'sapiensid.global_matching.enabled' not in patch_values(body_preserved)
     assert patch_values(body_first)[tracks.LOCAL + 'body_first_matching']
     assert patch_values(face_first)['sapiensid.global_matching.enabled']
     assert all('threshold' not in key for p in route['patches'] for key in patch_values(p))

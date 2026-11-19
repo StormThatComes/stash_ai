@@ -140,7 +140,7 @@ def execute(args, config):
     validation_path = getattr(args, 'solver_validation', None)
     from .body_identity import enabled as body_enabled
     compare_strategies = getattr(args,'compare_scene_strategies',False) or bool(
-        validation_path and body_enabled(config) and config.data['execution']['solver_compare_scene_strategies'])
+        args.solve and body_enabled(config) and config.data['execution']['solver_compare_scene_strategies'])
     validation_manifest = None
     excluded_scenes = ()
     if validation_path:

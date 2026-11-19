@@ -474,10 +474,14 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             boundaries = (('boundary_probe',p) for p in ordered(config,
                 boundary_probes(changes,scoped_options),source))
             interactions = (('learned_interaction', p) for p in interaction_proposals(config, changes, scoped_options, source))
-            yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,
+            mechanisms = (('mechanism_plan', dict(changes, **item['patch']))
+                          for item in source.get('mechanisms', {}).get('plans', ())
+                          if any(k.startswith(PERSON_PREFIX) for k in item['patch']) == (family == 'hybrid'))
+            yield from search.operations({'measured_blockers':directed,'mechanism_plan':mechanisms,'coordinate_probe':probes,
                                           'crossover':mixing,'boundary_probe':boundaries,'learned_interaction':interactions})
         search = BeamSearch(factories, factory, search_limit, config)
-        search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
+        search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'],
+                       mechanisms=feedback['baseline'].get('mechanisms'), admissible=summaries['baseline']['admissible'])
         tightening.observe({}, summaries['baseline']['fully_solved'])
         bidirectional = BidirectionalSearch(config, goals, search_limit, feedback['baseline'])
         bidirectional.observe('baseline', {}, summaries['baseline'], ranking('baseline'), outcomes['baseline'])
@@ -500,7 +504,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
             search.completed(phase, parent=parent)
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
-                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase)
+                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase,
+                mechanisms=feedback[name].get('mechanisms'), admissible=summaries[name]['admissible'])
             if improved:
                 normal_exhausted = False
                 search.stop_reason = None
@@ -692,6 +697,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             patches[name] = patch
             families[name] = family
             origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
+            mechanism = max((item for item in feedback.get(parent, {}).get('mechanisms', {}).get('plans', ())
+                              if strategy == 'mechanism_plan' and all(
+                                  normalized.get(k, parameter(config.data, k)) == v for k,v in item['patch'].items())),
+                            key=lambda item:len(item['patch']), default=None)
+            if mechanism:
+                origins[name]['search_mechanism'] = {k:v for k,v in mechanism.items() if k != 'patch'}
             if phase == 'targeted':
                 origins[name]['search_target'] = {k:v for k,v in target.items() if k != 'patch'}
             pending_search[name] = normalized, family, phase, parent, strategy
@@ -941,6 +952,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
                         beam_width=search.width if search else BeamSearch.width, peak_beam=search.peak_beam if search else 0,
                         beam_trials=list(search.beam) if search else [],
+                        mechanism_parents=sorted(search.mechanism_parents) if search else [],
                         pruned_trials=search.pruned if search else 0,
                         operators=search.operators if search else {}, restarts=search.restarts if search else 0,
                         stagnation_patience=search.patience if search else None,

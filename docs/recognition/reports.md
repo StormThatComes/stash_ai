@@ -1,5 +1,13 @@
 # Recognition reports and exports
 
+The merge inspector's **Build a View and test its downstream matches** scenario
+uses the same bounded formation diagnosis and proposal generator as the solver.
+It lists independent witnesses, missing admission/authority/support/cohesion
+conditions, and combined formation/attachment experiments. Its local/global
+modality scenarios also share the solver's generator and keep the loaded global
+similarity floors. These are replay hypotheses; a sampled cohort does not certify
+an emitted View or a successful merge. See [mechanism experiments](solver.md#mechanism-construction-experiments).
+
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
 - [Offline identity face export](#offline-identity-face-export)
