@@ -164,6 +164,10 @@ class DeduplicatedPMPose:
             raise ValueError('PMPose returned an invalid deduplication frame count.')
         selected_frames, selected_predictions, reports, fallbacks = [], [], [], []
         for (image, bounds), prediction in zip(frames, predictions):
+            from . import detection_phases as phases
+            if phases.active(image) is not None:
+                phases.pose(image, 'Initial keypoints (before deduplication)', bounds, prediction,
+                            labels=[f'D{i}' for i in range(len(bounds))], reset=True)
             reserves = getattr(image, '_pose_reserves', {})
             confirmed = set()
             fallback = None
@@ -174,6 +178,7 @@ class DeduplicatedPMPose:
                     owner, primary, reserve = recovered_pair
                     if reserves:
                         prediction, confirmed = recovered, {reserve}
+                        phases.pose(image, 'After contact pose recovery', bounds, prediction)
                     else:
                         # Both slots already passed NMS. Preserve the original SAM
                         # decision for both and offer the recovered pose only to a
@@ -186,6 +191,9 @@ class DeduplicatedPMPose:
             points, scores, probabilities = prediction
             selected = points[keep], scores[keep], {k: v[keep] for k, v in probabilities.items()}
             selected_bounds = [bounds[i] for i in keep]
+            if phases.active(image) is not None:
+                phases.pose(image, 'After pose deduplication', selected_bounds, selected,
+                            labels=[f'P{i} (D{source})' for i, source in enumerate(keep)], reset=True)
             selected_frames.append((image, selected_bounds))
             selected_predictions.append(selected)
             reports.append(report)
@@ -234,6 +242,7 @@ class DeduplicatedPMPose:
             removed = maskless(snapshot,slot,bounds[keep[slot]],image.size,final,self.settings)
             record['withheld_rival_joints'] = sorted(set(record.get('withheld_rival_joints', ())) | set(removed))
             record['contact_pose_recovered'] = True
+            phases.refined_pose(image, 'After contact pose fallback', final, final[3])
         for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))
         return [(*final,report) for final,report in zip(finals,reports)]

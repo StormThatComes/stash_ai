@@ -290,6 +290,7 @@ def _resolve_group(candidates, options, evidence, maximum):
 
 
 def select_masks(owner, image, bounds, points, cores, jobs, records, initial_masks, evidence, decoder=None, valid=None):
+    from . import detection_phases as phases
     settings = owner.settings
     minimum = settings['min_prompt_points']
     active = list(jobs)
@@ -385,7 +386,6 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 observer = mask_observer(image, record)
                 rank, mask, box, reason, edits = assessed[best]
                 if observer is not None:
-                    assess(variants[best], observer)
                     mask_history(image,record).append(dict(attempt=attempt,
                         positive=positive.tolist(), negative=np.asarray(negative).tolist(), chosen=best,
                         variants=[dict(score=float(item[1]), reason=assessment[3],
@@ -407,6 +407,16 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
                 record['separated'] = False
+                if observer is not None or phases.active(image) is not None:
+                    def observe(stage, pixels):
+                        if observer is not None:
+                            observer(stage, pixels)
+                        title = f'raw candidate {best}' if stage == 'raw' else 'after cleanup / validation'
+                        phases.mask(image, f'Mask attempt {attempt}: {title}', i, pixels, record,
+                                    positive=positive, negative=negative, rejected=bool(reason))
+                    # Reuse the audit observer: rejected candidates can still
+                    # have a cleaned mask even though assessment returns None.
+                    assess(variants[best], observe)
                 if reason:
                     rejected.add(i)
                     # A previously conflicting candidate still blocks its peer until the
@@ -417,6 +427,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 record['mask_boundary_fraction'] = boundary_fraction(mask)
                 pixels = record['mask_pixels'] = int(mask.sum())
                 if len(bounds) == 1:
+                    phases.mask(image, 'Selected mask for pose', i, mask, record, rejected=False)
                     yield i, box, mask, indices
                     continue
                 torso = [k for k in cores[i] if k in (5, 6, 11, 12)]
@@ -449,6 +460,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
 
     for i in conflicts:
         records[i].update(status='rejected', reason='shared_mask_pixels', mask_conflict=True, separated=False)
+    if candidates or conflicts:
+        phases.notes(image, 'Cross-person mask ownership / conflicts', records)
     for i, candidate in candidates.items():
         if not records[i]['reason']:
             x,y,r,b = candidate.extent
@@ -473,4 +486,5 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
             records[i]['separated'] = bool(peers and len(torso) >= 2
                 and inside(mask, points[i,torso]).all()
                 and all(len(cores[j]) >= 2 and not inside(mask, points[j,cores[j]]).any() for j in peers))
+            phases.mask(image, 'Selected mask after cross-person selection', i, mask, records[i], rejected=False)
             yield i, candidate.box, mask, candidate.indices

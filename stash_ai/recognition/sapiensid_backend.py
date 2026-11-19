@@ -183,6 +183,8 @@ class SapiensIDFaces(YuNetDetector):
                 selected.append(index)
                 bounds.append([left, top, right, bottom])
             parents = getattr(result, 'reserve_parents', None)
+            from . import detection_phases as phases
+            phases.boxes(image, bounds)
             image._pose_reserves = {} if parents is None else {
                 k:selected.index(int(parents[i])) for k,i in enumerate(selected) if int(parents[i]) in selected}
             if settings['pose']['backend']=='rtmo' and self.pose_refiner is not None:
@@ -204,7 +206,10 @@ class SapiensIDFaces(YuNetDetector):
                     raise ValueError('SapiensID pose detector returned malformed COCO17 geometry.')
                 points, confidences = points[selected], confidences[selected]
                 prediction = points, confidences
+            if len(prediction) <= 3:
+                phases.pose(image, 'Initial keypoints (before output filters)', bounds, prediction)
             people = self._people(bounds, [float(scores[i]) for i in selected], *prediction)
+            phases.output_people(image, people)
         if _defer is not None:
             _defer.append((image, faces, [], []))
             return faces
@@ -341,6 +346,8 @@ class SapiensIDFaces(YuNetDetector):
                 raise ValueError('Pose refiner returned an invalid frame count.')
             for (image,faces,bounds,scores),prediction in zip(deferred,predictions):
                 prepared[id(image)]=image,faces,self._people(bounds,scores,*prediction)
+                from .detection_phases import output_people
+                output_people(image, prepared[id(image)][2])
         self._prepared_frames=prepared
 
     def _activate(self, image, faces, people):

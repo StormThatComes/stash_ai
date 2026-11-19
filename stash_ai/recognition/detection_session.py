@@ -113,17 +113,24 @@ class CueDetector:
         self.write = write
         self.config = self.detector = None
 
-    def render(self, frame, config, *, mask_options=None):
+    def render_phases(self, frame, config):
+        return self.render(frame, config, capture_phases=True)
+
+    def render(self, frame, config, *, mask_options=None, capture_phases=False):
         from .detection_audit import render_frame
+        from .detection_phases import capture, DetectionResult
         if self.detector is None or not same_settings(self.config, config):
             self.close()
             self.detector = load_detector(self.services, config, self.factory, self.write)
             self.config = config
         try:
             # A fresh image also isolates single-cue inference from browsing history.
-            with trial_image(frame,self.detector) as image, render_frame(
+            with trial_image(frame,self.detector) as image, capture(
+                    image, enabled=capture_phases) as phases, render_frame(
                     image, self.detector, frame.scene_id, frame.index, frame.cue,
                     mask_options=mask_options) as (result, record):
+                if phases is not None:
+                    return DetectionResult(result.copy(), record, phases)
                 return result.copy(), record
         except Exception:
             cleanup([self.close])

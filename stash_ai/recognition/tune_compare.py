@@ -17,7 +17,7 @@ def detect_variants(detector, frame, plans, reusable, stop):
                 break
         else:
             try:
-                output = detector.render(frame, config)
+                output = getattr(detector, 'render_phases', detector.render)(frame, config)
             except Exception as error:
                 # Release exception tracebacks (and their model tensors) on this thread.
                 results[name] = safe_error(error, os.getenv('STASH_API_KEY', ''))

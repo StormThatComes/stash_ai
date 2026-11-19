@@ -44,3 +44,35 @@ def test_apply_combined_edits_preserves_shared_overrides(tmp_path, monkeypatch):
     assert pose['deduplication']['min_visibility'] == .1
     assert next_config.data['detection']['score_threshold'] == .8
     assert case.cfg.data['detection']['score_threshold'] == .9
+
+
+def test_phase_history_excludes_temporal_context_and_survives_trial_image_close(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.recognition.detection_session import CueFrame
+    from stash_ai.recognition import detection_phases as phases
+    case = setup(tmp_path, monkeypatch)
+    pose = case.cfg.data['sapiensid']['pose']
+    pose['backend'] = 'pmpose'
+    pose['refinement'].update(enabled=True, recover_prompt_points=True)
+    class Phased(Detector):
+        config = case.cfg
+        def detect(self, image, **kwargs):
+            phases.boxes(image, [[self.calls, 0, 100, 100]])
+            return super().detect(image, **kwargs)
+    detector = Phased()
+    engine = CueDetector(case.services, factory=lambda *_: detector)
+    cue = SimpleNamespace(start=1., end=2., rect=(0, 0, 160, 160))
+    try:
+        with Image.new('RGB', (160, 160)) as image:
+            frame = CueFrame('1', 1, cue, image, (0, cue, image.size, image.tobytes()))
+            result = engine.render_phases(frame, case.cfg)
+            assert detector.calls == 2
+            assert result.phases.image is None
+            assert len(result.phases.phases) == 2
+            assert result.phases.phases[1].people[0].bounds[0] == 1
+            with result.phases.render(image, 1) as rendered:
+                assert rendered.width >= 160
+            json.dumps(result[1])
+            result[0].close()
+    finally:
+        engine.close()
