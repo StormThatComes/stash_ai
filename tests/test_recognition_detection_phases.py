@@ -115,6 +115,30 @@ def test_deduplication_keeps_original_candidate_labels_and_pre_filter_points():
     assert filtered.people[0].points[0] == (-1, -1)
 
 
+@pytest.mark.parametrize('mode', ['box_context_retry', 'partial_pose_recovery'])
+def test_collision_recovery_preserves_history_and_refinement_metadata(mode):
+    from stash_ai.recognition.pose_deduplication import DeduplicatedPMPose
+    from stash_ai.recognition.pose_deduplication_config import defaults as dedup_defaults
+    from tests.test_recognition_pose_collision_recovery import BOXES, LYING, STANDING, Pose as RecoveryPose, copied
+    class Raw(RecoveryPose):
+        def predict_many(self, frames):
+            return [copied()] if len(frames[0][1]) == 2 else super().predict_many(frames)
+    raw = Raw()
+    refined = SimpleNamespace(settings={}, refine_many=lambda frames, values: [
+        (*value, [dict(bounds=box) for box in bounds]) for (_, bounds), value in zip(frames, values)])
+    pipeline = DeduplicatedPMPose(raw, dict(dedup_defaults(), **{mode: True}), refined)
+    with Image.new('RGB', (160, 160)) as image, phases.capture(image) as history:
+        output = pipeline.predict(image, BOXES)
+    initial, recovered, selected = history.phases[1:]
+    np.testing.assert_array_equal(initial.people[0].points, copied()[0][0])
+    assert recovered.title == 'After box-context / partial-pose recovery'
+    np.testing.assert_array_equal(recovered.people[0].points, LYING)
+    np.testing.assert_array_equal(recovered.people[1].points, STANDING)
+    assert selected.title == 'After pose deduplication' and len(selected.people) == 2
+    assert output[3][0]['collision_recovery'][0]['accepted']
+    assert output[4]['kept_indices'] == [0, 1] and len(raw.calls) == 1
+
+
 @pytest.mark.parametrize('second_pass', [False, True])
 def test_generic_estimators_only_show_stages_they_execute(second_pass):
     from stash_ai.recognition.pose_masks import PoseMasks
