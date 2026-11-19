@@ -167,13 +167,18 @@ class DeduplicatedPMPose:
             reserves = getattr(image, '_pose_reserves', {})
             confirmed = set()
             fallback = None
+            from .pose_collision_recovery import recover
+            prediction, recovery, used = recover(self.pose, image, bounds, prediction, self.settings)
+            confirmed.update(row['owner'] for row in recovery if row.get('accepted'))
+            remaining = dict(self.settings, max_contact_attempts=max(0, self.settings['max_contact_attempts']-used))
             if self.refined and getattr(self.pose,'supports_rival_mask',False):
                 from .contact_pose import recover_pair
-                recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,self.settings)
+                recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,remaining)
                 if recovered_pair is not None:
                     owner, primary, reserve = recovered_pair
                     if reserves:
-                        prediction, confirmed = recovered, {reserve}
+                        prediction = recovered
+                        confirmed.add(reserve)
                     else:
                         # Both slots already passed NMS. Preserve the original SAM
                         # decision for both and offer the recovered pose only to a
@@ -182,6 +187,10 @@ class DeduplicatedPMPose:
             fallbacks.append(fallback)
             report = select(bounds, prediction, self.settings, audit=active(image), reserves=reserves,
                             confirmed=confirmed)
+            if recovery:
+                report['collision_recovery'] = recovery
+                if 'audit' in report:
+                    report['audit']['collision_recovery'] = recovery
             keep = np.asarray(report['kept_indices'], dtype=np.int64)
             points, scores, probabilities = prediction
             selected = points[keep], scores[keep], {k: v[keep] for k, v in probabilities.items()}
@@ -234,6 +243,12 @@ class DeduplicatedPMPose:
             removed = maskless(snapshot,slot,bounds[keep[slot]],image.size,final,self.settings)
             record['withheld_rival_joints'] = sorted(set(record.get('withheld_rival_joints', ())) | set(removed))
             record['contact_pose_recovered'] = True
+        for final, report in zip(finals, reports):
+            if final[3] is not None:
+                for slot, original in enumerate(report['kept_indices']):
+                    attempts = [r for r in report.get('collision_recovery', ()) if r['owner'] == original]
+                    if attempts:
+                        final[3][slot]['collision_recovery'] = attempts
         for (image,_),report in zip(frames,reports):
             publish(image, report.get('audit'))
         return [(*final,report) for final,report in zip(finals,reports)]

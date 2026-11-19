@@ -36,7 +36,7 @@ _GROUPS = (
      'min_limb_path_coverage min_limb_foreign_distance_pixels min_foreign_island_points '
      'expand_boxes max_box_area_ratio max_side_expansion masked_identity_crop'),
     ('pose.deduplication', 'sapiensid.pose.deduplication',
-     'enabled max_contact_attempts contact_crop_variants contact_min_iou contact_max_iou min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
+     'enabled box_context_retry box_context_retention partial_pose_recovery partial_min_overlap partial_point_distance partial_min_shared_points max_contact_attempts contact_crop_variants contact_min_iou contact_max_iou min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
      'min_match_fraction'),
 
     ('body', 'sapiensid', 'enabled'),
