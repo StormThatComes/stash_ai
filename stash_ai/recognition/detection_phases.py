@@ -101,7 +101,8 @@ def _details(person, record):
             note += f" | {field}: {record[field]}"
     return replace(person, positive=_xy(record.get('prompt_points', ())),
                    negative=_xy(record.get('negative_points', ())), note=note,
-                   rejected=bool(record.get('reason') or record.get('mask_conflict')))
+                   rejected=bool(record.get('mask_conflict') or
+                                 record.get('reason') and not record.get('overlap_mask')))
 
 
 def boxes(image, bounds):
@@ -129,6 +130,13 @@ def pose(image, title, bounds, prediction, *, records=None, indices=None, labels
                          label=labels[offset] if labels is not None else person.label)
         if records is not None:
             person = _details(person, records[offset])
+            if records[offset].get('overlap_mask') and not records[offset].get('mask_conflict'):
+                from .person_geometry import unpack_mask
+                left, top, right, bottom = (int(v) for v in box)
+                pixels = np.zeros((image.height, image.width), dtype=bool)
+                pixels[top:bottom, left:right] = unpack_mask(
+                    records[offset]['overlap_mask'], right-left, bottom-top)
+                person = replace(person, mask=(pixels.shape, np.packbits(pixels, axis=None).tobytes()))
         if i < len(rows):
             rows[i] = person
         else:

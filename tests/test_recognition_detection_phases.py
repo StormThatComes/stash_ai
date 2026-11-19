@@ -31,6 +31,13 @@ def test_snapshots_are_detached_and_capture_both_masked_pose_and_accepted_points
             assert raw.people[0].points != initial.people[0].points
             assert final.people[0].points == initial.people[0].points
             assert 'second_pass_core_drift' in final.people[0].note
+            # Drift preserves a quality mask in the original box. Do not keep
+            # displaying the expanded proposal as if its entire area survived.
+            assert not final.people[0].rejected
+            shape, packed = final.people[0].mask
+            quality = np.unpackbits(np.frombuffer(packed, dtype=np.uint8),
+                                    count=shape[0]*shape[1]).reshape(shape)
+            assert quality.sum() == 40 * 80 and not quality[:, 60:].any()
         else:
             assert raw.people[0].points == final.people[0].points
         before = initial.people[0].points
