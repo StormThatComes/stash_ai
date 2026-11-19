@@ -36,7 +36,7 @@ SUPPORT = ('recognition.min_identity_support', 'recognition.min_merge_support',
 MAX_SUPPORT = 8
 
 
-def registry(config):
+def registry(config, changes=None):
     result = {k: Domain() for k in UNIT}
     result.update({k: Domain(int, 2 if k == 'clustering.view_min_support' else 1, MAX_SUPPORT) for k in SUPPORT})
     result['clustering.same_scene_match_bonus'] = Domain(high=.1, relax=1)
@@ -66,6 +66,9 @@ def registry(config):
             int, 1, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references'])),
     }
     result.update((key,special.get(key,Domain())) for key in active(config))
+    if (changes or {}).get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
+        from .body_parameters import GLOBAL
+        result.update((key,special.get(key,Domain())) for key in GLOBAL)
     return result
 
 
@@ -76,7 +79,7 @@ def support_baseline_changes(config):
 
 
 def normalize(config, changes):
-    domains = registry(config)
+    domains = registry(config, changes)
     from .mechanism_scenarios import SWITCHES, INHERITED_SWITCHES, order_patch
     order = 'sapiensid.identities.body_first_matching'
     if order in changes and changes[order] != parameter(config.data, order):
@@ -88,10 +91,6 @@ def normalize(config, changes):
     if any(type(v) is not bool and not (k in INHERITED_SWITCHES and v is None)
            for k,v in categories.items() if k in SWITCHES):
         raise ValueError('Mechanism switches require boolean values.')
-    if changes.get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
-        from .body_parameters import GLOBAL
-        domains.update((k, Domain(int, 1, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references']))
-                        if k.endswith('min_support') else Domain()) for k in GLOBAL)
     if any(type(v) is not bool for k,v in categories.items() if k.endswith(('tracklet_matching','body_first_matching'))) or any(
             v is not None and type(v) is not bool for k,v in categories.items() if k.endswith('endpoint_matching')) or any(
             v not in ('fixed','evidence') for k,v in categories.items() if k.endswith('scene_bonus_mode')):

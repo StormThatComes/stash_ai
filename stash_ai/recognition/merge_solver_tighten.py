@@ -126,8 +126,7 @@ class Tightener:
         if self.first_solution is not None:
             return
         self.first_solution = name
-        from .merge_report_policy import patched
-        self.domains.update(registry(patched(self.config, changes)))
+        self.domains.update(registry(self.config, changes))
         self.fallback_references = feedback.get('fallback_references', 0)
         active = feedback.get('matching_parameters', {})
         self.matching = MATCHING.intersection(active)
