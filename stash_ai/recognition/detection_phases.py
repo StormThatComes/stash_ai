@@ -20,6 +20,13 @@ class Person:
     negative: tuple = ()
     note: str = ''
     rejected: bool = False
+    scores: tuple = ()
+    probabilities: tuple = ()
+    score_kind: str = 'confidence'
+    probability_kind: str = 'unavailable'
+    raw_points: tuple = ()
+    states: tuple = ()
+    point_reasons: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -37,8 +44,9 @@ class DetectionResult(tuple):
 
 
 class History:
-    def __init__(self, image):
+    def __init__(self, image, backend=None):
         self.image = image
+        self.backend = backend
         self.phases = []
         self.people = ()
         self.bytes = self.omitted = 0
@@ -63,8 +71,8 @@ class History:
 
 
 @contextmanager
-def capture(image, *, enabled=True):
-    history = History(image) if enabled else None
+def capture(image, *, enabled=True, backend=None):
+    history = History(image, backend) if enabled else None
     token = _CURRENT.set(history)
     try:
         yield history
@@ -112,6 +120,17 @@ def boxes(image, bounds):
                      [Person(f'D{i}', tuple(b)) for i, b in enumerate(bounds)])
 
 
+def _quality_mask(image, person, record):
+    if not record.get('overlap_mask') or record.get('mask_conflict'):
+        return person
+    import numpy as np
+    from .person_geometry import unpack_mask
+    left, top, right, bottom = (int(v) for v in person.bounds)
+    pixels = np.zeros((image.height, image.width), dtype=bool)
+    pixels[top:bottom, left:right] = unpack_mask(record['overlap_mask'], right-left, bottom-top)
+    return replace(person, mask=(pixels.shape, np.packbits(pixels, axis=None).tobytes()))
+
+
 def pose(image, title, bounds, prediction, *, records=None, indices=None, labels=None, reset=False):
     history = active(image)
     if history is None:
@@ -120,23 +139,25 @@ def pose(image, title, bounds, prediction, *, records=None, indices=None, labels
         history.omitted += 1
         return
     import numpy as np
+    from .detection_point_details import score_kind, probability_kind
     points, scores = prediction[:2]
+    probabilities = prediction[2] if len(prediction) > 2 else {}
     rows = [] if reset else list(history.people)
     slots = list(range(len(bounds))) if indices is None else indices
     for offset, (i, box) in enumerate(zip(slots, bounds)):
         person = rows[i] if i < len(rows) else Person(f'P{i}', tuple(box))
         xy = np.where((scores[offset] > 0)[:, None], points[offset], -1)
         person = replace(person, bounds=tuple(box), points=_xy(xy),
-                         label=labels[offset] if labels is not None else person.label)
+                         label=labels[offset] if labels is not None else person.label,
+                         scores=tuple(float(v) for v in scores[offset]),
+                         probabilities=tuple((key, tuple(float(v) for v in probabilities[key][offset]))
+                                             for key in ('presence', 'visibility', 'flip_agreement') if key in probabilities),
+                         score_kind=score_kind(history.backend),
+                         probability_kind=probability_kind(history.backend, probabilities),
+                         raw_points=_xy(points[offset]), states=(), point_reasons=())
         if records is not None:
             person = _details(person, records[offset])
-            if records[offset].get('overlap_mask') and not records[offset].get('mask_conflict'):
-                from .person_geometry import unpack_mask
-                left, top, right, bottom = (int(v) for v in box)
-                pixels = np.zeros((image.height, image.width), dtype=bool)
-                pixels[top:bottom, left:right] = unpack_mask(
-                    records[offset]['overlap_mask'], right-left, bottom-top)
-                person = replace(person, mask=(pixels.shape, np.packbits(pixels, axis=None).tobytes()))
+            person = _quality_mask(image, person, records[offset])
         if i < len(rows):
             rows[i] = person
         else:
@@ -161,12 +182,20 @@ def refined_pose(image, title, prediction, records):
         pose(image, title, [r['bounds'] for r in records], prediction, records=records)
 
 
-def output_people(image, people):
-    if active(image) is not None:
-        import numpy as np
-        pose(image, 'After output keypoint filters', [p['bounds'] for p in people],
-             (np.asarray([p['keypoints'] for p in people]), np.ones((len(people), 17))),
-             records=[p.get('pose_refinement', {}) for p in people])
+def output_people(image, people, *, prediction=None, settings=None):
+    history = active(image)
+    if history is not None:
+        from .detection_point_details import output_person
+        rows = [output_person(p, i, raw=prediction[0][i] if prediction is not None else None,
+                              settings=settings) for i, p in enumerate(people)]
+        # Reuse only the corresponding mask, never another candidate's points/scores.
+        for i, row in enumerate(rows):
+            if i < len(history.people):
+                old = history.people[i]
+                if old.bounds == row.bounds and old.raw_points == row.raw_points:
+                    row = replace(row, mask=old.mask, label=old.label)
+            rows[i] = _quality_mask(image, row, people[i].get('pose_refinement', {}))
+        history.save('After output keypoint filters', rows)
 
 
 def mask(image, title, index, pixels, record, *, positive=None, negative=None, rejected=None):

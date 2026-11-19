@@ -48,6 +48,21 @@ retained pose to detector candidate 2. Labels are local to a cue/configuration.
 Mask stages show the selected candidate for each attempt, including rejected attempts;
 they do not retain every alternative mask or model-internal feature map.
 
+Hover over a keypoint in any recorded phase or the final result to see its person,
+COCO17 name/index, source coordinates, score, presence, visibility, and available
+flip-agreement/provenance information. Values belong to that exact phase. PMPose
+scores are expected OKS; generic estimators' internal confidence proxies are explicitly
+marked **not measured**, and missing fields show **N/A**.
+
+In **After output keypoint filters**, removed points with known source coordinates
+remain visible as gray hollow markers. Hovering them explains every failed output
+cutoff by its YAML path and measured value, or identifies the output-box boundary
+that excluded them. The final preview retains these markers when its geometry and
+measurements match that recorded output phase. Markers are diagnostic overlays;
+the filtered recognition keypoints remain unavailable. Final face landmarks also
+support hover, with face detection score kept separate from unavailable per-landmark
+scores. Hover respects zoom/panning and never runs inference.
+
 History is transient and belongs to the current cue and configuration. Masks are
 packed on CPU and stages are rendered on demand, with a limit of 256 snapshots and
 a conservative 64 MiB history budget per distinct result. If the limit is reached,

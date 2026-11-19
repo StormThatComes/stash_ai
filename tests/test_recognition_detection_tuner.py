@@ -188,6 +188,68 @@ def test_phase_slider_reuses_detection_and_ab_positions_are_independent(root, tm
         ui.close()
 
 
+def test_hover_tracks_phase_zoom_scroll_and_clears_without_model_calls(root, tmp_path, monkeypatch):
+    from stash_ai.recognition.detection_session import CueDetector
+    from stash_ai.recognition.tune_window import Tuner
+    from stash_ai.recognition import detection_phases as phases
+    from tests.test_recognition_pose_refinement import BOX, pose_points, prediction
+    case = setup(tmp_path, monkeypatch)
+    case.services.assets = lambda *args, **kwargs: {}
+    case.cfg.data['sapiensid']['pose']['backend'] = 'pmpose'
+    class Phased(Detector):
+        def detect(self, image, **kwargs):
+            value = prediction([pose_points()])
+            phases.pose(image, 'First pass', [BOX], value)
+            value[1][:] = .72
+            phases.pose(image, 'Second pass', [BOX], value)
+            return super().detect(image, **kwargs)
+    detector = Phased()
+    ui = Tuner(root, case.cfg, case.services, detector=CueDetector(case.services, factory=lambda *args: detector),
+               compare_config=case.cfg)
+    try:
+        ui.scene_entry.insert(0, '1')
+        ui.open_scene()
+        settle(ui)
+        ui.run_button.invoke()
+        settle(ui)
+        ui.phases.slide(1)  # B: first pass; A stays final.
+        root.update()
+        panel = ui.images.panels['B']
+        def hover():
+            x = round(35*panel.zoom-panel.canvas.canvasx(0))
+            y = round(20*panel.zoom-panel.canvas.canvasy(0))
+            panel.canvas.event_generate('<Motion>', x=x, y=y)
+            root.update()
+        hover()
+        assert 'nose (#0)' in panel.hover.text and '0.9500' in panel.hover.text
+        assert panel.hover.window.winfo_viewable()
+        assert not ui.images.panels['A'].hover.text
+        ui.phases.slide(2)
+        assert not panel.hover.text
+        root.update()
+        hover()
+        assert 'Score (expected OKS): 0.7200' in panel.hover.text
+        ui.zoom.set('400%')
+        ui.set_zoom()
+        root.update()
+        ui.images.pan('x', 'moveto', .02)
+        root.update()
+        hover()
+        assert 'Score (expected OKS): 0.7200' in panel.hover.text
+        panel.canvas.event_generate('<Leave>')
+        root.update()
+        assert not panel.hover.text and not panel.hover.window.winfo_viewable()
+        hover()
+        ui.edited()
+        assert not panel.hover.points and not panel.hover.text
+        ui.step(1)
+        settle(ui)
+        assert all(not p.hover.points for p in ui.images.panels.values())
+        assert detector.calls == 1
+    finally:
+        ui.close()
+
+
 def test_comparison_reuses_a_retries_b_and_releases_models_on_owner(root, tmp_path, monkeypatch):
     from stash_ai.recognition.detection_session import CueDetector
     from stash_ai.recognition.tune_window import Tuner

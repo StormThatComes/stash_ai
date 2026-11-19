@@ -83,14 +83,23 @@ class PhaseNavigation(ttk.Frame):
             self.slide(len(item[2].phases) if item[2] is not None else 0)
 
     def show(self, name):
+        from .detection_point_hover import targets, face_targets, draw_rejected
+        from .detection_point_details import final_people
         result, source, history = self.results[name]
         position = self.positions[name]
         if history is not None and position < len(history.phases):
             image = history.render(source, position)
             caption = f'Phase {position+1}/{len(history.phases)+1}: {history.phases[position].title}'
+            phase = history.phases[position]
+            points = targets(phase.people, phase.title, source.size)
         else:
             image, record = result
+            people = final_people(record, history)
+            points = targets(people, 'Final result', source.size) + face_targets(record)
+            if any(point.rejected for point in points):
+                image = image.copy()
+                draw_rejected(image, people, source.size)
             matches = sum(face['person_index'] is not None for face in record['faces'])
             caption = (f"Final result | Faces: {len(record['faces'])}    People: {len(record['people'])}"
                        f'    Matched faces: {matches}')
-        self.images.show(name, image, caption)
+        self.images.show(name, image, caption, points=points)

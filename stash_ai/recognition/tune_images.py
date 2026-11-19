@@ -16,6 +16,7 @@ class ImagePanel(ttk.LabelFrame):
         self.item = self.canvas.create_image(0, 0, anchor='nw')
         self.image = self.photo = None
         self.zoom = 1.
+        self.hover = None
         self.redraw = None
         horizontal = ttk.Scrollbar(self, orient='horizontal', command=lambda *args: pan('x', *args))
         vertical = ttk.Scrollbar(self, orient='vertical', command=lambda *args: pan('y', *args))
@@ -27,6 +28,8 @@ class ImagePanel(ttk.LabelFrame):
         ttk.Label(self, textvariable=self.caption, wraplength=400).grid(row=2, column=0, sticky='w')
 
     def refresh(self):
+        if self.hover is not None:
+            self.hover.hide()
         if self.redraw is None:
             self.redraw = self.after_idle(self.draw)
 
@@ -61,6 +64,12 @@ class ImagePair(ttk.Frame):
         self.zoom = 1.
         self.compare(False)
 
+    def enable_hover(self):
+        from .tune_point_hover import PointHover
+        for panel in self.panels.values():
+            if panel.hover is None:
+                panel.hover = PointHover(panel)
+
     def compare(self, enabled):
         self.names = ('A', 'B') if enabled else ('A',)
         for column, (name, panel) in enumerate(self.panels.items()):
@@ -69,11 +78,15 @@ class ImagePair(ttk.Frame):
             if visible:
                 panel.grid(row=0, column=column, sticky='nsew', padx=2)
             else:
+                if panel.hover is not None:
+                    panel.hover.hide()
                 panel.grid_remove()
         self.layout()
 
-    def show(self, name, image, caption):
+    def show(self, name, image, caption, *, points=()):
         panel = self.panels[name]
+        if panel.hover is not None:
+            panel.hover.set_points(points)
         panel.image = image
         panel.caption.set(caption)
         self.layout()

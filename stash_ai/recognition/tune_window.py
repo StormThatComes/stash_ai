@@ -68,6 +68,7 @@ class Tuner:
         self.slider.bind('<Left>', lambda _: self.step(-1))
         self.slider.bind('<Right>', lambda _: self.step(1))
         self.images = ImagePair(body)
+        self.images.enable_hover()
         self.phases = PhaseNavigation(body, self.images)
         self.phases.grid(row=2, column=0, sticky='ew', pady=(0, 8))
         self.images.grid(row=3, column=0, sticky='nsew')

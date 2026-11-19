@@ -8,11 +8,13 @@ def render(source, phase):
     from .detection_masks import paint_mask
     from .detection_sweep import _wrap
     from .person_audit import _draw
+    from .detection_point_hover import draw_rejected
 
     font = ImageFont.load_default()
     width = max(source.width, 640)
     lines = [phase.title, 'White rings: positive prompts. Red crosses: negative prompts. '
-             'Dashed masks: rejected. Raw points precede output quality filters.']
+             'Dashed masks: rejected. Gray hollow points: filtered (hover for details). '
+             'Raw points precede output quality filters.']
     lines += [f'{person.label}: {person.note}' for person in phase.people if person.note]
     lines = _wrap(lines, font, width - 16)
     line_height = font.getbbox('Ag')[3] - font.getbbox('Ag')[1] + 6
@@ -36,6 +38,7 @@ def render(source, phase):
             x, y = person.bounds[:2]
             painter.text((max(0, x+2), max(0, y+2)), person.label, fill=color,
                          stroke_width=1, stroke_fill='black')
+        draw_rejected(overlay, phase.people, source.size)
         output.paste(overlay)
     painter = ImageDraw.Draw(output)
     for i, line in enumerate(lines):

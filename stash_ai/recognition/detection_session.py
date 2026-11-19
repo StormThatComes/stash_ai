@@ -126,7 +126,7 @@ class CueDetector:
         try:
             # A fresh image also isolates single-cue inference from browsing history.
             with trial_image(frame,self.detector) as image, capture(
-                    image, enabled=capture_phases) as phases, render_frame(
+                    image, enabled=capture_phases, backend=config.data['sapiensid']['pose']['backend']) as phases, render_frame(
                     image, self.detector, frame.scene_id, frame.index, frame.cue,
                     mask_options=mask_options) as (result, record):
                 if phases is not None:

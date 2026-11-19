@@ -209,7 +209,7 @@ class SapiensIDFaces(YuNetDetector):
             if len(prediction) <= 3:
                 phases.pose(image, 'Initial keypoints (before output filters)', bounds, prediction)
             people = self._people(bounds, [float(scores[i]) for i in selected], *prediction)
-            phases.output_people(image, people)
+            phases.output_people(image, people, prediction=prediction, settings=settings['pose'])
         if _defer is not None:
             _defer.append((image, faces, [], []))
             return faces
@@ -347,7 +347,8 @@ class SapiensIDFaces(YuNetDetector):
             for (image,faces,bounds,scores),prediction in zip(deferred,predictions):
                 prepared[id(image)]=image,faces,self._people(bounds,scores,*prediction)
                 from .detection_phases import output_people
-                output_people(image, prepared[id(image)][2])
+                output_people(image, prepared[id(image)][2], prediction=prediction,
+                              settings=self.config.data['sapiensid']['pose'])
         self._prepared_frames=prepared
 
     def _activate(self, image, faces, people):
