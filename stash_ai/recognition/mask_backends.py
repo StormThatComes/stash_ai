@@ -13,7 +13,7 @@ def model_contract(backend):
         return dict(backend=backend, revision=REVISION, files=FILES, adapter=1)
     if backend == 'rfdetr_seg_large':
         from .rfdetr_masks import SHA256, VERSION
-        return dict(backend=backend, weights=SHA256, version=VERSION, adapter=1)
+        return dict(backend=backend, weights=SHA256, version=VERSION, adapter=2)
     raise ValueError('Unknown mask backend: ' + str(backend))
 
 
@@ -88,12 +88,18 @@ class FrameSegmenter:
     def predict_options(self, positive, negative):
         return self.options(positive, negative, True)
 
+    def __call__(self, positive, negative, multi):
+        return self.options(positive, negative, multi)
+
     def predict_frames(self, frames, *, process=None):
         result = []
         for image, prompts in frames:
             with self.frame(image):
-                initial = [self.predict(p, n) for p, n in prompts]
-                result.append(process(prompts, initial, self.options) if process else initial)
+                # Instance models need the owner's cleanup/admission context
+                # before selecting a mask. Keep their full proposal pool lazy.
+                initial = ([None] * len(prompts) if process and hasattr(self, 'iter_instances')
+                           else [self.predict(p, n) for p, n in prompts])
+                result.append(process(prompts, initial, self) if process else initial)
         return result
 
     def refine_frames(self, frames, process):

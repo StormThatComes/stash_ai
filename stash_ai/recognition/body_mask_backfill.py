@@ -71,7 +71,10 @@ def _restore_cue(collector, db, image, rows, attempt):
         results = []
         for row, (points, negative) in zip(rows, prompts):
             details = json.loads(row['geometry'])['pose_refinement']
-            if details.get('retry_mask_choices') and callable(getattr(segmenter, 'predict_options', None)):
+            if 'mask_instance' in details:
+                replay = getattr(segmenter, 'predict_instance', None)
+                prediction = replay(details['mask_instance']) if callable(replay) else None
+            elif details.get('retry_mask_choices') and callable(getattr(segmenter, 'predict_options', None)):
                 options = segmenter.predict_options(points, negative)
                 index = details.get('mask_variant', 0)
                 prediction = options[index] if 0 <= index < len(options) else None
@@ -81,9 +84,10 @@ def _restore_cue(collector, db, image, rows, attempt):
                            if prediction is not None else None)
     # Recognition can use SAM's batched decoder for the first prompt set and
     # its scalar decoder for retries. Their edge pixels can differ on GPU.
+    # Instance replay must never substitute another query through prompt selection.
     if callable(getattr(segmenter, 'predict_frames', None)):
         for index, result in enumerate(results):
-            if result is None:
+            if result is None and 'mask_instance' not in json.loads(rows[index]['geometry'])['pose_refinement']:
                 [predictions] = segmenter.predict_frames([(image, [prompts[index]])])
                 [prediction] = predictions
                 results[index] = _checked_result(image, rows[index], collector.config,
