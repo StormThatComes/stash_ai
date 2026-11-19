@@ -42,6 +42,8 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
     with dedup_audit.capture(image) as dedup_reports, capture_masks(
             image, enabled=mask_options.view != 'off') as masks, detector.prepared_frame(image):
         faces = detector.detect(image, force_pose=True)
+        from .detection_phases import finish
+        finish(image)
         people = detector.frame_people
         deduplication = dedup_reports[0] if dedup_reports else None
         person_colors = [_person_color(i) for i in range(len(people))]

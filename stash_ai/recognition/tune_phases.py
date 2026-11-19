@@ -2,6 +2,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from .detection_phase_timing import caption as timing_caption
+
 
 class PhaseNavigation(ttk.Frame):
     def __init__(self, parent, images):
@@ -21,6 +23,9 @@ class PhaseNavigation(ttk.Frame):
         self.next.grid(row=1, column=2)
         self.final = ttk.Button(self, text='Final result', command=self.show_final)
         self.final.grid(row=1, column=3, padx=(8, 0))
+        ttk.Label(self, text='Step: wall time since the previous phase. Total: cumulative detection time. '
+                  'Shared batch work is counted once.', wraplength=900).grid(
+                      row=2, column=0, columnspan=4, sticky='w')
         self.columnconfigure(1, weight=1)
         self.slider.bind('<Left>', lambda _: self.step(-1))
         self.slider.bind('<Right>', lambda _: self.step(1))
@@ -58,7 +63,8 @@ class PhaseNavigation(ttk.Frame):
             else:
                 title = 'Final result' if position == last else item[2].phases[position].title
                 suffix = f' | history limit: {item[2].omitted} phases omitted' if item[2] and item[2].omitted else ''
-                self.caption.set(f'Phase {self.panel} {position+1}/{last+1}: {title}{suffix}')
+                self.caption.set(f'Phase {self.panel} {position+1}/{last+1}: {title}'
+                                 f'{timing_caption(item[2], position)}{suffix}')
         finally:
             self.updating = False
 
@@ -102,4 +108,4 @@ class PhaseNavigation(ttk.Frame):
             matches = sum(face['person_index'] is not None for face in record['faces'])
             caption = (f"Final result | Faces: {len(record['faces'])}    People: {len(record['people'])}"
                        f'    Matched faces: {matches}')
-        self.images.show(name, image, caption, points=points)
+        self.images.show(name, image, caption + timing_caption(history, position), points=points)

@@ -63,6 +63,20 @@ the filtered recognition keypoints remain unavailable. Final face landmarks also
 support hover, with face detection score kept separate from unavailable per-landmark
 scores. Hover respects zoom/panning and never runs inference.
 
+The phase bar and each A/B image caption show **Step** (elapsed wall time since the
+previous recorded phase) and **Total** (cumulative time for this cue), in milliseconds
+or seconds. **Original cue** starts at zero; **Final result** includes the remaining
+detection work, including final association/retries. Measurements stop before audit
+annotation/layout rendering and exclude model loading, preceding-cue context, snapshot
+copying/packing, and browsing the preview. Reusing a cached result preserves its original
+timings; a new detection measures again.
+
+These are intervals between actual checkpoints, not isolated GPU kernel timings.
+Preparation, waiting, and shared/batched work are charged once, to the first checkpoint
+after that work; for example face detection precedes the first person-box checkpoint.
+No extra CUDA synchronization is introduced. If snapshots are omitted by the history
+limit, the final **Remaining (includes omitted phases)** time still covers that work.
+
 History is transient and belongs to the current cue and configuration. Masks are
 packed on CPU and stages are rendered on demand, with a limit of 256 snapshots and
 a conservative 64 MiB history budget per distinct result. If the limit is reached,

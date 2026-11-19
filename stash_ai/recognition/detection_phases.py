@@ -2,7 +2,10 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from functools import wraps
 import sys
+
+from .detection_phase_timing import Clock, Timing
 
 
 _CURRENT = ContextVar('detection_phases', default=None)
@@ -33,6 +36,7 @@ class Person:
 class Phase:
     title: str
     people: tuple
+    timing: Timing | None = None
 
 
 class DetectionResult(tuple):
@@ -50,9 +54,15 @@ class History:
         self.phases = []
         self.people = ()
         self.bytes = self.omitted = 0
+        self.clock = Clock()
         self.save('Original cue', ())
+        self.clock.start()
 
     def save(self, title, people):
+        with self.clock.snapshot():
+            self._save(title, people)
+
+    def _save(self, title, people):
         # Count even shared tuples/masks again: a conservative bound also covers
         # unusually large sets of negative prompts, not just typical COCO17 rows.
         def size(value):
@@ -62,7 +72,7 @@ class History:
             self.omitted += 1
             return
         self.people = tuple(people)
-        self.phases.append(Phase(title, self.people))
+        self.phases.append(Phase(title, self.people, self.clock.checkpoint()))
         self.bytes += charge
 
     def render(self, source, index):
@@ -79,12 +89,31 @@ def capture(image, *, enabled=True, backend=None):
     finally:
         _CURRENT.reset(token)
         if history is not None:
+            history.clock.finish()
             history.image = None  # No inference image or GPU owner survives the run.
 
 
 def active(image):
     history = _CURRENT.get()
     return history if history is not None and history.image is image else None
+
+
+def finish(image):
+    """Freeze the final interval before audit annotations or UI rendering begin."""
+    history = active(image)
+    if history is not None:
+        history.clock.finish()
+
+
+def _snapshot(function):
+    @wraps(function)
+    def call(image, *args, **kwargs):
+        history = active(image)
+        if history is None or history.clock.final is not None:
+            return
+        with history.clock.snapshot():
+            return function(image, *args, **kwargs)
+    return call
 
 
 def _xy(points):
@@ -113,6 +142,7 @@ def _details(person, record):
                                  record.get('reason') and not record.get('overlap_mask')))
 
 
+@_snapshot
 def boxes(image, bounds):
     history = active(image)
     if history is not None:
@@ -131,6 +161,7 @@ def _quality_mask(image, person, record):
     return replace(person, mask=(pixels.shape, np.packbits(pixels, axis=None).tobytes()))
 
 
+@_snapshot
 def pose(image, title, bounds, prediction, *, records=None, indices=None, labels=None, reset=False):
     history = active(image)
     if history is None:
@@ -165,6 +196,7 @@ def pose(image, title, bounds, prediction, *, records=None, indices=None, labels
     history.save(title, rows)
 
 
+@_snapshot
 def notes(image, title, records):
     history = active(image)
     if history is not None:
@@ -182,6 +214,7 @@ def refined_pose(image, title, prediction, records):
         pose(image, title, [r['bounds'] for r in records], prediction, records=records)
 
 
+@_snapshot
 def output_people(image, people, *, prediction=None, settings=None):
     history = active(image)
     if history is not None:
@@ -198,6 +231,7 @@ def output_people(image, people, *, prediction=None, settings=None):
         history.save('After output keypoint filters', rows)
 
 
+@_snapshot
 def mask(image, title, index, pixels, record, *, positive=None, negative=None, rejected=None):
     history = active(image)
     if history is None:
