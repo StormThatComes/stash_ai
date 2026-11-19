@@ -60,8 +60,11 @@ def refine_many(owner, frames, predictions):
                     owner.masked_inputs(image,jobs,original)) for image,jobs,_,_,original in pending])
                 if len(predicted) != len(pending):
                     raise ValueError('PMPose returned an invalid masked frame count.')
-                for (_,jobs,result,records,original),prediction in zip(pending,predicted):
+                for (image,jobs,result,records,original),prediction in zip(pending,predicted):
+                    from . import detection_phases as phases
+                    phases.masked_pose(image, jobs, prediction)
                     owner._apply_second_pass(jobs,result,records,original,prediction)
+                    phases.refined_pose(image, 'After refinement acceptance / joint fusion', result, records)
             pipeline_count('pmpose_second_pass_people',people)
             pipeline_count('pmpose_second_pass_batches')
             pipeline_max('pmpose_second_pass_batch_max',people)

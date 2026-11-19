@@ -13,6 +13,7 @@ from .config import load
 from .detection_session import CueDetector
 from .tune_compare import detect_variants
 from .tune_images import ImagePair
+from .tune_phases import PhaseNavigation
 from .tune_editor import ParameterEditor, Settings, display_value
 from .tune_worker import SceneBrowser, Worker
 
@@ -43,7 +44,7 @@ class Tuner:
         self.body = body = ttk.Frame(root, padding=12)
         body.pack(fill='both', expand=True)
         body.columnconfigure(0, weight=1)
-        body.rowconfigure(2, weight=1)
+        body.rowconfigure(3, weight=1)
         bar = ttk.Frame(body)
         bar.grid(row=0, column=0, sticky='ew')
         ttk.Label(bar, text='Scene ID').pack(side='left')
@@ -67,10 +68,12 @@ class Tuner:
         self.slider.bind('<Left>', lambda _: self.step(-1))
         self.slider.bind('<Right>', lambda _: self.step(1))
         self.images = ImagePair(body)
-        self.images.grid(row=2, column=0, sticky='nsew')
+        self.phases = PhaseNavigation(body, self.images)
+        self.phases.grid(row=2, column=0, sticky='ew', pady=(0, 8))
+        self.images.grid(row=3, column=0, sticky='nsew')
         tools = ttk.Frame(body)
-        tools.grid(row=3, column=0, sticky='ew', pady=8)
-        ttk.Label(tools, text='Edit configuration').pack(side='left')
+        tools.grid(row=4, column=0, sticky='ew', pady=8)
+        ttk.Label(tools, text='Configuration / phases').pack(side='left')
         self.choose = ttk.Combobox(tools, width=4, textvariable=self.active, state='readonly')
         self.choose.pack(side='left', padx=6)
         self.choose.bind('<<ComboboxSelected>>', lambda _: self.choose_editor())
@@ -90,9 +93,9 @@ class Tuner:
         self.zoom.bind('<<ComboboxSelected>>', lambda _: self.set_zoom())
 
         self.editor = ParameterEditor(body, self.settings[self.active.get()], self.edited, self.error)
-        self.editor.grid(row=4, column=0, sticky='ew', pady=(0, 8))
+        self.editor.grid(row=5, column=0, sticky='ew', pady=(0, 8))
         self.status = tk.StringVar(value='Load a scene to browse its VTT cues.')
-        ttk.Label(body, textvariable=self.status, wraplength=900).grid(row=5, column=0, sticky='w')
+        ttk.Label(body, textvariable=self.status, wraplength=900).grid(row=6, column=0, sticky='w')
         self.toggle_compare()
         self.scene_entry.focus_set()
         self.poll_id = root.after(35, self.poll)
@@ -110,6 +113,7 @@ class Tuner:
             self.show_raw('B')
 
     def choose_editor(self):
+        self.phases.select_panel(self.active.get())
         settings = self.settings[self.active.get()]
         self.editor.bind_settings(settings)
         self.path.delete(0, 'end')
@@ -165,6 +169,7 @@ class Tuner:
         self.images.layout()
 
     def show_raw(self, name, caption='Original VTT cue'):
+        self.phases.clear(name)
         self.images.show(name, self.frame.image if self.frame else None, caption if self.frame else '')
 
     def open_scene(self):
@@ -258,10 +263,7 @@ class Tuner:
                 self.show_raw(name, 'Detection failed: ' + result)
                 continue
             self.cache[name] = (plans[name], result)
-            image, record = result
-            matches = sum(face['person_index'] is not None for face in record['faces'])
-            self.images.show(name, image, f"Faces: {len(record['faces'])}    People: {len(record['people'])}"
-                                          f"    Matched faces: {matches}")
+            self.phases.set_result(name, result, self.frame.image)
         self.run_button.state(['!disabled'])
         self.status.set('Detection complete' if all(n in self.cache for n in self.images.names)
                         else 'One or more panels have no current result.')

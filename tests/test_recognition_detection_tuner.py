@@ -1,6 +1,7 @@
 """Desktop event routing and single-owner detection, including a real Tk smoke test."""
 from dataclasses import replace
 import gc
+import os
 from pathlib import Path
 import threading
 import time
@@ -84,6 +85,8 @@ def root():
     try:
         window = tk.Tk()
     except tk.TclError as error:
+        if os.getenv('STASH_AI_DESKTOP_TEST') == '1':
+            pytest.fail(f'Desktop tests require a working display: {error}')
         pytest.skip(f'No graphical desktop: {error}')
     yield window
     window.destroy()
@@ -136,6 +139,53 @@ def test_only_run_button_loads_detectors_and_navigation_clears_annotations(root,
         ui.close()
     assert all(item.closed for item in loaded)
     assert not case.stash.writes
+
+
+def test_phase_slider_reuses_detection_and_ab_positions_are_independent(root, tmp_path, monkeypatch):
+    from stash_ai.recognition.detection_session import CueDetector
+    from stash_ai.recognition.tune_window import Tuner
+    from stash_ai.recognition import detection_phases as phases
+    from tests.test_recognition_pose_refinement import BOX, pose_points, prediction
+    case = setup(tmp_path, monkeypatch)
+    case.services.assets = lambda *args, **kwargs: {}
+    class Phased(Detector):
+        def detect(self, image, **kwargs):
+            phases.pose(image, 'Before refinement', [BOX], prediction([pose_points()]))
+            phases.pose(image, 'After refinement', [BOX], prediction([pose_points()+1]))
+            return super().detect(image, **kwargs)
+    detector = Phased()
+    ui = Tuner(root, case.cfg, case.services,
+               detector=CueDetector(case.services, factory=lambda *args: detector), compare_config=case.cfg)
+    try:
+        ui.scene_entry.insert(0, '1')
+        ui.open_scene()
+        settle(ui)
+        assert ui.phases.slider.instate(['disabled'])
+        ui.run_button.invoke()
+        settle(ui)
+        assert detector.calls == 1 and ui.cache['A'][1] is ui.cache['B'][1]
+        assert ui.phases.positions == {'A': 3, 'B': 3}
+        ui.phases.slider.set(1)
+        root.update()
+        assert ui.phases.positions == {'A': 3, 'B': 1}
+        assert 'Before refinement' in ui.images.panels['B'].caption.get()
+        ui.active.set('A')
+        ui.choose_editor()
+        ui.phases.step(-1)
+        assert ui.phases.positions == {'A': 2, 'B': 1}
+        assert 'After refinement' in ui.images.panels['A'].caption.get()
+        ui.phases.final.invoke()
+        assert ui.phases.positions == {'A': 3, 'B': 1}
+        ui.active.set('B')
+        ui.choose_editor()
+        ui.edited()
+        assert ui.phases.slider.instate(['disabled']) and list(ui.phases.results) == ['A']
+        ui.step(1)
+        settle(ui)
+        assert not ui.phases.results and not ui.phases.positions
+        assert detector.calls == 1 and not case.stash.writes
+    finally:
+        ui.close()
 
 
 def test_comparison_reuses_a_retries_b_and_releases_models_on_owner(root, tmp_path, monkeypatch):

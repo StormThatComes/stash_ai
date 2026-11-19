@@ -44,6 +44,11 @@ class Pose:
             method=getattr(self.model,'predict_many',None)
             return method(values) if callable(method) else [self.model.predict(*value) for value in values]
         frames = list(frames)
+        from .detection_phases import active
+        if any(active(frame[0]) is not None for frame in frames):
+            # Cached final poses have no intermediate history. Raw model caches
+            # remain reusable; replay the decision pipeline to capture real stages.
+            return calculate(frames)
         if self.face_prompts and any(hasattr(f[0], '_recognition_scan') for f in frames):
             # Raw inference remains cached. The temporal mask plan consumes cues in order.
             return calculate(frames)

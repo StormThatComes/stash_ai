@@ -18,17 +18,44 @@ Enter a **Scene ID** and choose **Load scene**, or supply an initial `--scene-id
 command line. The slider, Previous and Next browse raw VTT crops at their original
 zero-based indices. Select a detector setting, enter its value and press **Set value**.
 Only **Run detection** loads models and computes an annotated image. Each detection
-uses only the selected cue, independently of navigation history. Edits are local to the
+starts from fresh cue context, independently of navigation history. Edits are local to the
 window. The recognition database and Stash identities are never modified.
 
 To preview ViTPose++ with the bundled YAML, set `pose.estimator.backend` to
-`vitpose_plus_large` and choose **Run detection**. The tuner applies refinement and
-pose deduplication only to PMPose. Switching back restores that panel's PMPose
-settings. Body and anchor sharpness floors apply during recognition collection and
-matching, so they can stay set while previewing a detector without SAM.
+`vitpose_plus_large` and choose **Run detection**. The tuner preserves each panel's
+mask/refinement settings, including the optional generic second pose pass.
+Body and anchor sharpness floors apply during recognition collection and matching.
+
+After a run, a second **Phase** slider browses intermediate results for that cue.
+**Previous phase**, **Next phase**, the arrow keys on that slider, and **Final result**
+use the recorded result; they never call a model. The view initially shows the final
+result. Depending on the enabled stages, the history includes:
+
+- Person boxes after detector NMS and initial keypoints before pose deduplication.
+- Contact recovery, deduplication, and the pose before mask/refinement processing.
+- Prompt eligibility/recovery, then the selected raw and cleaned mask for each
+  decoder attempt, with positive prompts, negative prompts, and rejection reasons.
+- Cross-person mask conflicts and the mask selected for pose processing.
+- Raw keypoints from the masked pose pass, followed separately by accepted/fused
+  keypoints. A rejected second pass remains visible alongside the preserved first pose.
+- Ownership/maskless fallback, output keypoint filters, and the final annotated result.
+
+Only executed stages appear. A mask-only estimator has no synthetic second pose pass.
+Raw points are displayed before the final score/presence/visibility filters. White
+rings identify positive prompts; red crosses identify negative prompts. `D` labels
+identify detector candidates; after deduplication `P0 (D2)`, for example, maps the first
+retained pose to detector candidate 2. Labels are local to a cue/configuration.
+Mask stages show the selected candidate for each attempt, including rejected attempts;
+they do not retain every alternative mask or model-internal feature map.
+
+History is transient and belongs to the current cue and configuration. Masks are
+packed on CPU and stages are rendered on demand, with a limit of 256 snapshots and
+a conservative 64 MiB history budget per distinct result. If the limit is reached,
+the phase caption reports omitted stages; detection and the final result remain available.
+Ordinary recognition and CLI audit exports do not retain this timeline.
 
 Enable **Compare A/B** to show two copies of the same cue. Select **B** under
-**Edit configuration**, use **Copy A to B** or enter a second file path and choose
+**Configuration / phases**, use **Copy A to B** or enter a second file path and choose
 **Load YAML**. You can also start with both files:
 
 ```sh
@@ -36,12 +63,15 @@ python stash_ai.py recognition tune-detection --scene-id 123 --face-config basel
 ```
 
 The two panels share zoom and scrolling. **Differences** lists the edited detector
-settings. **Run detection** computes the missing results sequentially on one model
+settings. The phase slider controls the panel selected under **Configuration / phases**.
+A and B keep independent phase positions so different retry counts cannot silently
+align unrelated stages; select a phase in A, switch to B, then select its comparison
+phase. **Run detection** computes the missing results sequentially on one model
 thread. Identical configurations share their result. Changing B preserves A for the
 current cue. Navigating during detection immediately clears the overlays, and late
 results cannot replace the new preview. An error is shown in the affected panel,
-so you can fix a setting and retry that panel. The full-scene CLI audit can also use
-previous cues for temporal evidence; this tuner always inspects an isolated cue.
+so you can fix a setting and retry that panel. When temporal prompt recovery is enabled,
+the preceding cue supplies context; the phase history covers only the selected cue.
 
 ## Full-cue face and pose detection audit
 

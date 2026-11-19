@@ -7,6 +7,7 @@ import numpy as np
 from . import prompt_recovery
 from .mask_candidates import check_mask, inside, regional_seeds, select_masks, spread_indices
 from .profiling import pipeline_stage, pipeline_timing
+from . import detection_phases as phases
 
 CORE = (0, 1, 2, 3, 4, 5, 6, 11, 12)  # Head/torso, not the suspect wrists/ankles.
 
@@ -77,6 +78,7 @@ class RefinedPMPose:
         return self.refine_many(frames, predictions)
 
     def _plan(self, bounds, prediction, image=None):
+        phases.pose(image, 'Initial keypoints (before refinement)', bounds, prediction)
         points, scores, probabilities = prediction
         settings = self.settings
         result = (points.copy(), scores.copy(), {k: v.copy() for k, v in probabilities.items()})
@@ -154,6 +156,11 @@ class RefinedPMPose:
                 else:
                     indices = spread_indices(points[i], indices, limit, initial=minimum)
                 jobs.append((i, indices, foreign))
+        if phases.active(image) is not None:
+            planned = {i for i, _, _ in jobs}
+            phases.notes(image, 'Prompt eligibility / recovery', [
+                dict(r, reason=None, status='eligible for mask prompts') if i in planned else r
+                for i, r in enumerate(records)])
         return result, records, cores, jobs
 
     def _prompts(self, bounds, points, cores, i, indices, leaks=None):
@@ -230,6 +237,7 @@ class RefinedPMPose:
                 removed = maskless(prediction,i,bounds[i],image.size,result,self.joint_quality)
                 if removed:
                     record['withheld_rival_joints'] = removed
+        phases.refined_pose(image, 'After ownership / maskless fallback', result, records)
 
     def masked_inputs(self, image, jobs, original):
         if getattr(self.pose,'supports_rival_mask',False):
@@ -241,7 +249,9 @@ class RefinedPMPose:
     def _second_pass(self, image, pending, result, records, original):
         refined = self.pose.predict(image, [box for _, box, _, _ in pending],
                                     masks=self.masked_inputs(image,pending,original))
+        phases.masked_pose(image, pending, refined)
         self._apply_second_pass(pending, result, records, original, refined)
+        phases.refined_pose(image, 'After refinement acceptance / joint fusion', result, records)
 
     def _apply_second_pass(self, pending, result, records, original, refined):
         for offset, (i, box, mask, indices) in enumerate(pending):

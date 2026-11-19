@@ -91,6 +91,8 @@ class PoseMasks(RefinedPMPose):
             record.update(status='masked', reason=None, bounds=box,
                           point_evidence='confidence_proxy', visibility_measured=False,
                           box_expanded=box != record['detector_bounds'])
+        from . import detection_phases as phases
+        phases.refined_pose(image, 'After mask ownership filtering (no second pose pass)', result, records)
 
 
 def wrap(pose, config, device):
