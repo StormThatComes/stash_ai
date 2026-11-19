@@ -31,18 +31,21 @@ def load(config, device):
         model.register_buffer('_kp_active_mask', model._kp_active_mask, persistent=False)
     load_verified_weights(model, path, expected_size=SIZE, expected_sha256=SHA256)
     return RFDETRMasks(model.float().to(device).eval(), device, config.data['execution']['sam_precision'],
-                       config.data['sapiensid']['pose']['refinement']['min_mask_score'])
+                       config.data['sapiensid']['pose']['refinement']['min_mask_score'],
+                       settings=config.data['sapiensid']['pose']['refinement'])
 
 
 class RFDETRMasks(FrameSegmenter):
-    def __init__(self, model, device, precision, threshold):
+    def __init__(self, model, device, precision, threshold, *, settings=None):
         super().__init__(model, device, precision)
+        from .pose_refinement_config import defaults
+        self.settings = dict(defaults() if settings is None else settings, min_mask_score=threshold)
         self.threshold = threshold
-        self.masks = self.scores = None
+        self.masks = self.scores = self.instance_ids = None
 
     def clear(self):
         super().clear()
-        self.masks = self.scores = None
+        self.masks = self.scores = self.instance_ids = None
 
     def encode(self, image):
         import numpy as np
@@ -62,6 +65,7 @@ class RFDETRMasks(FrameSegmenter):
         scores = logits[0, :, 1].float().sigmoid()  # COCO sparse class ID 1: person
         indices = torch.nonzero(scores >= self.threshold).flatten()
         indices = indices[torch.argsort(scores[indices], descending=True, stable=True)]
+        self.instance_ids = indices.cpu().tolist()
         self.scores = scores[indices].cpu().numpy()
         # Keep packed masks on the CPU, resize one plane at a time to avoid an
         # N-person full-resolution floating point allocation on the GPU.
@@ -71,21 +75,43 @@ class RFDETRMasks(FrameSegmenter):
                                  mode='bilinear', align_corners=False)[0, 0] > 0
             self.masks.append(np.packbits(mask.cpu().numpy(), axis=None))
 
-    def options(self, positive, negative, multi):
-        import numpy as np
-        from .mask_cleanup import inside
+    def iter_instances(self):
         if self.masks is None:
             raise RuntimeError('RF-DETR-Seg requires an active image context.')
-        candidates = []
-        for packed, score in zip(self.masks, self.scores):
-            mask = np.unpackbits(packed, count=self.size[0]*self.size[1]).reshape(self.size[::-1]).astype(bool)
-            # Never combine two instances or clip a foreign arm into a guessed
-            # person. Prompts select whole instances; common admission checks
-            # subsequently validate all reliable foreign core landmarks.
-            if len(positive) and inside(mask, positive).all() and not inside(mask, negative).any():
-                candidates.append((mask, float(score)))
-                if len(candidates) == (3 if multi else 1):
-                    break
-        if not candidates:
-            candidates = [(np.zeros(self.size[::-1], dtype=bool), 0.)]
-        return self.checked(np.stack([m for m, _ in candidates]), [s for _, s in candidates])
+        ids = self.instance_ids if self.instance_ids is not None else range(len(self.masks))
+        for index, instance in enumerate(ids):
+            yield instance, self._instance(index)
+
+    def _instance(self, index):
+        import numpy as np
+        mask = np.unpackbits(self.masks[index], count=self.size[0]*self.size[1]).reshape(self.size[::-1])
+        return self.checked(mask[None], [self.scores[index]])[0]
+
+    def predict_instance(self, instance):
+        """Replay the selected query, independent of confidence/ranking order."""
+        if self.masks is None:
+            raise RuntimeError('RF-DETR-Seg requires an active image context.')
+        ids = self.instance_ids if self.instance_ids is not None else range(len(self.masks))
+        if type(instance) is not int or instance not in ids:
+            return None
+        return self._instance(ids.index(instance))
+
+    def options(self, positive, negative, multi):
+        """Standalone prompts; refinement uses iter_instances with full context."""
+        import numpy as np
+        from .mask_candidates import check_mask
+        from .mask_cleanup import inside
+        from .instance_mask_candidates import select_instances
+        if self.size is None:
+            raise RuntimeError('RF-DETR-Seg requires an active image context.')
+        def assess(variant):
+            raw, score = variant
+            mask, box, reason = check_mask(raw, score, positive, negative,
+                [0, 0, *self.size], self.settings, self.size)
+            target = raw if mask is None else mask
+            rank = (reason is None, -int(inside(target, negative).sum()),
+                    int(inside(target, positive).sum()), score)
+            return rank, mask, box, reason, {}
+        _, assessed, _ = select_instances(self, assess, positive, negative, limit=3 if multi else 1)
+        accepted = [(mask, rank[-1]) for rank, mask, _, reason, _ in assessed if reason is None]
+        return accepted or [(np.zeros(self.size[::-1], dtype=bool), 0.)]

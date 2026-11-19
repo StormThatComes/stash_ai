@@ -302,12 +302,14 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
     leaks, tried, exhausted = {}, {}, set()
     packed_bytes = 0
     supplied = iter(initial_masks) if initial_masks is not None else None
+    instance_source = decoder if callable(getattr(decoder, 'iter_instances', None)) else None
     with ExitStack() as stack:
         stack.enter_context(decoded_masks(min(32*1024**2,getattr(owner,'queue_bytes',32*1024**2)//4)))
         frame_open = False
         while active:
             if supplied is None and decoder is None and not frame_open:
-                stack.enter_context(owner.segmenter.frame(image))
+                frame = stack.enter_context(owner.segmenter.frame(image))
+                instance_source = frame if callable(getattr(frame, 'iter_instances', None)) else None
                 frame_open = True
             for i, available, foreign in active:
                 record = records[i]
@@ -337,7 +339,26 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                         exhausted.add(i)
                         continue
                     previous.add(signature)
-                if supplied is not None:
+                reliable = np.flatnonzero(valid[i]) if valid is not None else cores[i]
+                limbs = [(points[i,p],points[i,k]) for p,k in ((7,9),(8,10),(13,15),(14,16))
+                         if p in reliable and k in reliable]
+                def assess(variant, observe=None):
+                    return _assessment(*variant, i, indices, positive, foreign, bounds, peers, points,
+                                       reliable, evidence, record, settings, image.size, limbs, observe)
+                if instance_source is not None:
+                    if supplied is not None:
+                        next(supplied)
+                    if attempt > 1:
+                        from .refinement_budget import budget
+                        if not budget(image, settings).admit('sam_decoder', record=record):
+                            exhausted.add(i)
+                            continue
+                    from .instance_mask_candidates import select_instances
+                    variants, assessed, count_evaluated = select_instances(instance_source, assess, positive, negative)
+                    record['mask_candidates_evaluated'] = count_evaluated
+                    if attempt > 1:
+                        record['retry_mask_choices'] = len(variants)
+                elif supplied is not None:
                     variants = [next(supplied)]
                 else:
                     if attempt>1:
@@ -356,13 +377,8 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                                     else owner.segmenter.predict(positive)]
                     if multi:
                         record['retry_mask_choices'] = len(variants)
-                reliable = np.flatnonzero(valid[i]) if valid is not None else cores[i]
-                limbs = [(points[i,p],points[i,k]) for p,k in ((7,9),(8,10),(13,15),(14,16))
-                         if p in reliable and k in reliable]
-                def assess(variant, observe=None):
-                    return _assessment(*variant, i, indices, positive, foreign, bounds, peers, points,
-                                       reliable, evidence, record, settings, image.size, limbs, observe)
-                assessed = [assess(item) for item in variants]
+                if instance_source is None:
+                    assessed = [assess(item) for item in variants]
                 order = sorted(range(len(variants)), key=lambda v: assessed[v][0], reverse=True)
                 best = order[0]
                 raw, score = variants[best]
@@ -372,7 +388,9 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                     assess(variants[best], observer)
                     mask_history(image,record).append(dict(attempt=attempt,
                         positive=positive.tolist(), negative=np.asarray(negative).tolist(), chosen=best,
-                        variants=[dict(score=float(item[1]), reason=assessment[3])
+                        variants=[dict(score=float(item[1]), reason=assessment[3],
+                                       **({'instance': assessment[4]['mask_instance']}
+                                          if 'mask_instance' in assessment[4] else {}))
                                   for item, assessment in zip(variants, assessed)]))
                 if adaptive:
                     leaks[i] = {j: set(cores[j][inside(raw, points[j, cores[j]])])
@@ -382,6 +400,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                               mask_variant=best)
                 record.pop('component_edits', None)
                 record.pop('bridge_cuts', None)
+                record.pop('mask_instance', None)
                 record.update(edits)
                 if peers:
                     record['negative_points'] = np.asarray(negative).tolist()

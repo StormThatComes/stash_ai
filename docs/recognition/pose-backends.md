@@ -764,10 +764,15 @@ path as SAM-pose2seg. SAM 3 and RF-DETR-Seg process one image at a time and reus
 its features/instance masks for all people and retries. Their image batch size
 is one regardless of `execution.gpu.sam_frame_batch_size`.
 
-RF-DETR produces independent person instances, then selects up to three masks
-covering all positive prompts and none of the negative prompts. It never unions
-instances to cover a pose. No compatible instance returns an empty mask and
-is rejected by the shared admission checks. Its `min_mask_score` is a **person
+RF-DETR produces independent person instances. Refinement evaluates every
+proposal above `min_mask_score` with the shared cleanup, configured
+`min_prompt_coverage`, foreign-core and expansion checks before retaining up to
+three candidates for joint ownership resolution. A cleaned instance must cover
+at least one positive prompt and none of the negative prompts. It never unions
+instances to cover a pose. Rejections retain the actual admission reason and
+person confidence; `no_person_instances` means no proposal cleared the detector
+confidence threshold. Selected query IDs are retained for exact mask replay.
+Its `min_mask_score` is a **person
 detection confidence**, not SAM's predicted mask IoU; recalibrate this and
 `min_recovery_mask_score` when comparing models. Changing prompts can select a
 different RF-DETR instance but does not redraw its boundary.
