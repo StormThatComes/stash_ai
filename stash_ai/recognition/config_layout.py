@@ -30,7 +30,7 @@ _GROUPS = (
      'directory=pmpose_directory batch_size=pmpose_batch_size '
      'presence_threshold=pmpose_presence_threshold visibility_threshold=pmpose_visibility_threshold'),
     ('pose.refinement', 'sapiensid.pose.refinement',
-     'enabled directory mode overlap_threshold generic_second_pass max_retry_jobs_per_cue max_retry_jobs_per_scene max_mask_combinations bidirectional_prompts negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
+     'enabled backend directory mode overlap_threshold generic_second_pass max_retry_jobs_per_cue max_retry_jobs_per_scene max_mask_combinations bidirectional_prompts negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
      'min_recovery_mask_score adaptive_decoder_retries recover_prompt_points min_prompt_points max_prompt_points max_negative_prompt_points_per_neighbor min_mask_score min_prompt_coverage max_foreign_coverage '
      'min_island_pixels min_island_fraction max_island_gap_fraction bridge_radius_pixels max_bridge_lobe_fraction '
      'min_limb_path_coverage min_limb_foreign_distance_pixels min_foreign_island_points '

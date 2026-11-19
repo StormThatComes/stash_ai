@@ -96,3 +96,21 @@ and notices provided by each upstream project.
 The [benchmark credits](benchmarks/data/dance_contact/CREDITS.md) identify the source,
 attribution, modifications and license for each of the 17 photographs. The derivatives
 use CC BY 2.0 or CC BY-SA 2.0, 3.0 or 4.0. The manual annotations use CC BY-SA 4.0.
+
+### Alternative pose mask backends
+
+HQ-SAM 2 uses unmodified, hash-verified upstream bytes from
+https://github.com/SysCV/sam-hq at the revision in
+`stash_ai/recognition/hq_sam2_registry.py`. Its Apache-2.0 LICENSE is downloaded
+with the source subset. Verified Python imports are renamed to a private
+namespace in memory; upstream headers remain intact. The public checkpoint is
+from `lkeab/hq-sam`, pinned by revision and SHA256.
+
+SAM 3 uses Hugging Face Transformers' implementation and Meta's gated
+`facebook/sam3` weights under the SAM license. Users must obtain access and
+accept the model terms at https://huggingface.co/facebook/sam3. The application
+uses only the visual segmentation tracker on still images.
+
+RF-DETR-Seg Large uses the existing RF-DETR runtime and the official
+`rf-detr-seg-l-ft.pth` checkpoint from Roboflow, verified by SHA256. This is
+independent of the existing RF-DETR-XL box detector.

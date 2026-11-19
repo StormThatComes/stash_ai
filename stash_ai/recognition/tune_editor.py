@@ -15,6 +15,7 @@ CHOICES = {
     'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo', 'rtmo'),
     'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo', 'rtmo'),
     'pose.estimator.sapiens.variant': ('0.3b', '0.6b', '1b'),
+    'pose.refinement.backend': ('sam_pose2seg', 'sam3', 'hq_sam2_large', 'rfdetr_seg_large'),
     'pose.refinement.mode': ('all', 'overlap'),
 }
 

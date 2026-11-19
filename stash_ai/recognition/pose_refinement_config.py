@@ -9,7 +9,7 @@ LEGACY_CLEANUP = dict(min_island_pixels=4, min_island_fraction=.001,
 
 
 def defaults():
-    return dict(enabled=False, directory='', mode='all', overlap_threshold=.2, generic_second_pass=False,
+    return dict(enabled=False, backend='sam_pose2seg', directory='', mode='all', overlap_threshold=.2, generic_second_pass=False,
                 max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
                 max_mask_combinations=256, bidirectional_prompts=False, negative_limb_prompts=False, joint_limb_ownership=False, max_limb_length_ratio=3.,
@@ -27,6 +27,9 @@ def validate(pose):
         raise ValueError(prefix + 'enabled must be boolean.')
     if not settings['enabled']:
         return
+    from .mask_backends import BACKENDS
+    if settings['backend'] not in BACKENDS:
+        raise ValueError(prefix + 'backend must be one of: ' + ', '.join(BACKENDS))
     for key in ('generic_second_pass','expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
@@ -72,6 +75,10 @@ def validate(pose):
 def contract(settings):
     from . import sam_pose2seg_registry as registry
     active = {k: v for k, v in settings.items() if k != 'directory' and k not in LEGACY_CLEANUP}
+    backend = active.pop('backend', 'sam_pose2seg')
+    if backend != 'sam_pose2seg':
+        from .mask_backends import model_contract
+        active['mask_model'] = model_contract(backend)
     for key in LEGACY_CLEANUP.keys() - {'bridge_radius_pixels', 'max_bridge_lobe_fraction'}:
         if settings.get(key, LEGACY_CLEANUP[key]) != LEGACY_CLEANUP[key]:
             active[key] = settings[key]
