@@ -41,13 +41,25 @@ def variants(config):
     for body_first in (False,True):
         original = result['tracks-1-evidence']
         data = plain(original.data)
-        data['sapiensid']['identities']['body_first_matching'] = body_first
+        from .mechanism_scenarios import order_patch
+        data['sapiensid']['identities'].update(
+            (k.rsplit('.',1)[-1],v) for k,v in order_patch(original,body_first).items())
         controls['body-first' if body_first else 'face-first'] = replace(original,data=data)
-    return {**controls, **{name:v for name,v in result.items() if name not in controls}}
+    variants = {**controls, **{name:v for name,v in result.items() if name not in controls}}
+    # Canonicalize inherited switches in every profile, so an explicit control
+    # does not spend another trial on an otherwise equivalent configuration.
+    from .body_identity import turn_feature
+    for variant in variants.values():
+        settings = variant.data['sapiensid']['identities']
+        for key in ('extended_track_graph', 'turn_recovery'):
+            if settings.get(key) is None:
+                settings[key] = turn_feature(settings, key)
+    return variants
 
 
 STRATEGY_KEYS = tuple('sapiensid.identities.'+key for key in (
-    'tracklet_matching','endpoint_matching','scene_bonus_mode','body_first_matching','scene_match_bonus')) + ('clustering.same_scene_match_bonus',)
+    'tracklet_matching','endpoint_matching','scene_bonus_mode','body_first_matching','scene_match_bonus')) + (
+        'clustering.same_scene_match_bonus','sapiensid.identities.extended_track_graph','sapiensid.identities.turn_recovery')
 
 
 def holdout_ablations(config):

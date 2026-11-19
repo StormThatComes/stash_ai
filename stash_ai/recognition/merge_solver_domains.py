@@ -77,8 +77,21 @@ def support_baseline_changes(config):
 
 def normalize(config, changes):
     domains = registry(config)
+    from .mechanism_scenarios import SWITCHES, INHERITED_SWITCHES, order_patch
+    order = 'sapiensid.identities.body_first_matching'
+    if order in changes and changes[order] != parameter(config.data, order):
+        changes = dict(order_patch(config, changes[order]), **changes)
     from .scene_strategy_validation import STRATEGY_KEYS
     categories = {k:v for k,v in changes.items() if k in STRATEGY_KEYS[:4] and config.data['sapiensid']['enabled']}
+    categories.update((k,v) for k,v in changes.items() if k in SWITCHES and
+                      (not k.startswith('sapiensid.') or config.data['sapiensid']['enabled']))
+    if any(type(v) is not bool and not (k in INHERITED_SWITCHES and v is None)
+           for k,v in categories.items() if k in SWITCHES):
+        raise ValueError('Mechanism switches require boolean values.')
+    if changes.get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
+        from .body_parameters import GLOBAL
+        domains.update((k, Domain(int, 1, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references']))
+                        if k.endswith('min_support') else Domain()) for k in GLOBAL)
     if any(type(v) is not bool for k,v in categories.items() if k.endswith(('tracklet_matching','body_first_matching'))) or any(
             v is not None and type(v) is not bool for k,v in categories.items() if k.endswith('endpoint_matching')) or any(
             v not in ('fixed','evidence') for k,v in categories.items() if k.endswith('scene_bonus_mode')):

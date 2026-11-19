@@ -56,7 +56,9 @@ class StrictPolicy:
         from .body_identity import turn_feature
         from .fragment_endpoints import enabled as endpoints
         identity = config.data['sapiensid']['identities']
-        active = {key for key in ('tracklet_matching', 'body_first_matching') if identity[key]}
+        # Formation order is a strategy choice; both orders retain the same
+        # enabled face/body routes and still undergo all production guards.
+        active = {key for key in ('tracklet_matching',) if identity[key]}
         active.update(key for key in ('extended_track_graph', 'turn_recovery') if turn_feature(identity, key))
         if endpoints(identity):
             active.add('endpoint_matching')

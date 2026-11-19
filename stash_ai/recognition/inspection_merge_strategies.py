@@ -95,7 +95,6 @@ def local_global(config, report, routes):
     )
     if not report or not tracks.enabled(config):
         return result
-    grouping = config.data['clustering']
     global_body = config.data['sapiensid']['global_matching']
     if not all(p['reference_samples'] for p in report['identities']):
         result['notes'].append('Both sides need current face references to compare modality order.')
@@ -103,34 +102,16 @@ def local_global(config, report, routes):
     if not any(p['person_members'] for p in report['identities']):
         result['notes'].append('No retained body members for the pair.')
         return result
-    # In both directions keep the global thresholds at the loaded policy:
-    # the local formation/attachment gates are the experiment.
-    for family, settings, title in (
-        (
-            'local_body',
-            {
-                tracks.LOCAL + 'body_first_matching': True,
-                tracks.LOCAL + 'tracklet_matching': True,
-                'sapiensid.global_matching.enabled': False,
-            },
-            'Local body paths, global strict face / View',
-        ),
-        (
-            'local_face',
-            {tracks.LOCAL + 'body_first_matching': False, 'sapiensid.global_matching.enabled': True},
-            'Local same-scene face support, global body consolidation',
-        ),
-    ):
-        if family == 'local_body' and restricted(grouping):
-            settings['clustering.anchor_view_matching'] = True
-        for measured in _plans(routes, family) or [dict(changes=[])]:
-            changes = {**patch_values(measured), **settings}
-            patch = _path(config, title, changes)
-            if not patch['notes']:
-                patch['mechanism'] = (
-                    'global_face_consolidation' if family == 'local_body' else 'global_body_merge'
-                )
-                result['patches'].append(patch)
+    from .mechanism_scenarios import local_global_plans
+    inputs = {family: [patch_values(p) for p in _plans(routes, family)] or [{}]
+              for family in ('local_body', 'local_face')}
+    for item in local_global_plans(config, inputs):
+        patch = _path(config, item['title'], item['patch'])
+        if not patch['notes']:
+            patch['mechanism'] = ('global_face_consolidation' if item['strategy']=='local_body_global'
+                                  else 'global_body_merge')
+            patch['stages'] = item['stages']
+            result['patches'].append(patch)
     if result['patches']:
         result['status'] = 'Rebuild hypothesis'
     result['notes'].append(
@@ -170,7 +151,8 @@ def strategies(db, config, scan, ids, routes, catalogue_routes, controls, report
             dict(strategy=key, title=title, status='Incomplete', notes=[str(exc)], patches=[])
             for key, title in tracks.TITLES.items()
         )
-    extra.extend([birth_and_recovery(db, config, scan, routes), local_global(config, report, routes)])
+    extra.extend([birth_and_recovery(db, config, scan, routes), local_global(config, report, routes),
+                  view_formation(db, config, scan, ids, routes)])
     if report:
         rivals = report['independent_person'].get('nearest_competitors', ())
         ranked = [r for r in rivals if r['identity'] in ids and r['rival'] not in ids]
@@ -218,3 +200,38 @@ def strategies(db, config, scan, ids, routes, catalogue_routes, controls, report
                     'Protected replay controls: ' + ', '.join(patch['controls'])
                 )
     return [*extra, control_route]
+
+
+def view_formation(db, config, scan, ids, routes):
+    """Use the same measured construction plans as the automatic solver."""
+    from .mechanism_views import load_rows, diagnose, MAX_ROWS
+    from .mechanism_scenarios import plans
+    from .merge_solver_feedback import quality_feedback
+    addresses = []
+    for owner in ids:
+        addresses.extend(r[0] for r in db.execute(
+            'SELECT o.id FROM members m JOIN observations o ON o.id=m.observation '
+            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=? '
+            'ORDER BY s.scene,o.cue,o.id LIMIT ?',
+            (owner,scan['scope'],scan['namespace'],MAX_ROWS//max(1,len(ids)))))
+    rows = load_rows(db,config,scan['scope'],scan['namespace'],addresses)
+    goals = dict(groups=[dict(members=[dict(observations=[dict(id=r['id']) for r in rows])])])
+    quality = quality_feedback(db,config,goals)['observations']
+    cohorts = diagnose(config,rows,quality=quality)
+    followups = {family:[patch_values(p) for name in names for p in _plans(routes,name)]
+                 for family,names in [('face',('strict_core','confirmed_views','nominations')),
+                                      ('hybrid',('sapiensid_hybrid',))]}
+    result = dict(strategy='view_formation', title='Build a View and test its downstream matches',
+                  status='Insufficient evidence', notes=[], patches=[], cohorts=cohorts)
+    for cohort in cohorts:
+        result['notes'].append(f"{cohort['pose']} · scene {cohort['scene']} · "
+            f"{cohort['independent_support']}/{cohort['required_support']} independent witnesses · "
+            + (', '.join(cohort['blockers']) or 'supported strict cohort'))
+    for item in plans(config,cohorts,followups=followups):
+        patch = _path(config,item['title'],item['patch'])
+        if patch['changes'] and not patch['notes']:
+            patch.update(stages=item['stages'],watch=item.get('witnesses',[]))
+            result['patches'].append(patch)
+    if result['patches']:
+        result['status'] = 'Rebuild hypothesis'
+    return result

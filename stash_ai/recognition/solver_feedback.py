@@ -166,6 +166,27 @@ def collect(target, settings, goals, feasibility, query_feedback, initial_change
     if targeted:
         from .merge_solver_targeted import plan as targeted_plan
         latest_feedback['targeted'] = targeted_plan(target, settings, goals, feasibility, membership, latest_feedback, hybrid)
+    from .mechanism_views import for_goals
+    from .mechanism_scenarios import plans, local_face_routes
+    from .solver_measurement_budget import measure
+    coverage = {}
+    mechanisms = measure(lambda: for_goals(target, settings, goals, quality['observations'], priorities=targets['priorities']),
+                         dict(cohorts=[], sampled=0, truncated=True), coverage)
+    local = {'local_body': [], 'local_face': []}
+    for item in latest_feedback.get('targeted', {}).get('candidates', ()):
+        if item['route'].startswith('local_body'):
+            local['local_body'].append(item['patch'])
+    for patch in queries['face_proposals']:
+        values = {k:v for k,v in patch.items() if k.startswith('clustering.same_scene_')}
+        if values:
+            local['local_face'].append(values)
+    local['local_face'].extend(local_face_routes(settings, queries['face_proposals']))
+    for family in local:
+        local[family] = local[family][:2] or [{}]
+    mechanisms['plans'] = list(plans(settings, mechanisms['cohorts'], local=local,
+                                    followups=latest_feedback['proposals']))
+    mechanisms['coverage'] = coverage
+    latest_feedback['mechanisms'] = mechanisms
     if excluded:
         from .merge_scene_exclusions import KINDS
         for kind in KINDS:

@@ -126,6 +126,8 @@ class Tightener:
         if self.first_solution is not None:
             return
         self.first_solution = name
+        from .merge_report_policy import patched
+        self.domains.update(registry(patched(self.config, changes)))
         self.fallback_references = feedback.get('fallback_references', 0)
         active = feedback.get('matching_parameters', {})
         self.matching = MATCHING.intersection(active)
@@ -229,7 +231,9 @@ class Tightener:
             values[key] = value
         patch = normalize(self.config, dict(changes, **values))
         # Normalization may couple gates, but may never silently relax another.
-        if any(self.domains[k].relax*(self.value(patch,k)-self.value(changes,k)) > 0
+        if any((self.value(patch,k) != self.value(changes,k) if k not in self.domains or
+                self.domains[k].kind is bool else
+                self.domains[k].relax*(self.value(patch,k)-self.value(changes,k)) > 0)
                for k in patch.keys() | changes.keys()):
             return None
         if self.score(patch) <= self.score(changes):

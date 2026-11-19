@@ -539,6 +539,42 @@ values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
 
+## Mechanism construction experiments
+
+Ordinary search shares a bounded scenario generator with Inspect Scene.
+The `mechanism_plan` operator can construct a supported strict View and combine
+its admission, core support and cohesion requirements with a downstream face or
+hybrid proposal in one replay. It also compares local body formation followed by
+global face/View matching with local face support followed by global body
+matching. These local/global experiments retain the loaded global similarity
+floors; they include a variant preserving global body matching and an isolation
+variant disabling it. Strict checks still apply. Body-first/face-first is an
+ordering choice, so changing it does not disable a protected route.
+
+`solver_feedback.mechanisms` records sampled cohorts, concrete witness IDs,
+independent support, cohesion, missing measurements, reference authority and
+the proposed stages. Measurements use at most 128 retained face rows and 16
+cohorts per replay, balanced across goal sets and prioritizing unresolved evidence.
+Duplicate pixels/timestamps do not create extra support. Superseded scans,
+foreign models and missing embeddings cannot contribute. `truncated` and
+`missing_retained` make incomplete diagnosis explicit. A supported sampled
+cohort is a construction milestone, not proof that production emitted a View
+or accepted a merge. Contextual and auxiliary memberships do not acquire
+strict reference authority from the solver's labels.
+
+Up to two slots in the existing beam may retain admissible configurations that
+improve a cohort's admission, strict rooting or support relative to baseline,
+even when the final partition has not improved yet. These states get follow-up
+experiments, reported in `search.mechanism_parents`. The incumbent remains in
+the beam; milestones do not change winner ranking or reset stagnation patience.
+There is no reward for the number of Views. Final selection, exclusions,
+collateral limits and the total replay budget remain unchanged.
+
+`search_mechanism` identifies the chosen scenario and its stages on completed
+mechanism trials. Compact reports retain bounded formation diagnostics. Every
+candidate still passes config validation, retained-contract checks and the full
+production replay; the source database and input YAML remain read-only.
+
 ## Targeted merge trials
 
 After baseline replay, `--targeted-trials 8` (default) first tries measured routes
@@ -685,7 +721,12 @@ in consecutive cues of the same measured shot. The proposal is validated by the 
 
 ### Comparing body recognition strategies
 
-Both bundled profiles enable `execution.solver.compare_scene_strategies`. Pass `--solve --solver-validation holdout.json` to compare strategies. Use `--compare-scene-strategies` to request the comparison with another profile.
+Both bundled profiles enable `execution.solver.compare_scene_strategies`. With
+body identities enabled, ordinary `--solve` now screens strategies on training
+goals without requiring a holdout. Use `--compare-scene-strategies` to request
+the comparison with another profile. Add `--solver-validation holdout.json` for
+independent validation after winner selection. Without that manifest, the result
+contains training replays only and makes no holdout-quality claim.
 The holdout compares sixteen named strategies, including a matched pair that
 toggles `matching.body.identities.body_first_matching`. Training reuses
 equivalent configurations within the trial budget. Four matched controls toggle face and body scene support independently
