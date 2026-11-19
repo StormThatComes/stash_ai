@@ -145,13 +145,19 @@ def test_phase_slider_reuses_detection_and_ab_positions_are_independent(root, tm
     from stash_ai.recognition.detection_session import CueDetector
     from stash_ai.recognition.tune_window import Tuner
     from stash_ai.recognition import detection_phases as phases
+    from stash_ai.recognition import detection_phase_timing as timing
     from tests.test_recognition_pose_refinement import BOX, pose_points, prediction
     case = setup(tmp_path, monkeypatch)
     case.services.assets = lambda *args, **kwargs: {}
+    now = [0.]
+    monkeypatch.setattr(timing, 'perf_counter', lambda: now[0])
     class Phased(Detector):
         def detect(self, image, **kwargs):
+            now[0] += .125
             phases.pose(image, 'Before refinement', [BOX], prediction([pose_points()]))
+            now[0] += 1.25
             phases.pose(image, 'After refinement', [BOX], prediction([pose_points()+1]))
+            now[0] += .25
             return super().detect(image, **kwargs)
     detector = Phased()
     ui = Tuner(root, case.cfg, case.services,
@@ -165,15 +171,20 @@ def test_phase_slider_reuses_detection_and_ab_positions_are_independent(root, tm
         settle(ui)
         assert detector.calls == 1 and ui.cache['A'][1] is ui.cache['B'][1]
         assert ui.phases.positions == {'A': 3, 'B': 3}
+        assert 'Step: 250.0 ms | Total: 1.625 s' in ui.images.panels['A'].caption.get()
+        now[0] += 100  # Navigation must keep the original run's timings.
         ui.phases.slider.set(1)
         root.update()
         assert ui.phases.positions == {'A': 3, 'B': 1}
         assert 'Before refinement' in ui.images.panels['B'].caption.get()
+        assert 'Step: 125.0 ms | Total: 125.0 ms' in ui.images.panels['B'].caption.get()
+        assert 'Step: 125.0 ms | Total: 125.0 ms' in ui.phases.caption.get()
         ui.active.set('A')
         ui.choose_editor()
         ui.phases.step(-1)
         assert ui.phases.positions == {'A': 2, 'B': 1}
         assert 'After refinement' in ui.images.panels['A'].caption.get()
+        assert 'Step: 1.250 s | Total: 1.375 s' in ui.images.panels['A'].caption.get()
         ui.phases.final.invoke()
         assert ui.phases.positions == {'A': 3, 'B': 1}
         ui.active.set('B')
