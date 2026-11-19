@@ -244,8 +244,27 @@ pose:
     enabled: true
     # Suppress duplicate first-pass COCO17 candidates before SAM and face matching; supports pmpose,
     # vitpose_plus_large and sapiens.
+    box_context_retry: false
+    # Retry suspected copied poses with neutralized context outside the original detector box. Requires
+    # deduplication.enabled. Opt-in; supported by PMPose, ViTPose and Sapiens.
+    box_context_retention: 0.25
+    # Fraction of outside-box RGB contrast retained around neutral training-mean background during context
+    # retries. 0 replaces it, 1 preserves it. Range: 0..1.
+    partial_pose_recovery: false
+    # Retry copied limb chains or torso fragments even at low box IoU, protecting independent target core
+    # points. Requires deduplication.enabled. Opt-in.
+    partial_min_overlap: 0.1
+    # Minimum intersection / smaller-box area for context and partial-pose retries. Independent of
+    # contact_min_iou. Range: 0..1.
+    partial_point_distance: 0.035
+    # Coincident anatomical point tolerance as a fraction of the smaller box diagonal, with a 2px floor. Used by
+    # both new recovery options. Range: 0.001..0.1.
+    partial_min_shared_points: 3
+    # Required agreeing points on one limb chain or torso, and independently recovered points for accepting a
+    # retry. 3 includes three-joint limbs; 4 restricts partial detection to the torso. Range: 3..4.
     max_contact_attempts: 4
-    # Maximum directed contact recovery attempts per cue. 0 disables recovery. Range: 0..16.
+    # Maximum model calls per cue shared by contact, outside-box context and partial-pose recovery. 0 disables
+    # these retries. Range: 0..16.
     contact_crop_variants: false
     # Try expanded and sideways crops within the contact attempt budget. Experimental; validate ownership before
     # enabling.

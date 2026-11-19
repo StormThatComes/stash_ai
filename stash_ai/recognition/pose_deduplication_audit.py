@@ -72,6 +72,9 @@ def append_explanations(image, report):
         if 'detector_score' in row:
             text += f" | detector score={row['detector_score']:.3f}"
         lines.append(text)
+    for attempt in report.get('collision_recovery', ()):
+        status = 'accepted' if attempt.get('accepted') else attempt.get('reason', 'rejected')
+        lines.append(f"D{attempt['owner']}/D{attempt['peer']}: {attempt['mode']} retry {status}")
     for pair in report['comparisons']:
         a, b = pair['detector_indices']
         text = (f"D{a}/D{b}: {pair['decision']} ({pair['reason']}) | IoU={pair['box_iou']:.3f} | "

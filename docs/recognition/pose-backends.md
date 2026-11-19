@@ -389,6 +389,73 @@ rerun recognition on affected scenes. With it disabled, previous contracts
 and detection behavior remain unchanged. These are collection settings, not
 offline identity-solver parameters.
 
+## Outside-box context and partial copied-pose recovery
+
+Two opt-in options under `pose.deduplication` address displaced overlapping
+boxes, such as a horizontal person below an upright person. They work with
+PMPose, ViTPose++ and Sapiens in recognition, detection audits and Tune Detection.
+They require `deduplication.enabled`, but do not require SAM or a second masked
+pose pass. Existing configurations keep both options disabled.
+
+```yaml
+pose:
+  deduplication:
+    enabled: true
+    box_context_retry: true
+    box_context_retention: 0.25
+    partial_pose_recovery: true
+    partial_min_overlap: 0.1
+    partial_point_distance: 0.035
+    partial_min_shared_points: 3
+    max_contact_attempts: 4
+```
+
+`box_context_retry` makes one alternative full-size image for a suspicious
+person. Pixels inside its original detector box are unchanged. Outside pixels
+are blended toward neutral RGB training means before the usual affine crop.
+`box_context_retention: 0` removes outside context, `0.25` retains a quarter of
+its contrast and `1` preserves it. The original box and coordinate transform
+remain unchanged; this does not stretch the body. The other person is still
+visible inside the shared part of the box. This option alone cannot separate
+that shared foreground and can lose useful context from an inaccurate box.
+
+`partial_pose_recovery` detects coincident anatomical chains (shoulder–elbow–
+wrist or hip–knee–ankle) and torso fragments. It requires at least three agreeing
+points on one chain/torso; a single touching wrist does not trigger recovery.
+The overlap gate uses intersection divided by the smaller box area, independently
+of `contact_min_iou`. The existing `contact_max_iou` upper gate still excludes
+nearly identical boxes. Point distances use the smaller box diagonal, with a
+2 source-pixel floor. Setting `partial_min_shared_points: 4` restricts partial
+collision detection to the four-point torso.
+
+For partial recovery, measured rival bone corridors are faded while independent
+target head/torso points are protected. This is a geometric retry, not an
+inferred instance mask: it never removes an entire neighbour box. With both
+options enabled, the context-only retry runs first, followed if necessary by
+this targeted retry with the same outside-box attenuation.
+
+Acceptance requires distinct recovered landmarks, preserved reliable point
+coverage and agreement with the target's independent original core. A completely
+copied pose instead needs at least two newly reliable head/torso points in the
+target box outside the peer box. Confidence improvement alone cannot establish
+ownership. Candidates that copy any measured rival, drift from their own core,
+or lose reliable points are rejected. Exhaustion/rejection preserves the input
+prediction; these options do not invent missing joints or directly suppress a
+person. Normal duplicate selection still follows, using accepted repairs.
+
+Both options share `max_contact_attempts` with existing contact recovery and
+consume the shared cue/scene refinement job budget. Accepted repairs reach SAM
+and duplicate selection before a person can be discarded. No new model weights
+or dependencies are needed. Audit JSON exposes `collision_recovery` attempts
+with detector indices, mode, shared landmarks, acceptance and rejection reasons;
+the audit legend includes the retry outcome. When refinement is enabled, these
+records also appear in each surviving person's `pose_refinement` details.
+
+Changing active recovery options changes the pose/person evidence contract;
+rerun recognition on affected scenes before solving. Validate accuracy on the
+same real cues with both options disabled/enabled: deterministic regression tests
+cover the control flow and geometry, not pretrained-model accuracy on your data.
+
 ## Sapiens Pose keypoints
 
 `pose.estimator.backend: sapiens` selects Meta's **Sapiens v1 Pose** as another
