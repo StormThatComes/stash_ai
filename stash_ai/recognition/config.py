@@ -419,6 +419,14 @@ def effective_data(supplied, *, device=None, detection_preview=False):
             support = supplied['recognition'].pop('min_support')
             supplied['recognition'].update(min_identity_support=support, min_merge_support=support)
         _merge(data, supplied)
+    pose = data['sapiensid']['pose']
+    if pose['refinement']['pose_second_pass'] is None:
+        from .mask_usage import applications
+        pose['refinement']['pose_second_pass'] = applications(
+            pose['refinement'], generic=pose['backend'] != 'pmpose')['pose_refinement']
+    legacy_second = pose['refinement'].pop('generic_second_pass', False)
+    if type(legacy_second) is not bool:
+        raise ValueError('pose.refinement.generic_second_pass must be boolean.')
     if device is not None:
         data['models']['device'] = device
     try:

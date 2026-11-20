@@ -7,7 +7,8 @@ def foreground_mask(person):
     from .person_geometry import unpack_mask
     details = person.get('pose_refinement', {})
     packed = details.get('overlap_mask')
-    admitted = details.get('status') == 'refined' or details.get('reason') == 'second_pass_core_drift'
+    admitted = details.get('mask_valid', details.get('status') in ('refined', 'masked')
+                           or details.get('reason') == 'second_pass_core_drift')
     if (not packed or not admitted or details.get('mask_conflict')
             or details.get('bounds') != list(person['bounds'])):
         return None
@@ -31,6 +32,8 @@ def measure(person, people, *, report_above=None):
     in the crowding measurement consumed by tracking and identity ranking.
     """
     import numpy as np
+    from .mask_usage import uses
+    use_masks = uses(person, 'overlap')
     left, top, right, bottom = person['bounds']
     area = (right-left)*(bottom-top)
     overlap = box_overlap = 0.
@@ -51,9 +54,9 @@ def measure(person, people, *, report_above=None):
         box_fraction = (x1-x0)*(y1-y0)/area
         box_overlap = max(box_overlap, box_fraction)
         if not decoded:
-            own = foreground_mask(person)
+            own = foreground_mask(person) if use_masks else None
             decoded = True
-        peer = foreground_mask(other)
+        peer = foreground_mask(other) if use_masks and uses(other, 'overlap') else None
         peer_pixels = peer[0][y0-b:y1-b, x0-a:x1-a] if peer is not None else None
         if own is not None and peer_pixels is not None:
             own_pixels = own[0][y0-top:y1-top, x0-left:x1-left]

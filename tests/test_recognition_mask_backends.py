@@ -21,9 +21,9 @@ def test_public_yaml_round_trip_and_tune_selection(tmp_path, backend):
     path.write_text('version: 2\npose:\n  estimator: {backend: pmpose}\n'
                     '  refinement: {enabled: true, backend: ' + backend + '}\n')
     config = load(path)
-    assert v2_document(config.data)['pose']['refinement']['backend'] == backend
+    assert v2_document(config.data)['pose']['mask']['backend'] == backend
     editor = Settings(config)
-    assert backend in CHOICES['pose.refinement.backend']
+    assert backend in CHOICES['pose.mask.backend']
     editor.edit('pose.refinement.backend', 'hq_sam2_large')
     assert editor.effective().data['sapiensid']['pose']['refinement']['backend'] == 'hq_sam2_large'
 

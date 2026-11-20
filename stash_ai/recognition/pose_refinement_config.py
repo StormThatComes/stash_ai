@@ -10,7 +10,8 @@ LEGACY_CLEANUP = dict(min_island_pixels=4, min_island_fraction=.001,
 
 def defaults():
     return dict(enabled=False, backend='sam_pose2seg', directory='', mode='all', overlap_threshold=.2, generic_second_pass=False,
-                max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
+                pose_second_pass=None, mask_sharpness=True, mask_keypoint_filtering=True,
+                mask_overlap=True, mask_body_admission=True, max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
                 max_mask_combinations=256, bidirectional_prompts=False, negative_limb_prompts=False, joint_limb_ownership=False, max_limb_length_ratio=3.,
                 max_decoder_attempts=3, limb_peer_distance_fraction=.035, limb_peer_min_pixels=2., limb_contact_reach_ratio=5.,
@@ -27,17 +28,22 @@ def validate(pose):
         raise ValueError(prefix + 'enabled must be boolean.')
     if not settings['enabled']:
         return
+    from .mask_usage import applications, FIELDS
+    use = applications(settings, generic=pose['backend'] != 'pmpose')
+    for name, value in use.items():
+        if type(value) is not bool:
+            raise ValueError(prefix + FIELDS[name] + ' must be boolean.')
     from .mask_backends import BACKENDS
     if settings['backend'] not in BACKENDS:
         raise ValueError(prefix + 'backend must be one of: ' + ', '.join(BACKENDS))
-    for key in ('generic_second_pass','expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
+    for key in ('expand_boxes', 'masked_identity_crop', 'recover_prompt_points', 'adaptive_decoder_retries', 'negative_limb_prompts', 'joint_limb_ownership', 'bidirectional_prompts'):
         if type(settings[key]) is not bool:
             raise ValueError(prefix + key + ' must be boolean.')
     if pose['backend'] not in ('pmpose', 'sapiens', 'vitpose_plus_large', 'rtmo'):
         raise ValueError(prefix + 'enabled requires a supported COCO17 pose backend.')
-    if pose['backend']=='rtmo' and settings['generic_second_pass']:
-        raise ValueError(prefix+'generic_second_pass is unsupported for RTMO; use mask-only refinement.')
-    if pose['backend']=='rtmo' and settings['bidirectional_prompts']:
+    if pose['backend']=='rtmo' and use['pose_refinement']:
+        raise ValueError('pose.mask.apply_to.pose_refinement is unsupported for RTMO; use mask-only refinement.')
+    if settings['bidirectional_prompts'] and not use['pose_refinement']:
         raise ValueError(prefix+'bidirectional_prompts requires a top-down estimator with an independent second pass.')
     if settings['mode'] not in ('all', 'overlap'):
         raise ValueError(prefix + 'mode must be all or overlap.')
@@ -72,9 +78,12 @@ def validate(pose):
         raise ValueError(prefix + 'directory requires a local path.')
 
 
-def contract(settings):
+def contract(settings, *, generic=False):
     from . import sam_pose2seg_registry as registry
     active = {k: v for k, v in settings.items() if k != 'directory' and k not in LEGACY_CLEANUP}
+    from .mask_usage import applications
+    active['pose_second_pass'] = applications(settings, generic=generic)['pose_refinement']
+    active.pop('generic_second_pass', None)
     backend = active.pop('backend', 'sam_pose2seg')
     if backend != 'sam_pose2seg':
         from .mask_backends import model_contract
@@ -85,7 +94,7 @@ def contract(settings):
     if settings.get('bridge_radius_pixels') and settings.get('max_bridge_lobe_fraction'):
         active.update(bridge_radius_pixels=settings['bridge_radius_pixels'],
                       max_bridge_lobe_fraction=settings['max_bridge_lobe_fraction'])
-    return dict(version='coco17-sam-pose2seg-refinement-v19',
+    return dict(version='coco17-sam-pose2seg-refinement-v20',
                 source_revision=registry.SOURCE_REVISION, weights_sha256=registry.SHA256,
                 mask_background_alpha=.25,
                 **active)

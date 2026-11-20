@@ -139,10 +139,10 @@ pose:
     # Minimum probability that a PMPose point lies inside the crop. Range: 0..1.
     min_visibility: 0.5
     # Minimum probability that a PMPose point is visible. Range: 0..1.
-  refinement:
-    # Optional instance masks and second pose pass.
+  mask:
+    # Instance mask generation and independent consumers.
     enabled: true
-    # SAM masks for top-down pose estimators; PMPose also runs a masked second pass.
+    # Generate instance masks for supported COCO17 estimators. Applications are controlled by apply_to.
     backend: sam_pose2seg
     # Instance masks: sam_pose2seg (default), sam3, hq_sam2_large or rfdetr_seg_large. Models download on first
     # use; SAM 3 requires Hugging Face access.
@@ -152,9 +152,6 @@ pose:
     # all also repairs isolated tight boxes; overlap limits SAM to overlapping people.
     overlap_threshold: 0.2
     # Minimum intersection / smaller-box area in overlap mode. Range: 0..1.
-    generic_second_pass: false
-    # Run and validate a masked second ViTPose/Sapiens pass; confidence remains a proxy, never measured
-    # visibility. Off by default.
     max_retry_jobs_per_cue: 16
     # Shared maximum person jobs for contact recovery, SAM decoder retries and masked second passes (1-1024).
     max_retry_jobs_per_scene: 4096
@@ -231,14 +228,31 @@ pose:
     # pixels. Range: 0..1000000.
     min_foreign_island_points: 2
     # Minimum foreign core points on an island with no own support to discard it. Range: 1..1000.
-    expand_boxes: true
-    # Union the admitted mask bounds with the original detector box; never shrink.
     max_box_area_ratio: 2.0
     # Reject masks whose union box exceeds this multiple of the original area. Range: 1..10.
     max_side_expansion: 0.5
     # Maximum extension on any side, relative to original width or height. Range: 0..2.
-    masked_identity_crop: true
-    # Mask the identity encoder crop when active refinement separates overlapping bodies.
+    apply_to:
+      # Use validated masks independently in each stage; false selects that stage without masks.
+      sharpness: true
+      # Measure sharpness inside the mask (true) or the original full person crop (false). Missing required
+      # masks never fall back to crop sharpness.
+      body_encoder_input: true
+      # Neutralize background pixels for a validated, separated body crop sent to the body encoder.
+      # Missing/ineligible masks keep the original crop and are reported.
+      pose_refinement: true
+      # Run a masked second pose pass and dependent contact recovery. Unsupported for RTMO. Legacy PMPose
+      # defaults to true, other estimators to generic_second_pass.
+      keypoint_filtering: true
+      # Apply mask ownership, joint fusion/filtering and maskless ownership fallback. False preserves the
+      # selected pose pass scores and points before ordinary output filters.
+      box_expansion: true
+      # Expand the person box to the admitted mask bounds; never shrink. False preserves the original box.
+      overlap: true
+      # Measure overlap using masks when available. False uses boxes for all peers.
+      body_admission: true
+      # Use mask separation/conflicts for body admission and crowd context. Mask validity checks always remain
+      # active.
   deduplication:
     # Optional suppression of duplicate PMPose predictions.
     enabled: true
@@ -312,9 +326,9 @@ body:
     min_person_pixels: 64
     # Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.
     min_sharpness: 10.0
-    # Minimum sharpness inside the SAM mask at source resolution. Positive values require a top-down pose
-    # backend, refinement.enabled: true and mode: all; missing masks reject the body. Independent of
-    # masked_identity_crop. 0 disables this gate. Range: 0..1000000.
+    # Minimum body sharpness at source resolution. With pose.mask.apply_to.sharpness: true, positive values
+    # require mask.enabled: true and mode: all; missing masks reject the body. False measures the original full
+    # crop. 0 disables this gate. Range: 0..1000000.
     min_keypoints: 4
     # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
     max_overlap: 0.65
@@ -503,9 +517,8 @@ matching:
       # Minimum shorter source body-crop side for body/hybrid anchors; null adds no pixel floor. Range: 1..8192
       # or null.
       min_sharpness: 25.0
-      # Minimum SAM-mask sharpness for body/hybrid anchors. Positive values require a top-down pose backend,
-      # refinement.enabled: true and mode: all; missing masks cannot qualify. 0 disables this floor. Range:
-      # 0..1000000.
+      # Minimum body/hybrid anchor sharpness using pose.mask.apply_to.sharpness to select masked or full-crop
+      # measurement. Missing required masks cannot qualify. 0 disables this floor. Range: 0..1000000.
       keypoint_rules:
         # Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop
         # before the SapiensID nose and eye filter.

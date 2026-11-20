@@ -1,6 +1,6 @@
 """SAM masks for COCO17 estimators without model-specific visibility heads."""
 import numpy as np
-from .pose_refinement import RefinedPMPose, retain_quality_mask
+from .pose_refinement import RefinedPMPose
 
 
 class ConfidencePose:
@@ -50,49 +50,13 @@ class PoseMasks(RefinedPMPose):
                        (value[0],value[1],dict(presence=value[1].copy(),visibility=value[1].copy())) for value in values]
         return self.refine_many(frames,predictions)
 
-    @property
-    def requires_second_pass(self):return self.settings.get('generic_second_pass',False)
-
-    def _plan(self,bounds,prediction,image=None):
-        if not self.requires_second_pass:
-            # A mask alone cannot independently verify a borrowed landmark.
-            self.previous_cue=self.next_cue=None
-            context=getattr(self,'cue_contexts',None);self.cue_contexts=None
-            try:return super()._plan(bounds,prediction,image)
-            finally:self.cue_contexts=context
-        return super()._plan(bounds,prediction,image)
+    generic_estimator = True
 
     def _apply_second_pass(self,pending,result,records,original,refined):
         super()._apply_second_pass(pending,result,records,original,refined)
         for i,*_ in pending:
             records[i].update(point_evidence='confidence_proxy',visibility_measured=False)
 
-    def _second_pass(self, image, pending, result, records, original):
-        if self.requires_second_pass:
-            return super()._second_pass(image,pending,result,records,original)
-        for i, box, mask, indices in pending:
-            record = records[i]
-            from .limb_ownership import fuse, PARENT
-            # A single pass can remove foreign points, but cannot corroborate a
-            # disconnected endpoint by comparing the prediction with itself.
-            own=(original[0][i:i+1],original[1][i:i+1],{k:v[i:i+1] for k,v in original[2].items()})
-            xy,score,prob,_=fuse(i,0,original,own,mask,box,self.joint_quality)
-            for k,p in PARENT.items():
-                if score[p]<=self.joint_quality['min_keypoint_score']:
-                    xy[k],score[k]=-1,0
-                    for value in prob.values():value[k]=0
-            removed=np.flatnonzero((original[1][i]>0)&(score==0)).tolist()
-            if removed:record['mask_ownership_withheld']=removed
-            result[0][i],result[1][i]=xy,score
-            for key in result[2]:result[2][key][i]=prob[key]
-            retain_quality_mask(record, mask, box)
-            if record.get('separated') and self.settings.get('masked_identity_crop'):
-                record['encoder_mask'] = record.get('overlap_mask')
-            record.update(status='masked', reason=None, bounds=box,
-                          point_evidence='confidence_proxy', visibility_measured=False,
-                          box_expanded=box != record['detector_bounds'])
-        from . import detection_phases as phases
-        phases.refined_pose(image, 'After mask ownership filtering (no second pose pass)', result, records)
 
 
 def wrap(pose, config, device):

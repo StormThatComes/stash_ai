@@ -42,6 +42,7 @@ def retain_quality_mask(record, mask, bounds):
     packed = np.packbits(mask[top:bottom, left:right], axis=None)
     if packed.any():
         record['overlap_mask'] = base64.b64encode(packed).decode('ascii')
+        record['mask_valid'] = True
 
 
 class PromptCores(list):
@@ -55,6 +56,15 @@ class RefinedPMPose:
         self.frame_batch_size, self.queue_bytes = frame_batch_size, queue_bytes
         # Prompt confidence is intentionally stricter than output joint eligibility.
         self.joint_quality = dict(settings, **(joint_quality or {}))
+
+    @property
+    def mask_usage(self):
+        from .mask_usage import applications
+        return applications(self.settings, generic=getattr(self, 'generic_estimator', False))
+
+    @property
+    def requires_second_pass(self):
+        return self.mask_usage['pose_refinement']
 
     def close(self):
         from .resident_models import release
@@ -83,7 +93,8 @@ class RefinedPMPose:
         settings = self.settings
         result = (points.copy(), scores.copy(), {k: v.copy() for k, v in probabilities.items()})
         records = [dict(status='skipped', reason='no_reliable_prompts',
-                        detector_bounds=list(box), bounds=list(box)) for box in bounds]
+                        detector_bounds=list(box), bounds=list(box), mask_usage=self.mask_usage,
+                        mask_applied=dict.fromkeys(self.mask_usage, False)) for box in bounds]
         cores = [reliable_core(points[i], scores[i], {k: v[i] for k, v in probabilities.items()}, box, settings)
                  for i, box in enumerate(bounds)]
         cores = PromptCores(cores)
@@ -97,8 +108,8 @@ class RefinedPMPose:
             cores.negatives = extra
         recovery = settings.get('recover_prompt_points', False)
         from .temporal_prompts import capture, borrow
-        previous = self.previous_cue
-        context = getattr(self, 'cue_contexts', None)
+        previous = self.previous_cue if self.requires_second_pass else None
+        context = getattr(self, 'cue_contexts', None) if self.requires_second_pass else None
         signature = getattr(image, '_recognition_cue_signature', None)
         if context is not None and signature:
             scan = getattr(image, '_recognition_scan', None)
@@ -136,7 +147,7 @@ class RefinedPMPose:
                          if previous and self.previous_cue else {})
                 indices = borrow(previous, self.previous_cue, i, indices, settings['min_prompt_points'],
                                  record, local=local)
-                future = getattr(self,'next_cue',None)
+                future = getattr(self,'next_cue',None) if self.requires_second_pass else None
                 if future and 'temporal_prompts' not in record:
                     local = prompt_recovery.local_candidates(points,scores,tests,valid,i)
                     indices = borrow(future,self.previous_cue,i,indices,settings['min_prompt_points'],record,local=local)
@@ -179,7 +190,7 @@ class RefinedPMPose:
         return prompts, neighbours, negatives
 
     def refine_many(self, frames, predictions):
-        if self.settings.get('bidirectional_prompts',False):
+        if self.requires_second_pass and self.settings.get('bidirectional_prompts',False):
             from .pose_context import contexts
             self.cue_contexts = contexts(self, frames, predictions)
             try:
@@ -228,6 +239,8 @@ class RefinedPMPose:
         return (*result, records)
 
     def finish_maskless(self,image,bounds,prediction,result,records):
+        if not self.mask_usage['keypoint_filtering']:
+            return
         if self.settings.get('joint_limb_ownership',False):
             from .joint_limbs import settle
             settle(result,bounds,records,self.settings)
@@ -245,10 +258,12 @@ class RefinedPMPose:
             return conditioning(image,jobs,original)
         return [mask for _,_,mask,_ in jobs]
 
-    @pipeline_stage('pmpose_masked_second_pass')
     def _second_pass(self, image, pending, result, records, original):
-        refined = self.pose.predict(image, [box for _, box, _, _ in pending],
-                                    masks=self.masked_inputs(image,pending,original))
+        if not self.requires_second_pass:
+            return self._mask_only(image, pending, result, records, original)
+        with pipeline_timing('pmpose_masked_second_pass'):
+            refined = self.pose.predict(image, [box for _, box, _, _ in pending],
+                                        masks=self.masked_inputs(image,pending,original))
         phases.masked_pose(image, pending, refined)
         self._apply_second_pass(pending, result, records, original, refined)
         phases.refined_pose(image, 'After refinement acceptance / joint fusion', result, records)
@@ -276,7 +291,12 @@ class RefinedPMPose:
                     retain_quality_mask(record, mask, old)
                 continue
             from .limb_ownership import fuse
-            joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.joint_quality)
+            if self.mask_usage['keypoint_filtering']:
+                joints, confidence, evidence, restored = fuse(i, offset, original, refined, mask, box, self.joint_quality)
+            else:
+                joints, confidence = new_points[offset].copy(), new_scores[offset].copy()
+                evidence = {k: v[offset].copy() for k, v in probabilities.items()}
+                restored = []
             if restored:
                 records[i]['restored_first_pass_joints'] = restored
             # Quality needs the validated mask even when encoder masking is off.
@@ -284,8 +304,45 @@ class RefinedPMPose:
             retain_quality_mask(records[i], mask, box)
             if records[i].get('overlap_mask') and records[i].get('separated') and self.settings.get('masked_identity_crop'):
                 records[i]['encoder_mask'] = records[i]['overlap_mask']
+            records[i].setdefault('mask_applied', {}).update(
+                pose_refinement=True, keypoint_filtering=self.mask_usage['keypoint_filtering'],
+                box_expansion=box != records[i]['detector_bounds'],
+                body_encoder_input=bool(records[i].get('encoder_mask')))
             result[0][i], result[1][i] = joints, confidence
             for key in result[2]:
                 result[2][key][i] = evidence[key]
             records[i].update(status='refined', reason=None, bounds=box,
                               box_expanded=box != records[i]['detector_bounds'])
+
+    def _mask_only(self, image, pending, result, records, original):
+        for i, box, mask, indices in pending:
+            record = records[i]
+            if self.mask_usage['keypoint_filtering']:
+                from .limb_ownership import fuse, PARENT
+                # A single pass can remove foreign points, but cannot corroborate a
+                # disconnected endpoint by comparing the prediction with itself.
+                own=(original[0][i:i+1],original[1][i:i+1],{k:v[i:i+1] for k,v in original[2].items()})
+                xy,score,prob,_=fuse(i,0,original,own,mask,box,self.joint_quality)
+                for k,p in PARENT.items():
+                    if score[p]<=self.joint_quality['min_keypoint_score']:
+                        xy[k],score[k]=-1,0
+                        for value in prob.values():value[k]=0
+                removed=np.flatnonzero((original[1][i]>0)&(score==0)).tolist()
+                if removed:record['mask_ownership_withheld']=removed
+                result[0][i],result[1][i]=xy,score
+                for key in result[2]:result[2][key][i]=prob[key]
+            retain_quality_mask(record, mask, box)
+            if record.get('separated') and self.settings.get('masked_identity_crop'):
+                record['encoder_mask'] = record.get('overlap_mask')
+            record.setdefault('mask_applied', {}).update(
+                keypoint_filtering=self.mask_usage['keypoint_filtering'],
+                box_expansion=box != record['detector_bounds'],
+                body_encoder_input=bool(record.get('encoder_mask')))
+            record.update(status='masked', reason=None, bounds=box,
+                          box_expanded=box != record['detector_bounds'])
+            if getattr(self, 'generic_estimator', False):
+                record.update(point_evidence='confidence_proxy', visibility_measured=False)
+        from . import detection_phases as phases
+        title = ('After mask ownership filtering (no second pose pass)' if self.mask_usage['keypoint_filtering']
+                 else 'Mask retained (keypoints unchanged)')
+        phases.refined_pose(image, title, result, records)

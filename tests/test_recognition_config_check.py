@@ -78,8 +78,8 @@ def test_quality_pose_masks_and_portraits(tmp_path):
         'matching.face.anchors.quality.max_pose_deviation': .5,
         'matching.face.anchors.quality.min_visible_face_fraction': .5,
         'body.collection.min_keypoints': 7,
-        'pose.refinement.min_recovery_mask_score': .49,
-        'pose.refinement.min_prompt_coverage': .85,
+        'pose.mask.min_recovery_mask_score': .49,
+        'pose.mask.min_prompt_coverage': .85,
         'pose.point_quality.min_presence': 1.,
         'pose.deduplication.min_presence': .4,
         'pose.deduplication.min_shared_points': 8,
@@ -93,9 +93,9 @@ def test_quality_pose_masks_and_portraits(tmp_path):
     assert r['body-anchor-min_keypoints']['status'] == 'ok'
     assert r['recovery-mask-score']['status'] == 'ok'
     assert r['mask-prompt-coverage']['status'] == r['duplicate-core-agreement']['status'] == 'ok'
-    inherited = r['pose.refinement.min_presence-ceiling']
+    inherited = r['pose.mask.min_presence-ceiling']
     assert inherited['status'] == 'warning' and not inherited['solver_constraint']
-    assert inherited['settings'] == {'pose.point_quality.min_presence': 1., 'pose.refinement.min_presence': None}
+    assert inherited['settings'] == {'pose.point_quality.min_presence': 1., 'pose.mask.min_presence': None}
     assert r['pose.deduplication.min_presence-ceiling']['status'] == 'ok'
     assert r['portrait-anchor-min_visible_face_fraction']['status'] == r['portrait-mouth-weights']['status'] == 'ok'
 

@@ -51,7 +51,7 @@ def pose(config):
         if active:model['inference_precision']=active
     if backend != 'pmpose' and p.get('refinement',{}).get('enabled'):
         from .pose_refinement_config import contract as mask_contract
-        model = [model, mask_contract(p['refinement']), 'confidence-proxy-mask-v2']
+        model = [model, mask_contract(p['refinement'], generic=True), 'confidence-proxy-mask-v2']
     if backend!='pmpose' and p.get('deduplication',{}).get('enabled'):
         from .pose_deduplication_config import contract
         model=[model,contract(p['deduplication'])]

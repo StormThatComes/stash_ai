@@ -2,7 +2,7 @@
 FACE_FIELDS = ('min_face_pixels', 'min_sharpness', 'min_visible_face_fraction')
 QUERY = 'matching.face.samples.minimum.'
 ANCHOR = 'matching.face.anchors.quality.'
-REFINE = 'pose.refinement.'
+REFINE = 'pose.mask.'
 DEDUP = 'pose.deduplication.'
 
 

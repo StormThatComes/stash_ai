@@ -29,12 +29,16 @@ _GROUPS = (
     ('pose.estimator.pmpose', 'sapiensid.pose',
      'directory=pmpose_directory batch_size=pmpose_batch_size '
      'presence_threshold=pmpose_presence_threshold visibility_threshold=pmpose_visibility_threshold'),
-    ('pose.refinement', 'sapiensid.pose.refinement',
-     'enabled backend directory mode overlap_threshold generic_second_pass max_retry_jobs_per_cue max_retry_jobs_per_scene max_mask_combinations bidirectional_prompts negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
+    ('pose.mask', 'sapiensid.pose.refinement',
+     'enabled backend directory mode overlap_threshold max_retry_jobs_per_cue max_retry_jobs_per_scene max_mask_combinations bidirectional_prompts negative_limb_prompts joint_limb_ownership max_limb_length_ratio max_decoder_attempts limb_peer_distance_fraction limb_peer_min_pixels limb_contact_reach_ratio min_keypoint_score min_presence min_visibility '
      'min_recovery_mask_score adaptive_decoder_retries recover_prompt_points min_prompt_points max_prompt_points max_negative_prompt_points_per_neighbor min_mask_score min_prompt_coverage max_foreign_coverage '
      'min_island_pixels min_island_fraction max_island_gap_fraction bridge_radius_pixels max_bridge_lobe_fraction '
      'min_limb_path_coverage min_limb_foreign_distance_pixels min_foreign_island_points '
-     'expand_boxes max_box_area_ratio max_side_expansion masked_identity_crop'),
+     'max_box_area_ratio max_side_expansion'),
+    ('pose.mask.apply_to', 'sapiensid.pose.refinement',
+     'sharpness=mask_sharpness body_encoder_input=masked_identity_crop pose_refinement=pose_second_pass '
+     'keypoint_filtering=mask_keypoint_filtering box_expansion=expand_boxes '
+     'overlap=mask_overlap body_admission=mask_body_admission'),
     ('pose.deduplication', 'sapiensid.pose.deduplication',
      'enabled box_context_retry box_context_retention partial_pose_recovery partial_min_overlap partial_point_distance partial_min_shared_points max_contact_attempts contact_crop_variants contact_min_iou contact_max_iou min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
      'min_match_fraction'),
@@ -139,6 +143,27 @@ PUBLIC_PATHS = _paths()
 INTERNAL_PATHS = {value: key for key, value in PUBLIC_PATHS.items()}
 LEGACY_BYTE_PATHS = {key[:-3] + '_bytes': value for key, value in PUBLIC_PATHS.items()
                      if value.endswith('_bytes')}
+LEGACY_MASK_PATHS = {key.replace('pose.mask.', 'pose.refinement.', 1): value
+                     for key, value in PUBLIC_PATHS.items()
+                     if key.startswith('pose.mask.') and not key.startswith('pose.mask.apply_to.')}
+LEGACY_MASK_PATHS.update({
+    'pose.refinement.masked_identity_crop': 'sapiensid.pose.refinement.masked_identity_crop',
+    'pose.refinement.expand_boxes': 'sapiensid.pose.refinement.expand_boxes',
+    'pose.refinement.generic_second_pass': 'sapiensid.pose.refinement.generic_second_pass',
+})
+
+
+def canonical_path(path):
+    internal = LEGACY_MASK_PATHS.get(path)
+    if path == 'sapiensid.pose.refinement.generic_second_pass':
+        internal = path
+    if internal is None:
+        return path
+    if internal.endswith('.generic_second_pass'):
+        return 'pose.mask.apply_to.pose_refinement'
+    return INTERNAL_PATHS[internal]
+
+
 VITPOSE_BATCH = 'pose.estimator.vitpose_plus_large.batch_size'
 
 
@@ -167,7 +192,7 @@ def leaf_items(document, prefix=''):
 
 
 POINT_FIELDS = ('min_keypoint_score', 'min_presence', 'min_visibility')
-POINT_STAGES = ('refinement', 'deduplication')
+POINT_STAGES = ('mask', 'deduplication')
 
 
 def apply_v2(data, supplied):
@@ -186,13 +211,15 @@ def apply_v2(data, supplied):
             _number(value, key, 0, 1)
             shared[shared_paths[key]] = value
             continue
-        internal = PUBLIC_PATHS.get(key, LEGACY_BYTE_PATHS.get(key))
+        internal = PUBLIC_PATHS.get(key, LEGACY_BYTE_PATHS.get(key, LEGACY_MASK_PATHS.get(key)))
         if internal is None:
-            if value == {} and (key == 'pose.point_quality' or any(p.startswith(key + '.') for p in PUBLIC_PATHS)):
+            if value == {} and (key == 'pose.point_quality' or any(p.startswith(key + '.') for p in (*PUBLIC_PATHS, *LEGACY_MASK_PATHS))):
                 continue
             raise ValueError(f'{key}: unknown v2 setting or expected a mapping.')
         if internal in seen:
-            raise ValueError(f'{key}: do not combine legacy byte and MB settings for the same limit.')
+            raise ValueError(f'{key}: do not combine legacy and canonical settings for the same parameter.')
+        if key.startswith('pose.mask.apply_to.') and type(value) is not bool:
+            raise ValueError(f'{key}: expected true or false.')
         seen.add(internal)
         if key in PUBLIC_PATHS and internal.endswith('_bytes'):
             value = from_mb(internal, value, name=key)
@@ -201,6 +228,9 @@ def apply_v2(data, supplied):
             _number(value, key + ' (legacy bytes)', low,
                     float('inf') if high is None else high, integer=True)
         put(data, internal, value)
+    if ('sapiensid.pose.refinement.generic_second_pass' in seen
+            and 'sapiensid.pose.refinement.pose_second_pass' in seen):
+        raise ValueError('Do not combine generic_second_pass and pose.mask.apply_to.pose_refinement.')
     source_body = supplied.get('body', {})
     if 'enabled' not in source_body.get('collection', {}):
         body['collection']['enabled'] = body['enabled']
@@ -210,12 +240,14 @@ def apply_v2(data, supplied):
     if 'enabled' not in source_matching.get('global', {}):
         body['global_matching']['enabled'] = body['identities']['enabled']
     source_pose = supplied.get('pose', {})
-    if 'enabled' not in source_pose.get('refinement', {}):
+    if 'sapiensid.pose.refinement.enabled' not in seen:
         body['pose']['refinement']['enabled'] = body['pose']['backend'] == 'pmpose'
     for stage in POINT_STAGES:
+        internal_stage = 'refinement' if stage == 'mask' else stage
+        source = dict(source_pose.get('refinement', {}), **source_pose.get('mask', {})) if stage == 'mask' else source_pose.get(stage, {})
         for field in POINT_FIELDS:
-            if source_pose.get(stage, {}).get(field) is None:
-                body['pose'][stage][field] = shared[field]
+            if source.get(field) is None:
+                body['pose'][internal_stage][field] = shared[field]
     # V1 used one batch for frames and ViTPose crops. Canonicalize equal
     # values so equivalent configurations keep historical hashes and snapshots.
     pose = data['sapiensid']['pose']
@@ -232,7 +264,11 @@ def v2_document(data, *, source=b''):
     from .config import parse_yaml, plain
     result = {'version': 2}
     for public, internal in PUBLIC_PATHS.items():
-        if public == VITPOSE_BATCH:
+        if public == 'pose.mask.apply_to.pose_refinement':
+            from .mask_usage import applications
+            pose = data['sapiensid']['pose']
+            value = applications(pose['refinement'], generic=pose['backend'] != 'pmpose')['pose_refinement']
+        elif public == VITPOSE_BATCH:
             pose = data['sapiensid']['pose']
             value = pose.get('vitpose_batch_size', pose['batch_size'])
         else:
@@ -251,17 +287,20 @@ def v2_document(data, *, source=b''):
             default = first
         shared[field] = default
         for stage in POINT_STAGES:
-            explicit = source_pose.get(stage, {}).get(field) is not None
+            source = dict(source_pose.get('refinement', {}), **source_pose.get('mask', {})) if stage == 'mask' else source_pose.get(stage, {})
+            explicit = source.get(field) is not None
             if not explicit and pose[stage][field] == default:
                 pose[stage][field] = None
     result['pose'] = {'detector': pose['detector'], 'estimator': pose['estimator'],
-                      'point_quality': shared, 'refinement': pose['refinement'],
+                      'point_quality': shared, 'mask': pose['mask'],
                       'deduplication': pose['deduplication']}
     return result
 
 
 def internal_path(path):
     """Resolve a v2 field, including an indexed regional-rule minimum."""
+    if path in LEGACY_MASK_PATHS:
+        return LEGACY_MASK_PATHS[path]
     if path in PUBLIC_PATHS:
         return PUBLIC_PATHS[path]
     if path in LEGACY_BYTE_PATHS:
@@ -276,6 +315,8 @@ def public_path(path):
     rules = 'sapiensid.identities.anchor_keypoint_rules'
     if path == rules or path.startswith(rules + '.'):
         return 'matching.body.anchors.keypoint_rules' + path[len(rules):]
+    if path == 'sapiensid.pose.refinement.generic_second_pass':
+        return 'pose.mask.apply_to.pose_refinement'
     return INTERNAL_PATHS[path]
 
 

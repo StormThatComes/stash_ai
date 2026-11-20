@@ -5,12 +5,12 @@ import numpy as np
 from .body_observations import contract, identifier
 
 
-def _pixels(image,bounds,mask=None):
+def _pixels(image,bounds,mask=None, *, measure=True):
     left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
         from .foreground_quality import laplacian
-        measured=laplacian(values,mask)
+        measured=laplacian(values,mask) if measure else None
         pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
             small=np.asarray(thumb)
@@ -22,26 +22,28 @@ def _pixels(image,bounds,mask=None):
 def quality(image,person,people,settings):
     from .inference_cache import many
     bounds=person['bounds'];left,top,right,bottom=bounds
-    packed = person.get('pose_refinement',{}).get('encoder_mask')
+    from .mask_usage import uses
+    packed = person.get('pose_refinement',{}).get('encoder_mask') if uses(person, 'body_encoder_input') else None
     from .body_overlap import foreground_mask
     foreground = foreground_mask(person)
-    mask = foreground[0] if foreground is not None else None
-    if packed:
-        from .person_geometry import encoder_crop
-        width,height = right-left,bottom-top
-        with encoder_crop(image,bounds,packed) as crop:
-            sharp,pixel_digest,appearance_hash = _pixels(crop,(0,0,width,height),mask)
-    elif mask is not None:
+    masked_sharpness = uses(person, 'sharpness')
+    mask = foreground[0] if foreground is not None and masked_sharpness else None
+    # Always measure source pixels: encoder background replacement must not
+    # introduce artificial sharp edges when crop sharpness is selected.
+    if mask is not None:
         sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask)
     else:
         sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v2-quality-count',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
-    if mask is None:
-        # Keep crop texture as a diagnostic, never as evidence for a masked
-        # sharpness floor (including a later body-anchor-only floor).
+    source_pixel_digest = pixel_digest
+    if packed:
+        from .person_geometry import encoder_crop
+        with encoder_crop(image,bounds,packed) as crop:
+            _,pixel_digest,appearance_hash = _pixels(crop,(0,0,right-left,bottom-top),measure=False)
+    if masked_sharpness and mask is None:
         sharp=dict(crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_pixels=0)
     sharpness=sharp['sharpness']
-    sharp['sharpness_method']='sam_mask' if mask is not None else 'unavailable'
+    sharp['sharpness_method']=('sam_mask' if mask is not None else 'unavailable') if masked_sharpness else 'person_crop'
     from .body_overlap import admission_overlap, measure
     overlaps=measure(person,people,report_above=settings['max_overlap'])
     overlap=admission_overlap(overlaps)
@@ -49,19 +51,27 @@ def quality(image,person,people,settings):
     detected=sum(x>=0 and y>=0 for x,y in person['keypoints'])
     points=used_keypoints(person)
     border=sum((left==0,top==0,right==image.width,bottom==image.height))
+    details = person.get('pose_refinement', {})
+    if 'mask_applied' in details:
+        details['mask_applied'].update(sharpness=mask is not None,
+            body_encoder_input=bool(packed), overlap=uses(person, 'overlap') and foreground is not None)
     measured=dict(pixel_digest=pixel_digest,appearance_hash=appearance_hash,width=right-left,height=bottom-top,
                   keypoints=points,detected_keypoints=detected,border_edges=border,**sharp,**overlaps)
     if packed:
         measured['foreground_hash'] = appearance_hash
         # Matching uses the masked input digest. VTT inspection verifies the original pixels.
-        with image.crop(bounds) as crop, crop.convert('RGB') as raw:
-            measured['source_pixel_digest'] = hashlib.sha256(str(raw.size).encode('ascii') + raw.tobytes()).hexdigest()
+        measured['source_pixel_digest'] = source_pixel_digest
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
             'person_sharpness_mask_unavailable' if settings['min_sharpness']>0 and not sharp['sharpness_pixels'] else
             'person_sharpness' if sharpness<settings['min_sharpness'] else
             'person_keypoints' if points<settings['min_keypoints'] else
             'person_overlap' if overlap is not None and overlap>settings['max_overlap'] else None)
     return measured,reason
+
+
+def foreground_mask_available(person):
+    from .body_overlap import foreground_mask
+    return foreground_mask(person) is not None
 
 
 def public_person(person):
@@ -144,7 +154,12 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
         ambiguous=associated is None and any(index in candidates for candidates in choices)
         refinement = person.get('pose_refinement', {})
         measured['embedding_foreground']='masked' if refinement.get('encoder_mask') else 'full'
-        separated = refinement.get('status') in ('refined','masked') and refinement.get('separated')
+        from .mask_usage import uses, admission_conflict
+        if not refinement.get('encoder_mask'):
+            measured['embedding_mask_reason'] = ('disabled' if not uses(person, 'body_encoder_input')
+                else 'mask_not_separated' if foreground_mask_available(person) else 'mask_unavailable')
+        separated = uses(person, 'body_admission') and refinement.get('separated') and (
+            refinement.get('mask_valid') or refinement.get('status') in ('refined','masked'))
         if separated and (ambiguous or reason == 'person_overlap'):
             measured['query_only_reason'] = 'unassigned_face' if ambiguous else 'separated_overlap'
         if ambiguous and not separated:
@@ -167,8 +182,10 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measured.update(query_only=True, query_only_reason='unresolved_partner')
             # Neither face owns a merged body. Keep the independent face observations.
             row = face = None
-        if refinement.get('mask_conflict'):
+        if admission_conflict(person):
             reason = 'person_mask_conflict'
+        if 'mask_applied' in refinement:
+            refinement['mask_applied']['body_admission'] = bool(separated or admission_conflict(person))
         face_accepted=row is not None and row['rejected'] is None
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None
@@ -177,7 +194,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             _body=dict(scan=scan,cue=cue,seconds=seconds,contract=expected,
                        face=row['id'] if row is not None else None,
                        face_accepted=face_accepted,rejected=reason))
-        if measured.get('sharpness_method') == 'sam_mask' and config.data['sapiensid']['storage']['retain_body_masks']:
+        if foreground_mask_available(person) and config.data['sapiensid']['storage']['retain_body_masks']:
             from .retained_body_masks import compress_mask
             metadata['_quality_mask'] = compress_mask(refinement['overlap_mask'])
         record=[identifier(scan,cue,person,expected),metadata,None,None]

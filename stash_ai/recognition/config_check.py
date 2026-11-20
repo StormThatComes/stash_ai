@@ -16,6 +16,9 @@ class Checks:
         self.pose_source = (parse_yaml(config.source).get('pose', {})
                             if config.document_version == 2 and config.source else {})
 
+        if 'refinement' in self.pose_source:
+            self.pose_source['mask'] = dict(self.pose_source['refinement'], **self.pose_source.get('mask', {}))
+
     def value(self, path):
         return get(self.config.data, PUBLIC_PATHS[path])
 

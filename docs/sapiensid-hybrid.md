@@ -1,5 +1,8 @@
 # SapiensID body and hybrid matching
 
+Person-mask consumers can be configured independently through `pose.mask.apply_to`;
+see [mask applications](recognition/mask-applications.md). Legacy `pose.refinement` settings remain accepted.
+
 [Documentation index](README.md)
 
 - [Configure collection](#configure-collection)

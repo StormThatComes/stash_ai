@@ -35,7 +35,7 @@ def validate(data):
         ('sapiensid.identities.anchor_min_sharpness', body['identities']['anchor_min_sharpness']),
     ) if value > 0]
     pose, refinement = body['pose'], body['pose']['refinement']
-    if active and not (pose['backend'] in ('pmpose','vitpose_plus_large','sapiens') and refinement['enabled'] and refinement['mode'] == 'all'):
+    if active and refinement.get('mask_sharpness', True) and not (pose['backend'] in ('pmpose','vitpose_plus_large','sapiens','rtmo') and refinement['enabled'] and refinement['mode'] == 'all'):
         raise ValueError(', '.join(active) + ' > 0 requires SAM masks for every person: set '
-                         'a top-down pose backend, sapiensid.pose.refinement.enabled: true and '
+                         'a supported COCO17 pose backend, sapiensid.pose.refinement.enabled: true and '
                          'sapiensid.pose.refinement.mode: all, or set both sharpness floors to 0.')
