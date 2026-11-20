@@ -54,16 +54,22 @@ def test_rfdetr_replaces_box_model_in_single_and_batched_pose_pipeline(tmp_path,
     assert detector.pose is None and detector.pose_refiner is None
 
 
-def test_rfdetr_pmpose_dedup_sam_and_audit_share_survivor_indices(tmp_path, monkeypatch):
+@pytest.mark.parametrize('second_pass', [False, True])
+def test_rfdetr_pmpose_dedup_sam_and_audit_share_survivor_indices(tmp_path, monkeypatch, second_pass):
     torch = pytest.importorskip('torch')
     from stash_ai.recognition import sam_pose2seg, detection_audit
+    from stash_ai.recognition.detection_parameters import apply_edits
     from stash_ai.recognition.models import YuNetDetector
     from tests.test_recognition_pose_deduplication_integration import CandidatePose, FACE, BOXES
     from tests.test_recognition_pose_refinement import Segmenter
-    config = configuration(tmp_path, backend='pmpose')
-    settings = config.data['sapiensid']['pose']
-    settings['deduplication']['enabled'] = settings['refinement']['enabled'] = True
-    settings['refinement']['mode'] = 'all'
+    # The shared fixture has already resolved Sapiens' mask-only default.
+    # Select the intended PMPose consumer explicitly through the public API.
+    config, _ = apply_edits(configuration(tmp_path, backend='pmpose'), {
+        'pose.deduplication.enabled': True,
+        'pose.mask.enabled': True,
+        'pose.mask.mode': 'all',
+        'pose.mask.apply_to.pose_refinement': second_pass,
+    })
     def model(pixels):
         xyxy = torch.tensor(BOXES, dtype=torch.float32) / torch.tensor([160, 100, 160, 100])
         boxes = torch.cat(((xyxy[:, :2]+xyxy[:, 2:])/2, xyxy[:, 2:]-xyxy[:, :2]), dim=1)
@@ -71,7 +77,8 @@ def test_rfdetr_pmpose_dedup_sam_and_audit_share_survivor_indices(tmp_path, monk
         logits[..., 1] = torch.logit(torch.tensor([.99, .8]))
         return dict(pred_logits=logits, pred_boxes=boxes.unsqueeze(0).repeat(len(pixels), 1, 1))
     monkeypatch.setattr(rf, 'load', lambda _: rf.RFDETRDetector(model, device='cpu', batch_size=2))
-    monkeypatch.setattr(pmpose_pose, 'load', lambda cfg, device: pmpose_pose._pipeline(CandidatePose(), cfg, device))
+    pose = CandidatePose()
+    monkeypatch.setattr(pmpose_pose, 'load', lambda cfg, device: pmpose_pose._pipeline(pose, cfg, device))
     monkeypatch.setattr(sam_pose2seg, 'load', lambda *args: Segmenter())
     monkeypatch.setattr(YuNetDetector, 'detect', lambda *args, **kwargs: [FACE])
     detector = backend.SapiensIDFaces(config, {}, load_identity=False, load_detector=False)
@@ -83,7 +90,11 @@ def test_rfdetr_pmpose_dedup_sam_and_audit_share_survivor_indices(tmp_path, monk
                 assert len(record['people']) == 1
                 assert detector.face_matches == [0]
                 assert record['pose_deduplication']['kept_indices'] == [1]
-                assert record['people'][0]['pose_refinement']['status'] == 'refined'
+                refinement = record['people'][0]['pose_refinement']
+                assert refinement['status'] == ('refined' if second_pass else 'masked')
+                assert refinement['mask_usage']['pose_refinement'] is second_pass
+                assert refinement['mask_applied']['pose_refinement'] is second_pass
+                assert pose.calls == [('first', 1)] + ([('masked', 1)] if second_pass else [])
                 assert record['mask_visualization']['people'][0]['person_index'] == 0
                 json.dumps(record, allow_nan=False)
     finally:
