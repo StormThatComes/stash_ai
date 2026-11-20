@@ -112,13 +112,13 @@ def test_default_replays_from_equal_floors_and_preserves_portraits_in_exports(tm
     assert clean(winner) and config.source_path.read_bytes() == original
 
 
-@pytest.mark.parametrize('path', ['pose.refinement.min_presence', 'pose.point_quality.min_presence'])
+@pytest.mark.parametrize('path', ['pose.mask.min_presence', 'pose.point_quality.min_presence'])
 def test_scan_only_warning_is_reported_and_does_not_require_repair(tmp_path, path):
     changes = {path: 1.}
     if 'point_quality' in path:
-        changes['pose.refinement.min_presence'] = None
+        changes['pose.mask.min_presence'] = None
     config = load(profile(tmp_path, changes))
-    row = next(r for r in report(config)['checks'] if r['rule'] == 'pose.refinement.min_presence-ceiling')
+    row = next(r for r in report(config)['checks'] if r['rule'] == 'pose.mask.min_presence-ceiling')
     assert row['status'] == 'warning' and path in row['settings']
     assert not row['solver_constraint']
     assert StrictPolicy(config).repairs(config, {}, initial=True) == [{}]

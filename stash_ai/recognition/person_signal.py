@@ -242,9 +242,11 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
     from .inference_precision import contract as precision_contract
     evidence.update(precision_contract(config))
     refinement = s['pose'].get('refinement',{})
+    if not refinement.get('mask_sharpness', True):
+        evidence['body_sharpness_source'] = 'source-person-crop-v1'
     if s['pose'].get('backend','yolo')!='pmpose' and refinement.get('enabled'):
         from .pose_refinement_config import contract as mask_contract
-        evidence['pose_mask']=mask_contract(refinement)
+        evidence['pose_mask']=mask_contract(refinement, generic=True)
     if s['pose'].get('backend','yolo')!='pmpose' and s['pose'].get('deduplication',{}).get('enabled'):
         from .pose_deduplication_config import contract as dedup_contract
         evidence['pose_deduplication']=dedup_contract(s['pose']['deduplication'])

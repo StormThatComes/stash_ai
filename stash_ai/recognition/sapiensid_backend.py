@@ -60,7 +60,7 @@ def identity_contract(config):
         result['pose_refiner'] = pmpose_contract(settings['pose'])
     if settings['pose'].get('backend', 'yolo') in ('vitpose_plus_large', 'sapiens', 'rtmo') and settings['pose'].get('refinement',{}).get('enabled'):
         from .pose_refinement_config import contract
-        result['pose_mask'] = contract(settings['pose']['refinement'])
+        result['pose_mask'] = contract(settings['pose']['refinement'], generic=True)
     if settings['pose'].get('backend','yolo')!='pmpose' and settings['pose'].get('deduplication',{}).get('enabled'):
         from .pose_deduplication_config import contract
         result['pose_deduplication']=contract(settings['pose']['deduplication'])
@@ -271,6 +271,8 @@ class SapiensIDFaces(YuNetDetector):
                     threshold = settings['pmpose_' + key + '_threshold']
                     if threshold > 0:
                         usable &= values > threshold
+            from .mask_usage import applications
+            details['mask_usage'] = applications(settings['refinement'], generic=settings['backend'] != 'pmpose')
             kps[~usable] = -1
             if refinements is not None:
                 details['pose_refinement'] = refinements[index]

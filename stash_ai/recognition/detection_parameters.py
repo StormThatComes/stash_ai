@@ -4,7 +4,7 @@ from dataclasses import replace
 import yaml
 
 from .config import _freeze, effective_data
-from .config_layout import INTERNAL_PATHS, VITPOSE_BATCH, get, put, v2_document
+from .config_layout import INTERNAL_PATHS, VITPOSE_BATCH, canonical_path, get, put, v2_document
 
 
 def apply_edits(config, edits, *, detection_preview=False):
@@ -16,7 +16,7 @@ def apply_edits(config, edits, *, detection_preview=False):
     for parameter, value in edits.items():
         if not isinstance(parameter, str):
             raise ValueError('Expected a dotted parameter name.')
-        public = INTERNAL_PATHS.get(parameter, parameter)
+        public = canonical_path(INTERNAL_PATHS.get(parameter, parameter))
         if not public.startswith(('pose.', 'face.detector.')):
             raise ValueError(f'Unsupported detector parameter {parameter!r}. Use face.detector or pose settings.')
         try:

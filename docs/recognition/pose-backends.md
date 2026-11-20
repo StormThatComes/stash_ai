@@ -1,5 +1,8 @@
 # Person detectors and pose backends
 
+Person-mask consumers can be configured independently through `pose.mask.apply_to`;
+see [mask applications](mask-applications.md). Legacy `pose.refinement` settings remain accepted.
+
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
 - [ViTPose++ Large keypoints](#vitpose-large-keypoints)

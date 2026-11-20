@@ -18,7 +18,8 @@ def torso(person):
 
 
 def pair(people):
-    if len(people)!=2 or any(p.get('crowded_box_retry') or p.get('pose_refinement',{}).get('mask_conflict') for p in people):
+    from .mask_usage import admission_conflict
+    if len(people)!=2 or any(p.get('crowded_box_retry') or admission_conflict(p) for p in people):
         return None
     centres = [torso(p) for p in people]
     if None in centres:

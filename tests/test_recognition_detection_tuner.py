@@ -53,7 +53,8 @@ def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
     preview = second.effective().data['sapiensid']
     assert preview['pose']['backend'] == 'vitpose_plus_large'
     assert preview['pose']['refinement']['enabled'] and preview['pose']['deduplication']['enabled']
-    assert 'pose.refinement' in second.groups()
+    assert 'pose.mask' in second.groups()
+    assert 'pose.mask.apply_to' in second.groups()
     assert preview['collection']['min_sharpness'] > 0 and preview['identities']['anchor_min_sharpness'] > 0
     assert first.effective() is config
 

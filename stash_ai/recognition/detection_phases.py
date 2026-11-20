@@ -136,6 +136,10 @@ def _details(person, record):
     for field in ('restored_first_pass_joints', 'withheld_rival_joints', 'mask_ownership_withheld'):
         if record.get(field):
             note += f" | {field}: {record[field]}"
+    if record.get('mask_usage'):
+        note += ' | mask uses: ' + ', '.join(k for k, v in record['mask_usage'].items() if v)
+    if record.get('mask_applied'):
+        note += ' | applied: ' + (', '.join(k for k, v in record['mask_applied'].items() if v) or 'none')
     return replace(person, positive=_xy(record.get('prompt_points', ())),
                    negative=_xy(record.get('negative_points', ())), note=note,
                    rejected=bool(record.get('mask_conflict') or

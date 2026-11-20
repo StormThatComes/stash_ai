@@ -47,8 +47,8 @@ def test_body_floor_requires_pmpose_sam_on_every_person(tmp_path,version,floor,b
     path=floor if version==1 else public_path(floor)
     with pytest.raises(ValueError,match=re.escape(path)) as raised:
         configured(tmp_path,data,version)
-    prefix='sapiensid.pose' if version==1 else 'pose'
-    assert prefix+'.refinement.mode: all' in str(raised.value)
+    prefix='sapiensid.pose.refinement' if version==1 else 'pose.mask'
+    assert prefix+'.mode: all' in str(raised.value)
     body['pose']['backend']='pmpose';body['pose']['refinement'].update(enabled=True,mode='all')
     assert configured(tmp_path,data,version).data['sapiensid']['enabled']
 

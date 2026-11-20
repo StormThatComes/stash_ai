@@ -177,7 +177,8 @@ class DeduplicatedPMPose:
                 phases.pose(image, 'After box-context / partial-pose recovery', bounds, prediction)
             confirmed.update(row['owner'] for row in recovery if row.get('accepted'))
             remaining = dict(self.settings, max_contact_attempts=max(0, self.settings['max_contact_attempts']-used))
-            if self.refined and getattr(self.pose,'supports_rival_mask',False):
+            if (self.refined and getattr(self.refined, 'requires_second_pass', True)
+                    and getattr(self.pose,'supports_rival_mask',False)):
                 from .contact_pose import recover_pair
                 recovered, recovered_pair = recover_pair(self.pose,image,bounds,prediction,reserves,remaining)
                 if recovered_pair is not None:
@@ -250,7 +251,8 @@ class DeduplicatedPMPose:
                 final[2][key][slot] = np.where(usable,recovered[2][key][owner],0)
             from .limb_ownership import maskless
             snapshot = (final[0].copy(), final[1].copy(), {k:v.copy() for k,v in final[2].items()})
-            removed = maskless(snapshot,slot,bounds[keep[slot]],image.size,final,self.settings)
+            filtering = getattr(self.refined, 'mask_usage', {}).get('keypoint_filtering', True)
+            removed = maskless(snapshot,slot,bounds[keep[slot]],image.size,final,self.settings) if filtering else []
             record['withheld_rival_joints'] = sorted(set(record.get('withheld_rival_joints', ())) | set(removed))
             record['contact_pose_recovered'] = True
             phases.refined_pose(image, 'After contact pose fallback', final, final[3])

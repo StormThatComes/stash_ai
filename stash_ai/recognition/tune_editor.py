@@ -4,7 +4,7 @@ from tkinter import ttk
 
 from .config import defaults
 from .config_help import HELP
-from .config_layout import POINT_FIELDS, get, leaf_items, v2_document
+from .config_layout import POINT_FIELDS, canonical_path, get, leaf_items, v2_document
 from .detection_parameters import apply_edits
 
 
@@ -15,8 +15,8 @@ CHOICES = {
     'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo', 'rtmo'),
     'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo', 'rtmo'),
     'pose.estimator.sapiens.variant': ('0.3b', '0.6b', '1b'),
-    'pose.refinement.backend': ('sam_pose2seg', 'sam3', 'hq_sam2_large', 'rfdetr_seg_large'),
-    'pose.refinement.mode': ('all', 'overlap'),
+    'pose.mask.backend': ('sam_pose2seg', 'sam3', 'hq_sam2_large', 'rfdetr_seg_large'),
+    'pose.mask.mode': ('all', 'overlap'),
 }
 
 
@@ -38,11 +38,13 @@ class Settings:
         self.edits = {}
 
     def value(self, path):
+        path = canonical_path(path)
         if path in PMPOSE_SWITCHES and self.value('pose.estimator.backend') not in ('pmpose','vitpose_plus_large','sapiens'):
             return False
         return self.edits.get(path, self.base[path])
 
     def edit(self, path, text):
+        path = canonical_path(path)
         original = self.base[path]
         default = get(self.schema, path)
         if isinstance(default, str):
@@ -51,7 +53,7 @@ class Settings:
             if text not in ('true', 'false'):
                 raise ValueError(f'{path} requires true or false.')
             value = text == 'true'
-        elif (text == 'null' and path.startswith(('pose.refinement.', 'pose.deduplication.'))
+        elif (text == 'null' and path.startswith(('pose.mask.', 'pose.deduplication.'))
               and path.rpartition('.')[2] in POINT_FIELDS):
             value = None
         else:
@@ -80,11 +82,13 @@ class Settings:
         allowed = ['face.detector', 'pose.detector',
                    'pose.detector.' + ('dfine' if box.startswith('dfine') else box),
                    'pose.estimator', 'pose.estimator.' + estimator]
-        if estimator=='rtmo':allowed.extend(('pose.point_quality','pose.refinement'))
+        if estimator=='rtmo':allowed.extend(('pose.point_quality','pose.mask'))
         if estimator in ('sapiens','vitpose_plus_large'):
-            allowed.extend(('pose.point_quality','pose.refinement','pose.deduplication'))
+            allowed.extend(('pose.point_quality','pose.mask','pose.deduplication'))
         if estimator == 'pmpose':
-            allowed.extend(('pose.point_quality', 'pose.refinement', 'pose.deduplication'))
+            allowed.extend(('pose.point_quality', 'pose.mask', 'pose.deduplication'))
+        if 'pose.mask' in allowed:
+            allowed.append('pose.mask.apply_to')
         available = {key.rpartition('.')[0] for key in self.base}
         return [group for group in allowed if group in available]
 

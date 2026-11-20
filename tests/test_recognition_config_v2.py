@@ -12,7 +12,7 @@ from stash_ai.recognition.scanning import scan_identity
 
 
 def test_layout_has_a_unique_path_for_every_internal_setting():
-    paths = {k for k, _ in leaf_items(defaults())} - {'version'}
+    paths = {k for k, _ in leaf_items(defaults())} - {'version', 'sapiensid.pose.refinement.generic_second_pass'}
     assert set(INTERNAL_PATHS) == paths | {'sapiensid.pose.vitpose_batch_size'}
     assert len(INTERNAL_PATHS) == len(PUBLIC_PATHS)
 
@@ -134,8 +134,8 @@ def test_point_quality_inheritance_and_explicit_local_overrides_survive_export(t
     assert plain(load(exported).data) == plain(config.data)
     document = yaml.safe_load(exported.read_text())
     pose = document['pose']
-    assert pose['refinement']['min_presence'] == .6
-    assert pose['refinement']['min_visibility'] is None
+    assert pose['mask']['min_presence'] == .6
+    assert pose['mask']['min_visibility'] is None
     assert pose['deduplication']['min_presence'] is None
     pose['point_quality']['min_presence'] = .2
     exported.write_text(yaml.safe_dump(document))
