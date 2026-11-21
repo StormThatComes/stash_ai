@@ -393,9 +393,21 @@ quality target likewise requires visibility weighting, or anchor-only visibility
 measurement. Portrait quality targets remain preferences, not admission gates.
 
 FaceOcc receives an upright crop based on the eye-line direction, including
-sideways and upside-down faces. Visibility and foreground sharpness use the
-same rotated pixels, source ellipse and padding checks, with one segmentation
-pass per face. With partial boxes enabled, `face.quality.min_face_source_fraction`
+sideways and upside-down faces. Narrow profiles use the supported eye-to-mouth
+axis. The measurement ellipse rotates with that frame and remains centered on
+the detector box, retaining its full facial scale rather than shrinking to the
+five landmarks. Its upright dimensions are estimated from the box's projected
+extents. Near 45 degrees these extents do not determine the aspect ratio, so a
+bounded eye-to-mouth height prior resolves that ambiguity. Forehead, chin and
+cheeks remain part of the expected region even when FaceOcc marks them occluded.
+No region is fitted to the visible mask or selected by whichever scores highest.
+Five landmarks still only approximate the contour; an inaccurate detector box
+or landmark layout can misplace it. Use the outside-ellipse overlay in Face
+visibility to distinguish region errors from segmentation errors.
+
+Visibility and foreground sharpness use the same rotated pixels, oriented
+ellipse and padding checks, with one segmentation pass per face.
+With partial boxes enabled, `face.quality.min_face_source_fraction`
 sets how much of the face ellipse must lie in the VTT cue (default 0.85). Off-frame pixels contribute zero to the visible fraction and are
 excluded from sharpness. Inspect Scene reports the measured source coverage.
 The quality/visibility contracts invalidate older measurements:

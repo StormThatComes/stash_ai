@@ -12,36 +12,24 @@ from .inspection_images import InspectorImages
 from .inspection_runtime import Worker, check_cancelled, local
 from .models import checked_detection, ensure_assets
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD
+from .face_region import outline as face_outline
 from .visibility import (FaceVisibility, VisibilityGeometryError, cached, ellipse_radii, foreground_mask,
                          prepare_aligned, valid_fraction)
 
 
-def profile_roi(face, source_size, affine):
-    """Diagnostic landmark-scaled ellipse on the same aligned score grid."""
-    reverse = np.linalg.inv([affine[:3], affine[3:], (0,0,1)])
-    landmarks = np.c_[face.landmarks, np.ones(5)] @ reverse.T
+def legacy_roi(face, source_size, affine):
+    """Previous source-axis box ellipse, for comparison only."""
     x,y,width,height = face.box
-    scale = np.hypot(*affine[:2])
-    size = min(width,height) / scale
-    eyes = landmarks[:2,:2].mean(axis=0)
-    mouth = landmarks[3:,:2].mean(axis=0)
-    nose = landmarks[2,:2]
-    # Center the projected facial surface on supporting features. The scale
-    # floor keeps a narrow eye projection from collapsing the ROI onto the nose.
-    center = (eyes + mouth + nose) / 3
-    center = np.clip(center, 128 - .18*size, 128 + .18*size)
-    spread = np.ptp(landmarks[:,0])
-    rx = np.clip(.9*spread, .24*size, .45*size)
-    ry = np.clip(.95*abs(mouth[1]-eyes[1]), .36*size, .48*size)
+    cx,cy = x + width/2, y + height/2
+    rx,ry = ellipse_radii(width,height)
     yy,xx = np.ogrid[:256,:256]
-    region = (((xx+.5-center[0])/rx)**2 + ((yy+.5-center[1])/ry)**2) <= 1
-    total = int(region.sum())
     sx = affine[0]*(xx+.5) + affine[1]*(yy+.5) + affine[2]
     sy = affine[3]*(xx+.5) + affine[4]*(yy+.5) + affine[5]
+    region = (((sx-cx)/rx)**2 + ((sy-cy)/ry)**2) <= 1
+    total = int(region.sum())
     region &= (sx>=0) & (sx<source_size[0]) & (sy>=0) & (sy<source_size[1])
     angles = np.linspace(0,2*np.pi,97)
-    aligned = np.stack((center[0]+rx*np.cos(angles),center[1]+ry*np.sin(angles),np.ones(len(angles))))
-    outline = (np.array(affine).reshape(2,3) @ aligned).T
+    outline = np.stack((cx+rx*np.cos(angles),cy+ry*np.sin(angles)),axis=1)
     return region, total, [tuple(p) for p in outline]
 
 
@@ -56,21 +44,26 @@ class FaceReplay:
     source_to_model: tuple = ()
 
     comparison: tuple | None = None
+    outline: list | None = None
 
-    def render(self, threshold, use_profile=False):
+    def render(self, threshold, use_legacy=False, show_outside=False):
         if self.ellipse is None:
             return None, self.caption
         annotated = self.image.copy()
         caption = self.caption
         if self.logits is not None:
             region, total = self.region, self.total
-            if use_profile and self.comparison:
+            if use_legacy and self.comparison:
                 region, total, _ = self.comparison
             foreground = foreground_mask(self.logits, region, threshold)
-            with Image.fromarray(foreground.astype('uint8') * 110) as mask:
-                with mask.transform(annotated.size, Image.Transform.AFFINE, self.source_to_model,
-                                    resample=Image.Resampling.NEAREST) as alpha:
-                    annotated.paste((0, 240, 120), (0, 0, *annotated.size), alpha)
+            layers = [(foreground, (0, 240, 120))]
+            if show_outside:
+                layers.append(((self.logits > threshold) & ~region, (220, 80, 255)))
+            for pixels, color in layers:
+                with Image.fromarray(pixels.astype('uint8') * 110) as mask:
+                    with mask.transform(annotated.size, Image.Transform.AFFINE, self.source_to_model,
+                                        resample=Image.Resampling.NEAREST) as alpha:
+                        annotated.paste(color, (0, 0, *annotated.size), alpha)
             visible, source = int(foreground.sum()), int(region.sum())
             caption += (f' · Replay {visible / total:.3f} ({visible:,} visible / {total:,} ellipse pixels)'
                         f' · Source coverage {source / total:.1%}')
@@ -78,16 +71,21 @@ class FaceReplay:
                 alternate, denominator, _ = self.comparison
                 base_score = foreground_mask(self.logits,self.region,threshold).sum() / self.total
                 alternate_score = foreground_mask(self.logits,alternate,threshold).sum() / denominator
-                caption += f' · Box ellipse {base_score:.3f} · Landmark ROI {alternate_score:.3f}'
-        if use_profile and self.comparison:
+                caption += f' · Face ellipse {base_score:.3f} · Legacy box ellipse {alternate_score:.3f}'
+            if show_outside:
+                caption += ' · Purple: predicted face outside the ellipse (not counted)'
+        if use_legacy and self.comparison:
             ImageDraw.Draw(annotated).line(self.comparison[2], fill='gold', width=1)
+        elif self.outline is not None:
+            ImageDraw.Draw(annotated).line(self.outline, fill='gold', width=1)
         else:
             ImageDraw.Draw(annotated).ellipse(self.ellipse, outline='gold', width=1)
         return annotated, caption
 
     def slider_range(self, configured):
-        measured = self.region if self.comparison is None else self.region | self.comparison[0]
-        scores = self.logits[measured]
+        # Include raw pixels outside the ROI, so its diagnostic overlay can be
+        # tuned without rerunning the model or changing the measured region.
+        scores = self.logits
         # Include the measured range, the YAML value, and a position below the lowest logit.
         return math.floor(min(float(scores.min()), configured, 0.)) - 1, math.ceil(max(float(scores.max()), configured, 1.))
 
@@ -118,6 +116,7 @@ def replay(previews, address, scope):
     result = FaceReplay(image, recorded, (cx - rx, cy - ry, cx + rx, cy + ry))
     minimum = previews.config.data['detection']['min_face_source_fraction']
     try:
+        result.outline = face_outline(face)
         blob, region, total, affine = prepare_aligned(image, face, minimum)
     except VisibilityGeometryError as error:
         coverage = error.diagnostics.get('visibility_source_fraction')
@@ -143,7 +142,7 @@ def replay(previews, address, scope):
     # Pillow maps each displayed source pixel back into the aligned score map.
     result.source_to_model = tuple(np.linalg.inv([affine[:3], affine[3:], (0, 0, 1)])[:2].ravel())
     result.logits, result.region, result.total = logits, region, total
-    result.comparison = profile_roi(face, image.size, affine)
+    result.comparison = legacy_roi(face, image.size, affine)
     return result
 
 
@@ -162,10 +161,17 @@ class FaceVisibilityWindow:
         ttk.Button(bar, text='Fit', command=lambda: self.images.fit('A')).pack(side='left')
         ttk.Button(bar, text='100%', command=lambda: self.images.set_zoom('A', 1.)).pack(side='left')
         ttk.Label(bar, text='Gold outline: measurement ellipse    Green: pixels counted as visible').pack(side='left')
-        self.use_profile = tk.BooleanVar(master=self.window, value=False)
-        self.roi_toggle = ttk.Checkbutton(bar, text='Landmark ROI (preview)', variable=self.use_profile,
+        self.use_legacy = tk.BooleanVar(master=self.window, value=False)
+        self.roi_toggle = ttk.Checkbutton(bar, text='Legacy box ellipse (preview)', variable=self.use_legacy,
                                           command=lambda: self.set_threshold(self.value.get()))
         self.roi_toggle.pack(side='left')
+        mask_bar = ttk.Frame(self.window)
+        mask_bar.pack(fill='x', padx=8)
+        self.show_outside = tk.BooleanVar(master=self.window, value=False)
+        self.outside_toggle = ttk.Checkbutton(mask_bar, text='Show predicted face outside ellipse (purple)',
+                                              variable=self.show_outside,
+                                              command=lambda: self.set_threshold(self.value.get()))
+        self.outside_toggle.pack(side='left')
         controls = ttk.Frame(self.window)
         controls.pack(fill='x', padx=8)
         ttk.Label(controls, text='Pixel logit threshold (preview)').pack(side='left')
@@ -191,6 +197,7 @@ class FaceVisibilityWindow:
         self.window.lift()
         self.result = None
         self.roi_toggle.state(['disabled'])
+        self.outside_toggle.state(['disabled'])
         self.slider.state(['disabled'])
         self.reset.state(['disabled'])
         self.value.set(self.configured)
@@ -208,6 +215,7 @@ class FaceVisibilityWindow:
         if result.logits is not None:
             low, high = result.slider_range(self.configured)
             self.roi_toggle.state(['!disabled'])
+            self.outside_toggle.state(['!disabled'])
             self.slider.configure(from_=low, to=high)
             self.slider.state(['!disabled'])
             self.reset.state(['!disabled'])
@@ -227,8 +235,8 @@ class FaceVisibilityWindow:
         self.value_label.configure(text=str(threshold))
         if self.result is not None:
             result = self.result
-            use_profile = self.use_profile.get()
-            self.worker.request(lambda: result.render(threshold, True) if use_profile else result.render(threshold), self.display_overlay, self.failed)
+            use_legacy, show_outside = self.use_legacy.get(), self.show_outside.get()
+            self.worker.request(lambda: result.render(threshold, use_legacy, show_outside), self.display_overlay, self.failed)
 
     def display_overlay(self, overlay):
         image, caption = overlay

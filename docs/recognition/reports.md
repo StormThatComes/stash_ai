@@ -493,7 +493,19 @@ In `inspect-scene`, select a face (including an unassigned `face_occluded`
 observation) and click **Face visibility…**. The two synchronized panes show
 the original VTT cue and the selected face on the same cue. The gold outline
 marks the measurement ellipse. Green marks the pixels FaceOcc counted as
-visible inside it. Use the mouse wheel to zoom and drag either pane to pan.
+visible inside it. The ellipse follows the face orientation and uses the whole
+detector box for its scale and center. **Legacy box ellipse (preview)** compares
+the previous vertical/horizontal box-based region on the same logits. This
+replaces the small experimental landmark ROI, which could miss the forehead,
+chin and cheeks of a profile. The default **Face ellipse** is the region used
+by recognition; switching previews never changes the saved result.
+
+**Show predicted face outside ellipse (purple)** also displays the raw positive
+FaceOcc pixels excluded by the selected ellipse. Purple pixels do not enter
+the numerator or denominator and may include background false positives. This
+distinguishes skin recognized by FaceOcc but clipped by the measurement region
+from skin that the model itself missed. Neither preview triggers another model
+pass. Use the mouse wheel to zoom and drag either pane to pan.
 
 The **Pixel logit threshold (preview)** slider starts at
 `face.quality.faceocc_logit_threshold` from the loaded YAML. Drag it left to
