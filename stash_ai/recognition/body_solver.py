@@ -4,6 +4,7 @@ from .body_global import banks
 from .merge_report_policy import _floor
 from .threshold_boundaries import sides
 from .body_parameters import active
+from .face_landmark_fallback import body_face_sql
 
 
 def options_and_quality(db,config,goals,*,frozen_goals=None):
@@ -15,7 +16,7 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
     from .merge_solver_search import gate_values
     from .merge_solver_options import compact
     from .scan_heads import predicate as current_scan
-    from .person_anchor import anchor_gate,PIXEL_PARAMETER
+    from .person_anchor import body_gate,PIXEL_PARAMETER
     from .person_signal import contract as person_contract,available as persons_available
     from itertools import chain
     domains=registry(config)
@@ -26,20 +27,20 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
         options['sapiensid.identities.min_appearance_distance']=list(range(65))
     people=sorted({m['identity_id'] for g in goals['groups'] for m in g['members']})
     ids=sorted({r['id'] for g in (frozen_goals or {'groups':[]})['groups'] for m in g['members'] for r in m.get('observations',())})
-    body_rows=db.execute('SELECT b.id,b.quality FROM body_observations b LEFT JOIN body_members m ON m.observation=b.id '
+    body_rows=db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+',b.id,b.quality FROM body_observations b LEFT JOIN body_members m ON m.observation=b.id '
         'JOIN scans s ON s.id=b.scan WHERE (m.person IN (SELECT value FROM json_each(?)) '
         'OR b.id IN (SELECT value FROM json_each(?)) OR b.face IN (SELECT value FROM json_each(?))) '
         "AND s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? "
         'AND b.rejected IS NULL AND b.embedding IS NOT NULL AND '+current_scan()+' ORDER BY b.id',
         (encoded(people),encoded(ids),encoded(ids),goals['scope'],goals['namespace'],contract(config))) if enabled(config) and available(db) else ()
-    face_rows=db.execute('SELECT o.id,e.metadata AS quality FROM person_evidence e JOIN observations o ON o.id=e.observation '
+    face_rows=db.execute("SELECT json_object('observation',o.id,'geometry',json(o.geometry),'quality',json(o.quality),'rejected',o.rejected) AS anchor_face,o.id,e.metadata AS quality FROM person_evidence e JOIN observations o ON o.id=e.observation "
         'LEFT JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
         'WHERE (m.person IN (SELECT value FROM json_each(?)) OR o.id IN (SELECT value FROM json_each(?))) AND s.scope=? AND s.namespace=? '
         "AND s.status='complete' AND o.rejected IS NULL AND e.contract=? AND e.status='ready' AND "+current_scan(),
         (encoded(people),encoded(ids),goals['scope'],goals['namespace'],person_contract(config))) if options and config.data['sapiensid']['enabled'] and persons_available(db) else ()
     joint={};measurements=[]
     for row in chain(body_rows,face_rows):
-        measured=anchor_gate(row['quality'],config.data['sapiensid']['identities'],
+        measured=body_gate(row,config.data['sapiensid']['identities'],
             collection=config.data['sapiensid']['collection'])
         patch={}
         values=[(measured.get(field),key) for field,key in

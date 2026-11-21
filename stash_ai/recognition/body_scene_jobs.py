@@ -104,6 +104,8 @@ def planned(db, items, config, *, ids_only=False):
     worker_config = SimpleNamespace(data=plain(config.data)) if backend == 'processes' else config
     expected = contract(config)
     settings = config.data['sapiensid']['identities']
+    from .face_landmark_fallback import needed
+    face_charge = '+8*COALESCE(length(o.geometry)+length(o.quality),0)' if needed(settings) else ''
     # Every scene in this planning pass reads the same frozen memberships.
     witness_generation = object()
     from functools import lru_cache
@@ -173,7 +175,7 @@ def planned(db, items, config, *, ids_only=False):
             # score keys, and the decision output. Excluded rows are never loaded.
             raw, needs_guard = db.execute(
                 'SELECT COALESCE(SUM(8*length(b.embedding)+8*(length(b.quality)+length(b.geometry))'
-                '+4*COALESCE(length(o.embedding),0)+8192),0), '
+                '+4*COALESCE(length(o.embedding),0)'+face_charge+'+8192),0), '
                 'MAX(o.embedding IS NOT NULL AND o.rejected IS NULL) '
                 'FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
                 'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? '

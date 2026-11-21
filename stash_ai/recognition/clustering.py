@@ -263,7 +263,8 @@ def matching_policy(config):
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
         **({'body_anchor_quality':{k:config.data['sapiensid']['identities'][k] for k in
               ('anchor_min_person_pixels','anchor_min_keypoints','anchor_min_sharpness')},
-            'body_anchor_keypoint_rules':policy_rules(config.data['sapiensid']['identities'].get('anchor_keypoint_rules', {}))}
+            'body_anchor_keypoint_rules':policy_rules(config.data['sapiensid']['identities'].get('anchor_keypoint_rules', {})),
+            'body_anchor_face_landmark_fallback':config.data['sapiensid']['identities'].get('anchor_face_landmark_fallback', {})}
            if config.data['sapiensid']['enabled'] else {}),
         **({'body': {'local':config.data['sapiensid']['identities'],'global':config.data['sapiensid']['global_matching']}} if config.data['sapiensid']['identities']['enabled'] else {}),
         'format': MATCHING_FORMAT, 'recognition': config.data['recognition'],

@@ -521,12 +521,28 @@ matching:
       # measurement. Missing required masks cannot qualify. 0 disables this floor. Range: 0..1000000.
       keypoint_rules:
         # Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop
-        # before the SapiensID nose and eye filter.
+        # before the SapiensID nose and eye filter; optional face_landmark_fallback can supply missing head
+        # points.
         all: []
         # Every rule must pass: [{group: shoulders, min: 1}, {group: hips, min: 1}].
         any: []
         # At least one rule must pass if nonempty: [{group: left_leg, min: 2}, {group: right_leg, min: 2}]. A
         # rule may instead use {points: [left_elbow, right_elbow], min: 1}; min=0 adds no requirement.
+      face_landmark_fallback:
+        # Optional retained face landmarks for regional anchor rules only. Preserves pose geometry, encoder
+        # inputs, global keypoint counts and contact guards; needs no new inference.
+        enabled: false
+        # Fill missing regional-rule head points only after checking the original face/person association.
+        # Default false.
+        points: [nose, left_eye, right_eye]
+        # Allowed COCO17 points: nose, left_eye, right_eye. Each missing point is checked separately; existing
+        # points are never overwritten.
+        min_face_score: 0.9
+        # Minimum linked face detection score for borrowed landmarks. This is not a per-landmark visibility
+        # score. Range: 0..1.
+        max_eye_pose_deviation: 0.25
+        # Maximum roll-normalized face pose deviation for missing eyes. Profiles and explicitly occluded pose
+        # points are not restored. Nose is exempt from this eye-only limit. Range: 0..1.
     global:
       # Across-scene body consolidation with face contradiction checks.
       enabled: true

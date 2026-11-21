@@ -156,7 +156,7 @@ def face(quality, geometry, config, policies, fingerprint):
     return report(config, evidence_kind='face', groups=groups)
 
 
-def person(metadata, config, policies, fingerprint, *, independent=False):
+def person(metadata, config, policies, fingerprint, *, independent=False, face_evidence=None):
     collected, source = policies.resolve('body' if independent else 'person', fingerprint)
     settings = collected.data['sapiensid']
     person = metadata.get('person') or {}
@@ -212,7 +212,7 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
             note='Face-associated evidence inherits face admission. Independent collection quality floors are not required here.'))
     identity = config.data['sapiensid']['identities']
     from .person_anchor import anchor_gate
-    gate = anchor_gate(metadata, identity)
+    gate = anchor_gate(metadata, identity, face_evidence=face_evidence)
     floor = identity['anchor_min_person_pixels']
     checks = [check('sapiensid.identities.anchor_min_person_pixels', pixels(metadata), floor, enabled=floor is not None)]
     checks.extend(check('sapiensid.identities.'+key, gate.get(field), identity[key])
@@ -226,9 +226,19 @@ def person(metadata, config, policies, fingerprint, *, independent=False):
             continue
         checks = [dict(check(row['parameter'], row['measured'], row['minimum'], enabled=row['minimum'] > 0),
                        label=row['label'], points=row['points'], present=row['present']) for row in rows]
+        for checked, rule in zip(checks, rows):
+            if 'point_sources' in rule:
+                checked['point_sources'] = rule['point_sources']
+                recovered = [name for name, source in rule['point_sources'].items() if source == 'face_detector']
+                fallback = regional['face_landmark_fallback']
+                checked['note'] = ('Face detector fallback: '+', '.join(recovered)+
+                    f" (face {fallback['face_observation']}). Original pose points and encoder count unchanged."
+                    if recovered else 'Face detector fallback: '+str(fallback.get('reason') or fallback['skipped'] or 'not needed')+'.')
         summary = group('person_anchor_keypoints_'+mode, checks,
             note=('Every rule must pass.' if mode == 'all' else 'At least one rule must pass; other failed alternatives do not reject the anchor.')+
-                 ' Counts use detected pose points inside the person crop, before the encoder filters the nose and eyes. A minimum of zero adds no requirement.')
+                 ' Counts use detected pose points inside the person crop, before the encoder filters the nose and eyes. A minimum of zero adds no requirement.'+
+                 (' Missing head points may use the separately verified face detector evidence shown below.'
+                  if 'face_landmark_fallback' in regional else ''))
         passed = all(row['passed'] for row in rows) if mode == 'all' else any(row['passed'] for row in rows)
         if passed:
             summary['status'] = 'pass'

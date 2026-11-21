@@ -10,6 +10,7 @@ from .scanning import scan_identity
 from .reference_selection import select
 from .database import encoded
 from .pose_anchor_rules import policy_rules
+from .face_landmark_fallback import face_record
 
 
 def body_vector(row):
@@ -44,7 +45,7 @@ def _rows(db,config,scope,namespace,owners,ids=None):
     from .run_cache import metadata
     # The hybrid catalogue is built before local temporal corroboration.
     return (row for row in rows if not crowded_link(metadata(row['person_metadata']).get('quality',{})) and anchor_gate(row['person_metadata'],config.data['sapiensid']['identities'],
-        collection=config.data['sapiensid']['collection'])['eligible'])
+        collection=config.data['sapiensid']['collection'],face_evidence=face_record(row))['eligible'])
 
 
 def _select(records,config):
