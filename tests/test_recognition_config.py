@@ -127,22 +127,26 @@ def test_shipped_template_matches_default_schema(filename):
     assert body['identities']['tracklet_matching'] and body['identities']['endpoint_matching']
     assert body['identities']['scene_bonus_mode']=='evidence'
     assert config.data['execution']['solver_compare_scene_strategies']
-    assert body['pose']['refinement']['enabled'] and body['pose']['refinement']['masked_identity_crop']
+    assert body['pose']['refinement']['enabled']
+    assert body['pose']['refinement']['backend'] == 'sam3'
+    assert body['pose']['refinement']['masked_identity_crop'] is False
+    assert body['pose']['refinement']['pose_second_pass'] is False
+    assert body['pose']['refinement']['mask_keypoint_filtering'] is False
     assert body['pose']['deduplication']['enabled']
     assert body['identities']['enabled'] is True
     assert body['global_matching']['enabled'] is True
-    run_profile = filename == 'facial_recognition.yml'
-    assert config.data['execution']['portrait_ranking_cache_bytes'] == (256 * 1024**2 if run_profile else 16 * 1024**2)
+    assert config.data['execution']['portrait_ranking_cache_bytes'] == 65536 * 1024**2
     assert config.data['models']['detector'] == 'scrfd_10g'
+    assert config.data['models']['recognizer'] == 'lvface_b'
     assert config.data['recognition']['min_identity_support'] == 2
     assert config.data['recognition']['cross_scene_provisional'] is True
     assert config.data['clustering']['context_view_enrichment'] is True
-    assert config.data['recognition']['min_merge_support'] == 3
-    assert config.data['clustering']['same_scene_match_bonus'] == .03
-    assert config.data['clustering']['same_scene_min_support'] == 3
+    assert config.data['recognition']['min_merge_support'] == 2
+    assert config.data['clustering']['same_scene_match_bonus'] == .1
+    assert config.data['clustering']['same_scene_min_support'] == 2
     assert config.data['portraits']['source'] == 'vtt'
-    assert config.data['portraits']['margin'] == .35
-    assert config.data['execution']['prefetch_frames'] == (16 if run_profile else 4)
+    assert config.data['portraits']['margin'] == .1
+    assert config.data['execution']['prefetch_frames'] == 16
     assert config.data['execution']['prefetch_scenes'] is True
 
 

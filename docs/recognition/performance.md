@@ -11,7 +11,6 @@ Sub-byte remainders are rounded down only when converting to internal byte
 budgets; positive limits smaller than one byte are rejected. Zero disables
 only the limits whose comments explicitly allow it.
 
-The bundled run and solver profiles retain their existing effective budgets.
 Old v1 files and old v2 `*_bytes` keys remain readable in bytes, including
 existing snapshots. Combining the legacy byte key and its MB replacement for
 the same limit is an error. Use the existing migration command to write all
@@ -29,22 +28,28 @@ and multiply its old value by 1024. The offline parallel benchmark likewise
 uses `--queue-mb 64` in place of `--queue-bytes 67108864`.
 
 
-The shipped `facial_recognition.yml` is a starting profile for 16 available CPU
-slots, 64 GiB RAM allocated to this project and an SSD, with CUDA inference.
+The shipped `facial_recognition.yml` is a tuned profile for a large-memory
+CUDA host, with 16 available CPU slots for rebuild and SSD storage.
 It uses 16 rebuild workers, one native thread per worker, a 40 GiB working
-maximum and an 8 GiB evidence cache (including up to 4 GiB of matrices).
-The 4 GiB sprite cache and untracked process allocations need additional RAM.
+maximum and an 8 GiB evidence cache. The configured 64 GiB matrix-cache ceiling
+still shares that 8 GiB cache. Sprites, verified model bytes and parked weights
+share a separate 16 GiB retained-memory cap; their individual ceilings do not
+add independent reservations. Active models, in-flight work and untracked
+process allocations need additional RAM; these are not total RSS limits.
 Rebuild profiling is initially enabled; disable it after measuring your workload.
 The smaller built-in defaults described below still apply to omitted settings.
-For four simultaneous solver trials, use the separate
+For eight simultaneous solver trials sharing a 64 GiB admission budget, use the separate
 [solver resource profile](solver-parallel.md#resource-profiles).
 
 The run profile uses eight scan CPU workers and a recognizer microbatch of eight.
 Static-one ONNX graphs still execute one embedding at a time. Dynamic batching
 can slightly change floating-point scores, so check threshold-boundary behavior
-with the actual recognizer/provider. The GPU policy is `phase`; model-specific
-person/pose/body batches remain unchanged. Neither the YAML nor a 300 GB SSD
-allocation guarantees capacity for all retained evidence from 10,000 scenes.
+with the actual recognizer/provider. The GPU policy is `sequential` with eight
+scenes per face/body window and CPU weight parking enabled. The profile uses
+LVFace-B, RF-DETR-XL, PMPose and SAM 3. Masks are used for sharpness, box
+expansion and overlap; the other mask applications are disabled.
+The 10 TiB combined disk ceiling and 1 TiB scratch ceiling are limits, not
+reservations or a guarantee of capacity for all 10,000 scenes.
 
 - [Progress and stage counters](#progress-and-stage-counters)
 - [Recognition GPU memory](#recognition-gpu-memory)

@@ -62,10 +62,11 @@ def test_switching_bundled_pmpose_to_vitpose_and_back_keeps_panel_settings():
     pose = second.effective().data['sapiensid']['pose']
     assert pose['refinement']['enabled'] and pose['deduplication']['enabled']
     assert pose['refinement']['min_prompt_points'] == 3
-    assert config.data['sapiensid']['pose']['refinement']['min_prompt_points'] == 2
+    assert config.data['sapiensid']['pose']['refinement']['min_prompt_points'] == 1
     second.edit('pose.refinement.enabled', 'false')
     pose = second.effective().data['sapiensid']['pose']
-    assert not pose['refinement']['enabled'] and pose['refinement']['masked_identity_crop']
+    assert not pose['refinement']['enabled']
+    assert pose['refinement']['masked_identity_crop'] is False
 
 
 def test_tuner_vitpose_masks_keep_explicit_disable(tmp_path):
