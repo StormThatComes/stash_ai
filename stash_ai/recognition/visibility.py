@@ -6,9 +6,9 @@ import math
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 
-CONTRACT = {'version': 7, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+CONTRACT = {'version': 8, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25-profile-roll-aligned',
-            'region': 'source-face-box-ellipse-0.45w-0.48h-inverse-mapped',
+            'region': 'oriented-box-supported-ellipse-0.45w-0.48h-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
             'sharpness': 'foreground-interior-laplacian-256-v1'}
 CONTRACT_ID = digest(CONTRACT)
@@ -199,19 +199,11 @@ def prepare_aligned(image, face, minimum_source_fraction):
     """Return the FaceOcc input, real ROI, full count and model-to-source affine."""
     import numpy as np
     from PIL import Image
-    points = np.asarray(face.landmarks, dtype=np.float64)
-    if points.shape != (5, 2) or not np.isfinite(points).all():
-        raise VisibilityGeometryError('Visibility alignment requires five finite landmarks.')
-    eye = points[1] - points[0]
-    distance = float(np.linalg.norm(eye))
-    if not math.isfinite(distance) or distance <= 1e-6:
-        raise VisibilityGeometryError('Visibility alignment requires distinct eye landmarks.')
-    x, y, width, height = face.box
-    from .face_frame import axis as facial_axis
-    axis, _ = facial_axis(points,width,height)
+    _, _, width, height = face.box
+    from .face_region import ellipse
+    (center_x, center_y), axis, (radius_x, radius_y) = ellipse(face)
     cosine, sine = map(float, axis)
     side = max(width, height) * 1.5
-    center_x, center_y = x + width / 2, y + height / 2
     scale = side / 256
     # PIL maps output coordinates back into the source. Rotate in this single
     # resampling pass, including upside-down faces; never mirror eye ordering.
@@ -226,11 +218,11 @@ def prepare_aligned(image, face, minimum_source_fraction):
     np.divide(data,std,out=data)
     dx = cosine * (columns + .5 - 128) - sine * (rows + .5 - 128)
     dy = sine * (columns + .5 - 128) + cosine * (rows + .5 - 128)
-    # Keep the original physical ROI, rather than replacing it with a smaller
-    # aligned ellipse that could silently discard an occluder near its edges.
-    radius_x, radius_y = ellipse_radii(width, height)
-    region = ((dx / (radius_x * 256 / side)) ** 2
-              + (dy / (radius_y * 256 / side)) ** 2 <= 1)
+    # The ROI is upright in the aligned model frame, and rotates with the face
+    # in source coordinates. Its full extent is supported by the detector box,
+    # not a small ellipse around eyes/nose/mouth or the predicted visible mask.
+    region = (((columns + .5 - 128) / (radius_x / scale)) ** 2
+              + ((rows + .5 - 128) / (radius_y / scale)) ** 2 <= 1)
     # Padding cannot contribute to foreground or sharpness.
     source_x, source_y = center_x + dx * scale, center_y + dy * scale
     real = ((source_x >= 0) & (source_x < image.width)
@@ -276,7 +268,7 @@ def _counts(visible, source_count, device, face_pixels, threshold):
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
             'visibility': {'contract': CONTRACT_ID if threshold == DEFAULT_FACEOCC_LOGIT_THRESHOLD else TUNED_CONTRACT_ID,
-                           'logit_threshold': threshold, 'method': 'faceocc-ellipse-profile-roll-v4', 'device': device,
+                           'logit_threshold': threshold, 'method': 'faceocc-oriented-box-ellipse-v5', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
