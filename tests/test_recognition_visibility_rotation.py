@@ -227,14 +227,14 @@ def test_old_completed_rejected_scan_is_reprocessed_once(tmp_path, monkeypatch, 
     from tests.helpers.recognition import Visibility
     from tests.test_recognition_detection_quality import settings
     config = settings(tmp_path, min_visible_face_fraction=visibility_floor)
-    old_contract = dict(CONTRACT, version=2, crop='square-face-box-padding-0.25',
-                        region='face-box-ellipse-0.45w-0.48h')
+    old_contract = dict(CONTRACT, version=7,
+                        region='source-face-box-ellipse-0.45w-0.48h-inverse-mapped')
     old_id = digest(old_contract)
     assert old_id != CONTRACT_ID
     assert not cached(dict(visible_face_fraction=1., visibility=dict(contract=old_id)))
     def old_policy(config, namespace):
         return digest(dict(namespace=namespace, detection=config.data['detection'],
-            max_cues=config.data['execution']['max_cues'], quality_format=4,
+            max_cues=config.data['execution']['max_cues'], quality_format=6,
             visibility_contract=old_id if visibility_floor else None))
     client = MediaClient(count=1)
     with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:

@@ -60,7 +60,9 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
         assert overlay.getpixel(visible) != original.getpixel(visible)
         assert overlay.getpixel(unmarked) == original.getpixel(unmarked)
         assert overlay.getpixel((5, 5)) == original.getpixel((5, 5))
-        assert overlay.getpixel((80, 18)) == (255, 215, 0)
+        # The outline follows the measured face, including oblique rolls;
+        # its top is no longer fixed at the old vertical box ellipse.
+        assert overlay.getpixel(tuple(int(v) for v in replay.outline[0])) == (255, 215, 0)
         loose, status = replay.render(-0.2)
         assert 'Replay 1.000' in status and loose.getpixel(unmarked) != original.getpixel(unmarked)
         _, status = replay.render(1.)

@@ -84,7 +84,7 @@ def assess(image,detection):
     from .inference_cache import many,current
     from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality',('face-quality-v5-profile-frame',_diagnostics.get()),[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v6-oriented-region',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
