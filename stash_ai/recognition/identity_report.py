@@ -239,7 +239,8 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 observation=row['id'], role=assignment['role'], rejection=row['rejected'])
             evidence = sample['person_evidence']
             if 'image' in evidence:
-                evidence['admission'] = admission_report.person(evidence['metadata'], config, policies, evidence['contract'])
+                from .face_landmark_fallback import face_record
+                evidence['admission'] = admission_report.person(evidence['metadata'], config, policies, evidence['contract'],face_evidence=face_record(row))
                 evidence['image']['thresholds'] = admission_panel.export(evidence['image'], evidence['admission'], directory, 'person-'+name,
                     observation=row['id'], role='face-associated '+assignment['role'],
                     rejection=evidence['metadata'].get('identity_rejection'))

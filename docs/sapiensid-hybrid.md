@@ -525,6 +525,52 @@ The face-associated collector measures the same source crop quality as independe
 collection, even when independent body identities are disabled. Changing these
 thresholds invalidates matching decisions, not retained embeddings.
 
+### Face landmark fallback for regional body rules
+
+A person with a missing pose nose or eye can optionally satisfy regional anchor
+rules using the corresponding landmark from its retained, accepted face detection:
+
+```yaml
+version: 2
+matching:
+  body:
+    anchors:
+      face_landmark_fallback:
+        enabled: true
+        points: [nose, left_eye, right_eye]
+        min_face_score: 0.9
+        max_eye_pose_deviation: 0.25
+```
+
+The feature defaults to disabled. The point list enables candidates, not automatic
+copying. The original pose must corroborate the existing face/person association
+before any landmark is borrowed. Missing all original nose/eye points cannot
+bootstrap an association. Conflicting original head measurements, rejected faces,
+out-of-crop landmarks, coincident points, explicit pose occlusion and recorded
+ownership conflicts prevent recovery. Profile faces and excessive roll-normalized
+pose deviation cannot supply missing eyes; the eye limit does not reject a nose.
+Face detection confidence is not per-landmark visibility. Recovered points retain
+unknown visibility and are labelled `face_detector`, never synthetic pose scores.
+
+Only `matching.body.anchors.keypoint_rules` uses the supplemented coordinates.
+The original COCO17 geometry, association/tracking, collection minima, overall
+anchor `min_keypoints`, masks and SapiensID's 17+5 input remain unchanged. Contact
+face vetoes still apply. The fallback cannot reuse an original face after contact
+correction changes its body owner. No ear or body point has a five-landmark face
+equivalent, and mouth corners are not mapped onto COCO17 joints.
+
+Rebuild matching to apply the option to retained observations. Matching policies
+and scene/reference caches include the setting and face evidence. No rescan or
+embedding inference is needed when the original face link and geometry survive;
+missing or rejected face evidence remains unavailable. The same regional decision
+is used by independent bodies, face-associated references, solver diagnostics and
+Inspect Scene. Each rule reports `point_sources`; `face_landmark_fallback` records
+the source face, recovered coordinates and per-point rejection reasons. Inspect
+Scene's rule notes and the threshold JSON/PNG companions explain the source.
+On a selected body, borrowed rule landmarks appear as orange hollow squares;
+hover identifies their source and unknown visibility. The green pose skeleton
+continues to show the original measurements.
+
 ### Regional body anchor keypoints
 
 `matching.body.anchors.keypoint_rules` adds regional requirements **alongside**

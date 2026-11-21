@@ -17,10 +17,12 @@ def freeze(db, config, rows, diagnostics):
     from .pose_policy import is_anchor, query_allows
     body = defaultdict(dict)
     if diagnostics['sapiensid_enabled'] and available(db):
-        for oid, contract, status, metadata in db.execute(
-                'SELECT observation,contract,status,metadata FROM person_evidence '
-                'WHERE observation IN (SELECT value FROM json_each(?))', (encoded([r['id'] for r in rows]),)):
-            body[oid][contract] = (status, metadata)
+        for oid, contract, status, metadata, face in db.execute(
+                "SELECT e.observation,e.contract,e.status,e.metadata,json_object('observation',o.id,"
+                "'geometry',json(o.geometry),'quality',json(o.quality),'rejected',o.rejected) "
+                'FROM person_evidence e JOIN observations o ON o.id=e.observation '
+                'WHERE e.observation IN (SELECT value FROM json_each(?))', (encoded([r['id'] for r in rows]),)):
+            body[oid][contract] = (status, metadata, face)
     for row in rows:
         eligible = row['status'] == 'complete' and row['rejected'] is None
         if eligible and row['reference_authority'] and is_anchor(row['quality'], config.data['clustering']):
@@ -34,7 +36,7 @@ def freeze(db, config, rows, diagnostics):
         state = ((record[0] if record else 'incompatible' if records else 'missing')
                  if diagnostics['sapiensid_enabled'] else 'disabled')
         from .person_anchor import anchor_gate
-        gate = (anchor_gate(record[1], config.data['sapiensid']['identities'], collection=config.data['sapiensid']['collection'])
+        gate = (anchor_gate(record[1], config.data['sapiensid']['identities'], collection=config.data['sapiensid']['collection'],face_evidence=record[2])
                 if state == 'ready' else dict(eligible=False, reason=state))
         body_role = 'anchor' if role == 'anchor' and gate['eligible'] else 'auxiliary' if eligible and state == 'ready' else 'other'
         row.update(sample_role=role, body_state=state, body_role=body_role,

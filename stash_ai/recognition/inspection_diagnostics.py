@@ -146,6 +146,7 @@ def unassigned_summary(scene_reader):
     from .scene_inspection import TABLES, _unassigned_query
     from .body_observations import available
     from .admission_report import Policies, face, person
+    from .face_landmark_fallback import body_face_sql
     config=scene_reader.config;revision=stamp(config.database)
     scan=scene_reader.catalogue()['scan'];counts=Counter();gates={};total=0
     with closing(open_readonly(config.database)) as db:
@@ -153,12 +154,12 @@ def unassigned_summary(scene_reader):
         for kind,(observations,_) in TABLES.items():
             if kind=='body' and not available(db):continue
             base,args=_unassigned_query(kind,config,scan)
-            query='SELECT r.*,o.quality,o.geometry'+(',o.contract' if kind=='body' else '')+' FROM ('+base+') r JOIN '+observations+' o ON o.id=r.id'
+            query='SELECT r.*,o.quality,o.geometry'+(',o.contract,'+body_face_sql('o',settings=config.data['sapiensid']['identities']) if kind=='body' else '')+' FROM ('+base+') r JOIN '+observations+' o ON o.id=r.id'
             for row in db.execute(query,args):
                 check_cancelled();total+=1;counts[kind,row['state']]+=1
                 quality=json.loads(row['quality'])
                 admission=(face(quality,json.loads(row['geometry']),config,policies,scan['policy_sha']) if kind=='face'
-                           else person(quality,config,policies,row['contract'],independent=True))
+                           else person(quality,config,policies,row['contract'],independent=True,face_evidence=row['anchor_face']))
                 for group in admission['groups']:
                     for check in group['checks']:
                         key=kind,group['stage'],check['parameter'],group['configuration_source'],str(check['threshold']),check['operator']

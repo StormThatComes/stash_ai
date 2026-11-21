@@ -68,10 +68,18 @@ def read(db, config, selector, kind, address):
         counts = (body.get('pose_refinement') or {}).get('prompt_rejections')
         if counts:
             notes.append('SAM core exclusions: ' + ', '.join(f'{key} {value}' for key,value in counts.items()))
-        shapes.append(dict(kind='body', id=address, selected=True, geometry=body))
-        face = db.execute('SELECT geometry FROM observations WHERE id=? AND scan=? AND cue=?',
+        body_shape = dict(kind='body', id=address, selected=True, geometry=body)
+        shapes.append(body_shape)
+        face = db.execute('SELECT id,geometry,quality,rejected FROM observations WHERE id=? AND scan=? AND cue=?',
                           (row['face'],row['scan'],row['cue'])).fetchone()
         if face is not None:
+            from .face_landmark_fallback import retained_body_face, needed
+            settings = config.data['sapiensid']['identities']
+            if needed(settings):
+                from .person_anchor import anchor_gate
+                gate = anchor_gate(quality, settings, face_evidence=retained_body_face(db, address, settings))
+                proof = gate['keypoint_rules'].get('face_landmark_fallback', {})
+                body_shape['rule_landmarks'] = proof.get('recovered', [])
             shapes.append(dict(kind='face', selected=False, geometry=_json(face['geometry'], [])))
     return dict(bounds=bounds, shapes=shapes, notes=notes)
 
@@ -174,6 +182,16 @@ def render(image, geometry, layers=None, *, database=None):
                 x,y = point
                 radius = 2 if kind == 'face' else 3
                 draw.ellipse((x-radius,y-radius,x+radius,y+radius), fill=color)
+        borrowed = []
+        if kind == 'body' and layers.get('keypoints'):
+            for item in shape.get('rule_landmarks', ()):
+                p = item['coordinates']
+                if _numbers(p, 2) and left <= p[0] < right and top <= p[1] < bottom:
+                    x, y = (p[0]-left)*sx, (p[1]-top)*sy
+                    draw.rectangle((x-4,y-4,x+4,y+4), outline=(255,140,0), width=2)
+                    borrowed.append(item['point'])
+        if borrowed:
+            shown.append('Regional rules: '+', '.join(borrowed)+' from face detector (orange squares)')
         shown.append(f"{'Selected' if shape['selected'] else ('Context' if shape.get('context') else 'Linked')} {kind}: {'yellow' if kind=='face' else 'green'} ({sum(p is not None for p in mapped)} points)" + mask_label)
     caption = '; '.join(shown) if shown else 'No retained geometry intersects this crop.'
     if layers.get('masks') and not any(s['kind'] == 'body' for s in geometry['shapes']):
@@ -191,6 +209,14 @@ def point_info(geometry,size,x,y):
         data=shape['geometry'];face=shape['kind']=='face'
         if face and not isinstance(data,list) or not face and not isinstance(data,dict):continue
         points=[data[i:i+2] for i in range(4,min(14,len(data)),2)] if face else data.get('keypoints') or []
+        for item in shape.get('rule_landmarks', ()):
+            p = item['coordinates']
+            if not _numbers(p, 2) or min(p) < 0:
+                continue
+            d=((p[0]-bounds[0])*sx-x)**2+((p[1]-bounds[1])*sy-y)**2
+            if d <= 64:
+                found.append((d-1e-6, f"{item['point']} · face_detector fallback · regional rules only · "
+                              f"source ({p[0]:g}, {p[1]:g}) · visibility: unknown; original pose unchanged"))
         if not isinstance(points,(list,tuple)):continue
         for i,p in enumerate(points[:5] if face else points[:17]):
             if not _numbers(p,2) or min(p)<0:continue

@@ -92,6 +92,8 @@ def validate(settings, *, detection_preview=False):
         _number(identity[key],'sapiensid.identities.'+key,low,high,integer=True)
     from .pose_anchor_rules import validate as validate_anchor_rules
     validate_anchor_rules(identity.get('anchor_keypoint_rules', {}))
+    from .face_landmark_fallback import validate as validate_fallback
+    validate_fallback(identity['anchor_face_landmark_fallback'])
     if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
         raise ValueError('sapiensid.identities.enabled requires independent collection.')
     for key in ('extended_track_graph','turn_recovery'):

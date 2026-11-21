@@ -50,6 +50,8 @@ def export(image, admission, directory, name, *, observation, role, rejection):
             if row.get('label'):
                 text = f'{row["label"]} | '+text
             lines.append((text, COLORS[state]))
+            for note in wrap(row.get('note', ''), width=120):
+                lines.append((note, '#475467'))
         if group.get('context'):
             lines.append(('Frame context only: '+', '.join(f'{k}={v}' for k,v in group['context'].items()), '#475467'))
         for text in wrap(group.get('note', ''), width=120):
