@@ -6,7 +6,8 @@ from .body_identity import available, enabled, policy as body_policy
 from .body_observations import contract
 from .clustering import matching_policy
 from .inspection_advice import _number, _path
-from .person_anchor import anchor_gate
+from .person_anchor import body_gate
+from .face_landmark_fallback import body_face_sql
 from .pose_policy import anchor_sql
 from .reference_roles import strict_sql, observation_sql
 from .threshold_boundaries import at_or_above, strictly_above
@@ -34,11 +35,11 @@ def _anchors(db, config, scan, ids, kind):
                 quality.pop('visible_face_fraction', None)
             yield row, quality, None
     elif enabled(config) and available(db):
-        sql = ("SELECT m.person,o.cue,o.id,o.quality,m.proof FROM body_members m JOIN body_observations o "
+        sql = ("SELECT "+body_face_sql('o',settings=config.data['sapiensid']['identities'])+",m.person,o.cue,o.id,o.quality,m.proof FROM body_members m JOIN body_observations o "
                "ON o.id=m.observation WHERE m.person IN (?,?) AND o.scan=? AND o.contract=? AND m.policy=? "
                "AND m.status='accepted' AND m.role='anchor' AND o.rejected IS NULL AND o.embedding IS NOT NULL")
         for row in db.execute(sql, (*ids, scan, contract(config), body_policy(config))):
-            gate = anchor_gate(row['quality'], config.data['sapiensid']['identities'], collection=config.data['sapiensid']['collection'])
+            gate = body_gate(row, config.data['sapiensid']['identities'], collection=config.data['sapiensid']['collection'])
             if gate['eligible']:
                 proof = json.loads(row['proof'])
                 support = proof.get('independent_support') if proof.get('reason') == 'body_scene_core' else None

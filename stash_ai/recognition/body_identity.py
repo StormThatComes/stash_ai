@@ -10,16 +10,18 @@ from .config import digest,plain
 from .database import encoded
 from .identity_merges import canonical
 from .progress import tracking
-from .person_anchor import pixel_gate,anchor_gate
+from .person_anchor import pixel_gate,body_gate
+from .face_landmark_fallback import body_face_sql
 
 
 
 
 def defaults():
+    from .face_landmark_fallback import defaults as fallback_defaults
     return dict(enabled=False, correct_contact_face_links=False, defer_contact_births=False, contact_birth_support=2, mixed_mask_score_penalty=0., contact_max_cues=12, contact_max_hidden=2, contact_max_people=4,tracklet_matching=False,body_first_matching=False,endpoint_matching=None,scene_bonus_mode='fixed',match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 track_similarity_threshold=None, turn_similarity_discount=.06, extended_track_graph=None, turn_recovery=None, scene_match_bonus=None, min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None,
-                anchor_keypoint_rules=dict(all=[],any=[]))
+                anchor_keypoint_rules=dict(all=[],any=[]), anchor_face_landmark_fallback=fallback_defaults())
 
 
 def turn_feature(settings, key):
@@ -61,7 +63,7 @@ def quality(row):
 def anchor(row,settings):
     if settings.get('_inspection_omit_body_anchors') and row['id'] in settings['_inspection_omit_body_anchors']:
         return False
-    return anchor_gate(row['quality'],settings)['eligible']
+    return body_gate(row,settings)['eligible']
 
 
 def independent(rows,settings,*,presorted=False,paged=False,reserve=lambda _:None):
@@ -297,7 +299,8 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
     from .reference_roles import same_scene_face_sql, strict_sql
     from .pose_policy import anchor_sql
     rows=[];cost=0
-    for raw in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
+    # The scene pass recomputes contact corrections; never reuse an old decision.
+    for raw in db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'],respect_corrections=False)+',b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
             'o.quality AS face_quality,o.dimensions AS face_dimensions,o.embedding AS face_embedding,o.rejected AS face_rejected,'
             'm.person AS face_person,'+strict_sql()+' AS strict_face,'+same_scene_face_sql()+' AS same_scene_face,'
             'CASE WHEN o.id IS NOT NULL THEN '+anchor_sql('o',config.data['clustering'])+
@@ -307,7 +310,7 @@ def _load_scene(db,scan,config, *, prepare_vectors=True):
             (scan,expected)):
         row=dict(raw)
         row['face_anchor'] = bool(row.pop('strict_face') and row['face_quality_ok'])
-        cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
+        cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+len(row['anchor_face'] or '')+4096
         if cost>config.data['sapiensid']['execution']['reference_bytes']:
             raise ResourceLimit('Person scene references exceed sapiensid.execution.reference_bytes.')
         rows.append(row)
@@ -537,7 +540,7 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
                 decisions[row['id']].update(runner=runner, rival=ranked[1][1])
         rules=settings.get('anchor_keypoint_rules',{})
         if not good and (rules.get('all') or rules.get('any')):
-            regional=anchor_gate(row['quality'],settings)['keypoint_rules']
+            regional=body_gate(row,settings)['keypoint_rules']
             if not regional['eligible']:
                 decisions[row['id']]['anchor_keypoint_rules']=regional
                 if decisions[row['id']]['reason']=='body_anchor_quality':

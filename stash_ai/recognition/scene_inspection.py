@@ -152,7 +152,9 @@ class UnassignedReader:
                     associations = [dict(kind='body', observation=r[0], label='Linked body in this cue') for r in
                         db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? AND contract=? ORDER BY id', (row['scan'], address, contract(self.config)))]
             else:
-                admission = admission_report.person(quality, self.config, policies, row['contract'], independent=True)
+                from .face_landmark_fallback import retained_body_face
+                admission = admission_report.person(quality, self.config, policies, row['contract'], independent=True,
+                    face_evidence=retained_body_face(db, address, self.config.data['sapiensid']['identities']))
                 member = db.execute('SELECT * FROM body_members WHERE observation=?', (address,)).fetchone()
                 if member:
                     proof = json.loads(member['proof'])

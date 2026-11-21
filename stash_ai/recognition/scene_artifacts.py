@@ -112,7 +112,7 @@ def body_key(db, scan, config):
         ('SELECT cue FROM body_observations WHERE scan=? AND contract=? UNION '
          'SELECT cue FROM observations WHERE scan=? ORDER BY cue',(scan,expected,scan)),
         ('SELECT b.id,b.cue,b.seconds,b.geometry,b.quality,b.rejected,b.embedding,b.face,'
-         'o.dimensions,o.embedding,o.quality,o.rejected,m.person,'+strict_sql()+','+same_scene_face_sql()+
+         'o.scan,o.cue,o.geometry,o.dimensions,o.embedding,o.quality,o.rejected,m.person,'+strict_sql()+','+same_scene_face_sql()+
          ' FROM body_observations b LEFT JOIN observations o ON o.id=b.face '
          'LEFT JOIN members m ON m.observation=o.id WHERE b.scan=? AND b.contract=? ORDER BY b.id',(scan,expected)),
         ('SELECT b.scan,b.geometry,b.cue,b.seconds,b.embedding,i.person,p.created FROM body_origins i JOIN body_observations b '
@@ -142,7 +142,7 @@ def body_key(db, scan, config):
             'SELECT m.person,o.id,o.dimensions,o.embedding,o.scan,o.seconds,o.quality,'+strict_sql()+' FROM observations o JOIN members m '
             'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
             "AND o.rejected IS NULL AND s.status='complete' AND "+predicate()+' ORDER BY o.id',(owner,))],'owner',owner))
-    local=signed('body-scene-input-v2',digest([scan,expected]),queries,'scene',scene_key(db,scan))
+    local=signed('body-scene-input-v3-face-landmarks',digest([scan,expected]),queries,'scene',scene_key(db,scan))
     shot_map = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-view-shots:'+scan,)).fetchone()
     motion = db.execute('SELECT value FROM metadata WHERE key=?', ('cue-continuity:'+scan,)).fetchone()
     return digest(['contact-proof-graph-v2',motion[0] if motion else None,scan,policy(config),plain(config.data['sapiensid']['execution']),sorted(roots),local,banks,

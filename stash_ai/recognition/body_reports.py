@@ -7,6 +7,7 @@ from .body_identity import available, enabled, policy, anchor
 from .body_observations import contract, coverage
 from .database import encoded
 from .person_anchor import pixel_gate
+from .face_landmark_fallback import body_face_sql
 
 
 def observations(db,config,scans):
@@ -27,7 +28,7 @@ def members(db,config=None,*,ids=None):
 def goal_rows(db,config,person):
     if not enabled(config) or not available(db):return []
     rows=[]
-    for raw in db.execute('SELECT b.id,b.scan,s.scene,b.cue,b.seconds,b.face,b.quality,b.rejected,s.status,m.role '
+    for raw in db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+',b.id,b.scan,s.scene,b.cue,b.seconds,b.face,b.quality,b.rejected,s.status,m.role '
         "FROM body_members m JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan "
         "WHERE m.person=? AND m.status='accepted' AND b.contract=? "
         "AND NOT EXISTS (SELECT 1 FROM members f WHERE f.observation=b.face AND f.person=m.person) ORDER BY b.id",(person,contract(config))):
@@ -40,8 +41,8 @@ def goal_rows(db,config,person):
         row.update(evidence_kind='person',reference_authority=strong,
             goal_role='reference' if eligible and strong else 'uncertain',
             sample_role='anchor' if eligible and strong else 'auxiliary' if eligible else 'other',body_state='ready')
-        from .person_anchor import anchor_gate
-        gate = anchor_gate(row['quality'],config.data['sapiensid']['identities'])
+        from .person_anchor import body_gate
+        gate = body_gate(row,config.data['sapiensid']['identities'])
         row.update(body_role=row['sample_role'], body_reason=gate['reason'],body_anchor_gate=gate)
         rows.append(row)
     return rows
@@ -79,7 +80,7 @@ def export_members(db,config,person,directory,*,policies=None,crops=None,merges=
         (person['id'],person['scope'],person['namespace'])).fetchone()
     if invalid:raise ValueError('Identity has incompatible retained person evidence.')
     samples=[]
-    rows=db.execute('SELECT b.*,m.role,m.status AS assignment_status,m.policy,m.proof,s.scene,s.status AS scan_status '
+    rows=db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+',b.*,m.role,m.status AS assignment_status,m.policy,m.proof,s.scene,s.status AS scan_status '
         "FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan "
         "WHERE m.person=? ORDER BY s.scene,b.cue,b.id",(person['id'],))
     for index,row in enumerate(rows,1):
@@ -99,7 +100,7 @@ def export_members(db,config,person,directory,*,policies=None,crops=None,merges=
                 drawn=_draw(copy,(0,0,rgb.width,rgb.height),shifted);_png(copy,target)
             return dict(status='exported',file=target.name,drawn_indices=drawn)
         image=_image(crops.body(row['id']) if row['crop'] is None and crops is not None and crops.client is not None else cold_crop(db,row['crop']),directory/name,annotate=annotate)
-        admission=admission_report.person(quality,config,policies,row['contract'],independent=True)
+        admission=admission_report.person(quality,config,policies,row['contract'],independent=True,face_evidence=row['anchor_face'])
         image['thresholds']=admission_panel.export(image,admission,directory,name,
             observation=row['id'],role=row['role'],rejection=row['rejected'])
         proof = json.loads(row['proof'])

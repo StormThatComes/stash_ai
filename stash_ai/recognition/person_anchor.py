@@ -32,7 +32,14 @@ def pixel_gate(metadata,settings):
     return dict(pixels=measured,minimum=minimum,eligible=reason is None,reason=reason)
 
 
-def anchor_gate(metadata,settings,*,collection=None):
+def body_gate(row, settings, *, collection=None):
+    """Evaluate a retained body row with its original, same-cue face evidence."""
+    row = dict(row)
+    face = None if row.get('_contact_correction') else row.get('anchor_face')
+    return anchor_gate(row['quality'], settings, collection=collection, face_evidence=face)
+
+
+def anchor_gate(metadata,settings,*,collection=None,face_evidence=None):
     """Measured pose and sharpness must qualify every body reference route."""
     gate=pixel_gate(metadata,settings)
     from .pose_anchor_rules import evaluate
@@ -49,7 +56,19 @@ def anchor_gate(metadata,settings,*,collection=None):
             effective=used_keypoints(person)
             points=min(points,effective) if valid(points) else effective
             if regional['enabled']:
-                regional=evaluate(rules,detected_crop_points(person))
+                detected = detected_crop_points(person)
+                fallback = settings.get('anchor_face_landmark_fallback', {})
+                proof = None
+                if fallback.get('enabled'):
+                    from .face_landmark_fallback import supplement
+                    detected, proof = supplement(detected, record, fallback, face_evidence)
+                regional=evaluate(rules,detected)
+                if proof is not None:
+                    regional['face_landmark_fallback'] = proof
+                    borrowed = {item['point'] for item in proof['recovered']}
+                    for rule in (*regional['all'], *regional['any']):
+                        rule['point_sources'] = {name: 'face_detector' if name in borrowed else 'pose_detector'
+                                                 for name in rule['present']}
         reason=record.get('identity_rejection') or gate['reason']
         if person.get('pose_refinement',{}).get('contact_pose_recovered'):
             reason='body_contact_recovery_unconfirmed'

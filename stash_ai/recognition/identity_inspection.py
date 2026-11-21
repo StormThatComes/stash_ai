@@ -93,7 +93,9 @@ class IdentityReader:
                 admission = admission_report.face(quality, json.loads(row['geometry']), self.config, policies, row['policy_sha'])
             else:
                 body = db.execute('SELECT face,contract FROM body_observations WHERE id=?', (address,)).fetchone()
-                admission = admission_report.person(quality, self.config, policies, body['contract'], independent=True)
+                from .face_landmark_fallback import retained_body_face
+                admission = admission_report.person(quality, self.config, policies, body['contract'], independent=True,
+                    face_evidence=retained_body_face(db, address, self.config.data['sapiensid']['identities']))
                 contract_current = body['contract'] == contract(self.config)
                 trace = explain.body(json.loads(row['proof']), linked_face=body['face'], role=row['role'],
                     status=row['status'], policy=row['policy'], current=row['policy']==self.body_policy,

@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 
 from .body_identity import copresent, independent, quality
 from .independent_evidence import body_vote, unit
-from .person_anchor import anchor_gate
+from .person_anchor import body_gate
 
 
 def _distinct(row, bank, settings):
@@ -22,7 +22,7 @@ def _distinct(row, bank, settings):
 
 def _check(row, owner, frozen, guard, occupied, proof):
     settings = frozen.settings
-    gate = anchor_gate(row['quality'], settings)
+    gate = body_gate(row, settings)
     if not gate['eligible']:
         return gate['reason']
     if not row['face_quality_ok'] or row.get('_face_vector') is None:

@@ -81,6 +81,8 @@ _GROUPS = (
      'min_keypoints=anchor_min_keypoints min_person_pixels=anchor_min_person_pixels '
      'min_sharpness=anchor_min_sharpness'),
     ('matching.body.anchors.keypoint_rules', 'sapiensid.identities.anchor_keypoint_rules', 'all any'),
+    ('matching.body.anchors.face_landmark_fallback', 'sapiensid.identities.anchor_face_landmark_fallback',
+     'enabled points min_face_score max_eye_pose_deviation'),
     ('matching.body.global', 'sapiensid.global_matching',
      'enabled match_threshold cohesion_threshold ambiguity_margin min_support max_references'),
     ('matching.hybrid', 'sapiensid.matching', 'face_floor person_threshold ambiguity_margin min_support'),

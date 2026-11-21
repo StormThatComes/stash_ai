@@ -2,6 +2,7 @@
 from .resource_errors import ResourceLimit
 import json
 from .database import encoded
+from .face_landmark_fallback import body_face_sql
 
 
 def recover(database,selected,config):
@@ -19,12 +20,12 @@ def recover(database,selected,config):
                 "WHERE b.scan=? AND m.status='withheld' AND (json_extract(m.proof,'$.reason') IN "
                 "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons|ambiguous)))).fetchone():continue
         rows=[];decisions={};cost=0
-        for raw in db.execute('SELECT b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
+        for raw in db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+',b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
                 'o.quality AS face_quality,o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
                 'JOIN body_members m ON m.observation=b.id LEFT JOIN observations o ON o.id=b.face '
                 'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL AND m.policy=?',
                 (item['scan'],contract(config),policy(config))):
-            row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['proof'])+4096
+            row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['proof'])+len(row['anchor_face'] or '')+4096
             if cost>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ResourceLimit('Person recovery references exceed sapiensid.execution.reference_bytes.')
             row['_vector']=vector(row)

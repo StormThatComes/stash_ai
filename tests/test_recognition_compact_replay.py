@@ -19,9 +19,10 @@ def test_scratch_drops_unused_quality_and_pixels_without_changing_sample_identit
             _copy_selection(database, replay, selected, 'scope', 'ns')
             for row in replay.execute('SELECT * FROM observations ORDER BY id'):
                 source = next(item for item in original if item['id'] == row['id'])
-                assert set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified'}
+                assert set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'}
                 assert json.loads(row['quality'])['view_shot'] == json.loads(source['quality'])['view_shot']
                 assert json.loads(row['quality'])['transition_verified'] == json.loads(source['quality'])['transition_verified']
+                assert json.loads(row['quality'])['face_profile'] == json.loads(source['quality'])['face_profile']
                 assert row['crop'] is None
                 assert row['source'] == '' and row['rect'] == '[]'
                 assert row['geometry'] == source['geometry'] and row['embedding'] == source['embedding']
@@ -45,7 +46,7 @@ def test_pose_aware_replay_retains_only_pose_not_full_quality(tmp_path):
             rows = replay.execute('SELECT quality,crop FROM observations').fetchall()
             assert rows
             assert all(json.loads(row['quality'])['pose_deviation'] == 0.0
-                       and set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified'}
+                       and set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'}
                        and row['crop'] is None for row in rows)
 
 

@@ -12,7 +12,7 @@ def compact_quality(raw):
     try:
         record=metadata(raw)
         selected={}
-        for key in ('query_only','transition_verified'):
+        for key in ('query_only','transition_verified','face_profile'):
             if type(record.get(key)) is bool:selected[key]=record[key]
         if record.get('_inspection_auxiliary_only'):
             selected['_inspection_auxiliary_only'] = True
