@@ -98,7 +98,8 @@ def test_default_replays_from_equal_floors_and_preserves_portraits_in_exports(tm
     assert result['config_policy']['mode'] == 'strict'
     assert result['config_policy']['input_control_replays'] == 1
     assert result['search']['attempted'] == len(seen)
-    assert {r['parameter'] for r in result['config_policy']['baseline_repair']['changes']} == {'recognition.min_merge_support'}
+    assert {r['parameter'] for r in result['config_policy']['baseline_repair']['changes']} == {
+        'recognition.min_merge_support', 'recognition.min_identity_support', 'clustering.auxiliary_min_support'}
     for trial in result['simulation']['trials'].values():
         config_patch = {v['parameter']: v['proposed'] for v in trial['changes']}
         assert clean(patched(config, config_patch))
@@ -178,7 +179,7 @@ def test_parallel_search_only_returns_compliant_trials(tmp_path, monkeypatch):
         result = solve(config, goals, db, maximum=7, strict=True, execution=execution)
     trials = result['simulation']['trials']
     assert result['search']['execution']['trials'] == 2
-    assert result['config_policy']['input_control_replays'] == 0
+    assert result['config_policy']['input_control_replays'] == 1
     assert 2 < result['search']['executed'] <= 7 and result['search']['failed_trials'] == 0
     for row in trials.values():
         assert clean(patched(config, {c['parameter']: c['proposed'] for c in row.get('changes', [])}))
@@ -253,10 +254,12 @@ def test_face_tie_and_copresence_advice_allow_strict_candidates():
     assert not [r for r in report(above)['checks'] if r['status'] == 'advice']
 
 
-def test_capacity_regression_is_filtered_before_replay(tmp_path, monkeypatch):
+def test_support_floor_skips_duplicate_proposal_before_replay_even_without_strict(tmp_path, monkeypatch):
     from tests.test_recognition_solver_coverage import proposals, recovery_fixture
+    from stash_ai.recognition.merge_solver_domains import support_baseline_changes
     config, goals = recovery_fixture(tmp_path)
     config = patched(config, {'recognition.cross_scene_provisional': True, 'recognition.min_identity_support': 2})
+    config = patched(config, support_baseline_changes(config))
     unsafe = {'recognition.min_identity_support': 1}
     for strict in (True, False):
         proposals(monkeypatch, [unsafe, {'sapiensid.matching.face_floor': .78}])
@@ -265,8 +268,6 @@ def test_capacity_regression_is_filtered_before_replay(tmp_path, monkeypatch):
         assert result['search']['executed'] == 2
         trial = result['simulation']['trials']['trial-1']
         parameters = {item['parameter'] for item in trial['changes']}
-        if strict:
-            assert result['config_policy']['rejected_by_rule']['provisional-face-birth'] == 1
-            assert parameters == {'sapiensid.matching.face_floor'}
-        else:
-            assert parameters == set(unsafe)
+        assert parameters == {'sapiensid.matching.face_floor'}
+        assert patched(config, {row['parameter']: row['proposed'] for row in trial['changes']}).data[
+            'recognition']['min_identity_support'] == 2

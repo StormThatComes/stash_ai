@@ -106,9 +106,17 @@ def test_real_solver_selects_and_exports_best_effort_with_missing_history(tmp_pa
 
 
 @pytest.mark.parametrize('style', ['auto', 'off'])
-def test_cli_reports_and_exports_unchanged_best_effort_baseline(tmp_path, capsys, style):
+@pytest.mark.parametrize('support', [1, 2])
+def test_cli_reports_and_exports_best_effort_baseline_with_support_bounds(tmp_path, capsys, style, support):
+    import yaml as yaml_format
     from stash_ai.recognition.cli import main
+    from stash_ai.recognition.config import load
     config, people = incomplete_source(tmp_path)
+    document = yaml_format.safe_load(config.source)
+    document['recognition']['min_identity_support'] = support
+    document['clustering']['auxiliary_min_support'] = support
+    config.source_path.write_text(yaml_format.safe_dump(document))
+    original = config.source_path.read_bytes()
     output, yaml = tmp_path/'result.json', tmp_path/'result.yml'
     args = ['report-merge', '--face-config', str(config.source_path), '--faces-db', str(config.database),
             '--solve', '--goal-policy', 'strict', '--max-trials', '1', '--output', str(output), '--yaml-output', str(yaml), '--progress-style', style]
@@ -117,14 +125,21 @@ def test_cli_reports_and_exports_unchanged_best_effort_baseline(tmp_path, capsys
     assert main(args) == 0
     result = json.loads(output.read_text())
     assert result['status'] == 'best_effort' and result['selected_trial'] == 'baseline'
-    assert result['recommendation'] is None
-    assert result['best_result']['changes'] == [] and not result['best_result']['changed']
+    expected = {'recognition.min_identity_support': 2, 'clustering.auxiliary_min_support': 2} if support == 1 else {}
+    assert (result['recommendation'] is not None) == bool(expected)
+    assert {row['parameter']: row['proposed'] for row in result['best_result']['changes']} == expected
+    assert result['best_result']['changed'] == bool(expected)
     assert result['yaml_exported'] and yaml.exists()
+    exported = load(yaml)
+    assert exported.data['recognition']['min_identity_support'] == 2
+    assert exported.data['clustering']['auxiliary_min_support'] == 2
+    assert config.source_path.read_bytes() == original
     captured = capsys.readouterr()
     assert captured.out == ''
     if style == 'auto':
         assert 'best completed trial: baseline (best_effort)' in captured.err
-        assert 'configuration=unchanged' in captured.err and 'assigned=' in captured.err
+        status = 'changed' if expected else 'unchanged'
+        assert 'configuration=' + status in captured.err and 'assigned=' in captured.err
         assert 'missing_latest_observations' in captured.err
     else:
         assert captured.err == ''

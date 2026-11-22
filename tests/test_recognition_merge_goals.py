@@ -77,9 +77,11 @@ def test_real_solver_and_export_reproduce_disjoint_partition(tmp_path):
         export(config, result, output, yaml)
 
 
-def test_interrupted_search_preserves_only_completed_trials(tmp_path):
+@pytest.mark.parametrize('support', [1, 2])
+def test_interrupted_search_preserves_only_completed_trials(tmp_path, support):
     from stash_ai.recognition.merge_solver import solve
-    config, _ = seeded(tmp_path)
+    config, _ = seeded(tmp_path, recognition={'min_identity_support': support},
+                       clustering={'auxiliary_min_support': support})
     def progress(name, stage, item):
         if name != 'baseline' and stage == 'start':
             raise KeyboardInterrupt
@@ -88,19 +90,26 @@ def test_interrupted_search_preserves_only_completed_trials(tmp_path):
         result = solve(config, goals, db, maximum=8, progress=progress)
     assert result['interrupted']
     assert list(result['simulation']['trials']) == ['baseline']
-    assert result['recommendation'] is None
+    assert result['selected_trial'] == 'baseline'
+    assert result['recommendation'] == (result['best_result'] if support == 1 else None)
+    expected = {'recognition.min_identity_support': 2, 'clustering.auxiliary_min_support': 2} if support == 1 else {}
+    assert {row['parameter']: row['proposed'] for row in result['best_result']['changes']} == expected
 
 
-def test_budget_one_keeps_baseline_and_never_claims_impossibility(tmp_path):
+@pytest.mark.parametrize('support', [1, 2])
+def test_budget_one_keeps_baseline_and_never_claims_impossibility(tmp_path, support):
     from stash_ai.recognition.merge_solver import solve
-    config, _ = seeded(tmp_path)
+    config, _ = seeded(tmp_path, recognition={'min_identity_support': support},
+                       clustering={'auxiliary_min_support': support})
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [['900','901']])
         result = solve(config, goals, db, maximum=1)
         assert result['selected_trial'] == 'baseline'
         assert result['search']['budget_exhausted']
         assert not result['search']['proves_infeasibility']
-        assert result['recommendation'] is None
+        assert result['recommendation'] == (result['best_result'] if support == 1 else None)
+        expected = {'recognition.min_identity_support': 2, 'clustering.auxiliary_min_support': 2} if support == 1 else {}
+        assert {row['parameter']: row['proposed'] for row in result['best_result']['changes']} == expected
         with pytest.raises(ValueError):
             solve(config, goals, db, maximum=0)
 

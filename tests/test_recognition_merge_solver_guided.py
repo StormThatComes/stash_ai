@@ -60,7 +60,8 @@ def test_quality_hints_jointly_admit_rows_filtered_before_query_recovery(tmp_pat
     assert result['status'] == 'fully_solved' and result['selected_trial'] == 'trial-1'
     changes = {c['parameter']:c['proposed'] for c in result['best_result']['changes']}
     assert changes == {'clustering.min_anchor_face_pixels':80, 'clustering.min_auxiliary_face_pixels':80,
-                       'clustering.min_anchor_sharpness':30, 'clustering.min_auxiliary_sharpness':30}
+                       'clustering.min_anchor_sharpness':30, 'clustering.min_auxiliary_sharpness':30,
+                       'recognition.min_identity_support':2, 'clustering.auxiliary_min_support':2}
     assert result['simulation']['trials']['trial-1']['search_strategy'] == 'measured_blockers'
 
 
@@ -201,7 +202,8 @@ def test_refinement_uses_each_coordinate_and_its_own_measured_bracket(tmp_path):
     candidates = list(refinement(config, changes, options))
     assert any(p[PREFIX+'face_floor'] == .6995 for p in candidates)
     assert any(p[PREFIX+'person_threshold'] == .805 for p in candidates)
-    assert any(p[PREFIX+'min_support'] == 1 for p in candidates)
+    assert all(p[PREFIX+'min_support'] >= 2 for p in candidates)
+    assert any(p[PREFIX+'min_support'] == 3 for p in candidates)
     assert all(sum(p[k] != changes[k] for k in changes) == 1 for p in candidates)
 
 

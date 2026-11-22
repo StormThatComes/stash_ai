@@ -26,6 +26,7 @@ def test_tpe_proposals_reproduce_with_seed_and_completed_history(tmp_path):
     second=create('tpe',42).suggest(config,history,options,{key:2},15)
     assert first==second and 0<=first[key]<=1
     assert type(first['sapiensid.matching.min_support']) is int
+    assert first['sapiensid.matching.min_support'] >= 2
 
 
 def test_tpe_uses_full_replay_and_checkpoint_reconstructs_proposals(tmp_path,monkeypatch):

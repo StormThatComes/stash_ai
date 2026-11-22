@@ -33,12 +33,13 @@ UNIT = ('recognition.match_threshold', 'recognition.ambiguity_margin',
 SUPPORT = ('recognition.min_identity_support', 'recognition.min_merge_support',
            'clustering.same_scene_min_support', 'clustering.auxiliary_min_support',
            'clustering.view_min_support', 'clustering.view_attach_min_support', 'sapiensid.matching.min_support')
+MIN_SUPPORT = 2
 MAX_SUPPORT = 8
 
 
 def registry(config, changes=None):
     result = {k: Domain() for k in UNIT}
-    result.update({k: Domain(int, 2 if k == 'clustering.view_min_support' else 1, MAX_SUPPORT) for k in SUPPORT})
+    result.update({k: Domain(int, MIN_SUPPORT, MAX_SUPPORT) for k in SUPPORT})
     result['clustering.same_scene_match_bonus'] = Domain(high=.1, relax=1)
     result['clustering.anchor_view_matching'] = Domain(bool, relax=1)
     detection = config.data['detection']
@@ -56,30 +57,39 @@ def registry(config, changes=None):
     special={
         'sapiensid.identities.scene_match_bonus':Domain(high=.1,relax=1),
         'sapiensid.identities.turn_similarity_discount':Domain(high=max(.1,settings_discount),relax=1),
-        'sapiensid.identities.min_support': Domain(int, 2, MAX_SUPPORT),
-        'sapiensid.identities.attach_min_support': Domain(int, 1, MAX_SUPPORT),
+        'sapiensid.identities.min_support': Domain(int, MIN_SUPPORT, MAX_SUPPORT),
+        'sapiensid.identities.attach_min_support': Domain(int, MIN_SUPPORT, MAX_SUPPORT),
         'sapiensid.identities.min_appearance_distance':Domain(int,0,64),
         'sapiensid.identities.anchor_min_keypoints':Domain(int,1,17),
         'sapiensid.identities.anchor_min_sharpness':Domain(high=1000000),
         'sapiensid.identities.anchor_min_person_pixels':Domain(int,1,8192),
         'sapiensid.global_matching.min_support': Domain(
-            int, 1, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references'])),
+            int, MIN_SUPPORT, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references'])),
     }
     result.update((key,special.get(key,Domain())) for key in active(config))
     if (changes or {}).get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
         from .body_parameters import GLOBAL
         result.update((key,special.get(key,Domain())) for key in GLOBAL)
+    key = 'sapiensid.global_matching.min_support'
+    if key in result and result[key].high < MIN_SUPPORT:
+        raise ValueError('Solver requires matching.body.global.max_references >= 2 '
+                         'when global body matching is enabled (minimum support is 2).')
     return result
 
 
 def support_baseline_changes(config):
     """Bring active support counts from older YAMLs into the solver's search space."""
-    return {key: domain.high for key, domain in registry(config).items()
-            if key.endswith('_support') and parameter(config.data, key) > domain.high}
+    return {key: domain.project(parameter(config.data, key)) for key, domain in registry(config).items()
+            if key.endswith('_support') and not domain.low <= parameter(config.data, key) <= domain.high}
 
 
 def normalize(config, changes):
     domains = registry(config, changes)
+    # A mechanism proposal can enable a route absent from the bounded baseline.
+    # Include its inherited support gate even when the proposal only flips a switch.
+    if changes.get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
+        key = 'sapiensid.global_matching.min_support'
+        changes = {key: parameter(config.data, key), **changes}
     from .mechanism_scenarios import SWITCHES, INHERITED_SWITCHES, order_patch
     order = 'sapiensid.identities.body_first_matching'
     if order in changes and changes[order] != parameter(config.data, order):

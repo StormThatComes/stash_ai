@@ -18,10 +18,12 @@ def scan(state, settings, client, factory=Backend):
 
 
 @pytest.mark.parametrize('interrupted', [False, True])
-def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path, interrupted):
+@pytest.mark.parametrize('support', [1, 2])
+def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path, interrupted, support):
     from stash_ai.recognition.merge_goals import resolve
     from stash_ai.recognition.merge_solver import solve
-    settings = config(tmp_path)
+    settings = patched(config(tmp_path), {'recognition.min_identity_support': support,
+                                         'clustering.auxiliary_min_support': support})
     changed = patched(settings, {'detection.min_face_pixels': 33})
     client = MediaClient('7')
     with FaceDatabase(settings.database) as state:
@@ -57,7 +59,12 @@ def test_returning_to_previous_scan_policy_reuses_and_selects_that_scan(tmp_path
         changes = state.connection.total_changes
         result = replay(settings, {}, source=state.connection, scope='scope')
         assert result['selection'] == ['7'] and 'baseline' in result['trials']
-        assert solve(settings, goals, state.connection, maximum=1)['search']['executed'] == 1
+        # A strict baseline repair needs the original-input control plus the bounded baseline.
+        budget = 2 if support == 1 else 1
+        solved = solve(settings, goals, state.connection, maximum=budget)
+        assert solved['search']['executed'] == budget
+        assert solved['config_policy']['input_control_replays'] == int(support == 1)
+        assert solved['simulation']['selection'] == ['7']
         assert state.connection.total_changes == changes
 
 

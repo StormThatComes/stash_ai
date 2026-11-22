@@ -127,9 +127,11 @@ def test_solver_caps_legacy_input_before_replay_and_exports_the_change(tmp_path,
     replays = report['simulation']['trials']
     assert len(replays) == trials
     assert replays['baseline']['changes_from_previous'] == [
+        dict(parameter='clustering.auxiliary_min_support', previous=1, current=2),
+        dict(parameter='recognition.min_identity_support', previous=1, current=2),
         dict(parameter='recognition.min_merge_support', previous=1000, current=8)]
     for trial in replays.values():
-        assert 1 <= trial['yaml_patch']['recognition']['min_merge_support'] <= 8
+        assert 2 <= trial['yaml_patch']['recognition']['min_merge_support'] <= 8
     journal = json.loads(checkpoint.read_text())
     for entry in journal['records']:
         record = json.loads((tmp_path / 'solver.json.trials' / entry['file']).read_text())
