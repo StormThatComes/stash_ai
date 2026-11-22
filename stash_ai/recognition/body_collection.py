@@ -139,6 +139,7 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
                     distinct_faces = True
                     merged_pair |= left<=x<right and top<=y<bottom and left<=u<right and top<=v<bottom
     items=[]
+    contact_masks = {}
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):
         if row['rejected'] is None and (match is None or merged_pair):
@@ -187,6 +188,12 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
         if 'mask_applied' in refinement:
             refinement['mask_applied']['body_admission'] = bool(separated or admission_conflict(person))
         face_accepted=row is not None and row['rejected'] is None
+        if face_accepted and len(people) > 1:
+            from .contact_face_evidence import measure as contact_evidence
+            measured['contact_face_evidence'] = contact_evidence(face, person, people,
+                face_id=row['id'], faces=faces, mask_cache=contact_masks)
+            for peer in measured['contact_face_evidence']['peers']:
+                peer['observation'] = identifier(scan, cue, people[peer['person_index']], expected)
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None
         metadata=dict(person=public_person(person),quality=measured,identity_rejection=reason,

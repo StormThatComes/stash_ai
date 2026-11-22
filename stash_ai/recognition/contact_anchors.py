@@ -11,7 +11,9 @@ def crowded_link(q):
     return q.get('detected_people',1)>1 and max(q.get('overlap',0), q.get('box_overlap',0))>=.25
 
 
-def questionable_links(rows,settings,scores,graph=()):
+def questionable_links(rows,settings,scores,graph=(), *, evidence=None):
+    from .contact_face_evidence import retained
+    evidence = {} if evidence is None else evidence
     clean = defaultdict(list)
     crowded = []
     for row in rows:
@@ -29,11 +31,24 @@ def questionable_links(rows,settings,scores,graph=()):
         points = torso_points(data)
         supported = False
         conflicted = False
+        local = retained(row, q)
+        temporal = dict(reason='insufficient_torso_points' if len(points)<3 else
+                        'shot_unavailable' if q.get('view_shot') is None else 'no_clean_neighbour',
+                        threshold=settings['cohesion_threshold'], margin=settings['ambiguity_margin'], neighbours=[])
+        check = evidence[row['id']] = dict(status='withheld',
+            crowding=dict(detected_people=q.get('detected_people'), overlap=q.get('overlap',0),
+                          box_overlap=q.get('box_overlap',0), threshold=.25),
+            same_frame=local, temporal=temporal)
         if len(points)>=3 and q.get('view_shot') is not None:
             for cue in (row['cue']-1,row['cue']+1):
                 ranked = []
+                neighbour = dict(cue=cue, candidates=len(clean[cue]), rejected={})
+                temporal['neighbours'].append(neighbour)
+                def reject(reason):
+                    neighbour['rejected'][reason] = neighbour['rejected'].get(reason,0)+1
                 for peer,other in clean[cue]:
                     if other.get('view_shot')!=q['view_shot']:
+                        reject('different_shot')
                         continue
                     geom = json.loads(peer['geometry'])
                     offset = None
@@ -43,21 +58,39 @@ def questionable_links(rows,settings,scores,graph=()):
                         from .cue_continuity import continuous
                         later = other if cue>row['cue'] else q
                         if not continuous(q['frame_signature'],other['frame_signature'],verified=later.get('transition_verified',False)):
+                            reject('shot_discontinuity')
                             continue
                         offset = translation(q,other,*signatures)
-                    if len(torso_points(geom))<3 or rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset):
+                    if len(torso_points(geom))<3:
+                        reject('insufficient_peer_torso')
                         continue
-                    ranked.append((body_similarity(scores,row,peer),peer['face_person']))
-                own = max((v for v,p in ranked if p==row['face_person']),default=-1.)
-                rival = max((v for v,p in ranked if p!=row['face_person']),default=-1.)
+                    blocked = rejection(data['bounds'],geom['bounds'],points,torso_points(geom),translation=offset)
+                    if blocked:
+                        reject(blocked[1])
+                        continue
+                    ranked.append((body_similarity(scores,row,peer),peer['face_person'],peer['id']))
+                own, own_id = max(((v,i) for v,p,i in ranked if p==row['face_person']),default=(-1.,None))
+                rival, rival_id = max(((v,i) for v,p,i in ranked if p!=row['face_person']),default=(-1.,None))
+                neighbour.update(own_score=own if own_id else None, rival_score=rival if rival_id else None,
+                                 own_observation=own_id, rival_observation=rival_id)
+                neighbour['reason'] = ('no_eligible_witness' if not ranked else 'own_witness_missing' if own_id is None else
+                    'low_body_similarity' if own<settings['cohesion_threshold'] else
+                    'insufficient_body_margin' if own-rival<settings['ambiguity_margin'] else 'confirmed')
                 if own>=settings['cohesion_threshold'] and own-rival>=settings['ambiguity_margin']:
                     supported = True
                 if rival>=settings['cohesion_threshold'] and own-rival<settings['ambiguity_margin']:
                     conflicted = True
+            reasons = [n['reason'] for n in temporal['neighbours']]
+            temporal['reason'] = ('temporal_identity_conflict' if conflicted else 'confirmed' if supported else
+                next((r for r in ('insufficient_body_margin','low_body_similarity','own_witness_missing') if r in reasons),
+                     'no_eligible_witness' if any(n['candidates'] for n in temporal['neighbours']) else 'no_clean_neighbour'))
         if conflicted:
             contradicted.add(row['id'])
-        if not supported or conflicted:
+        if (not supported and not local.get('confirmed')) or conflicted:
             questionable.add(row['id'])
+            check['reason'] = temporal['reason']
+        else:
+            check.update(status='confirmed', reason='adjacent_clean_witness' if supported else 'same_frame_head_torso')
     # Two independent clean endpoints can corroborate a longer contact. Each
     # intervening edge already competed against the other physical lane.
     from .independent_evidence import count
@@ -76,6 +109,10 @@ def questionable_links(rows,settings,scores,graph=()):
                     all(k.get('face_person') in (None,owner) for k in middle)):
                     questionable.difference_update(k['id'] for k in middle if k.get('face_person')==owner
                                                    and k['id'] not in contradicted)
+                    for k in middle:
+                        if k['id'] in evidence and k.get('face_person')==owner and k['id'] not in contradicted:
+                            evidence[k['id']].update(status='confirmed', reason='independent_clean_endpoints',
+                                                    witness_ids=[first['id'],r['id']])
             previous = i
     return questionable
 

@@ -410,6 +410,17 @@ settings are hash-verified when possible. Otherwise the UI labels them as
 current YAML only. Current quality eligibility does not reconstruct a historical
 matching decision. `Recorded evidence` opens the retained matching proofs.
 
+For `unconfirmed_contact_face`, Details explains the recorded contact check:
+crowding measurements, original head points and landmark error, head/torso
+geometry, peer mask support/conflicts, and adjacent-cue witness rejections.
+Missing clean neighbours, missing torso/shot evidence, low body similarity,
+insufficient rival margin and temporal identity conflicts are reported separately.
+Retained supporting and rival body IDs are available as references. Accepted bodies
+also show whether same-cue anatomy, adjacent witnesses or independent clean
+endpoints confirmed their contact link. This check precedes later track recovery;
+the final membership remains the decision shown above it. Old decisions explicitly
+report unavailable contact diagnostics instead of reconstructing an explanation.
+
 For an unassigned observation, `Suggested next steps` precedes the recorded
 evidence. It shows current YAML values, measured boundaries, copyable YAML
 patches and the next run needed to test them. The patch uses the loaded YAML

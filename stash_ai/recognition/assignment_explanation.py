@@ -2,6 +2,7 @@
 from .decision_evidence import REASONS
 
 BODY_REASONS = {
+    'unconfirmed_contact_face': 'The overlapping body/face link lacks independent ownership confirmation or has conflicting evidence.',
     'measured_face_association': 'This body was associated with an assigned face in the same cue.',
     'face_rooted_body_view': 'The body matched a view supported by tracks with identified face endpoints.',
     'face_rooted_crossing': 'The body was recovered through a crossing between identified face endpoints.',
@@ -64,6 +65,14 @@ def references(proof, kind, linked_face=None):
         add(item.get('medoid'), 'View medoid')
         for address in item.get('support_ids', ()):
             add(address, 'View support')
+    contact = proof.get('contact_confirmation', {})
+    for address in contact.get('witness_ids', ()):
+        add(address, 'Contact endpoint')
+    for neighbour in contact.get('temporal', {}).get('neighbours', ()):
+        add(neighbour.get('own_observation'), 'Contact supporting body')
+        add(neighbour.get('rival_observation'), 'Contact rival body')
+    for peer in contact.get('same_frame', {}).get('peers', ()):
+        add(peer.get('observation'), 'Same-cue contact peer')
     for index, track in enumerate(proof.get('source_tracks') or (), 1):
         if isinstance(track, (list, tuple)) and len(track) == 3:
             start, end, witness = track
@@ -169,4 +178,4 @@ def body(proof, *, linked_face, role, status, policy, current, merges, target):
                 status=status, role=role, decisions=[dict(reason=reason, summary=summary or
                 'See the retained body decision for this assignment.', policy=policy, metrics=metrics,
                 references=references(proof, 'body', linked_face), reference_role=reference_role, merge_source=source,
-                merges=path)])
+                merges=path, contact_confirmation=proof.get('contact_confirmation'))])
