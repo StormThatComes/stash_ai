@@ -20,6 +20,9 @@ def describe(trace):
                      'Membership is recorded. No accepted decision explaining it was retained.')
     for decision in trace['decisions']:
         lines.extend(('', decision['summary'], f"Reason: {decision['reason']}"))
+        if decision.get('contact_confirmation') or decision['reason'] == 'unconfirmed_contact_face':
+            from .contact_diagnostics import describe as describe_contact
+            lines.extend(describe_contact(decision.get('contact_confirmation')))
         if decision.get('reference_role'):
             lines.append('Recorded reference role: ' + decision['reference_role'])
         metrics = decision['metrics']

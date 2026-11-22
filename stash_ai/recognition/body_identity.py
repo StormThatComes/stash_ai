@@ -45,7 +45,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v51-contact-proofs',contract(config),matching_policy(config),
+    return digest(['body-local-v52-contact-confirmation',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 
@@ -376,8 +376,13 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     graph=rebind(graph,rows)
     seeds={};decisions={}
     from .contact_anchors import questionable_links
-    uncertain = questionable_links(rows,settings,scores,graph)
+    contact_checks = {}
+    uncertain = questionable_links(rows,settings,scores,graph,evidence=contact_checks)
     uncertain.difference_update(r['id'] for r in rows if r.get('_contact_correction'))
+    for row in rows:
+        if row.get('_contact_correction') and row['id'] in contact_checks:
+            contact_checks[row['id']].update(status='corrected', reason='independent_clean_endpoints_corrected_link',
+                witness_ids=row['_contact_correction']['witness_ids'])
     for row in rows:
         if row['face_person'] is None:continue
         person=roots[row['face_person']]
@@ -599,6 +604,8 @@ def _plan_once(db,config,record,rows,roots,origins_by_key,owners,frozen_faces,ca
     resolve_claims(rows,decisions,config,scores=scores)
     if settings['anchor_min_person_pixels'] is not None:
         for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
+    for oid, proof in contact_checks.items():
+        decisions[oid]['contact_confirmation'] = proof
     return record,rows,decisions
 
 

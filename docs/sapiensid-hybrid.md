@@ -238,6 +238,36 @@ A linked face receives the same feature through a compatibility projection.
 Rejected faces never supply facial landmarks to an independent body query.
 Ambiguous face/person ownership is withheld instead of guessed.
 
+Crowded links (`detected_people > 1` and either mask/fallback or box overlap at
+least 0.25) can also be confirmed from independently measured anatomy in the
+same cue. Collection records a compact proof using the complete detected roster,
+including peers that later fail body admission. It requires two distinct original
+nose/eye points agreeing with the face landmarks, both shoulders and at least one
+hip, a rotation-independent head/torso connection and separation from every peer.
+Face/temporal prompt points and the regional face-landmark fallback cannot count
+as independent head evidence. Competing face/head claims must lose by a measured
+landmark-error margin.
+
+Separated head/torso regions can explain large overlapping leg boxes. When those
+regions overlap, both validated masks must support their own anatomy and exclude
+the other core, with low mask intersection. Mask-based confirmation respects
+`pose.mask.apply_to.overlap` and `pose.mask.apply_to.body_admission`. Missing,
+invalid or disabled masks do not grant an exemption. Disjoint masks alone cannot
+confirm a missing or incorrectly attached head. These checks are versioned with
+the collected proof; the generic 0.25 crowding trigger remains unchanged.
+
+Same-cue evidence supplements the existing adjacent-cue and independent-endpoint
+checks. A measured temporal identity conflict still vetoes it. A newly confirmed
+body follows the ordinary face assignment and body anchor quality gates; it does
+not become a clean temporal endpoint merely because this check passed. The direct
+temporal search still examines only the previous and next cue.
+
+Run recognition again for the affected scenes after updating. The new body
+collection contract refreshes old observations to retain same-cue proofs without
+requiring stored mask images. Rebuilding old decisions alone cannot invent them.
+The inspector reports the retained contact proof and exact missing/conflicting
+evidence, independently of current quality eligibility.
+
 The independent records retain person bounds, pose points, optional face ID,
 quality measurements, rejection reasons and optional PNGs. The quality controls
 are `min_person_pixels`, `min_sharpness`, `min_keypoints`, `max_overlap`.

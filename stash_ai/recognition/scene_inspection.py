@@ -219,4 +219,5 @@ def _variant(item, metrics, refs):
     if metrics.get('runner') == -1 and metrics.get('rival') is None:
         metrics.pop('runner')
     return dict(reason=item['recorded'].get('reason', 'unknown'), summary='Recorded attempt: '+item['status'],
-                policy=item['policy'], metrics=metrics, references=refs, merges=[], merge_source=None)
+                policy=item['policy'], metrics=metrics, references=refs, merges=[], merge_source=None,
+                contact_confirmation=item['recorded'].get('contact_confirmation'))

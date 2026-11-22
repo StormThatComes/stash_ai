@@ -46,7 +46,7 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,
 
 
 def contract(config):
-    return _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False,
+    return _contract(config,'independent-person-v5-contact-evidence',legacy_mask_overlap=False,
                      legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False)
 
 
@@ -61,6 +61,8 @@ def _previous_contracts(config):
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
     return [_contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False,
+                      legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False),
+            _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False,
                       legacy_foreground_sharpness=False,legacy_drift_mask=False,
                       legacy_mask_prompts=False,legacy_pair_fallback=True),
             _contract(config,'independent-person-v4-independent-torso',legacy_mask_overlap=False,
