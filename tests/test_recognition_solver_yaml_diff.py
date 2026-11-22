@@ -62,7 +62,9 @@ def test_cli_diff_matches_winner_against_input_and_has_no_standalone_run_command
     assert result['yaml_diff_baseline']['configuration_sha256'] == digest(plain(config.data))
     assert config.source_path.read_bytes() == original
     if maximum == 1:
-        assert result['selected_trial'] == 'baseline' and yaml.safe_load(destination.read_text()) == {}
+        assert result['selected_trial'] == 'baseline'
+        assert yaml.safe_load(destination.read_text()) == {
+            'recognition': {'min_identity_support': 2}, 'clustering': {'auxiliary_min_support': 2}}
         assert 'Unmet conditions:' in destination.read_text()
     else:
         assert result['selected_trial'] != 'baseline'
@@ -85,7 +87,8 @@ def test_diff_is_live_before_interrupt_and_resumes_without_switching_format(tmp_
     with _open_readonly(config.database) as db:
         result = dict(goals, **solve(config, goals, db, maximum=4, checkpoint=path, winner_writer=owner,
                                     yaml_mode='diff', progress=progress))
-    assert result['interrupted'] and snapshots[0] == {}
+    assert result['interrupted'] and snapshots[0] == {
+        'recognition': {'min_identity_support': 2}, 'clustering': {'auxiliary_min_support': 2}}
     assert snapshots[-1] == result['best_result']['yaml_patch'] and snapshots[-1]
     export(config, result, tmp_path/'result.json', destination, yaml_owner=owner, yaml_mode='diff')
     original = destination.read_bytes()

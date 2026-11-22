@@ -20,11 +20,14 @@ the current directory (or built-in defaults if absent). `--yaml-output merged.ym
 only names the result file and never selects an input configuration. Incompatible
 input diagnostics include the resolved configuration and database paths.
 
-The solver caps minimum support counts at **8** for recognition, clustering and
-enabled SapiensID routes. Global body matching also respects `max_references`
-when it is smaller than 8. If an input YAML requests more support, the solver
-uses the capped count starting with the baseline replay and shows the adjustment
-in the trial report and exported YAML diff. This limit applies only to the solver.
+The solver searches minimum support counts in **2..8** for recognition, clustering
+and enabled SapiensID routes, including `min_identity_support`, `min_merge_support`,
+`min_support` and `attach_min_support`. Global body matching also respects
+`max_references` when it is smaller than 8, and requires at least 2 references.
+Input counts outside this range are adjusted starting with the baseline replay;
+the trial report and exported YAML diff include the adjustment. Newly enabled
+routes use the same bounds. These limits apply with or without `--no-strict`
+and only affect solver search; ordinary recognition retains its configured counts.
 
 The solver keeps `matching.body.anchors.keypoint_rules` exactly as configured
 during numeric tuning, including custom point lists and empty rules. To also

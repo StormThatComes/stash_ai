@@ -17,7 +17,9 @@ from stash_ai.recognition.merge_solver_hybrid import analyse, mode_boundary, PRE
 
 
 def prepared(tmp_path, faces, bodies, *, count=3, matching=None):
-    config, people = seeded(tmp_path, vectors=faces, count=count, recognition=dict(match_threshold=.99))
+    # Keep the baseline inside solver support bounds so these tests isolate hybrid gates.
+    config, people = seeded(tmp_path, vectors=faces, count=count,
+        recognition=dict(match_threshold=.99, min_identity_support=2), clustering=dict(auxiliary_min_support=2))
     data = plain(config.data)
     data['sapiensid']['enabled'] = True
     data['sapiensid']['pose']['backend'] = 'pmpose'

@@ -80,7 +80,8 @@ def test_body_admission_can_recover_withheld_members_from_frozen_addresses(tmp_p
         goals=resolve(db,c,[['900']],policy='strict')
         result=solve(c,goals,db,maximum=2)
         changes=check_winner(c,goals,db,result)
-    assert changes=={PIXEL_PARAMETER:95}
+    assert changes=={PIXEL_PARAMETER:95, 'recognition.min_identity_support':2,
+                     'clustering.auxiliary_min_support':2}
     assert result['simulation']['trials']['trial-1']['search_strategy']=='admission'
 
 

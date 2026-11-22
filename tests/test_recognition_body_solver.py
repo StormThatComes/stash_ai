@@ -36,7 +36,8 @@ def test_all_retained_body_parameters_reach_search_and_tpe_dimensions(tmp_path):
     assert selected==PARAMETERS
     from stash_ai.recognition.merge_solver_bidirectional import relaxed_seeds
     seeds=list(relaxed_seeds(c,dict(options=hints['options'])))
-    assert PARAMETERS <= set().union(*(p.keys() for p in seeds))
+    relaxable = {key for key in PARAMETERS if parameter(c.data, key) > domains[key].low}
+    assert relaxable <= set().union(*(p.keys() for p in seeds))
     for key in ('min_appearance_distance','anchor_min_keypoints'):
         key='sapiensid.identities.'+key
         patches=list(refinement(c,{key:1},hints['options']))
