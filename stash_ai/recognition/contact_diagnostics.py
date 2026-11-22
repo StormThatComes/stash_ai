@@ -14,6 +14,8 @@ def describe(check):
     local = check['same_frame']
     limits = local.get('thresholds', {})
     lines.append('Same-cue face/body evidence: '+local['reason'])
+    if 'full_body_reason' in local:
+        lines.append('Full head/torso path: '+local['full_body_reason'])
     if 'head_points' in local:
         names = ('nose','left_eye','right_eye')
         lines.append('Independent pose head points: '+(', '.join(names[i] for i in local['head_points']) or 'none'))
@@ -35,6 +37,40 @@ def describe(check):
                          f"(minimum {number(limits.get('mask_support'))}); foreign support: {number(peer['foreign_mask_support'])} "
                          f"(maximum {number(limits.get('foreign_mask_support'))}); mask overlap: {number(peer['mask_overlap'])} "
                          f"(maximum {number(limits.get('mask_overlap'))})")
+    upper = local.get('upper_body')
+    if upper:
+        names = ('nose','left_eye','right_eye','left_ear','right_ear','left_shoulder','right_shoulder')
+        def points(indices):
+            return ', '.join(names[i] for i in indices) or 'none'
+        lines.append('Masked upper-body path: '+upper['reason'])
+        lines.append(f"  Original aligned head points: {points(upper['head_points'])}; "
+                     f"supporting ears: {points(upper['ear_points'])}; shoulders: {points(upper['shoulder_points'])}")
+        lines.append('  Checks: '+', '.join(f'{k}={v}' for k,v in upper['checks'].items()))
+        if upper.get('excluded_points'):
+            lines.append('  Excluded original points: '+', '.join(
+                f"{names[p['point']]}={p['reason']}" for p in upper['excluded_points']))
+        for ear in upper.get('ears', ()):
+            lines.append(f"  {names[ear['point']]} distance / face side: {number(ear['distance'])}; "
+                         f"anatomically eligible: {ear['eligible']}")
+        if upper['checks']['head'] == 'insufficient_head_points':
+            lines.append('  Need two original nose/eye points, or one original eye with its same-side original ear. '
+                         'Missing, borrowed, occluded and out-of-box points cannot support this path.')
+        if 'neck_distance' in upper:
+            lines.append(f"  Head/shoulder distance: {number(upper['neck_distance'])}; "
+                         f"lateral: {number(upper['head_lateral'])}; normal: {number(upper['neck_normal'])}; hips optional")
+        if upper.get('mask'):
+            mask = upper['mask']
+            lines.append(f"  Own mask anatomy/corridor support: {number(mask['anatomy_support'])} / "
+                         f"{number(mask['corridor_support'])}; longest gap / face side: {number(mask['max_gap'])} "
+                         f"(support >= {number(upper['thresholds']['mask_support'])}; "
+                         f"gap <= {number(upper['thresholds']['mask_gap'])})")
+        for peer in upper['peers']:
+            lines.append(f"  Upper-body peer {peer.get('observation', peer['person_index'])}: {peer['reason']}")
+            if 'local_box_separated' in peer:
+                lines.append(f"    Head/shoulder region outside peer box: {peer['local_box_separated']}")
+            if 'foreign_mask_support' in peer:
+                lines.append(f"    Foreign upper-body/head support: {number(peer['foreign_mask_support'])} / "
+                             f"{number(peer['foreign_head_support'])}")
     temporal = check['temporal']
     lines.append(f"Temporal evidence: {temporal['reason']}; similarity >= {number(temporal['threshold'])}; "
                  f"lead >= {number(temporal['margin'])}")

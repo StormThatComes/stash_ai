@@ -6,7 +6,7 @@ ownership. No face landmark is copied into the pose by this module.
 import math
 import numpy as np
 
-VERSION = 'same-cue-head-torso-v1'
+VERSION = 'same-cue-head-torso-v2-upper-body'
 LIMITS = dict(head_error=.20, rival_margin=.12, min_torso_pixels=6.,
               head_projection_min=-.25, head_projection_max=1.25, head_lateral_ratio=.75,
               core_gap_pixels=4., mask_support=.8, foreign_mask_support=.1, mask_overlap=.1)
@@ -93,7 +93,7 @@ def _coverage(person, mask, points):
                for x, y in points)/len(points)
 
 
-def measure(face, person, people, *, face_id, faces=(), mask_cache=None):
+def _full_body(face, person, people, *, face_id, faces=(), mask_cache=None):
     """Use all detected peers, including rejected/maskless poses, before storage."""
     result = dict(version=VERSION, face=face_id, confirmed=False, reason='insufficient_head_points',
                   head_points=[], peers=[], thresholds=dict(LIMITS))
@@ -176,6 +176,26 @@ def measure(face, person, people, *, face_id, faces=(), mask_cache=None):
                               and overlap <= LIMITS['mask_overlap'] else 'mask_core_conflict')
     blockers = [p['reason'] for p in result['peers'] if not p['reason'].startswith('separated_')]
     result.update(confirmed=not blockers, reason=blockers[0] if blockers else 'same_frame_head_torso')
+    return result
+
+
+def measure(face, person, people, *, face_id, faces=(), mask_cache=None):
+    """Keep the full-body proof and independently evaluate a masked upper body."""
+    cache = {} if mask_cache is None else mask_cache
+    result = _full_body(face, person, people, face_id=face_id, faces=faces, mask_cache=cache)
+    result['full_body_reason'] = result['reason']
+    if result['confirmed']:
+        return result
+    from .contact_upper_body import measure as upper_body
+    upper = upper_body(face, person, people, faces=faces, mask_cache=cache)
+    result['upper_body'] = upper
+    # Real contradictions in the original anatomy remain vetoes. Whole-torso
+    # overlap alone is not a contradiction in the head/shoulder ownership proof.
+    vetoes = {'head_landmark_mismatch', 'head_torso_mismatch', 'competing_face_claim',
+              'mask_conflict', 'competing_head_claim'}
+    veto = result['reason'] in vetoes or any(p['reason'] in vetoes for p in result['peers'])
+    if upper['confirmed'] and not veto:
+        result.update(confirmed=True, reason='same_frame_upper_body')
     return result
 
 
