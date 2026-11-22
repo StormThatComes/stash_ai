@@ -5,6 +5,10 @@ import math
 
 PARAMETER = 'sapiensid.identities.anchor_face_landmark_fallback'
 LANDMARKS = {'nose': (0, 2), 'left_eye': (1, 1), 'right_eye': (2, 0)}
+POLICY_VERSION = 2
+# Recognition size/framing/pose floors do not invalidate detector coordinates.
+# Blur, occlusion, invalid geometry and unknown rejection reasons still veto.
+GEOMETRY_ONLY_REJECTIONS = frozenset(('face_too_small', 'face_incomplete', 'face_pose'))
 
 
 def defaults():
@@ -39,17 +43,27 @@ def needed(settings):
     return settings.get('anchor_face_landmark_fallback', {}).get('enabled', False) and any(rules.values())
 
 
+def policy(settings):
+    """Invalidate enabled matching caches when landmark admission changes."""
+    return dict(settings, version=POLICY_VERSION) if settings.get('enabled') else settings
+
+
 def body_face_sql(alias='b', *, settings=None, respect_corrections=True):
     """Read retained geometry without per-row Python queries or loading pixels."""
     if settings is not None and not needed(settings):
         return 'NULL AS anchor_face'
-    correction = (f" AND NOT EXISTS (SELECT 1 FROM body_members bm WHERE bm.observation={alias}.id "
+    correction = (f"EXISTS (SELECT 1 FROM body_members bm WHERE bm.observation={alias}.id "
                   "AND json_extract(bm.proof,'$.contact_correction') IS NOT NULL)"
-                  if respect_corrections else '')
-    return ("(SELECT json_object('observation',af.id,'geometry',json(af.geometry),"
-            "'quality',json(af.quality),'rejected',af.rejected) FROM observations af "
-            f'WHERE af.id={alias}.face AND af.scan={alias}.scan AND af.cue={alias}.cue'
-            + correction + ') AS anchor_face')
+                  if respect_corrections else '0')
+    # Keep the linked ID and the actual veto instead of presenting every blocked
+    # link as absent. The consumer checks unavailable_reason before coordinates.
+    return ("COALESCE((SELECT json_object('observation',af.id,'geometry',json(af.geometry),"
+            "'quality',json(af.quality),'rejected',af.rejected,'unavailable_reason',CASE "
+            f"WHEN af.scan<>{alias}.scan OR af.cue<>{alias}.cue THEN 'linked_face_context_mismatch' "
+            f"WHEN {correction} THEN 'linked_face_contact_corrected' END) "
+            f"FROM observations af WHERE af.id={alias}.face),json_object('observation',{alias}.face,"
+            f"'unavailable_reason',CASE WHEN {alias}.face IS NULL THEN 'face_link_missing' "
+            "ELSE 'linked_face_not_retained' END)) AS anchor_face")
 
 
 def retained_body_face(db, identifier, settings):
@@ -77,15 +91,27 @@ def supplement(points, metadata, settings, evidence):
         return points, result
     try:
         face_data = _decoded(evidence)
-        if not isinstance(face_data, Mapping) or face_data.get('rejected') is not None:
+        if not isinstance(face_data, Mapping):
             result['reason'] = 'linked_face_unavailable'
+            return points, result
+        result.update(face_observation=face_data.get('observation'), face_rejection=face_data.get('rejected'))
+        if face_data.get('unavailable_reason'):
+            result['reason'] = face_data['unavailable_reason']
+            return points, result
+        rejected = face_data.get('rejected')
+        if rejected is not None and rejected not in GEOMETRY_ONLY_REJECTIONS:
+            result['reason'] = 'linked_face_rejected'
             return points, result
         from .models import checked_detection
         face = checked_detection(_decoded(face_data['geometry']))
         quality = _decoded(face_data.get('quality')) or {}
         person = metadata['person']
-        if face.score < settings['min_face_score'] or quality.get('alignment_valid') is False:
-            result['reason'] = 'linked_face_quality'
+        result.update(face_score=face.score, min_face_score=settings['min_face_score'])
+        if face.score < settings['min_face_score']:
+            result['reason'] = 'linked_face_score'
+            return points, result
+        if quality.get('alignment_valid') is False:
+            result['reason'] = 'linked_face_alignment_invalid'
             return points, result
         from .person_association import association_rejection
         rejection = association_rejection(face, person)
@@ -97,8 +123,7 @@ def supplement(points, metadata, settings, evidence):
         eye_span = math.dist(*face.landmarks[:2])
         eye_allowed = (not quality.get('face_profile') and eye_span >= max(2., .16*min(face.box[2:]))
                        and pose['pose_deviation'] <= settings['max_eye_pose_deviation'])
-        result.update(face_observation=face_data.get('observation'), face_score=face.score,
-                      eye_pose_deviation=pose['pose_deviation'])
+        result['eye_pose_deviation'] = pose['pose_deviation']
         left, top, right, bottom = person['bounds']
         fx, fy, fw, fh = face.box
         copied = list(points)

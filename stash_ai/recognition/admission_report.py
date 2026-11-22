@@ -231,9 +231,16 @@ def person(metadata, config, policies, fingerprint, *, independent=False, face_e
                 checked['point_sources'] = rule['point_sources']
                 recovered = [name for name, source in rule['point_sources'].items() if source == 'face_detector']
                 fallback = regional['face_landmark_fallback']
-                checked['note'] = ('Face detector fallback: '+', '.join(recovered)+
-                    f" (face {fallback['face_observation']}). Original pose points and encoder count unchanged."
-                    if recovered else 'Face detector fallback: '+str(fallback.get('reason') or fallback['skipped'] or 'not needed')+'.')
+                outcome = ', '.join(recovered) if recovered else str(fallback.get('reason') or fallback['skipped'] or 'not needed')
+                checked['note'] = 'Face detector fallback: '+outcome+'.'
+                if fallback.get('face_observation'):
+                    checked['note'] += f" Linked face: {fallback['face_observation']}."
+                if fallback.get('face_rejection'):
+                    checked['note'] += f" Face admission rejection: {fallback['face_rejection']}."
+                if recovered:
+                    checked['note'] += ' Original pose points and encoder count unchanged.'
+                elif fallback.get('reason') == 'linked_face_score':
+                    checked['note'] += f" Detection score {fallback['face_score']:g} < {fallback['min_face_score']:g}."
         summary = group('person_anchor_keypoints_'+mode, checks,
             note=('Every rule must pass.' if mode == 'all' else 'At least one rule must pass; other failed alternatives do not reject the anchor.')+
                  ' Counts use detected pose points inside the person crop, before the encoder filters the nose and eyes. A minimum of zero adds no requirement.'+
