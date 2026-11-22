@@ -23,17 +23,34 @@ def _accepted(kind):
     return "m.person IS NOT NULL" + (" AND m.status='accepted'" if kind == 'body' else '')
 
 
+def _reason(payload):
+    return (f"COALESCE(CASE WHEN json_valid({payload}) THEN CASE WHEN "
+            f"json_type({payload},'$.reason')='text' THEN NULLIF(trim(json_extract({payload},'$.reason')),'') "
+            "END END,'unknown_reason')")
+
+
 def _unassigned_query(kind, config, scan):
     """Share membership and displayed-state rules between counts and pages."""
     observations, members = TABLES[kind]
-    status = "COALESCE(m.status,'unassigned')" if kind == 'body' else "'unassigned'"
+    status = ("COALESCE(m.status,'unassigned')" if kind == 'body' else
+              "CASE WHEN c.status='withheld' THEN 'withheld' ELSE 'unassigned' END")
     role = "COALESCE(m.role,'unknown')" if kind == 'body' else "'unknown'"
     state = f"COALESCE(NULLIF(o.rejected,''),CASE WHEN {status}='accepted' THEN {role} ELSE {status} END)"
     current, args = selection(config, kind)
+    evidence = ''
+    decision_args = []
+    if kind == 'face':
+        # A retained historical attempt must not turn an unmatched face into a
+        # current withheld result. The latest current decision wins exactly once.
+        evidence = ('LEFT JOIN candidates c ON c.rowid=(SELECT fc.rowid FROM candidates fc '
+                    f'WHERE {observation_sql("fc")}=o.id AND fc.scan=o.scan AND fc.policy=? '
+                    'ORDER BY fc.rowid DESC LIMIT 1) ')
+        decision_args = [matching_policy(config)]
+    reason = _reason('m.proof' if kind == 'body' else 'c.payload')
     return (f"SELECT '{kind}' AS kind,o.id,s.scene,o.cue,o.seconds,"
-            f'{status} AS status,{role} AS role,o.rejected,{state} AS state FROM {observations} o '
+            f'{status} AS status,{role} AS role,o.rejected,{state} AS state,{reason} AS reason FROM {observations} o '
             f'JOIN scans s ON s.id=o.scan LEFT JOIN {members} m ON m.observation=o.id '
-            f'WHERE o.scan=? AND NOT ({_accepted(kind)}) AND ' + current, [scan['id'], *args])
+            + evidence + f'WHERE o.scan=? AND NOT ({_accepted(kind)}) AND ' + current, [*decision_args, scan['id'], *args])
 
 
 class SceneReader:
@@ -66,9 +83,14 @@ class SceneReader:
                     group = groups.setdefault(row['id'], dict(identity=row['id'], performer=row['performer'], count=0))
                     group['count'] += row['count']
                 query, args = _unassigned_query(kind, self.config, scan)
-                unassigned_groups.extend(dict(kind=kind, state=row['state'], count=row['count'])
-                    for row in db.execute('SELECT state,COUNT(*) AS count FROM (' + query +
-                                          ') GROUP BY state ORDER BY state', args))
+                states = {}
+                for row in db.execute('SELECT state,reason,COUNT(*) AS count FROM (' + query +
+                                      ') GROUP BY state,reason ORDER BY state,COUNT(*) DESC,reason', args):
+                    group = states.setdefault(row['state'], dict(kind=kind, state=row['state'], count=0))
+                    group['count'] += row['count']
+                    if row['state'] == 'withheld':
+                        group.setdefault('reasons', []).append(dict(reason=row['reason'], count=row['count']))
+                unassigned_groups.extend(states.values())
             # Count only scene-local metadata. All-scene member pages are loaded on expansion.
             return dict(scan=scan, unassigned=sum(g['count'] for g in unassigned_groups),
                         unassigned_groups=unassigned_groups,
@@ -89,7 +111,7 @@ class UnassignedReader:
         self.face_policy, self.body_policy = matching_policy(config), body_policy(config)
 
     @cached
-    def page(self, *, offset=0, kind=None, state=None, after=None, observation=None):
+    def page(self, *, offset=0, kind=None, state=None, reason=None, after=None, observation=None):
         """Filter metadata by kind and displayed state before applying pagination."""
         if kind is not None and kind not in TABLES:
             raise ValueError('Observation kind must be face or body.')
@@ -106,15 +128,19 @@ class UnassignedReader:
             if not queries:
                 return [], False
             sql = 'SELECT * FROM ('+' UNION ALL '.join(queries)+')'
-            if state is not None:
-                sql += ' WHERE state=?'
-                args.append(state)
+            filters = []
+            for column, value in (('state', state), ('reason', reason)):
+                if value is not None:
+                    filters.append(column+'=?')
+                    args.append(value)
             if after is not None:
-                sql += (' AND ' if state is not None else ' WHERE ')+ '(cue,kind,id)>(?,?,?)'
+                filters.append('(cue,kind,id)>(?,?,?)')
                 args.extend((after['cue'],after['kind'],after['id']))
             if observation is not None:
-                sql += (' AND ' if state is not None or after is not None else ' WHERE ')+ 'id=?'
+                filters.append('id=?')
                 args.append(observation)
+            if filters:
+                sql += ' WHERE '+' AND '.join(filters)
             rows = [dict(r) for r in db.execute(sql+' ORDER BY cue,kind,id LIMIT ? OFFSET ?',
                                                (*args, PAGE_SIZE+1, offset))]
             return rows[:PAGE_SIZE], len(rows)>PAGE_SIZE
