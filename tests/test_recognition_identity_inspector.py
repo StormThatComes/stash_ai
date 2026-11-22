@@ -374,7 +374,7 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         face, body = owner['face'], owner['body']
         parent = ui.listing.parent(face)
         assert ui.listing.parent(body)==parent
-        assert len(ui.groups)==5
+        assert len(ui.groups)==6
         for group in ui.listing.get_children():
             assert [ui.listing.item(child,'text') for child in ui.listing.get_children(group)]==['Face','Body']
         expand(parent)
@@ -385,6 +385,9 @@ def test_native_scene_tree_expands_all_scenes_and_unassigned_rejections(tmp_path
         unassigned = {(v['kind'],v['state']):k for k,v in ui.branches.items() if v['unassigned']}
         unknown = unassigned['face','blurred']
         withheld = unassigned['body','withheld']
+        assert ui.branches[withheld]['reason']=='body_scene_core'
+        assert ui.listing.item(withheld,'text')=='body_scene_core · 3'
+        assert ui.listing.item(ui.listing.parent(withheld),'text')=='withheld · 3'
         unknown_kind = ui.listing.parent(unknown)
         unknown_root = ui.listing.parent(unknown_kind)
         assert ui.listing.item(unknown_root,'text')=='Unassigned in this scene · 11'
@@ -1300,6 +1303,67 @@ def test_native_scene_compares_selected_performers_on_demand(tmp_path):
         assert variants.result['trials']['option']['success']
         ui.search()
         assert ui.merge_window is None
+    finally:
+        ui.close()
+        root.destroy()
+        del ui, root
+        gc.collect()
+
+
+def test_native_reason_branches_page_independently_and_restore_ancestors(tmp_path, monkeypatch):
+    from tests.test_recognition_withheld_reasons import reason_fixture
+    from stash_ai.recognition.scene_inspection import SceneReader
+    tk = pytest.importorskip('tkinter')
+    try:
+        root = tk.Tk()
+    except tk.TclError as error:
+        import os
+        if os.environ.get('STASH_AI_DESKTOP_TEST'):
+            raise
+        pytest.skip(f'No graphical desktop: {error}')
+    from stash_ai.recognition import scene_inspection
+    from stash_ai.recognition.scene_window import SceneInspector
+    monkeypatch.setattr(scene_inspection, 'PAGE_SIZE', 2)
+    config = reason_fixture(tmp_path)
+    ui = SceneInspector(root, SceneReader(config, '2'), 'Withheld reasons')
+
+    def wait_for(condition):
+        deadline = time.monotonic()+8
+        while not condition() and time.monotonic()<deadline:
+            root.update()
+            time.sleep(.005)
+        assert condition(), ui.status.get()
+
+    try:
+        wait_for(lambda: any(b.get('reason') == 'unknown_reason' for b in ui.branches.values()))
+        branches = {b['reason']:k for k,b in ui.branches.items() if b.get('reason')}
+        assert set(branches) == {'unknown_reason','body_anchor_keypoint_rules','unconfirmed_contact_face'}
+        assert len({ui.branch_key(ui.branches[k]) for k in branches.values()}) == 3
+        for item in branches.values():
+            ui.listing.item(item, open=True)
+            ui.load_branch(item)
+        wait_for(lambda: all(ui.branches[k]['loaded'] for k in branches.values()))
+        unknown = branches['unknown_reason']
+        other = branches['unconfirmed_contact_face']
+        assert ui.branches[unknown]['offset'] == 2 and ui.branches[other]['offset'] == 1
+        ui.listing.selection_set(ui.branches[unknown]['marker'])
+        wait_for(lambda: ui.branches[unknown]['offset'] == 4)
+        assert ui.branches[other]['offset'] == 1
+        for reason, item in branches.items():
+            assert {ui.rows[k]['reason'] for k in ui.listing.get_children(item)} == {reason}
+        state = ui.capture()
+        for item in branches.values():
+            parent = item
+            while parent:
+                ui.listing.item(parent, open=False)
+                parent = ui.listing.parent(parent)
+        ui.restore_state = state
+        ui.restore_view()
+        for item in branches.values():
+            parent = item
+            while parent:
+                assert ui.listing.item(parent, 'open')
+                parent = ui.listing.parent(parent)
     finally:
         ui.close()
         root.destroy()

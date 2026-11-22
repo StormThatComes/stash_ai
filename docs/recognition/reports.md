@@ -388,10 +388,19 @@ checks remain unchanged.
 The unassigned tree is grouped as `Face` / `Body`, then by the displayed `State`.
 State groups use the retained rejection reason (such as `blurred` or
 `person_blurred`) when present, otherwise the membership state (such as
-`unassigned`, `provisional` or `withheld`). Each state group shows its observation
-count and loads independent pages of 80 on expansion. Only states present in
-the entry scene are listed; empty kinds show an explicit message. Counts and
-pages use the same membership and state rules, and refresh rebuilds the groups.
+`unassigned`, `provisional` or `withheld`). Faces with a withheld decision for the
+current matching policy also appear under `withheld`; historical attempts alone
+remain `unassigned`.
+
+`withheld` expands into recorded decision reasons, for example
+`Body → withheld → body_anchor_keypoint_rules` or
+`Body → withheld → unconfirmed_contact_face`. State and reason groups show counts;
+reason groups are ordered by count, then name. A missing or invalid reason appears
+under `unknown_reason`. Each reason loads its own pages of 80, and refresh/back/forward
+preserve independently opened reason groups. Other states load observations directly.
+Only states and reasons present in the entry scene are listed; empty kinds show an
+explicit message. Counts and pages share the same filters. The reasons describe
+retained decisions, and Details still identifies historical body decision policies.
 
 Select an unassigned observation to inspect its crop, retained rejection,
 matching attempts and available references. The detail panel also compares

@@ -130,6 +130,15 @@ class SceneInspector(Inspector):
             self.groups[kind_item] = f'{kind.capitalize()} observations\n{description}'
             states = [g for g in result['unassigned_groups'] if g['kind']==kind]
             for group in states:
+                if group['state'] == 'withheld':
+                    state_item = self.listing.insert(kind_item, 'end', text=f"withheld · {group['count']}")
+                    self.groups[state_item] = (f'{kind.capitalize()} withheld observations\n'
+                        'Expand a recorded decision reason. Details show whether the decision policy is current.')
+                    for reason in group['reasons']:
+                        self.add_branch(f"{reason['reason']} · {reason['count']}", reader, True,
+                            f"{kind.capitalize()} observations · State: withheld · Reason: {reason['reason']}\n{description}",
+                            parent=state_item, kind=kind, state='withheld', reason=reason['reason'])
+                    continue
                 self.add_branch(f"{group['state']} · {group['count']}", reader, True,
                                 f"{kind.capitalize()} observations · State: {group['state']}\n{description}",
                                 parent=kind_item, kind=kind, state=group['state'])
@@ -168,10 +177,10 @@ class SceneInspector(Inspector):
             self.merge_window = MergeWindow(self, self.merge_groups)
             self.visual_windows.append(self.merge_window)
 
-    def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None, state=None, level='observations'):
+    def add_branch(self, label, reader, unassigned, description, *, parent='', kind=None, state=None, reason=None, level='observations'):
         item = self.listing.insert(parent, 'end', text=label)
         marker = self.listing.insert(item, 'end', text='Expand to load…')
-        self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, state=state, level=level, offset=0,
+        self.branches[item] = dict(reader=reader, unassigned=unassigned, kind=kind, state=state, reason=reason, level=level, offset=0,
                                    loading=False, loaded=False, marker=marker, description=description, after=None)
 
     def expand(self, _event=None):
@@ -278,6 +287,8 @@ class SceneInspector(Inspector):
                         dict(after=branch['after'], kind=branch['kind'], state=branch['state']))
                 if not branch['unassigned']:
                     args['accepted_only'] = True
+                elif branch.get('reason') is not None:
+                    args['reason'] = branch['reason']
                 task = partial(branch['reader'].page, **args)
             self.tree_worker.request(task,
                                      partial(self.show_branch, item), partial(self.branch_error, item))
@@ -305,7 +316,8 @@ class SceneInspector(Inspector):
 
     def branch_key(self,branch):
         reader=branch['reader']
-        return (getattr(reader,'selector',('unassigned',))[1] if hasattr(reader,'selector') and not branch['unassigned'] else 'unassigned',branch['kind'],branch['state'])
+        return (getattr(reader,'selector',('unassigned',))[1] if hasattr(reader,'selector') and not branch['unassigned'] else 'unassigned',
+                branch['kind'],branch['state'],branch.get('reason'))
 
     def capture(self):
         row=self.current_row
@@ -328,7 +340,9 @@ class SceneInspector(Inspector):
             if self.branch_key(branch) in state['open']:
                 self.listing.item(item,open=True)
                 parent=self.listing.parent(item)
-                if parent:self.listing.item(parent,open=True)
+                while parent:
+                    self.listing.item(parent,open=True)
+                    parent=self.listing.parent(parent)
                 if not branch['loaded'] and not branch['loading']:self.load_branch(item)
         self.listing.yview_moveto(state['scroll'])
         selected=state.get('selected')
