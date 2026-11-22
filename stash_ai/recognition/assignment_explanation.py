@@ -71,7 +71,8 @@ def references(proof, kind, linked_face=None):
     for neighbour in contact.get('temporal', {}).get('neighbours', ()):
         add(neighbour.get('own_observation'), 'Contact supporting body')
         add(neighbour.get('rival_observation'), 'Contact rival body')
-    for peer in contact.get('same_frame', {}).get('peers', ()):
+    local = contact.get('same_frame', {})
+    for peer in [*local.get('peers', ()), *local.get('upper_body', {}).get('peers', ())]:
         add(peer.get('observation'), 'Same-cue contact peer')
     for index, track in enumerate(proof.get('source_tracks') or (), 1):
         if isinstance(track, (list, tuple)) and len(track) == 3:

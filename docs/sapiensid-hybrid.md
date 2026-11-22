@@ -241,7 +241,7 @@ Ambiguous face/person ownership is withheld instead of guessed.
 Crowded links (`detected_people > 1` and either mask/fallback or box overlap at
 least 0.25) can also be confirmed from independently measured anatomy in the
 same cue. Collection records a compact proof using the complete detected roster,
-including peers that later fail body admission. It requires two distinct original
+including peers that later fail body admission. The full-body path requires two distinct original
 nose/eye points agreeing with the face landmarks, both shoulders and at least one
 hip, a rotation-independent head/torso connection and separation from every peer.
 Face/temporal prompt points and the regional face-landmark fallback cannot count
@@ -255,6 +255,25 @@ the other core, with low mask intersection. Mask-based confirmation respects
 invalid or disabled masks do not grant an exemption. Disjoint masks alone cannot
 confirm a missing or incorrectly attached head. These checks are versioned with
 the collected proof; the generic 0.25 crowding trigger remains unchanged.
+
+When that path cannot confirm a link, a masked upper-body path also checks the
+head and shoulders. Two original nose/eye points can support it, or one original
+eye plus its same-side original ear. The ear is checked against face size and
+head/shoulder anatomy; it is not matched to a nonexistent face-detector ear
+landmark. Both original shoulders are required. Missing hips are allowed, while
+a measured contradictory torso remains a veto. Geometry is independent of image
+rotation and applies to profiles, lying people and upper-body crops.
+
+This path always requires a valid own mask. It checks the anatomical points and
+dense narrow corridors connecting the head, neck and shoulders, including gaps;
+isolated foreground spots around prompt points cannot confirm ownership. Every
+peer is checked, including rejected bodies. A peer whose entire box is outside
+the local head/shoulder region is excluded geometrically. Otherwise its measured
+upper body and valid mask must support its own anatomy and exclude the candidate
+head and connecting region, and vice versa. Contact below the shoulders does not
+by itself invalidate this local proof. Missing nearby peer anatomy/masks,
+competing head/face claims, borrowed points and explicit mask conflicts remain
+blockers. The existing full-body path is preserved.
 
 Same-cue evidence supplements the existing adjacent-cue and independent-endpoint
 checks. A measured temporal identity conflict still vetoes it. A newly confirmed

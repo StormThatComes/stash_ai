@@ -90,7 +90,7 @@ def questionable_links(rows,settings,scores,graph=(), *, evidence=None):
             questionable.add(row['id'])
             check['reason'] = temporal['reason']
         else:
-            check.update(status='confirmed', reason='adjacent_clean_witness' if supported else 'same_frame_head_torso')
+            check.update(status='confirmed', reason='adjacent_clean_witness' if supported else local['reason'])
     # Two independent clean endpoints can corroborate a longer contact. Each
     # intervening edge already competed against the other physical lane.
     from .independent_evidence import count

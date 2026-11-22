@@ -421,6 +421,16 @@ endpoints confirmed their contact link. This check precedes later track recovery
 the final membership remains the decision shown above it. Old decisions explicitly
 report unavailable contact diagnostics instead of reconstructing an explanation.
 
+If the full head/torso path fails, Details also shows the masked upper-body path:
+aligned original eyes/nose, anatomically eligible ears, shoulders, excluded points
+and their provenance, head/shoulder geometry, own-mask point/corridor coverage and
+the largest gap. Per-peer checks distinguish a remote box intersection from a
+missing nearby mask, competing head claim or foreign foreground in the head
+region. These measurements are retained even when the head-point count fails,
+so an untested mask is not confused with a rejected mask. `same_frame_upper_body`
+identifies links confirmed by this path. Recollect affected scenes with recognition
+after updating; old assignments and solver replay cannot invent the new proof.
+
 For an unassigned observation, `Suggested next steps` precedes the recorded
 evidence. It shows current YAML values, measured boundaries, copyable YAML
 patches and the next run needed to test them. The patch uses the loaded YAML

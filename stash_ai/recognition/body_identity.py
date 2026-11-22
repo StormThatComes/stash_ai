@@ -45,7 +45,7 @@ def available(db):
 def policy(config):
     from .rooted_witnesses import VIEW_POLICY
     from .clustering import matching_policy
-    return digest(['body-local-v52-contact-confirmation',contract(config),matching_policy(config),
+    return digest(['body-local-v53-upper-body-contact',contract(config),matching_policy(config),
                    config.data['sapiensid']['identities'],VIEW_POLICY,'anonymous-track-lineage-v2'])
 
 

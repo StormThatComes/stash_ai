@@ -192,7 +192,8 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             from .contact_face_evidence import measure as contact_evidence
             measured['contact_face_evidence'] = contact_evidence(face, person, people,
                 face_id=row['id'], faces=faces, mask_cache=contact_masks)
-            for peer in measured['contact_face_evidence']['peers']:
+            proof = measured['contact_face_evidence']
+            for peer in [*proof['peers'], *proof.get('upper_body', {}).get('peers', ())]:
                 peer['observation'] = identifier(scan, cue, people[peer['person_index']], expected)
         # Rejected face geometry must not invent head landmarks for a body query.
         usable_face=face if face_accepted else None
