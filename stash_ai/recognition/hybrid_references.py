@@ -79,6 +79,9 @@ def catalogue_rows(db,config,scope,namespace,owners):
         identity=dict(body['identities'])
         if 'anchor_keypoint_rules' in identity:
             identity['anchor_keypoint_rules']=policy_rules(identity['anchor_keypoint_rules'])
+        from .face_landmark_fallback import policy as fallback_policy
+        if 'anchor_face_landmark_fallback' in identity:
+            identity['anchor_face_landmark_fallback']=fallback_policy(identity['anchor_face_landmark_fallback'])
         source_policy=digest(['body-source-v4-partial',body['matching'],identity,config.data['clustering']])
         for owner in sorted(owners):
             spool=Records();keep=False

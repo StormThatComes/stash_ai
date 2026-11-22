@@ -528,7 +528,7 @@ thresholds invalidates matching decisions, not retained embeddings.
 ### Face landmark fallback for regional body rules
 
 A person with a missing pose nose or eye can optionally satisfy regional anchor
-rules using the corresponding landmark from its retained, accepted face detection:
+rules using the corresponding landmark from its retained face detection:
 
 ```yaml
 version: 2
@@ -545,12 +545,20 @@ matching:
 The feature defaults to disabled. The point list enables candidates, not automatic
 copying. The original pose must corroborate the existing face/person association
 before any landmark is borrowed. Missing all original nose/eye points cannot
-bootstrap an association. Conflicting original head measurements, rejected faces,
+bootstrap an association. Conflicting original head measurements, unreliable faces,
 out-of-crop landmarks, coincident points, explicit pose occlusion and recorded
 ownership conflicts prevent recovery. Profile faces and excessive roll-normalized
 pose deviation cannot supply missing eyes; the eye limit does not reject a nose.
 Face detection confidence is not per-landmark visibility. Recovered points retain
 unknown visibility and are labelled `face_detector`, never synthetic pose scores.
+
+Face recognition admission and landmark availability are distinct. A retained face
+rejected only for `face_too_small`, `face_incomplete` or `face_pose` may supply a
+landmark after the same detection-score, alignment, association and per-point checks.
+It remains rejected for face recognition and cannot provide identity authority.
+Blur, occlusion, invalid landmarks, weak detection and unknown rejection reasons
+still block fallback. In particular, a profile rejected for pose can supply a nose
+but cannot supply missing eyes.
 
 Only `matching.body.anchors.keypoint_rules` uses the supplemented coordinates.
 The original COCO17 geometry, association/tracking, collection minima, overall
@@ -562,7 +570,7 @@ equivalent, and mouth corners are not mapped onto COCO17 joints.
 Rebuild matching to apply the option to retained observations. Matching policies
 and scene/reference caches include the setting and face evidence. No rescan or
 embedding inference is needed when the original face link and geometry survive;
-missing or rejected face evidence remains unavailable. The same regional decision
+missing or geometrically unreliable face evidence remains unavailable. The same regional decision
 is used by independent bodies, face-associated references, solver diagnostics and
 Inspect Scene. Each rule reports `point_sources`; `face_landmark_fallback` records
 the source face, recovered coordinates and per-point rejection reasons. Inspect
@@ -570,6 +578,15 @@ Scene's rule notes and the threshold JSON/PNG companions explain the source.
 On a selected body, borrowed rule landmarks appear as orange hollow squares;
 hover identifies their source and unknown visibility. The green pose skeleton
 continues to show the original measurements.
+
+When fallback fails, Inspect Scene retains the linked face ID and its face admission
+rejection. `linked_face_rejected` means the face exists but is unsuitable, for example
+because of `face_occluded`; it is not a missing link. `face_link_missing`,
+`linked_face_not_retained`, `linked_face_context_mismatch` and
+`linked_face_contact_corrected` distinguish absent links, absent observations,
+another frame's face and corrected ownership. `linked_face_score` includes the
+measured and required score. The linked box/landmarks may still be drawn for review
+when their use as fallback is blocked.
 
 ### Regional body anchor keypoints
 

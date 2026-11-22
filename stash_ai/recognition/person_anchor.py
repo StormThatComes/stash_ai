@@ -35,7 +35,8 @@ def pixel_gate(metadata,settings):
 def body_gate(row, settings, *, collection=None):
     """Evaluate a retained body row with its original, same-cue face evidence."""
     row = dict(row)
-    face = None if row.get('_contact_correction') else row.get('anchor_face')
+    face = (dict(observation=row.get('face'), unavailable_reason='linked_face_contact_corrected')
+            if row.get('_contact_correction') else row.get('anchor_face'))
     return anchor_gate(row['quality'], settings, collection=collection, face_evidence=face)
 
 

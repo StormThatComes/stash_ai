@@ -56,9 +56,9 @@ def test_two_eyes_can_be_recovered_from_original_nose_and_frontal_face():
 @pytest.mark.parametrize('case,reason', [
     ('no_original_head', 'no_valid_head_keypoints'),
     ('wrong_face', 'head_landmark_mismatch'),
-    ('rejected_face', 'linked_face_unavailable'),
-    ('weak_face', 'linked_face_quality'),
-    ('invalid_alignment', 'linked_face_quality'),
+    ('rejected_face', 'linked_face_rejected'),
+    ('weak_face', 'linked_face_score'),
+    ('invalid_alignment', 'linked_face_alignment_invalid'),
     ('invalid_geometry', 'invalid_face_evidence'),
 ])
 def test_invalid_or_self_confirming_association_never_fills_nose(case, reason):
@@ -223,8 +223,9 @@ def test_linked_face_in_another_cue_cannot_supply_evidence(tmp_path):
         db = state.connection
         db.execute('UPDATE body_observations SET face=? WHERE id=?', ('face-'+ids[1], ids[0]))
         row = db.execute('SELECT b.quality,'+body_face_sql()+' FROM body_observations b WHERE b.id=?', (ids[0],)).fetchone()
-        assert row['anchor_face'] is None
-        assert not body_gate(row, config.data['sapiensid']['identities'])['eligible']
+        gate = body_gate(row, config.data['sapiensid']['identities'])
+        assert not gate['eligible']
+        assert gate['keypoint_rules']['face_landmark_fallback']['reason'] == 'linked_face_context_mismatch'
 
 
 def test_hybrid_references_use_same_fallback_without_body_collection(tmp_path):
@@ -305,15 +306,21 @@ def test_persisted_contact_correction_blocks_old_face_in_inspection(tmp_path):
         rebuild(state, [item], config, {})
         db.execute("UPDATE body_members SET proof=json_set(proof,'$.contact_correction',json(?))",
                    ('{"original_owner":"A","owner":"B"}',))
-        assert retained_body_face(db, ids[0], config.data['sapiensid']['identities']) is None
+        face = json.loads(retained_body_face(db, ids[0], config.data['sapiensid']['identities']))
+        assert face['observation'] == 'face-'+ids[0]
+        assert face['unavailable_reason'] == 'linked_face_contact_corrected'
         geometry = read(db, config, dict(scope='scope', namespace='ns'), 'body', ids[0])
         assert not geometry['shapes'][0]['rule_landmarks']
         # A new scene plan re-evaluates corrections instead of trusting stale memberships.
         assert all(d['status'] == 'accepted' for d in scene_plan(db, item['scan'], config)[2].values())
 
 
-@pytest.mark.parametrize('missing,profile,accepted', [('nose', True, 3), ('left_eye', False, 3), ('left_eye', True, 0)])
-def test_offline_replay_uses_identical_fallback_and_profile_guards(tmp_path, missing, profile, accepted):
+@pytest.mark.parametrize('missing,profile,accepted,rejected', [
+    ('nose', True, 3, None), ('left_eye', False, 3, None), ('left_eye', True, 0, None),
+    ('nose', True, 3, 'face_too_small'), ('nose', False, 3, 'face_incomplete'),
+    ('left_eye', False, 3, 'face_pose'), ('nose', False, 0, 'face_occluded'),
+])
+def test_offline_replay_uses_identical_fallback_and_profile_guards(tmp_path, missing, profile, accepted, rejected):
     import struct
     from tests.test_recognition_body_integration import seeded
     from stash_ai.recognition.database import FaceDatabase, encoded
@@ -335,7 +342,7 @@ def test_offline_replay_uses_identical_fallback_and_profile_guards(tmp_path, mis
             fid = 'face-'+oid
             db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (fid, selected[0]['scan'], cue, float(cue), '', '[]', encoded(face['geometry']),
-                 encoded(face['quality']), None, 3, struct.pack('<3f', 1, 0, 0), None))
+                 encoded(face['quality']), rejected, 3, struct.pack('<3f', 1, 0, 0), None))
             db.execute('UPDATE body_observations SET face=?,geometry=?,quality=? WHERE id=?',
                 (fid, encoded(value['person']), encoded(value), oid))
         db.commit()
@@ -347,3 +354,102 @@ def test_offline_replay_uses_identical_fallback_and_profile_guards(tmp_path, mis
         result = evaluate(config, goals, db)['trials']['baseline']
         assert result['goal_result']['groups'][0]['members'][0]['assigned'] == accepted
     assert config.database.read_bytes() == before
+
+
+@pytest.mark.parametrize('rejected', ['face_occluded', 'face_blurred', 'face_landmarks_invalid',
+                                   'face_detection_score', 'face_visibility_unmeasurable', 'unknown_reason'])
+def test_existing_rejected_face_reports_its_id_and_actual_blocker(rejected):
+    value, face = evidence()
+    face['rejected'] = rejected
+    gate = anchor_gate(value, policy(), face_evidence=face)
+    assert not gate['eligible']
+    proof = gate['keypoint_rules']['face_landmark_fallback']
+    assert proof['reason'] == 'linked_face_rejected'
+    assert proof['face_observation'] == 'face-1' and proof['face_rejection'] == rejected
+    assert not proof['recovered']
+
+
+@pytest.mark.parametrize('rejected', ['face_too_small', 'face_incomplete', 'face_pose'])
+def test_recognition_only_rejection_keeps_verified_detector_landmarks(rejected):
+    value, face = evidence()
+    face['rejected'] = rejected
+    original = deepcopy(face)
+    gate = anchor_gate(value, policy(), face_evidence=face)
+    assert gate['eligible'] and gate['keypoints'] == 16
+    proof = gate['keypoint_rules']['face_landmark_fallback']
+    assert proof['face_rejection'] == rejected and proof['recovered'][0]['point'] == 'nose'
+    assert face == original
+    face['quality']['alignment_valid'] = False
+    assert not anchor_gate(value, policy(), face_evidence=face)['eligible']
+
+
+@pytest.mark.parametrize('missing', [('nose',), ('left_eye',)])
+def test_pose_rejected_profile_still_cannot_supply_missing_eyes(missing):
+    value, face = evidence(missing)
+    face.update(rejected='face_pose')
+    face['quality']['face_profile'] = True
+    gate = anchor_gate(value, policy(missing), face_evidence=face)
+    assert gate['eligible'] == (missing == ('nose',))
+
+
+@pytest.mark.parametrize('link,reason', [(None, 'face_link_missing'), ('not-retained', 'linked_face_not_retained')])
+def test_missing_face_link_and_missing_observation_have_distinct_reasons(tmp_path, link, reason):
+    from stash_ai.recognition.database import FaceDatabase
+    config, item, ids = retained_scene(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        # Project an absent source without violating the database's foreign key.
+        row = db.execute('SELECT b.quality,'+body_face_sql()+
+            ' FROM (SELECT id,scan,cue,quality,? AS face FROM body_observations WHERE id=?) b', (link, ids[0])).fetchone()
+        gate = body_gate(row, config.data['sapiensid']['identities'])
+        assert not gate['eligible']
+        proof = gate['keypoint_rules']['face_landmark_fallback']
+        assert proof['reason'] == reason and proof['face_observation'] == link
+
+
+def test_inspector_shows_rejected_linked_face_and_why_fallback_refused_it(tmp_path):
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.body_identity import rebuild
+    from stash_ai.recognition.scene_inspection import UnassignedReader
+    from stash_ai.recognition.models import namespace
+    from stash_ai.recognition.scanning import scan_identity
+    config, item, ids = retained_scene(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        db.execute('UPDATE scans SET namespace=?,policy_sha=?', (namespace(config), scan_identity(config, namespace(config))))
+        db.execute("UPDATE observations SET rejected='face_occluded'")
+        rebuild(state, [item], config, {})
+        scan = dict(db.execute('SELECT * FROM scans WHERE id=?', (item['scan'],)).fetchone())
+        db.commit()
+    detail = UnassignedReader(config, scan).detail('body', ids[0], pixels=False)
+    gate = detail['admission']['anchor_gate']
+    assert gate['reason'] == 'body_anchor_keypoint_rules'
+    assert gate['keypoint_rules']['face_landmark_fallback']['reason'] == 'linked_face_rejected'
+    checks = next(g for g in detail['admission']['groups'] if g['stage'] == 'person_anchor_keypoints_all')['checks']
+    assert 'face_occluded' in checks[0]['note'] and 'face-'+ids[0] in checks[0]['note']
+    assert 'unavailable' not in checks[0]['note']
+    assert any(shape['kind'] == 'face' and shape['geometry'] for shape in detail['geometry']['shapes'])
+    assert any(ref['observation'] == 'face-'+ids[0] for decision in detail['trace']['decisions'] for ref in decision['references'])
+
+
+def test_admission_change_invalidates_cached_withheld_and_reuses_retained_geometry(tmp_path, monkeypatch):
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.body_scene_jobs import planned
+    from stash_ai.recognition.scene_artifacts import body_key
+    from stash_ai.recognition.derived_cache import scope
+    from stash_ai.recognition import face_landmark_fallback as fallback
+    config, item, ids = retained_scene(tmp_path)
+    with FaceDatabase(config.database) as state, scope(state, config):
+        db = state.connection
+        db.execute("UPDATE observations SET rejected='face_too_small'")
+        before = list(map(tuple, db.execute('SELECT * FROM observations ORDER BY id')))
+        with monkeypatch.context() as old:
+            old.setattr(fallback, 'GEOMETRY_ONLY_REJECTIONS', frozenset())
+            old.setattr(fallback, 'POLICY_VERSION', 1)
+            key = body_key(db, item['scan'], config)
+            first = list(planned(db, [item], config))[0][2]
+            assert all(d['reason'] == 'body_anchor_keypoint_rules' for d in first.values())
+        assert body_key(db, item['scan'], config) != key
+        second = list(planned(db, [item], config))[0][2]
+        assert all(d['status'] == 'accepted' for d in second.values())
+        assert list(map(tuple, db.execute('SELECT * FROM observations ORDER BY id'))) == before
