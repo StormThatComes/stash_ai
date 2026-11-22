@@ -100,7 +100,10 @@ The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
 setting with operator help immediately below it. The file groups settings by
 stage: face scanning, pose detection, SapiensID collection, identity matching,
 portraits, execution, storage and naming. Recognition runs use RF-DETR-XL for
-person boxes and PMPose for COCO17 points in the shipped profiles. Both profiles
+person boxes, PMPose for COCO17 points, LVFace-B for face embeddings and SAM 3
+for instance masks in the shipped profiles. Masks contribute to sharpness,
+box expansion and overlap; masked body-encoder input, pose refinement,
+keypoint filtering and body admission are disabled in these profiles. Both profiles
 collect body evidence, create scene-local identities and merge supported identities
 across scenes, including VTT cues without an accepted face. Set
 `matching.body.global.enabled: false` to keep matching local to a scene.

@@ -30,7 +30,7 @@ shared inputs/cache; face/hybrid kernels; complete body proofs and rivals.
 ## Usage
 
 ```powershell
-python stash_ai.py recognition report-merge --performer-set 900,901 --solve --face-config facial_recognition_solver.yml --solver-cpus 16 --solver-trials 4 --solver-memory-mb 65536 --profile-solver --checkpoint solver.json
+python stash_ai.py recognition report-merge --performer-set 900,901 --solve --face-config facial_recognition_solver.yml --solver-cpus 16 --solver-trials 8 --solver-memory-mb 65536 --profile-solver --checkpoint solver.json
 ```
 
 Default execution remains one trial using the existing rebuild settings. Explicit
@@ -38,8 +38,8 @@ solver execution limits BLAS to one native thread and allocates inner workers
 from the joint CPU ceiling. Baseline may use the whole CPU allocation. Trial
 workers use threads for local cohorts to avoid nested process pools.
 
-`--solver-cpus 16` alone still runs one trial. Add `--solver-trials 4` to
-request up to four simultaneous candidate trials. Preparation and baseline
+`--solver-cpus 16` alone still runs one trial. Add `--solver-trials 8` to
+request up to eight simultaneous candidate trials. Preparation and baseline
 must finish before these trials can start; neither phase is a parallel search.
 
 `--solver-scheduling batch` generates bounded batches and applies results in
@@ -60,34 +60,36 @@ versions retain their individual event records.
 
 ## Resource profiles
 
-The repository provides two complete v2 configurations for a host allocating
-16 CPUs and 64 GiB RAM to recognition:
+The repository provides two complete v2 configurations with the same tuned
+models, detection, matching and portrait settings. Only rebuild resources and
+the face reference memory cap differ. The solver profile is sized for eight
+simultaneous trials sharing 16 CPUs and a 64 GiB admission budget:
 
 | Setting | `facial_recognition.yml` (run) | `facial_recognition_solver.yml` (solver) |
 | --- | --- | --- |
-| Rebuild working maximum | 40 GiB | 10 GiB per trial |
-| Evidence / matrix cache | 8 / 4 GiB | 2 / 1 GiB per trial |
-| CPU work queue | 1 GiB | 256 MiB per trial |
-| Face / body reference limits | 4 / 4 GiB | 2 / 2 GiB per trial |
-| Body matching plan limit | 2 GiB | 512 MiB per trial |
-| Rebuild workers / cohort backend | 16 / processes | CLI allocation / threads |
+| Rebuild working maximum | 40 GiB | 5 GiB per trial |
+| Evidence / matrix cache | 8 / 64 GiB configured; matrices share the 8 GiB cache | 1 GiB / 512 MiB per trial |
+| CPU work queue | 1 GiB | 128 MiB per trial |
+| Face / body reference limits | 4 / 4 GiB | 1 / 1 GiB per trial |
+| Body matching plan limit | 2 GiB | 256 MiB per trial |
+| Rebuild workers / cohort backend | 16 / threads | CLI allocation (1 without flags) / threads |
 | Hybrid nomination device | measured CPU or CUDA (`auto`) | CPU |
 | Inner replay storage | SSD | SSD; mutable trial history still uses RAM |
 
 The solver YAML does **not** set the number of trials or the total CPU/RAM
-budget. Pass all three flags from the example above. At 16 CPUs and four trials,
-the planner reserves four coordinator slots and shares the twelve remaining
-CPU slots across active trials. With four active trials, each numerical window
-can normally use three helpers. With one active trial, a window can borrow up
-to twelve helpers. Windows release their slots after ordered retirement.
+budget. Pass all three flags from the example above. At 16 CPUs and eight trials,
+the planner reserves eight coordinator slots and shares the eight remaining
+CPU slots across active trials. With eight active trials, each numerical window
+has a one-worker allocation and runs on its coordinator. With one active trial,
+a window can borrow up to eight helpers. Windows release their slots after ordered retirement.
 Asynchronous scene prefetch reserves one helper until its read completes. Baseline runs alone with the
 larger CPU allocation but the same per-trial memory limit.
 
-The conservative maximum admission is **14.75 GiB per trial**: 10 GiB working,
-2 GiB face references, 2 GiB body references, 0.5 GiB plans and 0.25 GiB queue
-headroom. Four trials therefore admit at most **59 GiB**, leaving 5 GiB of the
-explicit 64 GiB budget unassigned. The 2 GiB evidence cache is already inside
-the working budget, and the 1 GiB matrix cache is inside the evidence cache.
+The conservative maximum admission is **7.375 GiB per trial**: 5 GiB working,
+1 GiB face references, 1 GiB body references, 0.25 GiB plans and 0.125 GiB queue
+headroom. Eight trials therefore admit at most **59 GiB**, leaving 5 GiB of the
+explicit 64 GiB budget unassigned. The 1 GiB evidence cache is already inside
+the working budget, and the 512 MiB matrix cache is inside the evidence cache.
 Admission may reserve less for references when the retained input is small.
 These are not OS RSS caps or a guarantee that every 10,000-scene replay fits.
 If a trial exceeds its working limit, reduce the trial count and raise its

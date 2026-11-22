@@ -34,6 +34,7 @@ def test_both_shipped_profiles_start_without_repair():
 @pytest.mark.parametrize('track', [.845, None])
 def test_only_adjacent_cues_require_a_score_gap(tmp_path, track):
     c = load(profile(tmp_path, {'matching.body.identities.track_similarity_threshold': track,
+                                'matching.body.identities.match_threshold': .85,
                                 'matching.body.identities.cohesion_threshold': .845}))
     policy = StrictPolicy(c)
     fixes = policy.repairs(c, {}, initial=True)
@@ -186,6 +187,9 @@ def test_parallel_search_only_returns_compliant_trials(tmp_path, monkeypatch):
 def test_strict_preserves_reachable_routes_and_allows_diagnostic_controls():
     source = Path(__file__).resolve().parents[1] / 'facial_recognition_solver.yml'
     config = patched(load(source), {'execution.max_cues': 6, 'clustering.max_samples_per_person': 4,
+                                    'sapiensid.identities.match_threshold': .85,
+                                    'sapiensid.identities.cohesion_threshold': .8,
+                                    'sapiensid.identities.scene_match_bonus': None,
                                     'sapiensid.identities.track_similarity_threshold': .80})
     policy = StrictPolicy(config)
     cases = (
@@ -215,6 +219,9 @@ def test_preexisting_capacity_limits_and_disabled_bonuses_allow_search():
     source = Path(__file__).resolve().parents[1] / 'facial_recognition_solver.yml'
     config = patched(load(source), {'execution.max_cues': 4, 'sapiensid.identities.min_support': 6,
                                     'clustering.same_scene_match_bonus': 0.,
+                                    'sapiensid.identities.match_threshold': .85,
+                                    'sapiensid.identities.cohesion_threshold': .8,
+                                    'sapiensid.identities.scene_match_bonus': None,
                                     'sapiensid.identities.track_similarity_threshold': .8})
     policy = StrictPolicy(config)
     assert {r['rule'] for r in policy.input_issues} == {'local-body-cue-cap-min_support', 'context-view-source'}

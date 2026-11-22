@@ -19,11 +19,14 @@ def test_profiles_preserve_models_matching_and_input_contracts():
     run = load(ROOT / 'facial_recognition.yml')
     solver = load(ROOT / 'facial_recognition_solver.yml')
     run_data, solver_data = plain(run.data), plain(solver.data)
-    # These are the only resource groups outside the top-level execution map.
+    # Only the per-trial resource limits may differ, including inside execution.
     for data in (run_data, solver_data):
-        data.pop('execution')
+        for key in ('rebuild_workers', 'rebuild_nomination_device', 'rebuild_memory_bytes',
+                    'rebuild_cache_bytes', 'rebuild_matrix_cache_bytes', 'rebuild_queue_bytes'):
+            data['execution'].pop(key)
         data['clustering'].pop('max_reference_bytes')
-        data['sapiensid'].pop('execution')
+        for key in ('reference_bytes', 'plan_bytes'):
+            data['sapiensid']['execution'].pop(key)
     assert run_data == solver_data
     assert namespace(run) == namespace(solver)
     assert scan_identity(run, namespace(run)) == scan_identity(solver, namespace(solver))
@@ -33,13 +36,13 @@ def test_profiles_preserve_models_matching_and_input_contracts():
     assert run.model_dir == solver.model_dir
 
 
-def test_shipped_solver_profile_admits_four_trials_without_shrinking_working_memory(monkeypatch):
+def test_shipped_solver_profile_admits_eight_trials_without_shrinking_working_memory(monkeypatch):
     monkeypatch.setattr('stash_ai.recognition.solver_execution.os.process_cpu_count', lambda: 24, raising=False)
     config = load(ROOT / 'facial_recognition_solver.yml')
     # No source-size discount: validate the worst-case configured reference limits.
-    runtime = plan(config, dict(cpus=16, trials=4, memory_bytes=64 * GIB))
-    assert runtime.trials == runtime.requested_trials == 4
-    assert runtime.rebuild_memory_bytes == config.data['execution']['rebuild_memory_bytes'] == 10 * GIB
+    runtime = plan(config, dict(cpus=16, trials=8, memory_bytes=64 * GIB))
+    assert runtime.trials == runtime.requested_trials == 8
+    assert runtime.rebuild_memory_bytes == config.data['execution']['rebuild_memory_bytes'] == 5 * GIB
     assert runtime.trial_bytes * runtime.trials == 59 * GIB
     assert runtime.memory_bytes - runtime.trial_bytes * runtime.trials == 5 * GIB
     replay = settings_for_replay(config, runtime)
@@ -49,12 +52,4 @@ def test_shipped_solver_profile_admits_four_trials_without_shrinking_working_mem
     assert replay.data['execution']['rebuild_prefetch_scenes'] is True
     with scope(runtime):
         pool = Compute(replay)
-        assert pool.workers == 3 and pool.native_threads == 1
-        replay.data['execution']['rebuild_parallel_scenes'] = False
-        from concurrent.futures import Future
-        from stash_ai.recognition.replay_memory import Lookahead
-        with Lookahead(':memory:', replay) as reader:
-            reader.pending = Future()
-            assert pool.workers == 2
-            reader.pending.set_result({})
-            assert pool.workers == 3
+        assert pool.workers == 1 and pool.native_threads == 1

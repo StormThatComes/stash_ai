@@ -36,7 +36,9 @@ def rows(config, gap=.02):
 ])
 def test_adjacent_cue_width_and_inheritance(tmp_path, track, gap, expected):
     path = 'matching.body.identities.track_similarity_threshold'
-    c = load(profile(tmp_path, {path: track}))
+    c = load(profile(tmp_path, {path: track,
+                                'matching.body.identities.match_threshold': .85,
+                                'matching.body.identities.cohesion_threshold': .8}))
     row = rows(c, gap)['body-adjacent-cues']
     assert row['status'] == expected and row['settings'][path] == track
     assert row['measures']['lower'] == (.8 if track is None else track)
@@ -44,10 +46,12 @@ def test_adjacent_cue_width_and_inheritance(tmp_path, track, gap, expected):
 
 def test_composed_gates_and_unit_specific_counts(tmp_path):
     config = load(profile(tmp_path, {
+        'matching.face.match_threshold': .65,
         'matching.face.views.match_threshold': .62,
         'matching.face.views.ambiguity_margin': .04,
         'matching.face.cross_scene.cooccurrence_merge_threshold': .65,
         'matching.hybrid.face_floor': .645,
+        'matching.body.identities.match_threshold': .85,
         'matching.body.identities.cohesion_threshold': .84,
         'matching.body.identities.scene_match_bonus': None,
         'matching.face.same_scene.match_bonus': .06,
@@ -75,12 +79,15 @@ def test_composed_gates_and_unit_specific_counts(tmp_path):
 
 def test_quality_pose_masks_and_portraits(tmp_path):
     config = load(profile(tmp_path, {
+        'face.quality.max_pose_deviation': .5,
+        'matching.face.anchors.quality.min_face_pixels': 35,
         'matching.face.anchors.quality.max_pose_deviation': .5,
         'matching.face.anchors.quality.min_visible_face_fraction': .5,
         'body.collection.min_keypoints': 7,
         'pose.mask.min_recovery_mask_score': .49,
         'pose.mask.min_prompt_coverage': .85,
         'pose.point_quality.min_presence': 1.,
+        'pose.mask.min_presence': None,
         'pose.deduplication.min_presence': .4,
         'pose.deduplication.min_shared_points': 8,
         'portraits.selection.anchor_only': True,
