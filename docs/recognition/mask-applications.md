@@ -43,6 +43,8 @@ live directly under `pose.mask`.
 threshold. `body.collection.min_sharpness` and `matching.body.anchors.min_sharpness`
 continue to apply. Recalibrate their values when changing measurement regions.
 Encoder background replacement never enters the sharpness measurement.
+Both regions use the [0–100 directional reblur score](sharpness.md); previous
+Laplacian thresholds require recalibration.
 
 A missing/invalid mask with masked sharpness selected has no valid sharpness
 measurement and fails a positive sharpness floor. There is no silent full-crop

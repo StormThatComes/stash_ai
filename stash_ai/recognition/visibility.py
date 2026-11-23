@@ -5,12 +5,13 @@ import math
 
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
+from .sharpness_policy import ALGORITHM
 
 CONTRACT = {'version': 8, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25-profile-roll-aligned',
             'region': 'oriented-box-supported-ellipse-0.45w-0.48h-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
-            'sharpness': 'foreground-interior-laplacian-256-v1'}
+            'sharpness': ALGORITHM}
 CONTRACT_ID = digest(CONTRACT)
 TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
 

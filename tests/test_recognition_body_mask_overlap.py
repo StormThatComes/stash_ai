@@ -174,8 +174,8 @@ def test_contract_refreshes_old_overlap_but_keeps_legacy_banks_recognizable(mask
     assert old_body in compatible_contracts(config)[1:]
     pose['refinement'].update(enabled=False,masked_identity_crop=False)
     assert 'quality_mask' not in pose_contract(config)[1]
-    assert person_contract(config) == person_contract(config,legacy_mask_overlap=True)
-    assert contract(config) == digest(['independent-person-v8-contact-mask-policy',person_contract(config),collection])
+    assert person_contract(config,legacy_sharpness=True) == person_contract(config,legacy_mask_overlap=True)
+    assert contract(config) == digest(['independent-person-v9-directional-sharpness',person_contract(config),collection])
 
 
 def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_path,monkeypatch):

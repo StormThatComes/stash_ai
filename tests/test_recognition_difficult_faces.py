@@ -37,7 +37,7 @@ def test_partial_head_requires_reliable_uncontested_points():
 
 def test_calibrated_sharpness_units_and_profile_floor_are_explicit():
     from stash_ai.recognition.quality import sharpness_failed
-    q=dict(sharpness=100,sharpness_normalized=1.,face_profile=True)
+    q=dict(sharpness=1.,sharpness_normalized=1.,face_profile=True)
     policy=dict(min_sharpness=2.,sharpness_metric='normalized',profile_min_sharpness=.5)
     assert not sharpness_failed(q,policy)
     assert sharpness_failed(dict(q,face_profile=False),policy)

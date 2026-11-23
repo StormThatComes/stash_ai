@@ -17,7 +17,7 @@ def quality(raw):
             value = record.get(key, 0.)
             return max(0., float(value)) if type(value) in (int, float) and math.isfinite(value) else 0.
         score = (min(1., math.log1p(number('pixels')) / math.log1p(512)) +
-                min(1., math.log1p(number('sharpness')) / math.log1p(1000)) +
+                min(1., number('sharpness') / 100) +
                 1. / (1. + number('pose_deviation'))) / 3
         if record.get('alignment_valid') is False:
             return 0.

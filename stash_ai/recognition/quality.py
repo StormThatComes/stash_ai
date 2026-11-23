@@ -87,7 +87,7 @@ def assess(image,detection):
     from .inference_cache import many,current
     from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality',('face-quality-v7-landmark-location',_diagnostics.get()),[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v8-directional-reblur',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
@@ -134,10 +134,9 @@ def _assess(image, detection):
 
 
 def sharpness_failed(quality,policy):
-    metric=policy.get('sharpness_metric','raw')
     threshold=policy.get('profile_min_sharpness') if quality.get('face_profile') else None
     threshold=policy['min_sharpness'] if threshold is None else threshold
-    value=quality.get('sharpness_normalized') if metric=='normalized' else quality.get('sharpness')
+    value=quality.get('sharpness')
     return threshold>0 and (value is None or value<threshold)
 
 
@@ -296,7 +295,7 @@ def portrait_components(quality, policy, *, _visibility_valid=None, _numbers=Non
     if not quality.get('complete') or not quality.get('landmarks_inside'):
         frontal *= .5
     return {'frontal': frontal,
-            'sharpness': min(1., math.log1p(sharpness) / math.log1p(1000)) * _attainment(sharpness, policy['min_sharpness']),
+            'sharpness': min(1., sharpness / 100) * _attainment(sharpness, policy['min_sharpness']),
             'resolution': min(1., pixels / 512) * _attainment(pixels, policy['min_face_pixels']),
             'exposure': 1 / (1 + abs(exposure - middle) / spread) * _upper_attainment(clipped, policy['max_clipped_fraction']),
             'visibility': visibility * _attainment(visibility, policy['min_visible_face_fraction'])}

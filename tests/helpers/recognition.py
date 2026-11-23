@@ -12,7 +12,8 @@ FACE = checked_detection([16, 16, 128, 128, 49, 60, 111, 60, 80, 84, 56, 108, 10
 
 
 def textured_image():
-    grid = np.indices((160, 160)).sum(axis=0) % 2
+    # Resolved texture, not a one-pixel Nyquist checkerboard removed by denoising.
+    grid = (np.indices((160, 160))//4).sum(axis=0) % 2
     pixels = np.repeat((grid[..., None] * 210 + 20).astype('uint8'), 3, axis=2)
     return Image.fromarray(pixels)
 
