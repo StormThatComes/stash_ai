@@ -2,6 +2,8 @@
 
 Full runs interleave the module manifest across two shards. The PR manifest
 runs the Windows-specific boundaries and representative lifecycle cases together.
+Manifest order balances measured Windows runtimes; keep the long rebuild suite
+on shard 2 to leave shard 1 time for model smoke and the native inspector replay.
 """
 import argparse
 from pathlib import Path

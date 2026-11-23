@@ -26,12 +26,12 @@ tests/test_recognition_progress.py
 tests/test_recognition_phase_progress.py
 tests/test_recognition_publication_ownership.py
 tests/test_recognition_portrait_budgets.py
-tests/test_recognition_rebuild.py
+tests/test_recognition_rebuild_cache.py
 tests/test_recognition_portrait_ranking.py
 tests/test_recognition_retained_benchmark.py
 tests/test_recognition_prefetch.py
 tests/test_recognition_retained_validation.py
-tests/test_recognition_rebuild_cache.py
+tests/test_recognition_rebuild.py
 tests/test_recognition_scanning.py
 tests/test_recognition_replay_checkpoints.py
 tests/test_recognition_shutdown_safety.py

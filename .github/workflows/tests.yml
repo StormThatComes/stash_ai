@@ -46,7 +46,8 @@ jobs:
     if: needs.plan.outputs.updater == 'true'
     name: updater (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    # A cold Windows runner installs the pinned Python before tests can start.
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -61,6 +62,7 @@ jobs:
           cache-dependency-glob: requirements-dev.txt
       - run: uv pip install --system pytest
       - run: python -m pytest -q tests/test_updater.py --tb=short
+        timeout-minutes: 5
 
   pytest:
     needs: plan
