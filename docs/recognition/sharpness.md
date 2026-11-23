@@ -47,6 +47,8 @@ verify regressions, not a universal threshold.
 4. Estimate noise per tile using the mixed second derivative. Subtract its
    expected contribution using each filter's squared kernel norm. Ignore tiles
    without at least 16 supported samples and sufficient signal above noise.
+   Exclude tiles where reblur increases energy by moving a neighbouring edge
+   into the tile; that is a boundary effect, not evidence of blur.
 5. Measure fractional energy loss under reblur, average the two scales, and
    use the lower quartile of informative tiles for each direction. The weakest
    informative direction determines the final score. An absent direction does

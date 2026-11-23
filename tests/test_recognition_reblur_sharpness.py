@@ -112,6 +112,16 @@ def test_absent_direction_does_not_penalize_sharp_stripes():
     assert measure(cv2.blur(stripes, (17, 1)))['sharpness'] < sharp*.6
 
 
+@pytest.mark.parametrize('size', [48, 64, 80, 96, 112, 128, 160, 192, 256])
+def test_edges_crossing_tile_boundaries_remain_sharp(size):
+    pixels = np.full((size, size), 127, np.float32)
+    pixels[size//4:3*size//4, size//4:3*size//4] = 35
+    sharp = measure(pixels)['sharpness']
+    assert sharp > 20
+    assert measure(cv2.GaussianBlur(pixels, (0, 0), 2))['sharpness'] < sharp*.75
+    assert measure(motion(pixels, 0))['sharpness'] < sharp*.75
+
+
 def test_measured_score_drives_body_collection_anchors_and_face_ranking():
     from PIL import Image
     from stash_ai.recognition.body_collection import quality

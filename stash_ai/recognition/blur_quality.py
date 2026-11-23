@@ -133,6 +133,10 @@ def batch(values, masks, xp=np):
         # Ignore noise-only tiles and absent directions, never treat them as
         # evidence for sharpness or as a directional-blur penalty.
         valid = (count >= 16) & (base > 3*noise_power*gains[0]+.01)
+        # Reblur can move an edge from a neighbouring tile into this one. An
+        # energy gain then describes the tile boundary, not a blurry edge.
+        # Compare only tiles where both scales have a measurable energy loss.
+        valid = valid & (energies[1] <= base) & (energies[2] <= base)
         losses = [(1-energy/base.clip(1e-8, None)).clip(0, 1) for energy in energies[1:]]
         scores.append(_quartile((losses[0]+losses[1])*.5, valid, xp))
     directional = xp.stack(scores, axis=1)
