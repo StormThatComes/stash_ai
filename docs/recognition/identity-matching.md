@@ -22,7 +22,7 @@ progress, and includes `observations_rejected` in its summary, including reused 
 | --- | ---: | --- |
 | `min_face_pixels` | 32 | Minimum shorter face-box side in source pixels |
 | `min_sharpness` | 10 | Minimum foreground directional reblur score (0–100); 0 disables; recalibrate old thresholds |
-| `max_pose_deviation` | 0.50 | Maximum five-landmark pose estimate in `[0, 1]`; `null` disables this gate |
+| `max_pose_deviation` | 0.50 | Maximum roll-invariant five-landmark pose proxy; threshold in `[0, 1]`; `null` disables this gate |
 | `min_visible_face_fraction` | 0.80 | Minimum FaceOcc visible-face estimate in `[0, 1]`; 0 disables recognition segmentation |
 | `faceocc_logit_threshold` | 0.0 | Strict per-pixel FaceOcc cutoff used for visible area and masked sharpness |
 | `min_face_source_fraction` | 0.85 | Minimum fraction of the face ellipse inside the image for a FaceOcc measurement |
@@ -40,6 +40,27 @@ contract as portraits. It is an estimate, not an anatomical percentage; hair,
 beards, glasses, pose and small thumbnails can affect it. These starting defaults
 are not calibrated on the operator's library. Inspect rejected examples before
 tightening them further; filtering can miss people seen only in difficult poses.
+
+`pose_deviation` takes the larger of two proxies in a face-relative coordinate
+frame: horizontal nose displacement from the eye midpoint divided by eye spacing,
+and the nose's fractional eye-to-mouth height deviation from 0.5. Narrow profiles
+retain the supported eye-to-mouth axis and a bounded eye-spacing denominator.
+The profile fallback is selected using distances between landmarks, independent
+of the detector box. Rotating the same points, including upside-down faces, does
+not change the score; changing the nose/eye/mouth proportions still does.
+`roll_deviation` remains a separate diagnostic and does not enter this threshold.
+The score is not a 3D head angle or an occlusion measurement and can exceed 1
+for severely inconsistent geometry. No additional model is loaded.
+
+Pose records use `pose_contract: landmark-pose-frame-v4`. The previous frame
+could switch when an axis-aligned detector box grew during rotation: a synthetic
+narrow-eye example changed from 0.000 upright to 0.158 at 45 degrees. Both now
+measure 0.000. The independent box-supported FaceOcc ROI is unchanged.
+Face scan, quality-cache and portrait-policy versions force fresh evaluation.
+Run recognition for affected scenes and refresh Inspect Scene; solver replay alone
+cannot correct stored scalar measurements. Old pose contracts cannot supply
+cross-policy references until those scenes are reprocessed. YAML thresholds
+are unchanged; inspect the refreshed measurements before retuning them.
 
 Recognition visibility is independent of `portraits.enabled` and
 `portraits.weights.visibility`. When its threshold is positive, FaceOcc becomes

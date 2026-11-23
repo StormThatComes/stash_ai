@@ -74,11 +74,12 @@ def test_cross_policy_references_require_current_quality_measurements(tmp_path,c
         assert bool(history.groups)==eligible
 
 
-def test_cross_policy_evidence_with_old_quality_contract_is_excluded(tmp_path):
+@pytest.mark.parametrize('contract', [None,'eye-frame-v2','profile-frame-v3'])
+def test_cross_policy_evidence_with_old_quality_contract_is_excluded(tmp_path,contract):
     config=config_for(tmp_path)
     with FaceDatabase(config.database) as db:
         sid=selected(db,config,'1',[A]*3)
-        db.connection.execute("UPDATE observations SET quality=json_remove(quality,'$.pose_contract') WHERE scan=?",(sid,))
+        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.pose_contract',?) WHERE scan=?",(contract,sid))
         db.connection.commit()
         tuned=changed(config,detection={'min_face_pixels':64})
         assert not capture(db.connection,[],tuned,'scope','ns','test').groups

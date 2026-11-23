@@ -53,7 +53,8 @@ face:
     # Minimum fraction of the face ellipse inside the source image for a FaceOcc measurement. Range: 0..1. Zero
     # still requires some real pixels; 1 requires the full ellipse.
     max_pose_deviation: null
-    # Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.
+    # Maximum roll-invariant five-landmark yaw/pitch proxy, not degrees; image rotation does not count. null
+    # disables this gate. Range: 0..1 or null.
     require_complete_face: false
     # Reject face boxes extending beyond the thumbnail before FaceOcc. Set false to allow partial boxes.
   recognizer:
@@ -398,7 +399,8 @@ matching:
         min_visible_face_fraction: 0.6
         # Minimum visible fraction for anchor references; null adds no extra anchor floor. Range: 0..1 or null.
         max_pose_deviation: 0.4
-        # Maximum pose deviation to seed an identity; null adds no anchor pose limit. Range: 0..1 or null.
+        # Maximum roll-invariant face pose deviation to seed an identity; null adds no anchor pose limit. Range:
+        # 0..1 or null.
     evidence:
       # Independent evidence accounting; reducing duplicate votes never merges people.
       near_duplicate_pixel_rms: 0.0
@@ -609,7 +611,8 @@ portraits:
     min_visible_face_fraction: 0.9
     # Preferred visible face fraction; 0 removes the extra target penalty. Range: 0..1.
     max_pose_deviation: 0.5
-    # Preferred maximum face pose deviation, not degrees. Range: 0..1.
+    # Preferred maximum roll-invariant face pose deviation, not degrees; image rotation does not count. Range:
+    # 0..1.
     min_exposure: 30.0
     # Lower end of the preferred mean grayscale brightness range (0..255).
     max_exposure: 225.0
