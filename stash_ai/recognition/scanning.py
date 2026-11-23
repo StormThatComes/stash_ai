@@ -24,21 +24,21 @@ def scan_identity(config, namespace):
         detection.pop('candidate_score_threshold',None)
     if not detection.get('alignment_retry_error'):
         detection.pop('alignment_retry_error',None)
-    from .rotated_faces import enabled
+    from .rotated_faces import enabled, CONTRACT as rotation_contract
     if enabled(config):
         from .body_observations import contract
-        detection['pose_guided_rotation'] = ['rotated-head-v3',contract(config)]
+        detection['pose_guided_rotation'] = [rotation_contract,contract(config)]
     else:
         detection.pop('pose_guided_rotation',None)
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
         detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
     return digest({'namespace': namespace, 'detection': detection,
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 7,
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 8,
                    'visibility_contract': visibility_contract})
 
 
 def geometry_contract(face, cue):
-    return digest(['real-source-alignment-coverage-v3', list(face.row), list(cue.rect)])
+    return digest(['real-source-alignment-coverage-v4-landmark-location', list(face.row), list(cue.rect)])
 
 
 @pipeline_stage('scan')

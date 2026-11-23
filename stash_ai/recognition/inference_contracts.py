@@ -4,10 +4,11 @@ from .config import plain
 
 def face(config):
     from .models import ASSETS
+    from .rotated_faces import enabled, CONTRACT as rotation_contract
     model=config.data['models']['detector']
-    return ['face-detector-v2-owned-repair',model,ASSETS[model].sha256,
+    return ['face-detector-v3-landmark-location',model,ASSETS[model].sha256,
             {k:config.data['detection'][k] for k in ('score_threshold','nms_threshold','max_faces_per_frame','candidate_score_threshold','alignment_retry_error')},
-            config.data['models']['device']]
+            config.data['models']['device'], rotation_contract if enabled(config) else None]
 
 
 def detector(config):

@@ -60,9 +60,12 @@ def _diagnostics(image, detection):
         result.update(alignment_valid=False, alignment_error='invalid_five_point_geometry')
         return result, None, None
     mask, stats = _coverage(image.width, image.height, matrix)
+    from .face_landmark_repair import box_consistent
+    spatial = box_consistent(detection)
     scale = float(math.hypot(matrix[0, 0], matrix[1, 0]))
     result.update(stats)
-    result.update(alignment_valid=(stats['source_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE
+    result.update(landmark_box_valid=spatial,
+                  alignment_valid=(spatial and stats['source_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE
                                    and stats['face_region_coverage'] >= MIN_ALIGNMENT_FACE_COVERAGE),
                   affine_source_to_112=matrix.tolist(),
                   source_pixels_per_aligned_pixel=1. / scale,

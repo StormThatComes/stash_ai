@@ -20,15 +20,18 @@ ALIGNMENT_FACE_COLUMNS = slice(24, 88)
 def alignment_measurements(detection, image=None):
     """Basic recognizer alignment validity, independent of optional pose gates."""
     from .aura import similarity_matrix
+    from .face_landmark_repair import box_consistent
+    spatial = box_consistent(detection)
     try:
         matrix = similarity_matrix(detection.landmarks)
     except ValueError:
-        return dict(alignment_valid=False)
+        return dict(alignment_valid=False, landmark_box_valid=spatial)
     import numpy as np
     target = np.asarray([[38.2946,51.6963],[73.5318,51.5014],[56.0252,71.7366],
                          [41.5493,92.3655],[70.7299,92.2041]])
     aligned = np.asarray(detection.landmarks) @ matrix[:,:2].T + matrix[:,2]
-    result = dict(alignment_valid=True, alignment_error=float(np.sqrt(((aligned-target)**2).sum(axis=1).mean())/112),
+    result = dict(alignment_valid=spatial, landmark_box_valid=spatial,
+                  alignment_error=float(np.sqrt(((aligned-target)**2).sum(axis=1).mean())/112),
                   alignment_scale=float(np.linalg.norm(matrix[0,:2])))
     if image is None:
         return result
@@ -44,7 +47,7 @@ def alignment_measurements(detection, image=None):
     real = (x >= 0) & (x < image.width) & (y >= 0) & (y < image.height)
     result.update(alignment_coverage=float(real.mean()),
                   alignment_face_coverage=float(real[ALIGNMENT_FACE_ROWS, ALIGNMENT_FACE_COLUMNS].mean()))
-    result['alignment_valid'] = (result['alignment_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE and
+    result['alignment_valid'] = (spatial and result['alignment_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE and
                                  result['alignment_face_coverage'] >= MIN_ALIGNMENT_FACE_COVERAGE)
     return result
 
@@ -84,7 +87,7 @@ def assess(image,detection):
     from .inference_cache import many,current
     from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality',('face-quality-v6-oriented-region',_diagnostics.get()),[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v7-landmark-location',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
