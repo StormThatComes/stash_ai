@@ -39,7 +39,7 @@ def test_every_candidate_can_miss_every_quality_goal_and_still_supply_a_portrait
     with FaceDatabase(config.database) as db:
         for row in db.connection.execute('SELECT id,quality FROM observations').fetchall():
             quality = json.loads(row['quality'])
-            quality.update(pixels=32, sharpness=1., pose_deviation=.9, exposure=250., clipped_fraction=.8,
+            quality.update(pixels=32, sharpness=1., portrait_sharpness=1., pose_deviation=.9, exposure=250., clipped_fraction=.8,
                            complete=False, landmarks_inside=False, visible_face_fraction=.2,
                            visibility={'contract': CONTRACT_ID})
             db.connection.execute('UPDATE observations SET quality=? WHERE id=?', (json.dumps(quality), row['id']))
@@ -154,7 +154,8 @@ def test_invalid_optional_asset_is_preserved_and_never_loaded(tmp_path, monkeypa
     assert 'wrong asset size' in published(config)[1]['quality_errors']['visibility']
 
 
-def test_zero_weights_still_choose_best_general_quality_without_optional_models(tmp_path, monkeypatch):
+@pytest.mark.parametrize('sharpness_field', ['sharpness', 'portrait_sharpness'])
+def test_zero_weights_still_choose_best_general_quality_without_optional_models(tmp_path, monkeypatch, sharpness_field):
     policy = defaults()['portraits']
     config, stash, services, _ = setup(tmp_path, monkeypatch, enabled=False,
                                      min_face_pixels=0, weights=dict.fromkeys(policy['weights'], 0))
@@ -162,7 +163,11 @@ def test_zero_weights_still_choose_best_general_quality_without_optional_models(
     with FaceDatabase(config.database) as db:
         for row in db.connection.execute('SELECT id,cue,quality FROM observations').fetchall():
             quality = json.loads(row['quality'])
-            quality['sharpness'] = [0., 20., 500.][row['cue']]
+            # Legacy records fall back to recognition sharpness. Current records
+            # must rank by portrait detail even when encoder detail ranks in reverse.
+            quality.pop('portrait_sharpness', None)
+            quality['sharpness'] = [100., 20., 0.][row['cue']]
+            quality[sharpness_field] = [0., 20., 100.][row['cue']]
             db.connection.execute('UPDATE observations SET quality=? WHERE id=?', (json.dumps(quality), row['id']))
         db.connection.commit()
     config = change(config, enabled=True)
