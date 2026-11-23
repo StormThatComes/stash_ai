@@ -260,9 +260,22 @@ When that path cannot confirm a link, a masked upper-body path also checks the
 head and shoulders. Two original nose/eye points can support it, or one original
 eye plus its same-side original ear. The ear is checked against face size and
 head/shoulder anatomy; it is not matched to a nonexistent face-detector ear
-landmark. Both original shoulders are required. Missing hips are allowed, while
+landmark. This route normally uses both original shoulders. Missing hips are allowed, while
 a measured contradictory torso remains a veto. Geometry is independent of image
 rotation and applies to profiles, lying people and upper-body crops.
+
+When exactly one original shoulder is available, an additional route retains the
+same independent head requirement and checks all five face-detector landmarks
+inside the valid own mask. The eye-to-mouth axis provides a rotation-aware check
+of head/shoulder distance and direction, and guides mask sampling through the
+neck to the visible shoulder. No missing shoulder or other pose point is added.
+The mask must support the connecting corridors, not just landmark islands.
+Available hip measurements may veto contradictory anatomy; missing hips do not.
+All five face landmarks also participate in rival-mask exclusion. Nearby peers
+still need their own measured upper-body anatomy and valid masks. Success is
+retained as `same_frame_single_shoulder`, with geometry and landmark coverage
+shown separately in the inspector. Mask use must still be enabled for both
+`pose.mask.apply_to.overlap` and `pose.mask.apply_to.body_admission`.
 
 This path always requires a valid own mask. It checks the anatomical points and
 dense narrow corridors connecting the head, neck and shoulders, including gaps;

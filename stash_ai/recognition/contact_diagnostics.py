@@ -55,7 +55,21 @@ def describe(check):
         if upper['checks']['head'] == 'insufficient_head_points':
             lines.append('  Need two original nose/eye points, or one original eye with its same-side original ear. '
                          'Missing, borrowed, occluded and out-of-box points cannot support this path.')
-        if 'neck_distance' in upper:
+        if upper.get('shoulder_mode') == 'single':
+            lines.append('  Single-shoulder path: original head support, all five face landmarks in the mask, '
+                         'and a masked head-to-shoulder connection; no shoulder is synthesized.')
+            if 'neck_distance' in upper:
+                single_limits = upper['thresholds']
+                lines.append(f"  Head/shoulder distance / face side: {number(upper['neck_distance'])}; "
+                             f"projection along face axis: {number(upper['head_projection'])}; "
+                             f"lateral: {number(upper['head_lateral'])}")
+                lines.append(f"  Single-shoulder limits: distance "
+                             f"{number(single_limits['single_shoulder_distance_min'])}..{number(single_limits['single_shoulder_distance_max'])}; "
+                             f"projection {number(single_limits['single_shoulder_projection_min'])}..{number(single_limits['single_shoulder_projection_max'])}; "
+                             f"lateral <= {number(single_limits['single_shoulder_lateral_max'])}")
+            if 'face_landmark_mask_support' in upper:
+                lines.append('  Face landmarks inside own mask: '+number(upper['face_landmark_mask_support'])+' (required 1.0000)')
+        elif 'neck_distance' in upper:
             lines.append(f"  Head/shoulder distance: {number(upper['neck_distance'])}; "
                          f"lateral: {number(upper['head_lateral'])}; normal: {number(upper['neck_normal'])}; hips optional")
         if upper.get('mask'):
