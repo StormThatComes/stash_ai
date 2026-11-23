@@ -15,6 +15,7 @@ MIN_ALIGNMENT_SOURCE_COVERAGE = .50
 MIN_ALIGNMENT_FACE_COVERAGE = .85
 ALIGNMENT_FACE_ROWS = slice(36, 105)
 ALIGNMENT_FACE_COLUMNS = slice(24, 88)
+POSE_CONTRACT = 'landmark-pose-frame-v4'
 
 
 def alignment_measurements(detection, image=None):
@@ -57,18 +58,17 @@ def alignable(detection, image=None):
 
 
 def pose_measurements(landmarks, size=None):
-    """Yaw/pitch proxies in the eye coordinate frame; roll is aligned away."""
+    """Yaw/pitch proxies with roll removed; size is a legacy, unused argument."""
     import numpy as np
     points = np.asarray(landmarks, dtype=np.float64)
+    from .face_frame import pose_axis
+    from .visibility import VisibilityGeometryError
+    try:
+        horizontal, profile = pose_axis(points)
+    except VisibilityGeometryError:
+        return dict(pose_deviation=1.,roll_deviation=1.,pose_contract=POSE_CONTRACT)
     eye = points[1] - points[0]
     distance = float(np.linalg.norm(eye))
-    from .face_frame import axis
-    from .visibility import VisibilityGeometryError
-    dimensions = size or np.maximum(np.ptp(points,axis=0),1)
-    try:
-        horizontal, profile = axis(points,*dimensions)
-    except VisibilityGeometryError:
-        return dict(pose_deviation=1.,roll_deviation=1.,pose_contract='profile-frame-v3')
     if profile:
         distance=max(distance,.6*np.linalg.norm(points[3:].mean(axis=0)-points[:2].mean(axis=0)))
     vertical = np.array([-horizontal[1], horizontal[0]])
@@ -79,7 +79,7 @@ def pose_measurements(landmarks, size=None):
     mouth_height = float(mouth @ vertical)
     pitch = abs(float(nose @ vertical) / max(mouth_height, 1.) - .5)
     return dict(pose_deviation=max(yaw, pitch),
-                roll_deviation=abs(float(eye[1])) / distance, pose_contract='profile-frame-v3')
+                roll_deviation=abs(float(eye[1])) / distance, pose_contract=POSE_CONTRACT)
 
 
 @pipeline_stage('quality')
@@ -87,7 +87,7 @@ def assess(image,detection):
     from .inference_cache import many,current
     from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality',('face-quality-v9-model-input',_diagnostics.get()),[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v10-landmark-pose',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 

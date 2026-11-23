@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from .config import digest
 from .models import checked_detection
 from .pose_policy import measurement_required
-from .quality import rejection
+from .quality import POSE_CONTRACT, rejection
 from .scanning import geometry_contract
 from .visibility import cached as visibility_cached, valid_fraction
 
@@ -19,14 +19,14 @@ from .visibility import cached as visibility_cached, valid_fraction
 def fallback_sql(db,config,namespace,*,observation='o'):
     policy=config.data['detection']
     needs_visibility = measurement_required(config)
-    name='reference_quality_'+digest([namespace,policy,needs_visibility,'retained-quality-v2'])[:24]
+    name='reference_quality_'+digest([namespace,policy,needs_visibility,'retained-quality-v3',POSE_CONTRACT])[:24]
     if not any(row[0]==name for row in db.execute('PRAGMA function_list')):
         def admissible(raw,geometry,rect):
             try:
                 quality=json.loads(raw)
                 face=checked_detection(json.loads(geometry))
                 rectangle=json.loads(rect)
-                if (quality.get('pose_contract') not in ('eye-frame-v2','profile-frame-v3') or
+                if (quality.get('pose_contract') != POSE_CONTRACT or
                     quality.get('alignment_valid') is not True or
                     quality.get('geometry_contract')!=geometry_contract(face,SimpleNamespace(rect=rectangle)) or
                     face.score<=(policy.get('candidate_score_threshold') if policy.get('candidate_score_threshold') is not None else policy['score_threshold'])):
