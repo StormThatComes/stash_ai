@@ -432,7 +432,13 @@ identifies links confirmed with both shoulders. `same_frame_single_shoulder`
 identifies the alternative with one original shoulder, independent original head
 evidence, all five face landmarks inside the own mask, and connected mask support.
 Details shows the face-axis geometry and landmark coverage for that alternative;
-the missing shoulder is never synthesized. Recollect affected scenes with recognition
+the missing shoulder is never synthesized. Disabled contact masks name the exact
+recorded switch separately for the selected body and its peers. Suggested next
+steps can enable `pose.mask.apply_to.contact_confirmation` and mask generation
+without changing `body_admission` or `overlap`. If current YAML already enables
+them, the suggestion requests fresh evidence instead of another YAML change.
+Historical decisions remain historical; no missing mask or geometry is inferred.
+Recollect affected scenes with recognition
 after updating; old assignments and solver replay cannot invent the new proof.
 
 For an unassigned observation, `Suggested next steps` precedes the recorded

@@ -85,16 +85,54 @@ def _quality(config, title, groups, *, next_action=REBUILD):
     return result, failures
 
 
+def _contact_masks(config, decision):
+    proof = decision['recorded']
+    if proof.get('reason') != 'unconfirmed_contact_face':
+        return None
+    contact = proof.get('contact_confirmation') or {}
+    if contact.get('reason') == 'temporal_identity_conflict':
+        return None
+    local = contact.get('same_frame') or {}
+    upper = local.get('upper_body') or {}
+    nodes = [local, upper, *local.get('peers', ()), *upper.get('peers', ())]
+    disabled = list(dict.fromkeys(path for node in nodes for path in node.get('disabled_mask_settings', ())))
+    if not any(node.get('reason') == 'masks_disabled' or node.get('checks', {}).get('mask') == 'masks_disabled'
+               for node in nodes):
+        return None
+    prefix = 'sapiensid.pose.refinement.'
+    changes = {prefix+key:True for key in ('enabled', 'mask_contact_confirmation')
+               if not parameter(config.data, prefix+key)}
+    evidence = ['Recorded contact-mask blocker: masks_disabled.']
+    if disabled:
+        evidence.append('Recorded disabled controls: '+', '.join(disabled)+'.')
+    notes = ['Contact confirmation has its own mask switch; overlap and body_admission do not need to be enabled.',
+             'A valid mask, independent original head/body geometry and absence of competing claims are still required. Enabling mask use does not establish identity membership.']
+    if not decision['current']:
+        notes.append('This is a historical attempt. Current settings differ; recollect evidence before evaluating the new policy.')
+    if not changes:
+        notes.append('Current YAML already enables mask generation and contact confirmation. Recollect this scene to replace the recorded disabled-mask evidence.')
+    return _path(config, 'Enable masks for contact confirmation' if changes else 'Recollect contact-mask evidence',
+                 changes, evidence=evidence, notes=notes, next_action=RESCAN)
+
+
 def _matching(config, kind, decisions):
     paths, notes = [], []
     current = [d for d in decisions if d['current'] and d['status'] != 'accepted']
     if not current:
+        if kind == 'body':
+            previous = next((d for d in decisions if d['status'] != 'accepted'), None)
+            contact = _contact_masks(config, previous) if previous else None
+            if contact:
+                return [contact], notes
         notes.append('No current-policy matching attempt is retained. Rebuild with the current YAML before choosing matching thresholds.')
         return paths, notes
     # Multiple retained policies are never combined into one hypothetical decision.
     decision = current[0]
     proof = decision['recorded']
     reason = proof.get('reason', 'unknown')
+    contact = _contact_masks(config, decision) if kind == 'body' else None
+    if contact:
+        return [contact], notes
     if (any(word in reason for word in ('conflict', 'co_present', 'co_presence', 'copresence', 'different_face', 'reassignment'))
             or reason in ('unresolved_partner', 'unconfirmed_contact_face')):
         notes.append(f'Recorded blocker: {reason}. Inspect the competing identities and geometry; do not bypass this by lowering thresholds.')

@@ -251,7 +251,8 @@ landmark-error margin.
 Separated head/torso regions can explain large overlapping leg boxes. When those
 regions overlap, both validated masks must support their own anatomy and exclude
 the other core, with low mask intersection. Mask-based confirmation respects
-`pose.mask.apply_to.overlap` and `pose.mask.apply_to.body_admission`. Missing,
+`pose.mask.apply_to.contact_confirmation` (default `true`), independently of
+`overlap` and `body_admission`. Missing,
 invalid or disabled masks do not grant an exemption. Disjoint masks alone cannot
 confirm a missing or incorrectly attached head. These checks are versioned with
 the collected proof; the generic 0.25 crowding trigger remains unchanged.
@@ -274,8 +275,9 @@ Available hip measurements may veto contradictory anatomy; missing hips do not.
 All five face landmarks also participate in rival-mask exclusion. Nearby peers
 still need their own measured upper-body anatomy and valid masks. Success is
 retained as `same_frame_single_shoulder`, with geometry and landmark coverage
-shown separately in the inspector. Mask use must still be enabled for both
-`pose.mask.apply_to.overlap` and `pose.mask.apply_to.body_admission`.
+shown separately in the inspector. Mask generation and
+`pose.mask.apply_to.contact_confirmation` must be enabled; `overlap` and
+`body_admission` may remain disabled.
 
 This path always requires a valid own mask. It checks the anatomical points and
 dense narrow corridors connecting the head, neck and shoulders, including gaps;

@@ -5,8 +5,9 @@ ownership. No face landmark is copied into the pose by this module.
 """
 import math
 import numpy as np
+from .mask_usage import uses, contact_disabled_settings
 
-VERSION = 'same-cue-head-torso-v3-single-shoulder'
+VERSION = 'same-cue-head-torso-v4-contact-mask-policy'
 LIMITS = dict(head_error=.20, rival_margin=.12, min_torso_pixels=6.,
               head_projection_min=-.25, head_projection_max=1.25, head_lateral_ratio=.75,
               core_gap_pixels=4., mask_support=.8, foreign_mask_support=.1, mask_overlap=.1)
@@ -75,10 +76,9 @@ def _separated(first, second):
 def _mask(person, cache):
     key = id(person)
     if key not in cache:
-        from .mask_usage import uses
         from .body_overlap import foreground_mask
         value = None
-        if uses(person, 'overlap') and uses(person, 'body_admission'):
+        if uses(person, 'contact_confirmation'):
             try:
                 value = foreground_mask(person)
             except (ValueError, TypeError):
@@ -96,7 +96,8 @@ def _coverage(person, mask, points):
 def _full_body(face, person, people, *, face_id, faces=(), mask_cache=None):
     """Use all detected peers, including rejected/maskless poses, before storage."""
     result = dict(version=VERSION, face=face_id, confirmed=False, reason='insufficient_head_points',
-                  head_points=[], peers=[], thresholds=dict(LIMITS))
+                  head_points=[], peers=[], thresholds=dict(LIMITS),
+                  disabled_mask_settings=contact_disabled_settings(person))
     points = _points(person)
     aligned, error, independent = _head(face, points)
     result.update(head_points=[i for i, _, _ in aligned], head_error=error)
@@ -133,7 +134,8 @@ def _full_body(face, person, people, *, face_id, faces=(), mask_cache=None):
     for index, peer in enumerate(people):
         if peer is person:
             continue
-        measured = dict(person_index=index, reason='insufficient_peer_torso')
+        measured = dict(person_index=index, reason='insufficient_peer_torso',
+                        disabled_mask_settings=contact_disabled_settings(peer))
         result['peers'].append(measured)
         left, top, right, bottom = peer['bounds']
         if _separated(core, [(left,top),(right,bottom)]):
@@ -153,10 +155,9 @@ def _full_body(face, person, people, *, face_id, faces=(), mask_cache=None):
             measured['reason'] = 'separated_head_torso'
             continue
         own_mask, peer_mask = _mask(person, cache), _mask(peer, cache)
-        from .mask_usage import uses
         measured.update(own_mask_available=own_mask is not None, peer_mask_available=peer_mask is not None)
-        measured['reason'] = ('masks_disabled' if any(not uses(p,k) for p in (person,peer)
-                              for k in ('overlap','body_admission')) else 'masks_unavailable_or_invalid')
+        measured['reason'] = ('masks_disabled' if any(not uses(p,'contact_confirmation') for p in (person,peer))
+                              else 'masks_unavailable_or_invalid')
         if own_mask is None or peer_mask is None:
             continue
         # Both masks must support their own torso, and exclude the linked head/core.

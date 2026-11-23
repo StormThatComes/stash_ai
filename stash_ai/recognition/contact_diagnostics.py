@@ -14,6 +14,8 @@ def describe(check):
     local = check['same_frame']
     limits = local.get('thresholds', {})
     lines.append('Same-cue face/body evidence: '+local['reason'])
+    if local.get('disabled_mask_settings'):
+        lines.append('Own contact mask disabled by: '+', '.join(local['disabled_mask_settings']))
     if 'full_body_reason' in local:
         lines.append('Full head/torso path: '+local['full_body_reason'])
     if 'head_points' in local:
@@ -29,6 +31,8 @@ def describe(check):
                      f"lateral offset: {number(local['head_lateral'])} (limit {number(local['head_lateral_limit'])})")
     for peer in local.get('peers', ()):
         lines.append(f"Peer {peer.get('observation', peer['person_index'])}: {peer['reason']}")
+        if peer.get('disabled_mask_settings'):
+            lines.append('  Peer contact mask disabled by: '+', '.join(peer['disabled_mask_settings']))
         if peer.get('head_error') is not None:
             lines.append('  Rival head/landmark error: '+number(peer['head_error'])+
                          ' (required error advantage '+number(limits.get('rival_margin'))+')')
@@ -80,6 +84,8 @@ def describe(check):
                          f"gap <= {number(upper['thresholds']['mask_gap'])})")
         for peer in upper['peers']:
             lines.append(f"  Upper-body peer {peer.get('observation', peer['person_index'])}: {peer['reason']}")
+            if peer.get('disabled_mask_settings'):
+                lines.append('    Peer contact mask disabled by: '+', '.join(peer['disabled_mask_settings']))
             if 'local_box_separated' in peer:
                 lines.append(f"    Head/shoulder region outside peer box: {peer['local_box_separated']}")
             if 'foreign_mask_support' in peer:
