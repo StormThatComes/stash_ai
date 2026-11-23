@@ -6,7 +6,7 @@ ownership. No face landmark is copied into the pose by this module.
 import math
 import numpy as np
 
-VERSION = 'same-cue-head-torso-v2-upper-body'
+VERSION = 'same-cue-head-torso-v3-single-shoulder'
 LIMITS = dict(head_error=.20, rival_margin=.12, min_torso_pixels=6.,
               head_projection_min=-.25, head_projection_max=1.25, head_lateral_ratio=.75,
               core_gap_pixels=4., mask_support=.8, foreign_mask_support=.1, mask_overlap=.1)
@@ -195,7 +195,7 @@ def measure(face, person, people, *, face_id, faces=(), mask_cache=None):
               'mask_conflict', 'competing_head_claim'}
     veto = result['reason'] in vetoes or any(p['reason'] in vetoes for p in result['peers'])
     if upper['confirmed'] and not veto:
-        result.update(confirmed=True, reason='same_frame_upper_body')
+        result.update(confirmed=True, reason=upper['reason'])
     return result
 
 

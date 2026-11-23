@@ -428,7 +428,11 @@ the largest gap. Per-peer checks distinguish a remote box intersection from a
 missing nearby mask, competing head claim or foreign foreground in the head
 region. These measurements are retained even when the head-point count fails,
 so an untested mask is not confused with a rejected mask. `same_frame_upper_body`
-identifies links confirmed by this path. Recollect affected scenes with recognition
+identifies links confirmed with both shoulders. `same_frame_single_shoulder`
+identifies the alternative with one original shoulder, independent original head
+evidence, all five face landmarks inside the own mask, and connected mask support.
+Details shows the face-axis geometry and landmark coverage for that alternative;
+the missing shoulder is never synthesized. Recollect affected scenes with recognition
 after updating; old assignments and solver replay cannot invent the new proof.
 
 For an unassigned observation, `Suggested next steps` precedes the recorded

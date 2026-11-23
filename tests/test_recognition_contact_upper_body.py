@@ -224,12 +224,16 @@ def test_new_evidence_contract_keeps_previous_version_only_as_competitor(tmp_pat
         version='same-cue-head-torso-v1',face='face',confirmed=True)))['confirmed']
 
 
-def test_collection_retains_upper_body_peer_references_and_inspector_resolves_them(tmp_path):
+@pytest.mark.parametrize('single', [False, True])
+def test_collection_retains_upper_body_peer_references_and_inspector_resolves_them(tmp_path, single):
     import uuid
     from stash_ai.recognition.body_collection import collect
     from stash_ai.recognition.config import load
     from stash_ai.recognition.assignment_explanation import references
     face, own = masked_profile(); _,peer = masked_profile(220)
+    if single:
+        from tests.test_recognition_contact_single_shoulder import single_shoulder
+        face, own, peer = single_shoulder()
     captured = []
     pipeline = SimpleNamespace(collect_items=lambda db,image,items:captured.extend(items))
     collect(pipeline,None,SimpleNamespace(person_geometry=lambda *args:None),load(root=tmp_path),
@@ -243,7 +247,8 @@ def test_collection_retains_upper_body_peer_references_and_inspector_resolves_th
     assert any(r['observation']==peer_id and r['label']=='Same-cue contact peer' for r in refs)
 
 
-def test_production_membership_and_replay_snapshot_preserve_the_upper_body_proof(tmp_path):
+@pytest.mark.parametrize('single', [False, True])
+def test_production_membership_and_replay_snapshot_preserve_the_upper_body_proof(tmp_path, single):
     import sqlite3
     from tests.test_recognition_face_landmark_fallback import retained_scene
     from stash_ai.recognition.database import FaceDatabase, SCHEMA
@@ -251,6 +256,10 @@ def test_production_membership_and_replay_snapshot_preserve_the_upper_body_proof
     from stash_ai.recognition.evaluation_scenarios import copy_history
     config,item,ids = retained_scene(tmp_path)
     face,own = masked_profile(); _,peer = masked_profile(220)
+    if single:
+        from tests.test_recognition_contact_single_shoulder import single_shoulder
+        face, own, peer = single_shoulder()
+    reason = 'same_frame_single_shoulder' if single else 'same_frame_upper_body'
     with FaceDatabase(config.database) as state:
         db = state.connection
         db.execute("INSERT INTO people VALUES ('A','scope','ns',1,NULL,'face-A')")
@@ -262,7 +271,7 @@ def test_production_membership_and_replay_snapshot_preserve_the_upper_body_proof
             db.execute('UPDATE body_observations SET quality=? WHERE id=?',(json.dumps(quality),oid))
         expected = scene_plan(db,item['scan'],config)[2]
         assert all(d['status']=='accepted' and d['person']=='A' for d in expected.values())
-        assert all(d['contact_confirmation']['reason']=='same_frame_upper_body' for d in expected.values())
+        assert all(d['contact_confirmation']['reason']==reason for d in expected.values())
         before = list(map(tuple,db.execute('SELECT * FROM body_observations ORDER BY id')))
         rebuild(state,[item],config,{})
         stored = [json.loads(r[0]) for r in db.execute('SELECT proof FROM body_members')]
