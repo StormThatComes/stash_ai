@@ -31,7 +31,7 @@ def choose(database, config, scope, target, *, crops=None):
     from PIL import Image
     from .portraits import policy_identity
     from .quality import encode_portrait
-    from .portrait_framing import person_bounds
+    from .portrait_framing import person_bounds, head_framing
     db=database.connection
     if not enabled(config) or not available(db):return None
     stamp=policy_identity(config);winner=None;best=None
@@ -42,8 +42,10 @@ def choose(database, config, scope, target, *, crops=None):
         for row in rows:
             if not eligible(db,config,target['person'],row['id']):continue
             quality=json.loads(row['quality']).get('quality',{})
-            key=(*score(quality),-row['seconds'],row['id'])
-            if best is not None and key<=best:continue
+            quality_key=(*score(quality),-row['seconds'],row['id'])
+            if best is not None and best[0] and quality_key<=best[1:]:continue
+            # The crop can be scaled in retained storage, so evaluate framing
+            # from its actual dimensions before comparing composition/quality.
             blob=db.execute('SELECT crop FROM body_observations WHERE id=?',(row['id'],)).fetchone()[0]
             from .cold_payloads import get
             blob=get(db,blob)
@@ -53,14 +55,19 @@ def choose(database, config, scope, target, *, crops=None):
             if blob is None:continue
             details={}
             try:
-                with Image.open(BytesIO(blob)) as source,source.convert('RGB') as rgb:
-                    bounds=person_bounds(rgb.size,json.loads(row['geometry']),config.data['portraits']['aspect_ratio'])
-                    with rgb.crop(bounds) as crop:
+                with Image.open(BytesIO(blob)) as source:
+                    geometry=json.loads(row['geometry'])
+                    bounds=person_bounds(source.size,geometry,config.data['portraits']['aspect_ratio'])
+                    composition=head_framing(source.size,geometry,bounds)
+                    key=(not composition['fallback'],*quality_key)
+                    if best is not None and key<=best:continue
+                    with source.convert('RGB') as rgb,rgb.crop(bounds) as crop:
                         data=encode_portrait(crop,config.data['portraits'],limit=config.data['storage']['max_crop_bytes'],details=details)
             except (OSError,ValueError,Image.DecompressionBombError):continue
             identifier=str(uuid.uuid5(uuid.NAMESPACE_URL,encoded(['body-portrait',scope,target['person'],row['id'],stamp])))
             metadata=dict(portrait_kind='person',selection_category='pose',source_type='person_crop',observation=row['id'],
                 person=target['person'],policy_sha=stamp,quality=quality,encoding=details,
+                head_framing=composition,framing=dict(kind='pose',version=2,geometry=geometry),
                 crop=bounds,crop_coordinate_system='retained_person_crop',pixels=details['pixels'],
                 identity_policy=identity_policy(config),role=row['role'],score=list(score(quality)))
             with db:
@@ -75,6 +82,10 @@ def current_prior(database, prior, config, target):
     from .portrait_availability import fit_cached_bytes
     metadata=json.loads(prior['metadata'])
     if config.data['portraits']['kind']=='face' or not eligible(database.connection,config,target['person'],metadata.get('observation')):
+        return None
+    row=database.connection.execute('SELECT geometry FROM body_observations WHERE id=?',
+                                    (metadata.get('observation'),)).fetchone()
+    if metadata.get('framing') != dict(kind='pose',version=2,geometry=json.loads(row['geometry'])):
         return None
     try:fit_cached_bytes(prior['image'],prior['digest'],config,dict(metadata))
     except (OSError,ValueError,KeyError,TypeError):return None
@@ -95,22 +106,27 @@ def choose_kind(database,client,config,scope,target,paths,backend_factory,decode
     if kind=='face':
         return face_choose(database,client,config,scope,target,paths,
                            backend_factory,decoder_factory,source_factory,**kwargs)
+    from .portrait_framing import fallback
+    reserve=None
     for category in config.data['portraits']['auto_precedence']:
         if category=='pose':
             winner=body_choose()
         else:
             winner=face_choose(database,client,config,scope,target,paths,
                 backend_factory,decoder_factory,source_factory,category=category,**kwargs)
-        if winner is not None:return winner
-    return None
+        if winner is not None:
+            if not fallback(json.loads(winner['metadata'])):return winner
+            if reserve is None:reserve=winner
+    return reserve
 
 
 def rank(metadata,config):
     from .quality import portrait_score,portrait_tiebreak
+    from .portrait_framing import fallback
     quality=metadata.get('quality',{})
     category=metadata.get('selection_category','pose' if metadata.get('portrait_kind')=='person' else 'face')
     preference=config.data['portraits']['auto_precedence'].index(category) if config.data['portraits']['kind']=='auto' else 0
-    if metadata.get('portrait_kind')=='person':return (preference,*[-v for v in score(quality)])
+    if metadata.get('portrait_kind')=='person':return (fallback(metadata),preference,*[-v for v in score(quality)])
     ranks={'video':0,'vtt':1,'recognition_crop':2}
-    return (preference,-portrait_score(quality,config.data['portraits']),
+    return (fallback(metadata),preference,-portrait_score(quality,config.data['portraits']),
             -portrait_tiebreak(quality,config.data['portraits']),ranks.get(metadata.get('source_type'),3))

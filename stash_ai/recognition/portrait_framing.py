@@ -27,12 +27,12 @@ def matches_aspect(size, ratio):
     return width == max(1, round(height*ratio)) or height == max(1, round(width/ratio))
 
 
-def _head(size, geometry):
+def _head(size, geometry, face_box=None):
     """COCO nose/eyes/ears plus clearance, mapped from source to retained pixels."""
     if not isinstance(geometry, dict):
         return None
     bounds, points = geometry.get('bounds'), geometry.get('keypoints')
-    if not isinstance(bounds, (list, tuple)) or len(bounds) != 4 or not isinstance(points, (list, tuple)):
+    if not isinstance(bounds, (list, tuple)) or len(bounds) != 4:
         return None
     if any(type(v) not in (int, float) or not math.isfinite(v) for v in bounds):
         return None
@@ -40,6 +40,20 @@ def _head(size, geometry):
     if right <= left or bottom <= top:
         return None
     width, height = size
+    if face_box is not None:
+        # A paired portrait follows its own identity-verified face, even when
+        # the pose estimator's head points are absent or belong to a neighbour.
+        if (not isinstance(face_box, (list, tuple)) or len(face_box) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in face_box)):
+            return None
+        x, y, w, h = face_box
+        if w <= 0 or h <= 0:
+            return None
+        region = ((x-left)*width/(right-left), (y-top)*height/(bottom-top),
+                  (x+w-left)*width/(right-left), (y+h-top)*height/(bottom-top))
+        return region, region
+    if not isinstance(points, (list, tuple)):
+        return None
     head = []
     for point in points[:5]:
         if not isinstance(point, (list, tuple)) or len(point) != 2:
@@ -68,15 +82,40 @@ def _origin(preferred, length, maximum, protected=None):
     return max(0, min(round(preferred), maximum-length))
 
 
-def person_bounds(size, geometry, ratio):
+def person_bounds(size, geometry, ratio, *, face_box=None):
     width, height = size
     if ratio is None:
         return [0, 0, width, height]
     crop_width, crop_height = aspect_size(width, height, ratio)
-    head = _head(size, geometry)
-    left, top = _origin((width-crop_width)/2, crop_width, width), 0
+    head = _head(size, geometry, face_box)
+    center = (head[1][0]+head[1][2])/2 if head else width/2
+    left, top = _origin(center-crop_width/2, crop_width, width), 0
     # Sacrifice clearance before measured features when the whole head cannot fit.
     for region in head or ():
         left = _origin(left, crop_width, width, (region[0], region[2]))
         top = _origin(top, crop_height, height, (region[1], region[3]))
     return [left, top, left+crop_width, top+crop_height]
+
+
+def head_framing(size, geometry, bounds, *, face_box=None):
+    """Keep the head in the middle third horizontally; preserve natural height.
+
+    Use the actual feasible crop, including source-edge clamping and null ratio.
+    Missing head evidence cannot establish that a person portrait is centred.
+    """
+    head = _head(size, geometry, face_box)
+    if head is None:
+        return dict(fallback=True, reason='head_unavailable', horizontal_offset=None)
+    left, top, right, bottom = bounds
+    x1, y1, x2, y2 = head[1]
+    offset = abs((x1+x2)/2-(left+right)/2)/(right-left)
+    contained = left <= x1 <= x2 <= right and top <= y1 <= y2 <= bottom
+    reason = 'head_outside_crop' if not contained else 'head_off_center' if offset > 1/6 else None
+    return dict(fallback=reason is not None, reason=reason, horizontal_offset=offset)
+
+
+def fallback(metadata):
+    """Face portraits remain primary; unmeasured person framing is a reserve."""
+    if metadata.get('selection_category') == 'face+pose' or metadata.get('portrait_kind') == 'person':
+        return bool(metadata.get('head_framing', {}).get('fallback', True))
+    return False

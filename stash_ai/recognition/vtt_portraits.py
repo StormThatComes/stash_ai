@@ -26,6 +26,7 @@ from .vtt_ranking_cache import Ranking
 from .portrait_pipeline import current as portrait_pipeline, Capacity
 from .portrait_encoding import Encoder
 from . import paired_portraits
+from .portrait_framing import fallback as framing_fallback
 
 
 class Sources:
@@ -240,125 +241,139 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         quality = ranking_quality(quality, config)
                         metadata['quality'] = quality
                         reason=reason or anchor_reason(quality,config)
+                        if not reason and category == 'face+pose':
+                            try:
+                                framing = paired_portraits.framing(db, config, row['id'])
+                                metadata['head_framing'] = paired_portraits.composition(framing, policy)
+                            except (ValueError, TypeError):
+                                reason = 'portrait_pose_unavailable'
                         if reason:
                             metadata['reason'] = reason
                         else:
                             score_metadata(metadata, quality, policy)
-                            ranked.append((-metadata['score'], -metadata['quality_tiebreak'], scene, row['seconds'], identifier))
+                            ranked.append((int(framing_fallback(metadata)), -metadata['score'],
+                                           -metadata['quality_tiebreak'], scene, row['seconds'], identifier))
                         store(database, identifier, scope, target, scene, metadata)
 
         # All eligibility and ranking decisions precede JPEG preparation. A bad
         # crop does not hide a later valid observation behind a candidate limit.
         flush(db)
         all_ranks=list(ranked)
-        heapq.heapify(ranked)
-        considered = len(ranked)
-        fallbacks = []
-        def candidates():
-            while ranked:
-                yield heapq.heappop(ranked)
-        crop_function = paired_portraits.source_bytes if category == 'face+pose' else portrait_bytes
-        with Encoder(config,crop_function,small=considered<2) as encodings, tracking(
-            candidates(),
-            'Choose VTT portrait',
-            total=considered,
-            unit='candidate',
-        ) as choices:
-            for _, _, scene, _, identifier in choices:
-                existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
-                metadata = json.loads(existing['metadata'])
-                metadata['eligible_observations'] = considered
-                rejected=anchor_reason(metadata.get('quality',{}),config)
-                if rejected:
-                    metadata['reason']=rejected
-                    store(database,identifier,scope,target,scene,metadata)
-                    continue
-                try:
-                    framing = (paired_portraits.framing(db, config, metadata['observation'])
-                               if category == 'face+pose' else paired_portraits.FACE_FRAMING)
-                except (ValueError, TypeError):
-                    metadata['reason'] = 'portrait_pose_unavailable'
-                    store(database, identifier, scope, target, scene, metadata)
-                    continue
-                if (existing['image'] is not None and metadata['source_type'] == 'vtt'
-                        and paired_portraits.matches(metadata, framing)):
+        considered = len(all_ranks)
+        # A centred retained crop beats an off-centre live thumbnail. Exhaust
+        # both source routes for one framing tier before considering reserves.
+        for framing_tier in (0, 1):
+            ranked = [rank for rank in all_ranks if rank[0] == framing_tier]
+            if not ranked:
+                continue
+            tier_count = len(ranked)
+            heapq.heapify(ranked)
+            fallbacks = []
+            def candidates():
+                while ranked:
+                    yield heapq.heappop(ranked)
+            crop_function = paired_portraits.source_bytes if category == 'face+pose' else portrait_bytes
+            with Encoder(config,crop_function,small=considered<2) as encodings, tracking(
+                candidates(),
+                'Choose VTT portrait',
+                total=tier_count,
+                unit='candidate',
+            ) as choices:
+                for _, _, _, scene, _, identifier in choices:
+                    existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                    metadata = json.loads(existing['metadata'])
+                    metadata['eligible_observations'] = considered
+                    rejected=anchor_reason(metadata.get('quality',{}),config)
+                    if rejected:
+                        metadata['reason']=rejected
+                        store(database,identifier,scope,target,scene,metadata)
+                        continue
                     try:
-                        data, sha = fit_cached_bytes(existing['image'], existing['digest'], config, metadata)
-                    except (OSError, ValueError):
-                        pass  # Try verified old/source pixels, preserving corrupt historical bytes.
-                    else:
-                        with db:
-                            db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
-                                       (encoded(metadata), data, sha, identifier))
-                        return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
-                row = db.execute('SELECT o.*,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',
-                                 (metadata['observation'],)).fetchone()
-                reused = cached_thumbnail(database, config, scope, target, row, identifier, metadata, framing=framing)
-                if reused is not None:
-                    return finish(reused)
-                try:
-                    face=framing if category == 'face+pose' else checked_detection(metadata['geometry'])
-                    image=sources.thumbnail(scene,row)
-                    data,bounds,encoding=encodings.encode(image,face,policy,
-                        config.data['storage']['max_crop_bytes'],
-                        before_wait=preparation.ranking_finished if preparation is not None else lambda:None)
-                    metadata.update(source_type='vtt', crop=bounds, pixels=encoding['pixels'], encoding=encoding,
-                                    crop_coordinate_system='thumbnail', framing=framing)
-                    metadata.pop('source_warning', None)
-                    metadata.pop('recognition_crop_bounds', None)
-                    metadata.pop('person_crop_bounds', None)
-                    if not fallback_reason:
-                        metadata.pop('fallback', None)
-                    else:
-                        metadata['fallback'] = {'from': policy['source'], 'reason': fallback_reason}
-                except PortraitFramingError:
-                    metadata['source_warning'] = 'portrait_encoding_unavailable'
-                    store(database, identifier, scope, target, scene, metadata)
-                    fallbacks.append(identifier)
-                    continue
-                except Exception:
-                    metadata['source_warning'] = 'vtt_source_unavailable_or_changed'
-                    store(database, identifier, scope, target, scene, metadata)
-                    fallbacks.append(identifier)
-                    continue
-                with db:
-                    db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
-                               (encoded(metadata), data, hashlib.sha256(data).hexdigest(), identifier))
-                return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
-        # Prefer a real thumbnail whenever one is usable; retained recognition
-        # pixels still illustrate the accepted identity if every source fails.
-        with Encoder(config,portrait_bytes,small=len(fallbacks)<2) as encodings, tracking(
-            fallbacks,
-            'Check retained portrait fallbacks',
-            unit='candidate',
-        ) as tracked:
-            for identifier in tracked:
-                existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
-                metadata = json.loads(existing['metadata'])
-                row = db.execute('SELECT * FROM observations WHERE id=?', (metadata['observation'],)).fetchone()
-                try:
-                    if category == 'face+pose':
-                        framing = paired_portraits.framing(db, config, metadata['observation'])
-                        blob = paired_portraits.retained_crop(db, metadata['observation'], framing)
-                        left, top, right, bottom = framing['geometry']['bounds']
-                        size = (right-left)*(bottom-top)*3 + len(blob) + config.data['storage']['max_crop_bytes']
-                        data,metadata=encodings.call(paired_portraits.retained_portrait,blob,framing,
-                            deepcopy(metadata),policy,config.data['storage']['max_crop_bytes'],size=size)
-                    else:
-                        quality=json.loads(row['quality'])
-                        bounds=quality.get('crop_bounds',[0,0,0,0])
-                        encoded_crop=quality.get('crop_encoding')
-                        pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
-                                [bounds[2]-bounds[0],bounds[3]-bounds[1]])
-                        size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
-                        data,metadata=encodings.call(retained_portrait,crop_row(db,row),deepcopy(metadata),policy,
-                            config.data['storage']['max_crop_bytes'],size=size)
-                except Exception:
-                    metadata['reason'] = 'portrait_source_unavailable'
-                    store(database, identifier, scope, target, existing['scene'], metadata)
-                    continue
-                with db:
-                    db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
-                               (encoded(metadata), data, hashlib.sha256(data).hexdigest(), identifier))
-                return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
+                        framing = (paired_portraits.framing(db, config, metadata['observation'])
+                                   if category == 'face+pose' else paired_portraits.FACE_FRAMING)
+                    except (ValueError, TypeError):
+                        metadata['reason'] = 'portrait_pose_unavailable'
+                        store(database, identifier, scope, target, scene, metadata)
+                        continue
+                    if (existing['image'] is not None and metadata['source_type'] == 'vtt'
+                            and paired_portraits.matches(metadata, framing)):
+                        try:
+                            data, sha = fit_cached_bytes(existing['image'], existing['digest'], config, metadata)
+                        except (OSError, ValueError):
+                            pass  # Try verified old/source pixels, preserving corrupt historical bytes.
+                        else:
+                            with db:
+                                db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
+                                           (encoded(metadata), data, sha, identifier))
+                            return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
+                    row = db.execute('SELECT o.*,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',
+                                     (metadata['observation'],)).fetchone()
+                    reused = cached_thumbnail(database, config, scope, target, row, identifier, metadata, framing=framing)
+                    if reused is not None:
+                        return finish(reused)
+                    try:
+                        face=framing if category == 'face+pose' else checked_detection(metadata['geometry'])
+                        image=sources.thumbnail(scene,row)
+                        data,bounds,encoding=encodings.encode(image,face,policy,
+                            config.data['storage']['max_crop_bytes'],
+                            before_wait=preparation.ranking_finished if preparation is not None else lambda:None)
+                        metadata.update(source_type='vtt', crop=bounds, pixels=encoding['pixels'], encoding=encoding,
+                                        crop_coordinate_system='thumbnail', framing=framing)
+                        metadata.pop('source_warning', None)
+                        metadata.pop('recognition_crop_bounds', None)
+                        metadata.pop('person_crop_bounds', None)
+                        if not fallback_reason:
+                            metadata.pop('fallback', None)
+                        else:
+                            metadata['fallback'] = {'from': policy['source'], 'reason': fallback_reason}
+                    except PortraitFramingError:
+                        metadata['source_warning'] = 'portrait_encoding_unavailable'
+                        store(database, identifier, scope, target, scene, metadata)
+                        fallbacks.append(identifier)
+                        continue
+                    except Exception:
+                        metadata['source_warning'] = 'vtt_source_unavailable_or_changed'
+                        store(database, identifier, scope, target, scene, metadata)
+                        fallbacks.append(identifier)
+                        continue
+                    with db:
+                        db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
+                                   (encoded(metadata), data, hashlib.sha256(data).hexdigest(), identifier))
+                    return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
+            # Prefer a real thumbnail whenever one is usable; retained recognition
+            # pixels still illustrate the accepted identity if every source fails.
+            with Encoder(config,portrait_bytes,small=len(fallbacks)<2) as encodings, tracking(
+                fallbacks,
+                'Check retained portrait fallbacks',
+                unit='candidate',
+            ) as tracked:
+                for identifier in tracked:
+                    existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                    metadata = json.loads(existing['metadata'])
+                    row = db.execute('SELECT * FROM observations WHERE id=?', (metadata['observation'],)).fetchone()
+                    try:
+                        if category == 'face+pose':
+                            framing = paired_portraits.framing(db, config, metadata['observation'])
+                            blob = paired_portraits.retained_crop(db, metadata['observation'], framing)
+                            left, top, right, bottom = framing['geometry']['bounds']
+                            size = (right-left)*(bottom-top)*3 + len(blob) + config.data['storage']['max_crop_bytes']
+                            data,metadata=encodings.call(paired_portraits.retained_portrait,blob,framing,
+                                deepcopy(metadata),policy,config.data['storage']['max_crop_bytes'],size=size)
+                        else:
+                            quality=json.loads(row['quality'])
+                            bounds=quality.get('crop_bounds',[0,0,0,0])
+                            encoded_crop=quality.get('crop_encoding')
+                            pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
+                                    [bounds[2]-bounds[0],bounds[3]-bounds[1]])
+                            size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
+                            data,metadata=encodings.call(retained_portrait,crop_row(db,row),deepcopy(metadata),policy,
+                                config.data['storage']['max_crop_bytes'],size=size)
+                    except Exception:
+                        metadata['reason'] = 'portrait_source_unavailable'
+                        store(database, identifier, scope, target, existing['scene'], metadata)
+                        continue
+                    with db:
+                        db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
+                                   (encoded(metadata), data, hashlib.sha256(data).hexdigest(), identifier))
+                    return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
     return finish(None)

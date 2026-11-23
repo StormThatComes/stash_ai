@@ -26,7 +26,7 @@ from .backend import prepared_frame
 
 def policy_identity(config):
     from .context import policy_digest
-    return policy_digest(config, ('portraits-v10', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+    return policy_digest(config, ('portraits-v11', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
                          lambda: _policy_value(config))
 
 
@@ -45,7 +45,7 @@ def _policy_value(config):
     from .pose_policy import measurement_required
     uses_mask = uses_visibility or measurement_required(config)
     tuning = {'faceocc_logit_threshold': cutoff} if uses_mask and cutoff != DEFAULT_FACEOCC_LOGIT_THRESHOLD else {}
-    return {'version': 10, 'portraits': policy, **tuning,
+    return {'version': 11, 'portraits': policy, **tuning,
                    'pose_contract': pose_contract(config) if policy['kind'] == 'auto' else None,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
