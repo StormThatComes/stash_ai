@@ -11,7 +11,8 @@ LEGACY_CLEANUP = dict(min_island_pixels=4, min_island_fraction=.001,
 def defaults():
     return dict(enabled=False, backend='sam_pose2seg', directory='', mode='all', overlap_threshold=.2, generic_second_pass=False,
                 pose_second_pass=None, mask_sharpness=True, mask_keypoint_filtering=True,
-                mask_overlap=True, mask_body_admission=True, max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
+                mask_overlap=True, mask_body_admission=True, mask_contact_confirmation=True,
+                max_retry_jobs_per_cue=16, max_retry_jobs_per_scene=4096,
                 min_keypoint_score=.5, min_presence=.5, min_visibility=.5,
                 max_mask_combinations=256, bidirectional_prompts=False, negative_limb_prompts=False, joint_limb_ownership=False, max_limb_length_ratio=3.,
                 max_decoder_attempts=3, limb_peer_distance_fraction=.035, limb_peer_min_pixels=2., limb_contact_reach_ratio=5.,
@@ -26,6 +27,8 @@ def validate(pose):
     prefix = 'sapiensid.pose.refinement.'
     if type(settings['enabled']) is not bool:
         raise ValueError(prefix + 'enabled must be boolean.')
+    if type(settings.get('mask_contact_confirmation', True)) is not bool:
+        raise ValueError(prefix + 'mask_contact_confirmation must be boolean.')
     if not settings['enabled']:
         return
     from .mask_usage import applications, FIELDS

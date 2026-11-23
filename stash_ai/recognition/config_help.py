@@ -65,6 +65,7 @@ HELP = {
     'pose.mask.apply_to.box_expansion': 'Expand the person box to the admitted mask bounds; never shrink. False preserves the original box.',
     'pose.mask.apply_to.overlap': 'Measure overlap using masks when available. False uses boxes for all peers.',
     'pose.mask.apply_to.body_admission': 'Use mask separation/conflicts for body admission and crowd context. Mask validity checks always remain active.',
+    'pose.mask.apply_to.contact_confirmation': 'Use validated masks to confirm face/body ownership in crowded frames, independently of overlap and body_admission. Requires original pose support; conflicts and missing masks remain blockers. Default: true.',
     'pose.mask.backend': 'Instance masks: sam_pose2seg (default), sam3, hq_sam2_large or rfdetr_seg_large. Models download on first use; SAM 3 requires Hugging Face access.',
     'pose.mask.enabled': 'Generate instance masks for supported COCO17 estimators. Applications are controlled by apply_to.',
     'pose.mask.max_decoder_attempts': 'Maximum SAM attempts per person, including the first. Range: 1..8.',

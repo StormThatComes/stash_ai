@@ -6,6 +6,7 @@ or hip does not make an otherwise exclusive head ambiguous.
 """
 import math
 import numpy as np
+from .mask_usage import uses, contact_disabled_settings
 
 from .contact_face_evidence import _points, _head, _torso, _mask, _coverage, _separated, LIMITS as FULL_LIMITS
 
@@ -199,7 +200,8 @@ def measure(face, person, people, *, faces=(), mask_cache):
     indices = [i for i, _, _ in aligned]
     result = dict(confirmed=False, reason='insufficient_head_points', head_points=indices,
                   ear_points=[], shoulder_points=[i for i in (5, 6) if i in points],
-                  excluded_points=_excluded(person, points), thresholds=dict(LIMITS), peers=[], checks={})
+                  excluded_points=_excluded(person, points), thresholds=dict(LIMITS), peers=[], checks={},
+                  disabled_mask_settings=contact_disabled_settings(person))
     checks = result['checks']
     scale = float(min(face.box[2:]))
     # A corresponding original ear supplements one original eye. It has no
@@ -233,9 +235,8 @@ def measure(face, person, people, *, faces=(), mask_cache):
                        if k in anatomy})
     own_mask = _mask(person, mask_cache)
     result['mask_available'] = own_mask is not None
-    from .mask_usage import uses
     checks['mask'] = ('mask_conflict' if person.get('pose_refinement', {}).get('mask_conflict') else
-                      'masks_disabled' if not all(uses(person,k) for k in ('overlap','body_admission')) else
+                      'masks_disabled' if not uses(person,'contact_confirmation') else
                       'masks_unavailable_or_invalid' if own_mask is None else 'geometry_unavailable')
     core = corridors = None
     if anatomy is not None and available:
@@ -266,7 +267,8 @@ def measure(face, person, people, *, faces=(), mask_cache):
     for index, peer in enumerate(people):
         if peer is person:
             continue
-        measured = dict(person_index=index, reason='geometry_unavailable')
+        measured = dict(person_index=index, reason='geometry_unavailable',
+                        disabled_mask_settings=contact_disabled_settings(peer))
         result['peers'].append(measured)
         if core is None:
             continue
@@ -298,8 +300,8 @@ def measure(face, person, people, *, faces=(), mask_cache):
         peer_mask = _mask(peer, mask_cache)
         measured['mask_available'] = peer_mask is not None
         if own_mask is None or peer_mask is None:
-            measured['reason'] = 'masks_disabled' if any(not uses(p,k) for p in (person,peer)
-                for k in ('overlap','body_admission')) else 'masks_unavailable_or_invalid'
+            measured['reason'] = ('masks_disabled' if any(not uses(p,'contact_confirmation') for p in (person,peer))
+                                  else 'masks_unavailable_or_invalid')
             continue
         peer_support = _support(peer, peer_mask[0], other_core, other_corridors, other_anatomy['scale'])
         probes = np.concatenate([np.asarray(core), *corridors])

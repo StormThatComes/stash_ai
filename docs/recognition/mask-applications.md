@@ -21,6 +21,7 @@ pose:
       box_expansion: false
       overlap: false
       body_admission: false
+      contact_confirmation: true
 ```
 
 These are strict YAML booleans. `mode` still selects `all` people or only
@@ -36,6 +37,7 @@ live directly under `pose.mask`.
 | `box_expansion` | Union of original box and admitted mask extent | Original person box |
 | `overlap` | Directional mask overlap with existing missing-mask fallback | Box overlap, ignoring own and peer masks |
 | `body_admission` | Mask separation/conflicts may admit query-only bodies or reject observations | No admission/crowd-context decisions based on those mask flags |
+| `contact_confirmation` | Validated masks corroborate independent face/body ownership evidence in crowded frames | Mask-based contact confirmation is unavailable; geometry and temporal checks still apply |
 
 `sharpness: false` changes the measurement region; it does not disable the
 threshold. `body.collection.min_sharpness` and `matching.body.anchors.min_sharpness`
@@ -54,6 +56,13 @@ crop; `embedding_foreground` and `embedding_mask_reason` report that choice.
 Pose refinement falls back to the preceding pose when its mask or second pass
 cannot be admitted. Disabling `body_admission` never makes an invalid mask valid
 for another consumer.
+
+`contact_confirmation` defaults to `true` and is independent of both `overlap`
+and `body_admission`. It does not alter pose points, sharpness or encoder input.
+Masks must still be generated and valid, and original pose evidence must support
+the face/body link. Missing masks, competing ownership and temporal identity
+conflicts remain blockers. This switch controls confirmation after association;
+it does not make landmarks inside a mask sufficient for initial face/body pairing.
 
 For unchanged pose geometry, disable `pose_refinement`, `keypoint_filtering`
 and `box_expansion`. Existing estimator score/presence/visibility filters and
@@ -83,8 +92,16 @@ old generic-only switch was false. Existing mask sharpness, filtering, overlap
 and body-admission behavior migrates to true. Specifying both an old field and
 its new equivalent is rejected instead of selecting one by YAML order.
 
-The bundled recognition and solver YAML files retain their prior choices.
+The bundled recognition and solver YAML files enable `contact_confirmation`
+while retaining their other consumer choices, including `body_admission: false`.
 To use the example above, change their `apply_to` values explicitly.
+
+Fresh scans record the explicit contact switch. Older retained rows without it
+retain the historical coupled `overlap`/`body_admission` interpretation; old
+confirmation proofs cannot become current accepted evidence merely by loading
+new defaults. Rerun recognition after updating. The inspector names disabled
+controls separately for the selected person and peers, and suggests the contact
+switch or fresh collection when the current YAML already enables it.
 
 Tune Detection exposes `pose.mask` and `pose.mask.apply_to`. Phase notes and
 retained body metadata record requested mask consumers and applied stages.

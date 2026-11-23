@@ -253,6 +253,10 @@ pose:
       body_admission: false
       # Use mask separation/conflicts for body admission and crowd context. Mask validity checks always remain
       # active.
+      contact_confirmation: true
+      # Use validated masks to confirm face/body ownership in crowded frames, independently of overlap and
+      # body_admission. Requires original pose support; conflicts and missing masks remain blockers. Default:
+      # true.
   deduplication:
     # Optional suppression of duplicate PMPose predictions.
     enabled: true

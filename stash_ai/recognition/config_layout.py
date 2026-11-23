@@ -38,7 +38,7 @@ _GROUPS = (
     ('pose.mask.apply_to', 'sapiensid.pose.refinement',
      'sharpness=mask_sharpness body_encoder_input=masked_identity_crop pose_refinement=pose_second_pass '
      'keypoint_filtering=mask_keypoint_filtering box_expansion=expand_boxes '
-     'overlap=mask_overlap body_admission=mask_body_admission'),
+     'overlap=mask_overlap body_admission=mask_body_admission contact_confirmation=mask_contact_confirmation'),
     ('pose.deduplication', 'sapiensid.pose.deduplication',
      'enabled box_context_retry box_context_retention partial_pose_recovery partial_min_overlap partial_point_distance partial_min_shared_points max_contact_attempts contact_crop_variants contact_min_iou contact_max_iou min_keypoint_score min_presence min_visibility min_shared_points max_point_distance '
      'min_match_fraction'),
