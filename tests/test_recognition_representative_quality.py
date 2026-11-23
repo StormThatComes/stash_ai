@@ -19,12 +19,12 @@ def test_visibility_and_alignment_reduce_quality_without_rejecting_old_evidence(
 def test_alignment_residual_is_invariant_to_source_scale_and_translation():
     landmarks=np.array([[38.2946,51.6963],[73.5318,51.5014],[56.0252,71.7366],
                         [41.5493,92.3655],[70.7299,92.2041]])
-    first=alignment_measurements(SimpleNamespace(landmarks=landmarks))
-    second=alignment_measurements(SimpleNamespace(landmarks=landmarks*2+15))
+    first=alignment_measurements(SimpleNamespace(landmarks=landmarks,box=(0,0,112,112)))
+    second=alignment_measurements(SimpleNamespace(landmarks=landmarks*2+15,box=(15,15,224,224)))
     assert first['alignment_error'] < 1e-6 and second['alignment_error'] < 1e-6
     assert abs(second['alignment_scale']-.5) < 1e-6
     landmarks[2,0]+=12
-    assert alignment_measurements(SimpleNamespace(landmarks=landmarks))['alignment_error'] > .01
+    assert alignment_measurements(SimpleNamespace(landmarks=landmarks,box=(0,0,112,112)))['alignment_error'] > .01
 
 
 def test_supported_rare_mode_has_reserved_slot():

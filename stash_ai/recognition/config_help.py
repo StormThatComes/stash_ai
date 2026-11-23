@@ -16,7 +16,7 @@ HELP = {
     'face.quality.min_face_pixels': 'Minimum shorter face-box side in source thumbnail pixels. Range: 8..4096.',
     'face.quality.min_sharpness': 'Minimum sharpness inside the FaceOcc mask at 256px input scale; mask edges excluded. Positive values require an active face visibility floor; 0 disables this gate. Range: 0..100000.',
     'face.quality.min_visible_face_fraction': "Minimum visible face fraction (0..1); cannot exceed either role's visibility floor.",
-    'face.detector.pose_guided_rotation': 'Retry one rotated head crop when a measured sideways head has no face. Requires SCRFD and body collection. Range: true or false.',
+    'face.detector.pose_guided_rotation': 'Repair rolled/suspect SCRFD faces before encoding and recover missing faces from pose. Unknown one-eye orientation tries up to four quarter turns. Requires SCRFD and body collection. Range: true or false.',
     'face.quality.faceocc_logit_threshold': 'Count a pixel inside the face ellipse when its raw FaceOcc logit is strictly above this value. Lower values include more pixels in visibility and masked sharpness. Range: finite float32; default 0.0.',
     'face.quality.min_face_source_fraction': 'Minimum fraction of the face ellipse inside the source image for a FaceOcc measurement. Range: 0..1. Zero still requires some real pixels; 1 requires the full ellipse.',
     'face.quality.max_pose_deviation': 'Maximum five-landmark pose deviation, not degrees; null disables this gate. Range: 0..1 or null.',
@@ -371,7 +371,7 @@ HELP.update({
 
 HELP.update({
  'face.detector.candidate_score_threshold': 'Optional lower SCRFD candidate floor; detections below score_threshold can query identities but cannot seed face anchors. Null disables. Range: 0..score_threshold.',
- 'face.detector.alignment_retry_error': 'Retry one local SCRFD crop when normalized five-point alignment error exceeds this value. 0 disables. Range: 0..1.',
+ 'face.detector.alignment_retry_error': 'Retry one local SCRFD crop when normalized alignment error exceeds this value or landmarks lie outside the box. 0 disables this local retry; pose_guided_rotation controls rotated retries. Range: 0..1.',
 })
 
 HELP.update({

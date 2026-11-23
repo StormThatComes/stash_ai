@@ -25,16 +25,24 @@ def test_alignment_requires_real_source_pixels_with_pose_disabled(tmp_path):
 
 
 
-@pytest.mark.parametrize('shift,expected', [
+@pytest.mark.parametrize('move_box', [False, True], ids=['landmarks-only', 'whole-face'])
+@pytest.mark.parametrize('shift,source_valid', [
     (0, True), (45, True), (60, False), (150, False),
 ])
-def test_alignment_requires_sufficient_real_face_pixels_even_with_pose_gate_disabled(tmp_path, shift, expected):
+def test_alignment_requires_sufficient_real_face_pixels_even_with_pose_gate_disabled(tmp_path, shift, source_valid, move_box):
     import cv2
-    from stash_ai.recognition.quality import assess, rejection
+    from stash_ai.recognition.quality import (
+        assess, rejection, alignment_measurements,
+        MIN_ALIGNMENT_SOURCE_COVERAGE, MIN_ALIGNMENT_FACE_COVERAGE,
+    )
     from stash_ai.recognition.models import checked_detection
     from stash_ai.recognition.aura import similarity_matrix
     from tests.helpers.recognition import FACE, textured_image
     geometry = list(FACE.row)
+    # Moving the whole detection isolates source coverage at the image edge;
+    # moving only landmarks also violates their location relative to the box.
+    if move_box:
+        geometry[0] += shift
     for index in range(4, 14, 2):
         geometry[index] += shift
     face = checked_detection(geometry)
@@ -42,9 +50,16 @@ def test_alignment_requires_sufficient_real_face_pixels_even_with_pose_gate_disa
     policy = dict(config.data['detection'], max_pose_deviation=None, min_sharpness=0)
     with textured_image() as image:
         quality = assess(image, face)
+        measurements = alignment_measurements(face, image)
         aligned = cv2.warpAffine(np.asarray(image), similarity_matrix(face.landmarks), (112, 112))
         # The original any()-based check would accept every one of these.
         assert aligned.any()
+        assert (measurements['alignment_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE
+                and measurements['alignment_face_coverage'] >= MIN_ALIGNMENT_FACE_COVERAGE) is source_valid
+        spatial_valid = move_box or shift == 0
+        assert measurements['landmark_box_valid'] is spatial_valid
+        expected = source_valid and spatial_valid
+        assert measurements['alignment_valid'] is expected
         assert quality['alignment_valid'] is expected
         assert (rejection(quality, policy) == 'face_landmarks_invalid') is not expected
 

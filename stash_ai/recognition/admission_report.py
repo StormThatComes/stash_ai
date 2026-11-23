@@ -130,7 +130,8 @@ def face(quality, geometry, config, policies, fingerprint):
               note='A nonempty source ellipse is required even at zero.'),
         check('detection.min_visible_face_fraction', visible, d['min_visible_face_fraction'],
               enabled=measurement_required(scan), note=visibility_note),
-        check('alignment_valid', quality.get('alignment_valid'), True, '==', note='Mandatory geometry gate; no YAML switch.'),
+        check('alignment_valid', quality.get('alignment_valid'), True, '==',
+              note='Mandatory geometry gate: finite alignment, real source coverage and landmarks within the face box (5% edge tolerance). No YAML switch.'),
         check('landmarks_inside', quality.get('landmarks_inside'), True, '==',
               enabled=d['max_pose_deviation'] is not None, note='Required when the detection pose limit is enabled.'),
     ]

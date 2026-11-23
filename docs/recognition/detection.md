@@ -442,3 +442,35 @@ faces can create **many PNG files and substantial disk usage**. Never commit
 or share the folder without inspecting it; the suggested
 `recognition_alignment_audit/` parent is gitignored. No automatic upload
 occurs and normal recognition is unchanged.
+
+## Rolled and translated face landmarks
+
+With `face.detector.pose_guided_rotation: true`, SCRFD retries already detected
+rolled faces and spatially inconsistent landmarks before face embeddings or body
+collection consume them. The existing option still requires SCRFD and enabled
+body collection. It does not depend on `alignment_retry_error`: a translation of
+all five landmarks leaves the similarity-fit residual unchanged. The crop is
+rotated using the measured facial axis, including the eye-to-mouth profile axis;
+an unavailable axis tries at most four quarter turns. Retry batches remain bounded
+by `execution.detector_batch_size` and eight inputs.
+
+Replacement requires a consistent face box, valid source alignment, comparable
+detection confidence and no competing detected head. Multiple eligible heads or
+inconsistent results across orientations leave the original detection intact.
+This is a new detector measurement, never a fixed offset applied to landmarks.
+Upright spatially consistent faces add no inference unless the separate local
+`alignment_retry_error` trigger is active. When that trigger is nonzero it also
+retries out-of-box landmarks, even when the alignment residual is small.
+
+For a pose without a face, a missing or compressed far eye now leaves orientation
+unknown instead of assuming 0 degrees. Recovery checks quarter-turn candidates
+against the original pose and all competing detections. Borrowed/conflicted head
+points cannot authorize the crop; a failed or ambiguous recovery adds no face.
+
+Landmarks outside the face box by more than 5% of its shorter side now fail the
+mandatory alignment gate even with `face.quality.max_pose_deviation: null`. The
+tolerance admits minor edge noise; it does not impose frontal pose or screen-up
+ordering. The legacy stricter `landmarks_inside` pose check is still optional.
+Face inference, quality and selected-scene scan versions are updated. Rerun
+recognition for affected scenes to replace old detections; refresh Inspect Scene
+after the run. Model weights and identity namespaces are unchanged.
