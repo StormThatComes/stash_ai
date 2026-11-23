@@ -93,7 +93,7 @@ def add_body(evidence):
     db = state.connection
     db.execute('INSERT INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         (identifier, target['scans'][0]['scan'], 0, 0., body_contract(config), None,
-         encoded(dict(bounds=[0, 0, 120, 240], keypoints=[[-1, -1]] * 17)),
+         encoded(dict(bounds=[0, 0, 120, 240], keypoints=[[60, 20]] + [[-1, -1]] * 16)),
          encoded(dict(quality=dict(sharpness=1000, keypoints=17, width=120, height=240))),
          None, np.ones(4096, dtype='<f4').tobytes(), output.getvalue()))
     db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',

@@ -68,6 +68,13 @@ def test_paired_frames_person_in_thumbnail_coordinates(evidence, prefetch, ratio
 def test_pose_ratio_keeps_inverted_head(evidence):
     geometry = dict(PERSON, keypoints=[[66, 140], [58, 134], [74, 134], [52, 136], [80, 136]] + [[-1, -1]]*12)
     paired(evidence, geometry)
+    # The verified face and the pose describe the same inverted head.
+    face = list(SMALL_FACE.row)
+    face[1] += 103
+    for index in (5, 7, 9, 11, 13):
+        face[index] += 103
+    evidence[0].connection.execute('UPDATE observations SET geometry=? WHERE id=?', (encoded(face), evidence[4][0]))
+    evidence[0].connection.commit()
     evidence[1].data['portraits']['aspect_ratio'] = 1.
     metadata = json.loads(choose(evidence)['metadata'])
     assert metadata['crop'][1] > 5

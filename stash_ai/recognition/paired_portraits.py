@@ -4,7 +4,7 @@ import json
 import math
 
 from stash_ai.inference.image_io import open_image
-from .portrait_framing import person_bounds
+from .portrait_framing import person_bounds, head_framing
 from .quality import PortraitFramingError, encode_portrait
 
 
@@ -30,8 +30,19 @@ def framing(db, config, observation):
     left, top, right, bottom = map(round, bounds)
     if not (0 <= left < right and 0 <= top < bottom) or (right-left)*(bottom-top) > 32*1048576:
         raise PortraitFramingError('Portrait person bounds are invalid.')
-    return dict(kind='pose', version=1, contract=expected,
+    from .models import checked_detection
+    face = db.execute('SELECT geometry FROM observations WHERE id=?', (observation,)).fetchone()
+    face_box = list(checked_detection(json.loads(face['geometry'])).box)
+    return dict(kind='pose', version=2, contract=expected, face_box=face_box,
                 geometry=dict(bounds=[left, top, right, bottom], keypoints=person.get('keypoints', [])))
+
+
+def composition(framing, policy):
+    geometry = framing['geometry']
+    left, top, right, bottom = geometry['bounds']
+    size = (right-left, bottom-top)
+    bounds = person_bounds(size, geometry, policy['aspect_ratio'], face_box=framing['face_box'])
+    return head_framing(size, geometry, bounds, face_box=framing['face_box'])
 
 
 def matches(metadata, expected):
@@ -45,7 +56,7 @@ def source_bytes(image, framing, policy, *, limit, details=None):
     if right > image.width or bottom > image.height:
         raise PortraitFramingError('Portrait person bounds exceed the verified thumbnail.')
     with image.crop((left, top, right, bottom)) as person:
-        bounds = person_bounds(person.size, geometry, policy['aspect_ratio'])
+        bounds = person_bounds(person.size, geometry, policy['aspect_ratio'], face_box=framing['face_box'])
         with person.crop(bounds) as crop, crop.convert('RGB') as rgb:
             data = encode_portrait(rgb, policy, limit=limit, details=details)
     return data, [bounds[0]+left, bounds[1]+top, bounds[2]+left, bounds[3]+top]
@@ -66,7 +77,7 @@ def retained_portrait(blob, framing, metadata, policy, limit):
     with open_image(BytesIO(blob)) as image:
         if image.size != (right-left, bottom-top):
             raise PortraitFramingError('Retained person dimensions do not match the measured bounds.')
-        bounds = person_bounds(image.size, geometry, policy['aspect_ratio'])
+        bounds = person_bounds(image.size, geometry, policy['aspect_ratio'], face_box=framing['face_box'])
         with image.crop(bounds) as crop, crop.convert('RGB') as rgb:
             data = encode_portrait(rgb, policy, limit=limit, details=details)
     result = dict(metadata)

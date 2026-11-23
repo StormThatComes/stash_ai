@@ -54,7 +54,7 @@ The console shows a performer progress bar and nested portrait-candidate work.
 
 ## Portrait selection
 
-Auto portraits use strict, configurable fallback tiers:
+Auto portraits use configurable fallback tiers, with centred person crops preferred:
 
 ```yaml
 version: 2
@@ -71,9 +71,13 @@ faces, and `pose` uses accepted retained person crops. List all three exactly on
 in the desired order (for example `[pose, face+pose, face]`). Older YAML files use
 the default above. Explicit `kind: face` and `kind: person` ignore this order.
 
-Each tier exhausts its usable candidates, including retained-pixel fallbacks,
-before the next tier is tried. Quality scores rank candidates within a tier;
-quality shortfalls alone cannot let a lower tier win. Identity checks,
+Within normally framed candidates, each tier exhausts its usable candidates,
+including retained-pixel fallbacks, before the next tier is tried. Quality scores
+rank candidates within a tier; quality shortfalls alone cannot let a lower tier
+win. Off-centre or unverified head framing is a reserve across all tiers, so a
+usable face portrait can beat an off-centre `face+pose` crop. If only reserves
+are available, the configured tier order and existing quality ranking still
+choose a portrait. Identity checks,
 `anchor_only`, crop/encoding limits and manual-image protection still apply.
 With SapiensID disabled or no current paired evidence, `face+pose` is empty.
 Decoded video faces belong to `face`: a VTT hint's pose does not prove a pose in
@@ -84,7 +88,12 @@ crop can supply this tier; a retained face crop cannot stand in for a person.
 Without usable person pixels, selection continues to another candidate or tier.
 
 Like `pose`, `face+pose` applies `portraits.crop.aspect_ratio` within the person bounds,
-preserving measured head points with clearance where possible. `null` keeps the
+shifting the crop to centre the head horizontally and preserving its vertical
+extent where possible. For `face+pose`, the identity-verified face box determines
+the head location; for `pose`, retained nose/eye/ear points do. A head centre in
+the middle third of the actual crop width counts as centred. Source-edge clamping,
+an incomplete head, or unavailable head geometry can make a crop reserve-only.
+The crop is not shrunk to a tiny patch just to meet this preference. `null` keeps the
 entire measured person crop. A fixed ratio can trim other parts of the body.
 `portraits.crop.margin` applies only to face crops. Face identity checks, anchor gates
 and face quality ranking still choose the `face+pose` observation; framing does
@@ -96,6 +105,12 @@ Portrait metadata records the winning `selection_category`.
 The framing upgrade also invalidates old face-framed `face+pose` images: refresh
 with the same command to reframe app-owned portraits without rebuilding identities.
 Cache reuse checks the person geometry and contract as well as the crop kind.
+Head-centred framing also advances the portrait cache policy, so old app-owned
+portraits are reconsidered on the next portrait refresh. No rescan or identity
+rebuild is needed. Metadata records `head_framing` with the horizontal offset and
+reserve reason. A centred retained crop beats an off-centre live thumbnail, and
+the same preference applies when comparing a winner to the previously published
+portrait. Manual images keep their existing protection.
 
 Set `portraits.selection.anchor_only: true` to require the actual portrait face to pass
 the current clustering anchor pose and visibility rules, in addition to its

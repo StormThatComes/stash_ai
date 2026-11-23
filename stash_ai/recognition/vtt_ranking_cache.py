@@ -40,7 +40,7 @@ class Ranking:
 
     def save_scenes(self,ranks):
         by_scene={}
-        for rank in ranks:by_scene.setdefault(rank[2],[]).append(rank)
+        for rank in ranks:by_scene.setdefault(rank[3],[]).append(rank)
         for _,part in self.scene_rankings():part.save(by_scene.get(part.target['scans'][0]['scene'],[]))
 
     def scan_inputs(self,scan):
@@ -119,14 +119,15 @@ class Ranking:
             return None
         try:
             document=json.loads(row[0]);checksum=document.pop('checksum')
-            if document.get('format')!=1 or digest(document)!=checksum:
+            if document.get('format')!=2 or digest(document)!=checksum:
                 return None
             ranks=document['ranks']
-            if not isinstance(ranks,list) or len({rank[4] for rank in ranks})!=len(ranks):
+            if not isinstance(ranks,list) or len({rank[5] for rank in ranks})!=len(ranks):
                 return None
             for rank in ranks:
-                if (len(rank)!=5 or any(type(rank[i]) not in (int,float) or not math.isfinite(rank[i]) for i in (0,1,3))
-                        or not isinstance(rank[2],str) or str(uuid.UUID(rank[4]))!=rank[4]):
+                if (len(rank)!=6 or type(rank[0]) is not int or rank[0] not in (0,1)
+                        or any(type(rank[i]) not in (int,float) or not math.isfinite(rank[i]) for i in (1,2,4))
+                        or not isinstance(rank[3],str) or str(uuid.UUID(rank[5]))!=rank[5]):
                     return None
             if document.get('inputs')!=self.inputs(check_retry=True):
                 return None
@@ -142,7 +143,7 @@ class Ranking:
         inputs=self.inputs(check_retry=True)
         if inputs is None:
             return
-        document=dict(format=1,inputs=inputs,ranks=ranks)
+        document=dict(format=2,inputs=inputs,ranks=ranks)
         document['checksum']=digest(document)
         payload=encoded(document)
         if len(payload.encode())+len(self.key)+256>min(1048576,self.limit):

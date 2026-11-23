@@ -61,7 +61,7 @@ def test_scene_ranking_composes_unchanged_scene_after_another_changes(tmp_path,m
         # Establish per-scene signatures independently from the run-captured matching proof.
         ranks=[]
         for row in state.connection.execute("SELECT id,scene,metadata FROM portraits WHERE json_extract(metadata,'$.score') IS NOT NULL"):
-            m=json.loads(row['metadata']);ranks.append((-m['score'],-m['quality_tiebreak'],row['scene'],m['cue_seconds'],row['id']))
+            m=json.loads(row['metadata']);ranks.append((0,-m['score'],-m['quality_tiebreak'],row['scene'],m['cue_seconds'],row['id']))
         ranking.save_scenes(ranks)
         assert len(ranking.load_scenes())==2
         dirty=next(i['scan'] for i in target['scans'] if i['scene']=='2')
