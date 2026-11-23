@@ -1,6 +1,7 @@
 """Reject blur thresholds whose active pipeline cannot produce semantic masks."""
 
 ALGORITHM = 'foreground-directional-reblur-v1'
+INPUT_SPACE = 'encoder-input-sharpness-v1'
 
 
 def validate(data):

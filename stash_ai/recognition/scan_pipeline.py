@@ -13,6 +13,7 @@ from stash_ai.runtime import shutdown
 
 
 _executor = ContextVar('recognition_pixel_executor', default=None)
+_VISIBILITY_BYTES = 4*256*256*4 + 25*112*112  # FaceOcc, encoder tensor, mask maps.
 
 
 @contextmanager
@@ -200,11 +201,9 @@ def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
     with diagnostics(config.data['detection'].get('quality_diagnostics',False)):
         quality=assess(image,face)
     quality['geometry_contract']=geometry_contract(face,cue)
-    from .pose_policy import measurement_required
     policy=config.data['detection']
-    # Semantic foreground can differ from the ellipse in either direction.
-    # Decide sharpness only after FaceOcc when visibility is being measured.
-    if measurement_required(config):policy=dict(policy,min_sharpness=0.,profile_min_sharpness=0.)
+    # Admission uses the prepared encoder pixels, after optional FaceOcc masks.
+    policy=dict(policy,min_sharpness=0.,profile_min_sharpness=0.)
     floor=policy.get('candidate_score_threshold')
     if floor is not None and face.score<=policy['score_threshold']:
         quality['query_only']=True
@@ -222,47 +221,57 @@ class CueVisibility:
     def measure(self,image,face):return self.values[id(image),id(face)]
 
 
-def cue_visibility(frames,prepared,visibility,config,stage):
+def recognition_pixels(image, entry, backend):
+    """Prepare the real encoder input once; reuse its tensor for inference."""
+    pixels = getattr(backend, 'embedding_pixels', None)
+    if not callable(pixels):return None
+    if entry['tensor'] is None:
+        entry['tensor'] = backend.prepare_embedding(image, entry['face'])
+    return pixels(entry['tensor'])
+
+
+def cue_visibility(frames,prepared,visibility,config,stage,backend=None):
     from .pose_policy import measurement_required
     from .visibility import prepare_measurement,VisibilityGeometryError,VisibilityError
     if not measurement_required(config) or visibility is None:return visibility
-    requests=[(image,e['face']) for (_,_,image),entries in zip(frames,prepared) for e in entries if e['reason'] is None]
+    requests=[(image,e) for (_,_,image),entries in zip(frames,prepared) for e in entries if e['reason'] is None]
     if not requests:return visibility
     values={}
     many=getattr(visibility,'measure_many',None)
     prepared_many=getattr(visibility,'measure_prepared_many',None)
     supports=getattr(visibility,'supports_prepared',None)
     use_prepared=callable(prepared_many) and (not callable(supports) or supports())
-    step=max(1,min(8,stage.limit//(4*256*256*4+4096)))
-    def pixels(image,face):
+    step=max(1,min(8,stage.limit//(_VISIBILITY_BYTES+4096)))
+    def pixels(image,entry):
         try:
-            return prepare_measurement(image, face, config.data['detection']['min_face_source_fraction'])
+            rgb = recognition_pixels(image, entry, backend)
+            return prepare_measurement(image, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb)
         except VisibilityGeometryError as error:
             return error
     for start in range(0,len(requests),step):
         chunk=requests[start:start+step]
         if use_prepared:
             pending=[];inputs=[]
-            for image,face in chunk:
-                if not stage.can_submit(image,extra=4*256*256*4):
+            for image,entry in chunk:
+                if not stage.can_submit(image,extra=_VISIBILITY_BYTES):
                     inputs.extend(f.result() for f in pending);pending=[]
-                pending.append(stage.submit(pixels,image,face,extra=4*256*256*4))
+                pending.append(stage.submit(pixels,image,entry,extra=_VISIBILITY_BYTES))
             inputs.extend(f.result() for f in pending)
             measured=prepared_many(inputs)
-        elif callable(many):measured=many(chunk)
+        elif callable(many):measured=many([(image,entry['face']) for image,entry in chunk])
         else:
             measured=[]
-            for image,face in chunk:
-                try:measured.append(visibility.measure(image,face))
+            for image,entry in chunk:
+                try:measured.append(visibility.measure(image,entry['face']))
                 except VisibilityGeometryError as error:measured.append(error)
         if len(measured)!=len(chunk):raise VisibilityError('Recognition visibility returned an incompatible batch.')
-        values.update(((id(image),id(face)),value) for (image,face),value in zip(chunk,measured))
+        values.update(((id(image),id(entry['face'])),value) for (image,entry),value in zip(chunk,measured))
     return CueVisibility(values)
 
 
 def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False, prepared_records=None):
-    from .quality import sharpness_failed
     """Yield complete face records; caller checkpoints only after the whole cue."""
+    from .quality import sharpness_failed
     from .models import normalized_embedding
     from .pose_policy import measurement_required
     from .visibility import VisibilityError, VisibilityGeometryError, cached
@@ -281,13 +290,20 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
     def visibility_pixels(pixels, entry):
         from .visibility import prepare_measurement
         try:
-            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'])
+            rgb = recognition_pixels(pixels, entry, backend)
+            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb)
         except VisibilityGeometryError as error:
             entry['visibility_input'] = error
         return entry
 
     def align(pixels, entry):
-        entry['tensor'] = prepare_embedding(pixels, entry['face'])
+        if entry['tensor'] is None:
+            entry['tensor'] = prepare_embedding(pixels, entry['face'])
+        if not measurement_required(config) and callable(getattr(backend,'embedding_pixels',None)):
+            from .foreground_quality import face_geometry
+            entry['quality'].update(face_geometry(pixels, entry['face'],
+                recognition_pixels=backend.embedding_pixels(entry['tensor']),
+                diagnostics=config.data['detection'].get('quality_diagnostics',False)))
         return entry
 
     @pipeline_stage('face_crop_encode')
@@ -319,7 +335,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
         return pending
 
     try:
-        with closing((entry for entry in prepared_records) if prepared_records is not None else stage.ordered(prepare, image, enumerate(faces), extra=4*256*256*4 if prepared_visibility else 0), name='close scan preparation') as stream:
+        with closing((entry for entry in prepared_records) if prepared_records is not None else stage.ordered(prepare, image, enumerate(faces), extra=_VISIBILITY_BYTES if prepared_visibility else 0), name='close scan preparation') as stream:
             batch_size = max(1, min(32, max(settings['scan_cpu_workers']*2, settings['recognizer_batch_size']),
                 stage.limit//(3*112*112*4 + config.data['storage']['max_crop_bytes'] + 4096)))
             while batch := list(islice(stream, batch_size)):
@@ -330,7 +346,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                     supports = getattr(visibility,'supports_prepared',None)
                     use_prepared = prepared_visibility and (not callable(supports) or supports())
                     if use_prepared:
-                        with closing(stage.ordered(visibility_pixels,image,visible,extra=4*256*256*4),
+                        with closing(stage.ordered(visibility_pixels,image,visible,extra=_VISIBILITY_BYTES),
                                      name='close visibility preparation') as prepared:
                             visible = list(prepared)
                     for offset in range(0,len(visible),8):
@@ -371,6 +387,9 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                     with closing(stage.ordered(align, image, accepted, extra=3*112*112*4),
                                  name='close face alignment preparation') as aligned:
                         accepted = list(aligned)
+                    for entry in accepted:
+                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']='face_blurred'
+                    accepted = [entry for entry in accepted if entry['reason'] is None]
                     encoded = encode_jobs(batch)
                     step = settings['recognizer_batch_size']
                     if defer_embeddings:
@@ -384,6 +403,9 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                         for entry, value in zip(chunk, vectors):
                             entry['vector'] = normalized_embedding(value, backend.dimensions).astype('<f4').tobytes()
                 else:
+                    for entry in accepted:
+                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']='face_blurred'
+                    accepted = [entry for entry in accepted if entry['reason'] is None]
                     encoded = encode_jobs(batch)
                     for entry in accepted:
                         entry['vector'] = normalized_embedding(backend.embed(image, entry['face']), backend.dimensions).astype('<f4').tobytes()
@@ -487,7 +509,7 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
             faces = sorted(faces, key=lambda face: tuple(face.row))
             faces_by_frame.append(faces)
             retained_faces += len(faces)
-            if len(batch) == 1 or retained_faces*4096 > config.data['execution']['scan_queue_bytes']//4:
+            if len(batch) == 1 or retained_faces*(3*112*112*4+4096) > config.data['execution']['scan_queue_bytes']//4:
                 continue
             prepared[position] = []
             _, cue, image = chunk[offset]
@@ -499,7 +521,7 @@ def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
     while pending:
         consume()
     if all(entries is not None for entries in prepared):
-        visibility = cue_visibility(batch, prepared, visibility, config, stage)
+        visibility = cue_visibility(batch, prepared, visibility, config, stage, backend)
     for position,(index, cue, image) in enumerate(batch):
         faces=faces_by_frame[position]
         values=[]

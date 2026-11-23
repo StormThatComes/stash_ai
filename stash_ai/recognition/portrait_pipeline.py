@@ -228,7 +228,7 @@ class ModelProxy:
         if isinstance(self.model,LazyVisibility) and self.model.factory is FaceVisibility:
             minimum = self.model.config.data['detection']['min_face_source_fraction']
             prepared=[]
-            size=sum(image.width*image.height*3*8 + 1048576 for image,_ in items)
+            size=sum(image.width*image.height*3*8 + 1048576 + 13*112*112 for image,_ in items)
             if self.cpu is not None and len(items)>1 and size<=self.cpu_limit:
                 from .portrait_cpu import visibility_input
                 futures=[]

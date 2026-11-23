@@ -383,13 +383,15 @@ segmentation. Any positive scan/query/anchor sharpness floor requires at least
 one positive face visibility floor; invalid YAML raises an error before work
 starts and identifies the settings to change. Without FaceOcc, ellipse quality
 is diagnostic only because these floors must be disabled. Both use the same
-256px FaceOcc input scale. The directional reblur score ranges from 0 to 100.
+112px aligned recognition input scale. FaceOcc remains 256px; its mask is mapped
+into encoder coordinates without resampling the FaceOcc RGB into an encoder crop.
+The directional reblur score ranges from 0 to 100.
 Complete 15x15 filter footprints touching a mask boundary
 or synthetic padding are excluded, so a sharp occluder/background cannot rescue
 a blurred face when a correct semantic mask is available. No additional model
 inference is introduced. Higher `min_sharpness` values reject more blur; `0`
-disables the gate. The anchor/query sharpness floors and portrait ranking use
-the same measured value. Active portrait sharpness weighting with a positive
+disables the gate. Anchor/query sharpness floors use this encoder-input value;
+portrait ranking retains its separate 256px `portrait_sharpness`. Active portrait sharpness weighting with a positive
 quality target likewise requires visibility weighting, or anchor-only visibility
 measurement. Portrait quality targets remain preferences, not admission gates.
 
@@ -406,8 +408,8 @@ Five landmarks still only approximate the contour; an inaccurate detector box
 or landmark layout can misplace it. Use the outside-ellipse overlay in Face
 visibility to distinguish region errors from segmentation errors.
 
-Visibility and foreground sharpness use the same rotated pixels, oriented
-ellipse and padding checks, with one segmentation pass per face.
+Visibility and foreground sharpness share the same semantic region, mapped to
+their respective model coordinates, with one segmentation pass per face.
 With partial boxes enabled, `face.quality.min_face_source_fraction`
 sets how much of the face ellipse must lie in the VTT cue (default 0.85). Off-frame pixels contribute zero to the visible fraction and are
 excluded from sharpness. Inspect Scene reports the measured source coverage.
@@ -425,7 +427,7 @@ See [sharpness measurement and migration](sharpness.md) for the algorithm,
 noise handling, shared score units and cache refresh.
 The scan/quality contracts change so the next run recomputes face measurements.
 Body foreground sharpness has its own `body.collection.min_sharpness` threshold
-and remains measured at source resolution; face and body scores are not
+and is measured after SapiensID square padding and resize to 384x384; face and body scores are not
 interchangeable.
 
 The created folder contains a `manifest.json` and three PNGs per passing

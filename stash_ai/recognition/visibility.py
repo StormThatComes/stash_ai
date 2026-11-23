@@ -11,7 +11,7 @@ CONTRACT = {'version': 8, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-
             'crop': 'square-face-box-padding-0.25-profile-roll-aligned',
             'region': 'oriented-box-supported-ellipse-0.45w-0.48h-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
-            'sharpness': ALGORITHM}
+            'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1'}
 CONTRACT_ID = digest(CONTRACT)
 TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
 
@@ -187,9 +187,20 @@ def prepare(image, face, *, allow_partial=False):
     return blob, region
 
 
-def prepare_measurement(image, face, minimum_source_fraction):
+class PreparedMeasurement(tuple):
+    """Legacy three-value visibility tuple plus the encoder-coordinate pixels."""
+    def __new__(cls, values, sharpness_input):
+        result = super().__new__(cls, values)
+        result.sharpness_input = sharpness_input
+        return result
+
+
+def prepare_measurement(image, face, minimum_source_fraction, *, recognition_pixels=None):
     """Prepare FaceOcc input only when the source covers the configured fraction of its ellipse."""
-    return prepare_aligned(image, face, minimum_source_fraction)[:3]
+    from .model_input_quality import face_input
+    blob, region, count, affine = prepare_aligned(image, face, minimum_source_fraction)
+    quality = face_input(image, face, affine, recognition_pixels)
+    return PreparedMeasurement((blob, region, count), quality)
 
 
 def ellipse_radii(width, height):
@@ -249,7 +260,7 @@ def foreground_mask(pixel_logits, region, threshold):
     return (pixel_logits > threshold) & region
 
 
-def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD, diagnostics=True):
+def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD, diagnostics=True, sharpness_input=None):
     foreground = foreground_mask(_pixel_logits(logits), region, threshold)
     count = int(region.sum())
     if count <= 0:
@@ -259,6 +270,10 @@ def measurement(logits, region, device, *, blob=None, face_pixels=None, threshol
     if blob is not None:
         from .foreground_quality import face
         result.update(face(blob,foreground,'faceocc_mask',diagnostics=diagnostics))
+        if sharpness_input is not None:
+            from .model_input_quality import faces
+            result['portrait_sharpness'] = result['sharpness']
+            result.update(faces([sharpness_input], foreground[None], diagnostics=diagnostics)[0])
     return result
 
 
@@ -274,7 +289,7 @@ def _counts(visible, source_count, device, face_pixels, threshold):
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
 
-def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD,diagnostics=True):
+def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD,diagnostics=True,sharpness_inputs=None):
     """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
@@ -294,6 +309,14 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,thr
         from .foreground_quality import device_faces
         for result,quality in zip(results,device_faces(inputs,foreground,diagnostics=diagnostics)):
             result.update(quality)
+        if sharpness_inputs is not None:
+            from .model_input_quality import faces
+            selected = [i for i, value in enumerate(sharpness_inputs) if value is not None]
+            qualities = faces([sharpness_inputs[i] for i in selected], foreground[selected], diagnostics=diagnostics, xp=torch) if selected else []
+            for index,quality in zip(selected, qualities):
+                result = results[index]
+                result['portrait_sharpness'] = result['sharpness']
+                result.update(quality)
     return results
 
 
@@ -354,7 +377,7 @@ class FaceVisibility:
         import torch
         if len(prepared)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         result = [None] * len(prepared)
-        blobs, regions, positions, totals = [], [], [], []
+        blobs, regions, positions, totals, quality_inputs = [], [], [], [], []
         for index,item in enumerate(prepared):
             if isinstance(item,VisibilityGeometryError):
                 result[index]=item;continue
@@ -365,6 +388,7 @@ class FaceVisibility:
             regions.append(region)
             positions.append(index)
             totals.append(full_count)
+            quality_inputs.append(getattr(item, 'sharpness_input', None))
         if blobs:
             with torch.inference_mode():
                 inputs=torch.from_numpy(blobs[0] if len(blobs)==1 else np.concatenate(blobs)).to(self.device)
@@ -374,11 +398,12 @@ class FaceVisibility:
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
                     measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i], threshold=self.logit_threshold,
-                                                diagnostics=getattr(self,'diagnostics',False))
+                                                diagnostics=getattr(self,'diagnostics',False), sharpness_input=quality_inputs[i])
                                     for i, region in enumerate(regions)]
                 else:
                     measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals,threshold=self.logit_threshold,
-                                                     diagnostics=getattr(self,'diagnostics',False))
+                                                     diagnostics=getattr(self,'diagnostics',False),
+                                                     sharpness_inputs=quality_inputs)
             for index,value in zip(positions,measurements):result[index]=value
         return result
 

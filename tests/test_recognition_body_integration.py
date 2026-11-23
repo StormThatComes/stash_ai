@@ -142,7 +142,7 @@ def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatc
     c.data['sapiensid']['pose']['backend']='pmpose'
     c.data['sapiensid']['pose']['refinement']['enabled']=True
     c.data['sapiensid']['collection'].update(enabled=True,min_sharpness=0)
-    c.data['sapiensid']['identities'].update(enabled=True,min_appearance_distance=0)
+    c.data['sapiensid']['identities'].update(enabled=True,min_appearance_distance=0,anchor_min_sharpness=1)
     c.data['portraits'].update(enabled=True,kind=kind)
     # Three genuinely distinct crops, not three copies of one input image.
     # Resolved random patches exercise distinct inputs without mistaking white noise for sharpness.

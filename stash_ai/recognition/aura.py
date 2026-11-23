@@ -78,6 +78,10 @@ class AuraFaces(YuNetDetector):
         from .embedding_batches import infer
         return infer(self, tensors)
 
+    def embedding_pixels(self, tensor):
+        """RGB intensities from the exact prepared recognition tensor."""
+        return tensor[0].transpose(1, 2, 0)*127.5+127.5
+
     def embed(self, image, detection):
         return self.embed_prepared_many([self.prepare_embedding(image, detection)])[0]
 

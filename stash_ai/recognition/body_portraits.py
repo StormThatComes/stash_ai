@@ -23,7 +23,7 @@ def eligible(db, config, person, observation):
 def score(quality):
     # Prefer a complete, unobstructed, sharp view before applying portrait framing.
     return (1-quality.get('overlap',0),-quality.get('border_edges',0),
-            min(quality.get('sharpness',0),100),quality.get('keypoints',0),
+            min(quality.get('portrait_sharpness',quality.get('sharpness',0)),100),quality.get('keypoints',0),
             min(quality.get('width',0),quality.get('height',0)))
 
 

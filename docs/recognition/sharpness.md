@@ -31,11 +31,34 @@ Tune these settings separately for faces and bodies:
 - `body.collection.min_sharpness` and `matching.body.anchors.min_sharpness`;
 - `portraits.quality.min_sharpness` (a ranking preference, not admission).
 
-Face measurements still use the 256px upright FaceOcc input; bodies still use
-source-resolution crops. The algorithm and output units match, but their
-different pixel scales and content still justify separate thresholds. Compare
-sharp and blurred **real VTT** examples when choosing floors. Synthetic tests
-verify regressions, not a universal threshold.
+Recognition measurements use the pixels presented to the identity encoder:
+**112x112 aligned face inputs** and **384x384 square-padded SapiensID inputs**.
+Face scanning reuses the prepared encoder tensor, including each recognizer's
+channel order and normalization. SapiensID RGB and support masks share the exact
+float bilinear resize, with no change to its interpolation/antialias settings.
+Pixels are measured in ordinary gray intensity units, before normalization or
+after reversing it; normalized model channels are not interpreted as gray.
+
+The face visibility mask is projected from FaceOcc coordinates into the aligned
+112px input, accounting for rotation, crop placement and pixel-center conventions.
+All bilinear mask contributors must be valid. Body masks undergo the same square
+padding and resize as the model pixels. Synthetic padding, mask holes and encoder
+background-replacement outlines never count as resolved detail. Mask-consumer
+switches remain independent; source pixel minimums remain source pixel minimums.
+
+`sharpness` controls recognition admission and anchor/query gates. The separate
+`portrait_sharpness` retains the existing portrait measurement (256px FaceOcc for
+faces and source crop for bodies), so a good tiny encoder input cannot overwrite
+the larger portrait's quality preference. This does not introduce a new portrait
+rendering/quality algorithm. Legacy records without the separate field retain
+their existing portrait behavior; refreshed observations store both values.
+
+This input-space change requires another threshold calibration and recognition
+rerun even if directional reblur scores were already collected. A small sharp
+source can lose usable detail after enlargement; a larger mildly blurred source
+can become adequate after reduction. Separate face/body thresholds still make
+sense. Compare sharp and blurred **real VTT** examples when choosing floors;
+synthetic tests verify regressions, not a universal threshold.
 
 ## Measurement
 
@@ -62,12 +85,14 @@ supported pixels; flat or noise-only regions have no positive sharpness evidence
 The existing missing-mask policy and `pose.mask.apply_to.sharpness` switch remain.
 
 NumPy and Torch use the same arithmetic. The FaceOcc device path transfers only
-four scalar summaries per image, not image/mask arrays. Noise suppression always
+scalar summaries for visibility and both sharpness scales, not image/mask arrays. Noise suppression always
 runs; `quality_diagnostics` only controls retention of its diagnostic value.
 
 Records include `sharpness_algorithm: foreground-directional-reblur-v1`, the
 measurement region in `sharpness_method`, `sharpness_pixels` (supported centers),
-`sharpness_contrast` and optional `sharpness_noise` (estimated source-gray sigma).
+`sharpness_contrast` and optional `sharpness_noise` (estimated measured-gray sigma).
+Encoder measurements also include `sharpness_space: encoder-input-sharpness-v1`
+and `sharpness_input_size`. Bodies retain source dimensions and the resize scale.
 Face `crop_sharpness` remains the old rectangular Laplacian diagnostic and must
 not be compared with the new thresholds. Body `crop_sharpness`, when a required
 mask is missing, is the new full-crop diagnostic; it cannot admit that body.

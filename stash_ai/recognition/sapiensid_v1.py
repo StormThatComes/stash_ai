@@ -28,23 +28,30 @@ def preprocess(image):
     keypoint transform, body detector or full SapiensID adapter.
     """
     from PIL import Image
-    from torchvision.transforms import InterpolationMode
     from torchvision.transforms import functional as F
     if not isinstance(image, Image.Image) or min(image.size) < 1:
         raise ValueError('SapiensID requires a non-empty PIL image.')
     with image.convert('RGB') as rgb:
         pixels = F.to_tensor(rgb)
+    pixels = square_resize(pixels, fill=1)
+    pixels = F.normalize(pixels, mean=[.5, .5, .5], std=[.5, .5, .5])
+    return pixels.unsqueeze(0).contiguous()
+
+
+def square_resize(pixels, *, fill):
+    """One spatial transform shared by model RGB and sharpness support masks."""
+    from torchvision.transforms import InterpolationMode
+    from torchvision.transforms import functional as F
     _, height, width = pixels.shape
     pad_width, pad_height = max(height-width, 0), max(width-height, 0)
     # The upstream SquarePad applies the asymmetric remainder to right/bottom.
     padding = (pad_width // 2, pad_height // 2,
                pad_width-pad_width // 2, pad_height-pad_height // 2)
     if any(padding):
-        pixels = F.pad(pixels, padding, fill=1, padding_mode='constant')
+        pixels = F.pad(pixels, padding, fill=fill, padding_mode='constant')
     pixels = F.resize(pixels, list(INPUT_SIZE),
                       interpolation=InterpolationMode.BILINEAR, antialias=None)
-    pixels = F.normalize(pixels, mean=[.5, .5, .5], std=[.5, .5, .5])
-    return pixels.unsqueeze(0).contiguous()
+    return pixels
 
 
 def verify_wb4m_checkpoint(path, *, expected_size=WB4M_BYTES, expected_sha256=WB4M_SHA256):

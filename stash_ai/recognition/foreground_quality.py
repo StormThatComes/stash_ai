@@ -45,13 +45,17 @@ def face(blob, mask, method, *, diagnostics=True):
     return dict(measure(gray,mask,diagnostics=diagnostics),sharpness_method=method)
 
 
-def face_geometry(image, detection, *, diagnostics=False):
-    from .visibility import prepare, VisibilityGeometryError
+def face_geometry(image, detection, *, diagnostics=False, recognition_pixels=None):
+    from .visibility import prepare_measurement, VisibilityGeometryError
     try:
-        blob, region = prepare(image,detection,allow_partial=True)
-    except VisibilityGeometryError:
+        prepared = prepare_measurement(image,detection,0., recognition_pixels=recognition_pixels)
+        blob, region, _ = prepared
+    except (VisibilityGeometryError, ValueError):
         return dict(sharpness=0.,sharpness_pixels=0,sharpness_method='unavailable')
-    return face(blob,region,'face_ellipse',diagnostics=diagnostics)
+    from .model_input_quality import faces
+    portrait = face(blob,region,'face_ellipse',diagnostics=diagnostics)
+    return dict(faces([prepared.sharpness_input], region[None], diagnostics=diagnostics)[0],
+                sharpness_method='face_ellipse', portrait_sharpness=portrait['sharpness'])
 
 
 def device_faces(inputs, masks, *, diagnostics=True):

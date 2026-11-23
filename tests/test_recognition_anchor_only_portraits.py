@@ -35,7 +35,9 @@ def qualities(config,poses,*,scene='1',clear_visibility=False):
         rows=db.connection.execute('SELECT o.* FROM observations o JOIN scans s ON s.id=o.scan '
             'WHERE s.scene=? ORDER BY o.cue',(scene,)).fetchall()
         for row,pose in zip(rows,poses):
-            quality=json.loads(row['quality']);quality.update(pose_deviation=pose,sharpness=1 if row['cue']==0 else 1000)
+            quality=json.loads(row['quality'])
+            value=1 if row['cue']==0 else 100
+            quality.update(pose_deviation=pose,sharpness=value,portrait_sharpness=value)
             if clear_visibility:
                 quality.pop('visibility',None);quality.pop('visible_face_fraction',None)
             db.connection.execute('UPDATE observations SET quality=? WHERE id=?',(json.dumps(quality),row['id']))
@@ -63,7 +65,8 @@ def test_anchor_attachment_can_illustrate_its_identity(tmp_path,monkeypatch):
     config=configured(config);assert run(config,services,'1')==0
     qualities(config,[.05,.05,.3])
     with FaceDatabase(config.database) as db:
-        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.sharpness',CASE cue WHEN 0 THEN 2000 ELSE 1 END)")
+        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.sharpness',CASE cue WHEN 0 THEN 100 ELSE 1 END,"
+                              "'$.portrait_sharpness',CASE cue WHEN 0 THEN 100 ELSE 1 END)")
         db.connection.execute("UPDATE candidates SET payload=json_set(payload,'$.reason','historical_view_identity',"
             "'$.reference_role','attachment') WHERE json_extract(payload,'$.observation') IN "
             '(SELECT id FROM observations WHERE cue=0)');db.connection.commit()

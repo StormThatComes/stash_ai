@@ -5,12 +5,16 @@ import numpy as np
 from .body_observations import contract, identifier
 
 
-def _pixels(image,bounds,mask=None, *, measure=True):
+def _pixels(image,bounds,mask=None, *, measure=True, encoder_mask=None):
     left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
         from .blur_quality import measure as measure_sharpness
-        measured=measure_sharpness(values,mask) if measure else None
+        measured=None
+        if measure:
+            from .model_input_quality import body
+            measured=body(rgb,mask,encoder_mask)
+            measured['portrait_sharpness']=measure_sharpness(values,mask)['sharpness']
         pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
             small=np.asarray(thumb)
@@ -28,12 +32,14 @@ def quality(image,person,people,settings):
     foreground = foreground_mask(person)
     masked_sharpness = uses(person, 'sharpness')
     mask = foreground[0] if foreground is not None and masked_sharpness else None
-    # Always measure source pixels: encoder background replacement must not
-    # introduce artificial sharp edges when crop sharpness is selected.
-    if mask is not None:
-        sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask)
+    # Match encoder pixels while excluding synthetic replacement outlines;
+    # the sharpness switch independently selects the measured region.
+    if mask is not None or packed:
+        from .person_geometry import unpack_mask
+        encoder_mask = unpack_mask(packed,right-left,bottom-top) if packed else None
+        sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask,encoder_mask=encoder_mask)
     else:
-        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v3-directional-reblur',[(image,bounds)],
+        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v4-model-input',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     source_pixel_digest = pixel_digest
     if packed:
@@ -41,7 +47,8 @@ def quality(image,person,people,settings):
         with encoder_crop(image,bounds,packed) as crop:
             _,pixel_digest,appearance_hash = _pixels(crop,(0,0,right-left,bottom-top),measure=False)
     if masked_sharpness and mask is None:
-        sharp=dict(crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_pixels=0)
+        sharp=dict(sharp,crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_normalized=0.,
+                   portrait_sharpness=0.,sharpness_pixels=0)
     sharpness=sharp['sharpness']
     sharp['sharpness_method']=('sam_mask' if mask is not None else 'unavailable') if masked_sharpness else 'person_crop'
     from .body_overlap import admission_overlap, measure
