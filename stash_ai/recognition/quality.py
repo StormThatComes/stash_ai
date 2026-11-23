@@ -87,7 +87,7 @@ def assess(image,detection):
     from .inference_cache import many,current
     from .foreground_quality import _diagnostics
     if current() is None:return _assess(image,detection)
-    return many('face_quality',('face-quality-v8-directional-reblur',_diagnostics.get()),[(image,tuple(detection.row))],
+    return many('face_quality',('face-quality-v9-model-input',_diagnostics.get()),[(image,tuple(detection.row))],
         lambda values:[_assess(pixels,detection) for pixels,_ in values])[0]
 
 
@@ -285,6 +285,7 @@ def portrait_components(quality, policy, *, _visibility_valid=None, _numbers=Non
     from .visibility import cached
     number = (lambda name: _number(quality, name)) if _numbers is None else _numbers.__getitem__
     pixels, sharpness, pose = (number(name) for name in ('pixels', 'sharpness', 'pose_deviation'))
+    sharpness = _number(quality,'portrait_sharpness') if 'portrait_sharpness' in quality else sharpness
     exposure = number('exposure')
     middle = (policy['min_exposure'] + policy['max_exposure']) / 2
     spread = max(1., (policy['max_exposure'] - policy['min_exposure']) / 2)
@@ -319,7 +320,7 @@ def portrait_shortfalls(quality, policy, *, _visibility_valid=None, _expression_
     result = []
     for name, missed in (
         ('face_too_small', number('pixels') < policy['min_face_pixels']),
-        ('face_blurred', number('sharpness') < policy['min_sharpness']),
+        ('face_blurred', (_number(quality,'portrait_sharpness') if 'portrait_sharpness' in quality else number('sharpness')) < policy['min_sharpness']),
         ('face_incomplete', not quality.get('complete') or not quality.get('landmarks_inside')),
         ('face_pose', number('pose_deviation') > policy['max_pose_deviation']),
         ('face_exposure', not policy['min_exposure'] <= number('exposure') <= policy['max_exposure']),

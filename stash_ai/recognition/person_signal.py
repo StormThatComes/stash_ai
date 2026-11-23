@@ -179,7 +179,7 @@ def validate(settings, *, detection_preview=False):
 
 def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
              legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
-             legacy_pair_fallback=False,legacy_contact_masks=False,legacy_sharpness=False):
+             legacy_pair_fallback=False,legacy_contact_masks=False,legacy_sharpness=False,legacy_input_sharpness=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -277,6 +277,9 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
             or legacy_drift_mask or legacy_mask_prompts or legacy_pair_fallback):
         from .sharpness_policy import ALGORITHM
         evidence['sharpness_algorithm'] = ALGORITHM
+        if not legacy_input_sharpness:
+            from .sharpness_policy import INPUT_SPACE
+            evidence['sharpness_space'] = INPUT_SPACE
     return digest(evidence)
 
 

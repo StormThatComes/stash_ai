@@ -24,7 +24,7 @@ def measurement_quality(quality, config):
     if 'measurement_basis' in result:
         result['measurement_basis'] = {k: v for k, v in result['measurement_basis'].items() if k != 'visibility'}
     if result.get('sharpness_method') == 'faceocc_mask':
-        result.update(sharpness=0., sharpness_pixels=0, sharpness_method='unavailable')
+        result.update(sharpness=0., portrait_sharpness=0., sharpness_pixels=0, sharpness_method='unavailable')
     return result
 
 
@@ -41,7 +41,7 @@ def ranking_quality(quality, config):
     result.pop('visible_face_fraction', None)
     result['visibility_source_fraction'] = coverage
     if result.get('sharpness_method') == 'faceocc_mask':
-        result.update(sharpness=0., sharpness_pixels=0, sharpness_method='unavailable')
+        result.update(sharpness=0., portrait_sharpness=0., sharpness_pixels=0, sharpness_method='unavailable')
     return result
 
 

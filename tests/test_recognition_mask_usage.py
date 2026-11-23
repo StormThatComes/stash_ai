@@ -112,9 +112,9 @@ def test_pose_pass_and_point_filtering_are_independent(second, filter_points):
     assert result[3][0]['mask_valid']
 
 
-def test_sharpness_uses_source_pixels_independently_of_encoder_mask():
+def test_sharpness_region_is_independent_but_uses_real_encoder_pixels():
     from stash_ai.recognition.body_collection import quality
-    from stash_ai.recognition.blur_quality import measure
+    from stash_ai.recognition.model_input_quality import body
     from tests.test_recognition_body_mask_overlap import person
     mask = np.zeros((32,32), bool); mask[8:24,8:24] = True
     pixels = np.full((32,32), 220, np.uint8); pixels[8:24,8:24] = 80
@@ -124,8 +124,12 @@ def test_sharpness_uses_source_pixels_independently_of_encoder_mask():
     policy = dict(min_person_pixels=1, min_sharpness=1, min_keypoints=1, max_overlap=1)
     with Image.fromarray(pixels).convert('RGB') as image:
         crop, reason = quality(image,item,[item],policy)
-        assert reason is None and crop['sharpness_method'] == 'person_crop'
-        assert crop['sharpness'] == measure(pixels)['sharpness']
+        assert reason == 'person_sharpness' and crop['sharpness_method'] == 'person_crop'
+        assert crop['sharpness'] == body(image,encoder_mask=mask)['sharpness'] == 0
+        item['mask_usage']['body_encoder_input'] = False
+        original, reason = quality(image,item,[item],policy)
+        assert original['sharpness'] == body(image)['sharpness'] > 1 and reason is None
+        item['mask_usage']['body_encoder_input'] = True
         item['mask_usage']['sharpness'] = True
         masked, reason = quality(image,item,[item],policy)
         assert masked['sharpness'] == 0 and reason == 'person_sharpness'

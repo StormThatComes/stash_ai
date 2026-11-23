@@ -362,12 +362,23 @@ class OpenCVFaces(YuNetDetector):
             self.close()
             raise
 
-    def embed(self, image, detection):
+    def prepare_embedding(self, image, detection):
         import numpy as np
-        aligned = self.recognizer.alignCrop(self._bgr(image), np.asarray(detection.row, dtype=np.float32))
+        return self.recognizer.alignCrop(self._bgr(image), np.asarray(detection.row, dtype=np.float32))
+
+    def embedding_pixels(self, aligned):
+        return aligned[:, :, ::-1]
+
+    def _embed_prepared(self, aligned):
         if self.ort_recognizer is not None:
             return self.ort_recognizer.embed(aligned)
         return normalized_embedding(self.recognizer.feature(aligned), self.dimensions)
+
+    def embed_prepared_many(self, tensors):
+        return [self._embed_prepared(tensor) for tensor in tensors]
+
+    def embed(self, image, detection):
+        return self._embed_prepared(self.prepare_embedding(image, detection))
 
     def close(self):
         super().close()

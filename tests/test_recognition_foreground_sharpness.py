@@ -34,19 +34,20 @@ def test_body_mask_ignores_background_without_masking_the_identity_input():
     pixels[mask]=128
     selected=person([0,0,32,32],mask)
     raw=person([0,0,32,32])
-    policy=dict(min_person_pixels=1,min_keypoints=1,min_sharpness=10,max_overlap=1)
+    policy=dict(min_person_pixels=1,min_keypoints=1,min_sharpness=1,max_overlap=1)
     with Image.fromarray(pixels).convert('RGB') as image:
         measured,reason=quality(image,selected,[selected],policy)
         original,missing=quality(image,raw,[raw],policy)
         assert measured['sharpness']==0 and reason=='person_sharpness'
         assert measured['sharpness_method']=='sam_mask' and measured['sharpness_pixels']>0
-        assert original['crop_sharpness']>10 and original['sharpness_method']=='unavailable'
+        assert original['crop_sharpness']>1 and original['sharpness_method']=='unavailable'
         assert original['sharpness']==0 and missing=='person_sharpness_mask_unavailable'
         assert measured['pixel_digest']==original['pixel_digest']
         selected['pose_refinement']['encoder_mask']=selected['pose_refinement']['overlap_mask']
         masked,_=quality(image,selected,[selected],policy)
         assert masked['sharpness']==measured['sharpness']
-        assert masked['sharpness_pixels']==measured['sharpness_pixels']
+        # Encoder replacement excludes its interpolation boundary as well.
+        assert 0 < masked['sharpness_pixels'] <= measured['sharpness_pixels']
 
 
 @pytest.mark.parametrize('kind',['missing','conflict','skipped','empty','thin'])

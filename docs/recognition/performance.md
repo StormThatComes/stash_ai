@@ -201,8 +201,10 @@ For schema upgrades, backup ownership and interrupted histories, see
 
 Face completeness/pose currently use measurable geometry and five-landmark
 ordering/symmetry estimates. They do not prove that every feature is unoccluded.
-Sharpness is measured on a normalized grayscale crop; actual face dimensions,
-exposure and clipping are retained separately.
+Recognition sharpness is measured on the aligned 112px encoder input, with the
+foreground mask projected into those coordinates. Actual source face dimensions,
+exposure and clipping are retained separately; portrait sharpness retains its
+own 256px measurement. See [foreground sharpness](sharpness.md).
 
 ## Rebuild performance diagnostics
 

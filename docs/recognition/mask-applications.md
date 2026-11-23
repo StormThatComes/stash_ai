@@ -30,7 +30,7 @@ live directly under `pose.mask`.
 
 | Application | true | false |
 | --- | --- | --- |
-| `sharpness` | Interior mask sharpness on original source pixels | Full original person-crop sharpness |
+| `sharpness` | Mask interior after SapiensID preprocessing | Full real image area after SapiensID preprocessing |
 | `body_encoder_input` | Neutral background in validated, separated body crops | Original crop pixels |
 | `pose_refinement` | Masked second pose pass and dependent contact recovery | No mask-driven pose re-estimation |
 | `keypoint_filtering` | Per-joint mask ownership/fusion and ownership fallback | Preserve selected pose predictions before ordinary estimator output filters |
@@ -42,7 +42,9 @@ live directly under `pose.mask`.
 `sharpness: false` changes the measurement region; it does not disable the
 threshold. `body.collection.min_sharpness` and `matching.body.anchors.min_sharpness`
 continue to apply. Recalibrate their values when changing measurement regions.
-Encoder background replacement never enters the sharpness measurement.
+Synthetic encoder background outlines and square padding never contribute to
+sharpness. Measurements reflect the actual encoder input; replacing a textured
+background can therefore remove its contribution when full-crop measurement is used.
 Both regions use the [0–100 directional reblur score](sharpness.md); previous
 Laplacian thresholds require recalibration.
 

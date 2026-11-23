@@ -34,7 +34,7 @@ def available(db):
 
 def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
               legacy_mask_overlap=True,legacy_foreground_sharpness=True,legacy_drift_mask=True,legacy_mask_prompts=True,
-              legacy_pair_fallback=False,legacy_contact_masks=True,legacy_sharpness=True):
+              legacy_pair_fallback=False,legacy_contact_masks=True,legacy_sharpness=True,legacy_input_sharpness=True):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
     return digest([version,person_contract(config,legacy_boundaries=legacy_boundaries,
@@ -44,13 +44,13 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,
                                           legacy_drift_mask=legacy_drift_mask, legacy_mask_prompts=legacy_mask_prompts,
                                           legacy_pair_fallback=legacy_pair_fallback,
                                           legacy_contact_masks=legacy_contact_masks,
-                                          legacy_sharpness=legacy_sharpness),settings])
+                                          legacy_sharpness=legacy_sharpness,legacy_input_sharpness=legacy_input_sharpness),settings])
 
 
 def contract(config):
-    return _contract(config,'independent-person-v9-directional-sharpness',legacy_mask_overlap=False,
+    return _contract(config,'independent-person-v10-model-input-sharpness',legacy_mask_overlap=False,
                      legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
-                     legacy_contact_masks=False,legacy_sharpness=False)
+                     legacy_contact_masks=False,legacy_sharpness=False,legacy_input_sharpness=False)
 
 
 def compatible_contracts(config):
@@ -63,7 +63,10 @@ def _previous_contracts(config):
     old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [_contract(config,'independent-person-v8-contact-mask-policy',legacy_mask_overlap=False,
+    return [_contract(config,'independent-person-v9-directional-sharpness',legacy_mask_overlap=False,
+                      legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
+                      legacy_contact_masks=False,legacy_sharpness=False),
+            _contract(config,'independent-person-v8-contact-mask-policy',legacy_mask_overlap=False,
                       legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
                       legacy_contact_masks=False),
             _contract(config,'independent-person-v7-single-shoulder-contact',legacy_mask_overlap=False,

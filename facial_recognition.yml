@@ -32,9 +32,9 @@ face:
     min_face_pixels: 35
     # Minimum shorter face-box side in source thumbnail pixels. Range: 8..4096.
     min_sharpness: 4.0
-    # Minimum foreground reblur sharpness (0..100) at 256px FaceOcc scale; filter footprints exclude mask edges.
-    # Positive values require an active face visibility floor. 0 disables this gate. Recalibrate former
-    # Laplacian thresholds.
+    # Minimum foreground reblur sharpness (0..100) on the aligned 112px recognition input; filter footprints
+    # exclude mask edges. Positive values require an active face visibility floor. 0 disables this gate.
+    # Recalibrate former Laplacian thresholds.
     sharpness_metric: raw
     # Compatibility selector: raw and normalized both use the same contrast/noise-corrected reblur score
     # (0..100). Recalibrate old thresholds; changing this selector no longer changes units.
@@ -236,8 +236,8 @@ pose:
     apply_to:
       # Use validated masks independently in each stage; false selects that stage without masks.
       sharpness: true
-      # Measure sharpness inside the mask (true) or the original full person crop (false). Missing required
-      # masks never fall back to crop sharpness.
+      # Measure sharpness inside the transformed mask (true) or the real full image area (false), after
+      # SapiensID preprocessing. Missing required masks never fall back to crop sharpness.
       body_encoder_input: false
       # Neutralize background pixels for a validated, separated body crop sent to the body encoder.
       # Missing/ineligible masks keep the original crop and are reported.
@@ -331,9 +331,10 @@ body:
     min_person_pixels: 100
     # Minimum shorter body-crop side in source thumbnail pixels. Range: 1..8192.
     min_sharpness: 4.0
-    # Minimum body reblur sharpness (0..100), measured at source resolution. With pose.mask.apply_to.sharpness:
-    # true, positive values require mask.enabled: true and mode: all; missing masks reject the body. False
-    # measures the original full crop. 0 disables this gate. Recalibrate former Laplacian thresholds.
+    # Minimum body reblur sharpness (0..100), measured after square padding and resize to the 384px SapiensID
+    # input. With pose.mask.apply_to.sharpness: true, positive values require mask.enabled: true and mode: all;
+    # missing masks reject the body. False measures the real full input area, excluding padding and synthetic
+    # mask outlines. 0 disables this gate. Recalibrate former Laplacian thresholds.
     min_keypoints: 3
     # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
     max_overlap: 0.65
@@ -602,9 +603,9 @@ portraits:
     min_face_pixels: 90
     # Preferred shorter face-box side in source pixels; 0 removes this target penalty. Range: 0..4096.
     min_sharpness: 4
-    # Preferred minimum face-foreground reblur sharpness (0..100) at 256px input scale. Positive values with
-    # sharpness weighting require FaceOcc via visibility weighting or anchor-only visibility; lower-quality
-    # faces remain eligible.
+    # Preferred minimum portrait_sharpness (0..100) at 256px FaceOcc scale, separate from the recognition input
+    # score. Positive values with sharpness weighting require FaceOcc via visibility weighting or anchor-only
+    # visibility; lower-quality faces remain eligible.
     min_visible_face_fraction: 0.9
     # Preferred visible face fraction; 0 removes the extra target penalty. Range: 0..1.
     max_pose_deviation: 0.5

@@ -100,6 +100,10 @@ class OnnxEmbeddingFaces(YuNetDetector):
         from .embedding_batches import infer
         return infer(self, tensors)
 
+    def embedding_pixels(self, tensor):
+        pixels = tensor[0].transpose(1, 2, 0)*127.5+127.5
+        return pixels if CONTRACTS[self.recognizer_key]['color']=='RGB' else pixels[:, :, ::-1]
+
     def embed(self, image, detection):
         return self.embed_prepared_many([self.prepare_embedding(image, detection)])[0]
 
