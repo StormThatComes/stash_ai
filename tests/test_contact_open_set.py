@@ -5,12 +5,16 @@ from stash_ai.recognition.body_collection import _pixels
 
 
 def test_foreground_edges_do_not_create_sharpness():
-    mask=np.zeros((12,12),dtype=bool)
-    mask[3:9,3:9]=True
+    # Keep room for the complete reblur footprint inside the foreground. The
+    # unmasked square has real edges; its constant masked interior has none.
+    mask=np.zeros((96,96),dtype=bool)
+    mask[24:72,24:72]=True
     pixels=np.where(mask,35,127).astype('uint8')
     with Image.fromarray(pixels) as image:
-        assert _pixels(image,(0,0,12,12))[0]['sharpness']>0
-        assert _pixels(image,(0,0,12,12),mask)[0]['sharpness']==0
+        assert _pixels(image,(0,0,96,96))[0]['sharpness']>0
+        quality=_pixels(image,(0,0,96,96),mask)[0]
+        assert quality['sharpness_pixels']>0
+        assert quality['sharpness']==0
 
 
 def test_absent_query_uses_a_threshold_learned_on_another_scene():

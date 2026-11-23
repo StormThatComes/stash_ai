@@ -165,7 +165,9 @@ def test_drift_keeps_only_owned_quality_mask_and_applies_directional_overlap(bat
     collection.update(min_person_pixels=1, min_sharpness=1, min_keypoints=1, max_overlap=.65)
     scan = '00000000-0000-0000-0000-000000000001'
     rng = np.random.default_rng(11)
-    with Image.fromarray(rng.integers(0, 256, (64,64,3), dtype=np.uint8)) as image:
+    # Preserve sharp foreground structure; white noise is no longer sharpness evidence.
+    pixels = rng.integers(0, 256, (8,8,3), dtype=np.uint8).repeat(8,0).repeat(8,1)
+    with Image.fromarray(pixels) as image:
         output = driver.predict(image, boxes)
         people = model._people(boxes, [.99,.99], *output)
         drift = people[1]['pose_refinement']

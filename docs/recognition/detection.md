@@ -383,7 +383,8 @@ segmentation. Any positive scan/query/anchor sharpness floor requires at least
 one positive face visibility floor; invalid YAML raises an error before work
 starts and identifies the settings to change. Without FaceOcc, ellipse quality
 is diagnostic only because these floors must be disabled. Both use the same
-256px FaceOcc input scale. Laplacian samples touching a mask boundary
+256px FaceOcc input scale. The directional reblur score ranges from 0 to 100.
+Complete 15x15 filter footprints touching a mask boundary
 or synthetic padding are excluded, so a sharp occluder/background cannot rescue
 a blurred face when a correct semantic mask is available. No additional model
 inference is introduced. Higher `min_sharpness` values reject more blur; `0`
@@ -419,7 +420,9 @@ usable landmarks; it does not recover a face that the detector never found.
 Quality records include `sharpness_method` (`faceocc_mask`, `face_ellipse`, or
 `unavailable`), `sharpness_pixels`, and the previous rectangular measurement as
 `crop_sharpness` for comparison. These scores differ from the old 112px crop
-variance; existing thresholds may need recalibration on representative frames.
+variance; all existing thresholds require recalibration on representative frames.
+See [sharpness measurement and migration](sharpness.md) for the algorithm,
+noise handling, shared score units and cache refresh.
 The scan/quality contracts change so the next run recomputes face measurements.
 Body foreground sharpness has its own `body.collection.min_sharpness` threshold
 and remains measured at source resolution; face and body scores are not

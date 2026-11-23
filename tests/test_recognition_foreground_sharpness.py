@@ -30,7 +30,7 @@ def blob_from_gray(gray):
 def test_body_mask_ignores_background_without_masking_the_identity_input():
     from stash_ai.recognition.body_collection import quality
     mask=np.indices((32,32))[1]<16
-    pixels=(np.indices((32,32)).sum(axis=0)%2*200+25).astype('uint8')
+    pixels=((np.indices((32,32))//4).sum(axis=0)%2*200+25).astype('uint8')
     pixels[mask]=128
     selected=person([0,0,32,32],mask)
     raw=person([0,0,32,32])
@@ -210,8 +210,8 @@ def test_face_scan_and_portrait_policies_refresh_even_without_faceocc(tmp_path):
     data['portraits']['weights']['visibility']=0
     config=replace(config,data=data)
     old_scan=digest(dict(namespace='ns',detection=data['detection'],
-        max_cues=data['execution']['max_cues'],quality_format=3,visibility_contract=None))
+        max_cues=data['execution']['max_cues'],quality_format=8,visibility_contract=None))
     assert scan_identity(config,'ns')!=old_scan
-    old_portrait=dict(_policy_value(config),version=8)
+    old_portrait=dict(_policy_value(config),version=11)
     assert old_portrait['visibility_contract'] is None
     assert policy_identity(config)!=digest(old_portrait)

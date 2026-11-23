@@ -145,7 +145,8 @@ def test_faceless_run_publishes_once_and_reuses_model_inputs(tmp_path,monkeypatc
     c.data['sapiensid']['identities'].update(enabled=True,min_appearance_distance=0)
     c.data['portraits'].update(enabled=True,kind=kind)
     # Three genuinely distinct crops, not three copies of one input image.
-    pixels=np.random.default_rng(2).integers(0,255,(160,480,3),dtype='uint8')
+    # Resolved random patches exercise distinct inputs without mistaking white noise for sharpness.
+    pixels=np.random.default_rng(2).integers(0,255,(20,60,3),dtype='uint8').repeat(8,0).repeat(8,1)
     with Image.fromarray(pixels) as img:out=BytesIO();img.save(out,'PNG');sprite=out.getvalue()
     vtt=('WEBVTT\n\n'+'\n\n'.join(f'00:00:0{i}.000 --> 00:00:0{i+1}.000\nsprite.jpg#xywh={i*160},0,160,160' for i in range(3))).encode()
     get=client.get

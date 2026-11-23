@@ -179,7 +179,7 @@ def validate(settings, *, detection_preview=False):
 
 def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
              legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
-             legacy_pair_fallback=False,legacy_contact_masks=False):
+             legacy_pair_fallback=False,legacy_contact_masks=False,legacy_sharpness=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -272,6 +272,11 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
         # must not make previously collected contracts impossible to identify.
         for mask in (evidence.get('pose_mask', {}), evidence.get('pose_refiner', {}).get('refinement', {})):
             mask.pop('mask_contact_confirmation', None)
+    if not (legacy_sharpness or legacy_contact_masks or legacy_boundaries or legacy_association
+            or legacy_mask_quality or legacy_mask_overlap or legacy_foreground_sharpness
+            or legacy_drift_mask or legacy_mask_prompts or legacy_pair_fallback):
+        from .sharpness_policy import ALGORITHM
+        evidence['sharpness_algorithm'] = ALGORITHM
     return digest(evidence)
 
 

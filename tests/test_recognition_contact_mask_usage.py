@@ -104,7 +104,7 @@ def test_contracts_refresh_current_proofs_and_preserve_pre_switch_hashes(tmp_pat
     config = replace(config,data=data)
     old_data = deepcopy(data)
     old_data['sapiensid']['pose']['refinement'].pop('mask_contact_confirmation')
-    old_person = person_contract(SimpleNamespace(data=old_data))
+    old_person = person_contract(SimpleNamespace(data=old_data), legacy_sharpness=True)
     collection = deepcopy(data['sapiensid']['collection']); collection.pop('enabled')
     old = digest(['independent-person-v7-single-shoulder-contact',old_person,collection])
     before = deepcopy(config.data)

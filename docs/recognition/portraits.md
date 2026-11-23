@@ -389,7 +389,7 @@ minimums/maximums now describe preferred quality rather than eligibility:
 | Portrait setting | Default | Effect on ranking |
 | --- | ---: | --- |
 | `min_face_pixels` | 96 | Extra resolution penalty below the preferred shorter face-box side; 0 removes this penalty |
-| `min_sharpness` | 25 | Extra sharpness penalty below the preferred Laplacian variance; 0 removes this penalty |
+| `min_sharpness` | 25 | Extra sharpness penalty below the preferred foreground reblur score (0–100; recalibrate old thresholds); 0 removes this penalty |
 | `max_pose_deviation` | 0.35 | Increasing penalty above the preferred five-landmark pose estimate |
 | `min_exposure`, `max_exposure` | 30, 225 | Favor mean brightness near the center of the preferred range |
 | `max_clipped_fraction` | 0.15 | Extra exposure penalty above the preferred fraction of near-black/white pixels |

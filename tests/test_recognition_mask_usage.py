@@ -114,7 +114,7 @@ def test_pose_pass_and_point_filtering_are_independent(second, filter_points):
 
 def test_sharpness_uses_source_pixels_independently_of_encoder_mask():
     from stash_ai.recognition.body_collection import quality
-    from stash_ai.recognition.foreground_quality import laplacian
+    from stash_ai.recognition.blur_quality import measure
     from tests.test_recognition_body_mask_overlap import person
     mask = np.zeros((32,32), bool); mask[8:24,8:24] = True
     pixels = np.full((32,32), 220, np.uint8); pixels[8:24,8:24] = 80
@@ -125,7 +125,7 @@ def test_sharpness_uses_source_pixels_independently_of_encoder_mask():
     with Image.fromarray(pixels).convert('RGB') as image:
         crop, reason = quality(image,item,[item],policy)
         assert reason is None and crop['sharpness_method'] == 'person_crop'
-        assert crop['sharpness'] == laplacian(pixels)['sharpness']
+        assert crop['sharpness'] == measure(pixels)['sharpness']
         item['mask_usage']['sharpness'] = True
         masked, reason = quality(image,item,[item],policy)
         assert masked['sharpness'] == 0 and reason == 'person_sharpness'

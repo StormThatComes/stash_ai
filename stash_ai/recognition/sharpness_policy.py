@@ -1,5 +1,7 @@
 """Reject blur thresholds whose active pipeline cannot produce semantic masks."""
 
+ALGORITHM = 'foreground-directional-reblur-v1'
+
 
 def validate(data):
     from .pose_policy import anchor_visibility

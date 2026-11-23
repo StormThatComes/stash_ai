@@ -9,8 +9,8 @@ def _pixels(image,bounds,mask=None, *, measure=True):
     left,top,right,bottom=bounds
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb, rgb.convert('L') as gray:
         values=np.asarray(gray,dtype=np.float32)
-        from .foreground_quality import laplacian
-        measured=laplacian(values,mask) if measure else None
+        from .blur_quality import measure as measure_sharpness
+        measured=measure_sharpness(values,mask) if measure else None
         pixel_digest=hashlib.sha256(str(rgb.size).encode('ascii')+rgb.tobytes()).hexdigest()
         with gray.resize((9,8)) as thumb:
             small=np.asarray(thumb)
@@ -33,7 +33,7 @@ def quality(image,person,people,settings):
     if mask is not None:
         sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask)
     else:
-        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v2-quality-count',[(image,bounds)],
+        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v3-directional-reblur',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     source_pixel_digest = pixel_digest
     if packed:

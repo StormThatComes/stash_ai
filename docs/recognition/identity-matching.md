@@ -21,7 +21,7 @@ progress, and includes `observations_rejected` in its summary, including reused 
 | `face.quality` setting | Built-in default | Meaning |
 | --- | ---: | --- |
 | `min_face_pixels` | 32 | Minimum shorter face-box side in source pixels |
-| `min_sharpness` | 10 | Minimum Laplacian variance on the normalized grayscale crop; 0 disables |
+| `min_sharpness` | 10 | Minimum foreground directional reblur score (0–100); 0 disables; recalibrate old thresholds |
 | `max_pose_deviation` | 0.50 | Maximum five-landmark pose estimate in `[0, 1]`; `null` disables this gate |
 | `min_visible_face_fraction` | 0.80 | Minimum FaceOcc visible-face estimate in `[0, 1]`; 0 disables recognition segmentation |
 | `faceocc_logit_threshold` | 0.0 | Strict per-pixel FaceOcc cutoff used for visible area and masked sharpness |
@@ -46,7 +46,7 @@ Recognition visibility is independent of `portraits.enabled` and
 a required recognition asset. Missing/invalid assets or failed/invalid measurements
 fail the scene without publishing its partial scan; completed cue checkpoints
 remain resumable on a later explicit run. An unavailable measurement never counts
-as an uncovered face. Cheap size/sharpness/geometry gates run before segmentation.
+as an uncovered face. Size/geometry gates run before segmentation; masked sharpness is checked after it.
 A lazy visibility model is reused within each active phase (or across phases in
 `retain` mode); accepted VTT observations retain the raw measurement so portrait
 ranking does not repeat it.
