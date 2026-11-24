@@ -1,4 +1,4 @@
-"""Opt-in numeric SCRFD retry evidence; never retain source pixels or model tensors."""
+"""Opt-in numeric detector retry evidence; never retain source pixels or model tensors."""
 from contextlib import contextmanager
 from contextvars import ContextVar
 from types import SimpleNamespace

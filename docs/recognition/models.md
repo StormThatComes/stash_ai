@@ -3,6 +3,7 @@
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
 - [SCRFD five-landmark detector choices](#scrfd-five-landmark-detector-choices)
+- [Optional RetinaFace detector comparison](#optional-retinaface-detector-comparison)
 - [Alternative ONNX face recognizers (research weights)](#alternative-onnx-face-recognizers-research-weights)
 - [Optional AuraFace recognizer](#optional-auraface-recognizer)
 - [Device policy](#device-policy)
@@ -11,7 +12,7 @@
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release
-also supports SCRFD-2.5G KPS and the explicitly selected legacy YuNet.
+also supports SCRFD-2.5G KPS, the explicitly selected legacy YuNet and RetinaFace-R50.
 Switching detectors changes the recognition namespace, prevents reuse of
 old scan/embedding evidence for that detector, and triggers a new scan;
 it does **not** delete historical embeddings or identities.
@@ -20,7 +21,7 @@ it does **not** delete historical embeddings or identities.
 version: 2
 face:
   detector:
-    backend: scrfd_10g  # default; alternatives: scrfd_2_5g, yunet
+    backend: scrfd_10g  # alternatives: scrfd_2_5g, yunet, retinaface_r50
   recognizer:
     backend: lvface_b  # or adaface_ir50, auraface, sface
 execution:
@@ -51,6 +52,49 @@ The `recognition audit-alignment` command now uses the detector named in
 YAML configurations and **different new output directories**. Compare
 actual landmark positions and 112px aligned crops on same-person and
 different-person cues, not only face detection benchmark scores.
+
+## Optional RetinaFace detector comparison
+
+`face.detector.backend: retinaface_r50` selects RetinaFace with a ResNet-50
+backbone and its own prior-box decoder. It returns a face box and the same
+five landmark positions consumed by the existing recognizers. The current
+recognizer and pose estimator remain independently selectable.
+
+```yaml
+face:
+  detector:
+    backend: retinaface_r50
+```
+
+Choose `retinaface_r50` in **Tune Detection → face.detector.backend** and press
+Detect on the same cue used for the SCRFD/YuNet comparison. Compare the nose,
+eyes and mouth positions against the actual image and the independently measured
+pose points; a higher detection score alone does not establish better landmarks.
+Keep the remaining settings fixed for the first comparison. Scores are not
+calibrated between detector families. No improvement on horizontal profiles is
+assumed without checking those images.
+
+The selected weights download automatically through the existing model installer:
+[yakhyo/uniface-weights](https://huggingface.co/yakhyo/uniface-weights), revision
+`cbe2dcc059a4a4e36b786c30b06975efcc28039b`, file `retinaface_r50.onnx`,
+109,458,344 bytes (about 109 MB). Size and SHA-256 are verified before loading.
+The distributor identifies the R50 model as an export from HivisionIDPhotos;
+see the [model notes](https://yakhyo.github.io/uniface/models/) and
+[RetinaFace paper/code](https://github.com/deepinsight/insightface/tree/master/detection/retinaface).
+
+Inference uses the existing ONNX Runtime CPU/CUDA selection, without new runtime
+packages. Inputs preserve aspect ratio in a 640×640 canvas, pad on the right/bottom,
+and subtract the BGR mean `(104,117,123)`. Box and landmark coordinates both use the
+actual resized width/height when mapping back to the source. The adapter processes
+one image per model call to bound activation memory.
+
+Local alignment retries, rotated landmark repair, numeric audit traces and
+pose-guided missing-face recovery are supported. The rotation option retains
+its existing requirement for enabled body collection. Switching detector changes
+the evidence namespace, so recognition needs a fresh scan for the selected scenes;
+Tune Detection performs fresh inference without modifying recognition state.
+The actual-weight smoke checks a pinned public-domain portrait, its 90°/270°
+rotations and non-square blank frames; it is not a difficult-profile accuracy benchmark.
 
 ## Alternative ONNX face recognizers (research weights)
 

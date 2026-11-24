@@ -51,6 +51,10 @@ ASSETS = {
     'yunet': Asset('opencv/face_detection_yunet', '3cc26e7f1014a5ee5d74a42acee58bafc9d0a310',
                    'face_detection_yunet_2023mar.onnx',
                    '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4', 232589, 'MIT'),
+    'retinaface_r50': Asset('yakhyo/uniface-weights', 'cbe2dcc059a4a4e36b786c30b06975efcc28039b',
+                            'retinaface_r50.onnx',
+                            '905eac744dc165dbcd62960938a191de3fecea6bef198fb1c5e13e690bc6a828',
+                            109458344, 'MIT'),
     'sface': Asset('opencv/face_recognition_sface', '3d7082438a6e4551e840c9b2bb60b71e8da4b524',
                    'face_recognition_sface_2021dec.onnx',
                    '0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79', 38696353,
@@ -242,11 +246,14 @@ class YuNetDetector:
         self.device = 'cpu'
         settings = config.data['detection']
         # Preserve the legacy YuNet interface used by all four recognizers.
-        # SCRFD uses a separate nine-output adapter without OpenCV DNN inference.
+        # ONNX detectors own independent preprocessing and output decoders.
         key = config.data['models']['detector']
         if key != 'yunet':
-            from .scrfd import ScrfdDetector
-            self.ort_detector = ScrfdDetector(config, paths, runtime_info=runtime_info)
+            if key == 'retinaface_r50':
+                from .retinaface import RetinaFaceDetector as Detector
+            else:
+                from .scrfd import ScrfdDetector as Detector
+            self.ort_detector = Detector(config, paths, runtime_info=runtime_info)
             self.detector = None
             self.detector_device = self.ort_detector.device
             self.provenance = {'opencv': cv2.__version__, 'detector_device': self.detector_device,

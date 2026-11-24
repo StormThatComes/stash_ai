@@ -11,7 +11,7 @@ from .detection_parameters import apply_edits
 PMPOSE_SWITCHES = ('pose.deduplication.enabled',)
 
 CHOICES = {
-    'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet'),
+    'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet', 'retinaface_r50'),
     'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo', 'rtmo'),
     'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo', 'rtmo'),
     'pose.estimator.sapiens.variant': ('0.3b', '0.6b', '1b'),

@@ -154,8 +154,8 @@ def test_pinned_expression_task_associates_mesh_and_scores_public_domain_portrai
         model.close()
 
 
-@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned SCRFD ONNX model smoke')
-@pytest.mark.parametrize('detector_key', ['scrfd_10g', 'scrfd_2_5g'])
+@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned ONNX detector smoke')
+@pytest.mark.parametrize('detector_key', ['scrfd_10g', 'scrfd_2_5g', 'retinaface_r50'])
 def test_pinned_scrfd_onnx_kps_cpu_smoke(tmp_path, detector_key):
     """Run the actual pinned 640px model, not just synthetic decoder fixtures."""
     import numpy as np
@@ -180,3 +180,47 @@ def test_pinned_scrfd_onnx_kps_cpu_smoke(tmp_path, detector_key):
                                for detection in detections)
     finally:
         backend.close()
+
+
+@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned RetinaFace image smoke')
+def test_pinned_retinaface_landmarks_on_public_domain_portrait(tmp_path):
+    import hashlib
+    from io import BytesIO
+    import requests
+    import numpy as np
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.models import ensure_assets, YuNetDetector
+    from stash_ai.recognition.quality import alignment_measurements
+    with requests.get('https://raw.githubusercontent.com/matplotlib/matplotlib/v3.10.1/lib/matplotlib/mpl-data/sample_data/grace_hopper.jpg', timeout=30) as response:
+        response.raise_for_status();data=response.content
+    assert hashlib.sha256(data).hexdigest()=='a8ca6d734765703b09728ab47fe59f473d93ae3967fc24c7c0288c3c7adb7130'
+    path=tmp_path/'retinaface.yml'
+    path.write_text('version: 2\nface: {detector: {backend: retinaface_r50, score_threshold: 0.55}}\nexecution: {gpu: {device: cpu}}\n')
+    config=load(path)
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    settings=plain(config.data)
+    settings['detection']['pose_guided_rotation']=True
+    settings['sapiensid']['enabled']=True
+    settings['sapiensid']['collection']['enabled']=True
+    config=replace(config,data=settings)
+    backend=YuNetDetector(config,ensure_assets(config,keys=['retinaface_r50']))
+    try:
+        with Image.open(BytesIO(data)) as image:
+            faces=backend.detect(image)
+            assert len(faces)==1
+            assert alignment_measurements(faces[0],image)['alignment_valid']
+            # A genuine positive sample catches channel, anchor, scale and
+            # output-order errors that a blank-image smoke cannot detect.
+            reference=np.array([[227,193],[308,195],[266,240],[229,268],[302,270]])
+            assert np.max(np.linalg.norm(np.asarray(faces[0].landmarks)-reference,axis=1))<20
+            from stash_ai.recognition.rotated_faces import restore
+            upright=faces[0]
+            for transpose,ccw in ((Image.Transpose.ROTATE_90,True),(Image.Transpose.ROTATE_270,False)):
+                with image.transpose(transpose) as turned:
+                    faces=backend.detect(turned)
+                    assert len(faces)==1 and alignment_measurements(faces[0],turned)['alignment_valid']
+                    restored=restore(faces[0],(0,0,*image.size),ccw)
+                    assert np.max(np.linalg.norm(np.asarray(restored.landmarks)-upright.landmarks,axis=1))<20
+    finally:backend.close()
