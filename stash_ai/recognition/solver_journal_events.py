@@ -17,6 +17,12 @@ def apply(document, event):
             apply(document, item)
     elif kind == 'schedule':
         document.setdefault('schedule', []).append(event['entry'])
+    elif kind == 'budget':
+        budgets = document.setdefault('budgets', [document['signature']['settings']['maximum']])
+        value = event['maximum']
+        if type(value) is not int or value <= budgets[-1]:
+            raise ValueError('Invalid solver journal budget extension.')
+        budgets.append(value)
     elif kind in ('task', 'raw'):
         document.setdefault('tasks' if kind == 'task' else 'raw_results', {})[event['name']] = event['entry']
     elif kind == 'record':

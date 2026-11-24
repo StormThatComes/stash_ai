@@ -202,7 +202,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_profiles import anchor_rule_profiles, profiles
     from .merge_solver_report import observation_locations, trim_completed
     locations = observation_locations(goals) if compact_report or getattr(progress, 'show_winner', False) else {}
-    rule_profiles = anchor_rule_profiles(config)[:candidate_budget-1] if compare_anchor_rules else ()
+    all_rule_profiles = anchor_rule_profiles(config) if compare_anchor_rules else ()
+    rule_profiles = all_rule_profiles[:max(0, candidate_budget-1)]
     search_limit = candidate_budget - len(rule_profiles)
     tightening = Tightener(config)
     from .merge_goal_output import configuration_document
@@ -234,6 +235,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
         journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,strict=strict,stop_on_stagnation=stop_on_stagnation,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
+    budget_history = journal.budgets if journal else (maximum,)
+    initial_budget = budget_history[0] - int(compare_input)
+    rule_profiles = all_rule_profiles[:max(0, initial_budget-1)]
+    search_limit = initial_budget - len(rule_profiles)
     replay_selection = replay_scope, scans, inputs
     from .merge_solver_feasibility import Feasibility, resource_limit
     from collections import deque
@@ -444,7 +449,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     scene_trials = {}
     finalists = []
     def stream():
-        nonlocal search, bidirectional, stop_reason, retire
+        nonlocal search, bidirectional, stop_reason, retire, search_limit, rule_profiles
         trials, attempts, probes_attempted = 1, 0, 0
         previous_name, previous_changes = 'baseline', {}
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
@@ -605,164 +610,188 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             while any(n not in summaries and n not in failures for runs in scene_trials.values() for n in runs):
                 yield None
             request.independent = False
-        while trials < search_limit and attempts < search_limit * 100:
-            reserve = allowance(search_limit, changes_for(best),
-                feedback[best]['provenance']['active_parameters'])
-            if summaries[best]['fully_solved']:
-                if tightening_reserve is None:
-                    # A solution found during polishing also deserves the
-                    # remaining budget, instead of inheriting a stale stop.
-                    polishing, stop_reason = None, None
-                    tightening_reserve = min(reserve, (search_limit-trials)//4)
-                reserve = min(reserve, tightening_reserve)
-            target = (targeted.next(best, feedback[best], changes_for(best))
-                      if polishing is None and not summaries[best]['fully_solved'] else None)
-            if summaries[best]['fully_solved'] and polishing is None and trials < search_limit-reserve:
+        for epoch, total_budget in enumerate(budget_history):
+            if epoch:
+                previous_limit = search_limit
+                rule_profiles = all_rule_profiles[:max(0, total_budget-int(compare_input)-1)]
+                search_limit = total_budget - int(compare_input) - len(rule_profiles)
+                search.extend(search_limit)
+                # Retain the alternate frontier and its consumed streams while
+                # permitting another bounded allowance of experiments.
+                if bidirectional.enabled:
+                    complexity = sum(max(1, len(g['members'])-1) for g in goals['groups'])
+                    bidirectional.budget += min(64, 8+4*complexity, max(0, search_limit-previous_limit))
+                normal_exhausted = False
+                polishing = tightening_reserve = stop_reason = None
+                request.independent = False
+            while trials < search_limit and attempts < search_limit * 100:
+                reserve = allowance(search_limit, changes_for(best),
+                    feedback[best]['provenance']['active_parameters'])
+                if summaries[best]['fully_solved']:
+                    if tightening_reserve is None:
+                        # A solution found during polishing also deserves the
+                        # remaining budget, instead of inheriting a stale stop.
+                        polishing, stop_reason = None, None
+                        tightening_reserve = min(reserve, (search_limit-trials)//4)
+                    reserve = min(reserve, tightening_reserve)
+                target = (targeted.next(best, feedback[best], changes_for(best))
+                          if polishing is None and not summaries[best]['fully_solved'] else None)
+                if summaries[best]['fully_solved'] and polishing is None and trials < search_limit-reserve:
+                    try:
+                        phase, parent, strategy, changes = tightening.next(best, changes_for(best),
+                            dict(feedback[best], options=options))
+                        parent_changes = changes_for(parent)
+                        family = 'hybrid' if any(k.startswith(PERSON_PREFIX) and
+                            changes.get(k, parameter(config.data,k)) != parent_changes.get(k, parameter(config.data,k))
+                            for k in changes.keys() | parent_changes.keys()) else 'face'
+                    except StopIteration:
+                        if pending_search:
+                            # A parallel batch may be awaiting the very boundary
+                            # needed for the next proposal. Drain results, then retry.
+                            yield None
+                            continue
+                        stop_reason = 'tightening_frontier_exhausted'
+                        polishing = Polisher(config, min(reserve, search_limit-trials))
+                elif target is not None:
+                    changes, strategy = target['patch'], target['route']
+                    family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
+                    phase, parent = 'targeted', best
+                elif (probes and probes_attempted < probe_budget
+                        and not any(s['construction']['merged'] for s in summaries.values())):
+                    strategy, changes = probes.popleft()
+                    family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
+                    phase, parent = 'feasibility', 'baseline'
+                elif polishing is None and trials < search_limit-reserve:
+                    period = cadence(search.operators.get('tpe', {}), 5)
+                    tpe_due = (learned and not normal_exhausted and trials >= BASELINE_WARMUP and
+                        (trials % period == 0 if sampled_for is None else trials-sampled_for >= period))
+                    alternate = (bidirectional.next(trials, feedback, solved=summaries[best]['fully_solved'],
+                        force=normal_exhausted, interval=cadence(search.lanes.get('bidirectional', {}), 2))
+                        if not tpe_due and (alternate_streak < 2 or normal_exhausted) else None)
+                    try:
+                        if tpe_due:
+                            sampled_for=trials
+                            history=[({c['parameter']:c['proposed'] for c in patches.get(n,{}).get('changes',())},
+                                      ranking(n)) for n in ranks]
+                            active=feedback[best]['provenance']['active_parameters']
+                            changes=learned.suggest(config,history,options,active,trials)
+                            family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
+                            phase,parent,strategy='adaptive',best,'tpe'
+                        elif alternate is not None:
+                            family, phase, parent, strategy, changes = alternate
+                        elif normal_exhausted:
+                            raise StopIteration
+                        else:
+                            family, phase, parent, strategy, changes = search.next()
+                    except StopIteration:
+                        if pending_search:
+                            # Completed workers may introduce new parents, blockers
+                            # or a solution. Do not close the generator before them.
+                            yield None
+                            continue
+                        if not normal_exhausted:
+                            normal_exhausted = True
+                            continue  # Finish the bounded alternate frontier before stopping.
+                        stop_reason=search.stop_reason
+                        polishing = Polisher(config, min(reserve, search_limit-trials))
+                else:
+                    if polishing is None:
+                        if pending_search:
+                            yield None
+                            continue
+                        polishing = Polisher(config, min(reserve, search_limit-trials))
+                if polishing is not None:
+                    try:
+                        phase, parent, strategy, changes = polishing.next(best,
+                            sorted(ranks,key=ranking,reverse=True), changes_for, feedback)
+                    except StopIteration:
+                        if pending_search:
+                            yield None
+                            continue
+                        stop_reason=stop_reason or 'polishing_complete'
+                        break
+                    family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
+                attempts += 1
                 try:
-                    phase, parent, strategy, changes = tightening.next(best, changes_for(best),
-                        dict(feedback[best], options=options))
-                    parent_changes = changes_for(parent)
-                    family = 'hybrid' if any(k.startswith(PERSON_PREFIX) and
-                        changes.get(k, parameter(config.data,k)) != parent_changes.get(k, parameter(config.data,k))
-                        for k in changes.keys() | parent_changes.keys()) else 'face'
-                except StopIteration:
-                    if pending_search:
-                        # A parallel batch may be awaiting the very boundary
-                        # needed for the next proposal. Drain results, then retry.
-                        yield None
-                        continue
-                    stop_reason = 'tightening_frontier_exhausted'
-                    polishing = Polisher(config, min(reserve, search_limit-trials))
-            elif target is not None:
-                changes, strategy = target['patch'], target['route']
-                family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
-                phase, parent = 'targeted', best
-            elif (probes and probes_attempted < probe_budget
-                    and not any(s['construction']['merged'] for s in summaries.values())):
-                strategy, changes = probes.popleft()
-                family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
-                phase, parent = 'feasibility', 'baseline'
-            elif polishing is None and trials < search_limit-reserve:
-                period = cadence(search.operators.get('tpe', {}), 5)
-                tpe_due = (learned and not normal_exhausted and trials >= BASELINE_WARMUP and
-                    (trials % period == 0 if sampled_for is None else trials-sampled_for >= period))
-                alternate = (bidirectional.next(trials, feedback, solved=summaries[best]['fully_solved'],
-                    force=normal_exhausted, interval=cadence(search.lanes.get('bidirectional', {}), 2))
-                    if not tpe_due and (alternate_streak < 2 or normal_exhausted) else None)
+                    changes = normalize(config, changes)
+                    if strict_policy:
+                        candidates = strict_policy.repairs(config, changes)
+                        if not candidates:
+                            search.rejected(family, strategy)
+                            continue
+                        changes = candidates[0]
+                except ValueError:
+                    search.rejected(family,strategy)
+                    continue
+                patch = proposal(config, changes)
+                fingerprint = digest(patch['yaml_patch'])
+                if not patch['changes'] or fingerprint in seen:
+                    search.rejected(family,strategy)
+                    continue
+                seen.add(fingerprint)
                 try:
-                    if tpe_due:
-                        sampled_for=trials
-                        history=[({c['parameter']:c['proposed'] for c in patches.get(n,{}).get('changes',())},
-                                  ranking(n)) for n in ranks]
-                        active=feedback[best]['provenance']['active_parameters']
-                        changes=learned.suggest(config,history,options,active,trials)
-                        family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
-                        phase,parent,strategy='adaptive',best,'tpe'
-                    elif alternate is not None:
-                        family, phase, parent, strategy, changes = alternate
-                    elif normal_exhausted:
-                        raise StopIteration
-                    else:
-                        family, phase, parent, strategy, changes = search.next()
-                except StopIteration:
-                    if pending_search:
-                        # Completed workers may introduce new parents, blockers
-                        # or a solution. Do not close the generator before them.
-                        yield None
-                        continue
-                    if not normal_exhausted:
-                        normal_exhausted = True
-                        continue  # Finish the bounded alternate frontier before stopping.
-                    stop_reason=search.stop_reason
-                    polishing = Polisher(config, min(reserve, search_limit-trials))
-            else:
-                if polishing is None:
-                    if pending_search:
-                        yield None
-                        continue
-                    polishing = Polisher(config, min(reserve, search_limit-trials))
-            if polishing is not None:
-                try:
-                    phase, parent, strategy, changes = polishing.next(best,
-                        sorted(ranks,key=ranking,reverse=True), changes_for, feedback)
-                except StopIteration:
-                    if pending_search:
-                        yield None
-                        continue
-                    stop_reason=stop_reason or 'polishing_complete'
-                    break
-                family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
-            attempts += 1
-            try:
-                changes = normalize(config, changes)
-                if strict_policy:
-                    candidates = strict_policy.repairs(config, changes)
-                    if not candidates:
-                        search.rejected(family, strategy)
-                        continue
-                    changes = candidates[0]
-            except ValueError:
-                search.rejected(family,strategy)
-                continue
-            patch = proposal(config, changes)
-            fingerprint = digest(patch['yaml_patch'])
-            if not patch['changes'] or fingerprint in seen:
-                search.rejected(family,strategy)
-                continue
-            seen.add(fingerprint)
-            try:
-                variant = patched(config, changes)
-            except ValueError:
-                search.rejected(family,strategy)
-                continue
-            if (scan_identity(variant, goals['namespace']) != scan_identity(config, goals['namespace']) or
-                    not same_contract(config, variant)):
-                search.rejected(family,strategy)
-                continue
-            name = f'trial-{trials}'
-            normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
-            transitions[name] = transition(previous_name, previous_changes, normalized)
-            patches[name] = patch
-            families[name] = family
-            origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
-            mechanism = max((item for item in feedback.get(parent, {}).get('mechanisms', {}).get('plans', ())
-                              if strategy == 'mechanism_plan' and all(
-                                  normalized.get(k, parameter(config.data, k)) == v for k,v in item['patch'].items())),
-                            key=lambda item:len(item['patch']), default=None)
-            if mechanism:
-                origins[name]['search_mechanism'] = {k:v for k,v in mechanism.items() if k != 'patch'}
-            if phase == 'targeted':
-                origins[name]['search_target'] = {k:v for k,v in target.items() if k != 'patch'}
-            pending_search[name] = normalized, family, phase, parent, strategy
-            if polishing is not None:
-                polishing.completed(phase)
-            yield name, variant
-            previous_name, previous_changes = name, normalized
-            trials += 1
-            probes_attempted += int(phase == 'feasibility')
-            targeted.executed += int(phase == 'targeted')
-        if stop_reason is None:
-            stop_reason = 'max_trials' if trials >= search_limit else 'proposal_limit'
-        if rule_profiles:
-            # Finish all numeric trials before choosing one common control for the comparisons.
-            while pending_search:
-                yield None
-            from .pose_anchor_rules import PARAMETER
-            parent = best
-            request.independent = True
-            for profile, rules in rule_profiles:
-                changes = changes_for(parent) | {PARAMETER: rules}
-                variant = patched(config, changes)
-                if strict_policy and strict_policy.violations(variant, record=True):
+                    variant = patched(config, changes)
+                except ValueError:
+                    search.rejected(family,strategy)
+                    continue
+                if (scan_identity(variant, goals['namespace']) != scan_identity(config, goals['namespace']) or
+                        not same_contract(config, variant)):
+                    search.rejected(family,strategy)
                     continue
                 name = f'trial-{trials}'
-                patches[name] = proposal(config, changes)
-                transitions[name] = transition(previous_name, previous_changes, changes)
-                origins[name] = dict(search_phase='anchor_rules', search_parent=parent, search_strategy=profile)
-                families[name] = 'hybrid'
+                normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
+                transitions[name] = transition(previous_name, previous_changes, normalized)
+                patches[name] = patch
+                families[name] = family
+                origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
+                mechanism = max((item for item in feedback.get(parent, {}).get('mechanisms', {}).get('plans', ())
+                                  if strategy == 'mechanism_plan' and all(
+                                      normalized.get(k, parameter(config.data, k)) == v for k,v in item['patch'].items())),
+                                key=lambda item:len(item['patch']), default=None)
+                if mechanism:
+                    origins[name]['search_mechanism'] = {k:v for k,v in mechanism.items() if k != 'patch'}
+                if phase == 'targeted':
+                    origins[name]['search_target'] = {k:v for k,v in target.items() if k != 'patch'}
+                pending_search[name] = normalized, family, phase, parent, strategy
+                if polishing is not None:
+                    polishing.completed(phase)
                 yield name, variant
+                previous_name, previous_changes = name, normalized
                 trials += 1
-                previous_name, previous_changes = name, changes
+                probes_attempted += int(phase == 'feasibility')
+                targeted.executed += int(phase == 'targeted')
+            if rule_profiles:
+                # Finish all numeric trials before choosing one common control for the comparisons.
+                while pending_search:
+                    yield None
+                from .pose_anchor_rules import PARAMETER
+                parent = best
+                request.independent = True
+                for profile, rules in rule_profiles:
+                    changes = changes_for(parent) | {PARAMETER: rules}
+                    variant = patched(config, changes)
+                    if strict_policy and strict_policy.violations(variant, record=True):
+                        continue
+                    patch = proposal(config, changes)
+                    key = digest(patch['yaml_patch'])
+                    if not patch['changes'] or key in seen:
+                        continue
+                    seen.add(key)
+                    name = f'trial-{trials}'
+                    patches[name] = patch
+                    transitions[name] = transition(previous_name, previous_changes, changes)
+                    origins[name] = dict(search_phase='anchor_rules', search_parent=parent, search_strategy=profile)
+                    families[name] = 'hybrid'
+                    pending_search[name] = changes_for(name), 'hybrid', 'anchor_rules', parent, profile
+                    yield name, variant
+                    trials += 1
+                    previous_name, previous_changes = name, changes
+            # Close an epoch only after every result is incorporated. This
+            # also reconstructs the original parallel schedule before extension.
+            while pending_search:
+                yield None
+            if stop_reason is None:
+                stop_reason = 'max_trials' if trials >= search_limit else 'proposal_limit'
     def saved_baseline(state):
         if 'baseline_delta' in state:
             from .solver_slot_index import apply_baseline
@@ -964,7 +993,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             search=dict(scene_finalists={k:{c['parameter']:c['proposed'] for c in input_patch(
                             max((n for n in scene_trials[k] if n in ranks),key=ranking))['changes']}
                                          for k in finalists},scene_families_tested=len(scene_trials),
-                        max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']) + int('input_control' in result),restored_trials=restored_count + int(control_restored),
+                        max_trials=maximum,budget_history=list(budget_history),sampler=sampler_metadata, executed=len(result['trials']) + int('input_control' in result),restored_trials=restored_count + int(control_restored),
                         recovered_evaluations=sum(bool(t.get('recovered_evaluation')) for items in
                             (result['trials'], failures) for n,t in items.items() if n not in restored_names),
                         attempted=len(result['trials'])+len(failures) + int('input_control' in result), failed_trials=len(failures),

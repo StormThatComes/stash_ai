@@ -378,7 +378,7 @@ def parser():
         help='Solver JSON detail for --output or stdout (default: compact). Use full for raw per-observation evidence.')
     merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')
     merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')
-    merge_report.add_argument('--resume', action='store_true', help='Resume --checkpoint with identical inputs, code and search settings.')
+    merge_report.add_argument('--resume', action='store_true', help='Resume --checkpoint with identical inputs, code and search settings; --max-trials may be increased.')
     merge_report.add_argument('--simulate', action='store_true',
         help='Replay baseline and proposals on all latest compatible scenes in this scope, in private RAM.')
     report = commands.add_parser('report', allow_abbrev=False,

@@ -1,5 +1,7 @@
 """Comparable mutation sizes and parameter-space diversity."""
 from .merge_report_policy import parameter
+from collections.abc import Mapping
+from .config import digest
 
 
 def scale(key, current):
@@ -17,6 +19,8 @@ def magnitude(changes):
 
 def signature(changes, config=None):
     def value(key,v):
+        if isinstance(v, (Mapping, list, tuple)):
+            return ('structured', digest(v))
         current=parameter(config.data,key) if config else v
         return round(float(v)/scale(key,current)/.02) if type(v) in (int,float) else v
     return tuple((k,value(k,v)) for k,v in sorted(changes.items()))

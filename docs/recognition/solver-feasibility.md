@@ -184,9 +184,28 @@ Resume with the same command plus `--resume`. Keep both the manifest and trial
 directory. The solver reconstructs its frontier, seen proposals and operator
 statistics from the journal; completed production replays are not repeated.
 It verifies all retained database tables, goals, input configuration, code and
-search settings first. Changed code, evidence, parameters or budgets require a new
-checkpoint. JSON report `--output` still requires a new path; omit it during
+search settings first. Changed code, evidence or parameters require a new
+checkpoint. The replay budget may stay equal or increase; reducing the last
+requested `--max-trials` is rejected. JSON report `--output` still requires a new path; omit it during
 resumable work or choose a new report filename on each invocation.
+
+
+To add work after interruption or a completed partial search, repeat the command
+with `--resume --max-trials 1000` (for example, after an original limit of 500).
+The new value is the total budget including previously completed and failed
+attempts, not an additional count. Completed production trials are restored;
+unfinished trials without a durable result still need evaluation.
+
+The checkpoint records a monotonic budget history. It reconstructs each earlier
+search epoch with its original limit, including dispatch/retirement order,
+reserved polishing, candidate deduplication, intermediate milestones and restart
+streams. Outstanding results are drained before the next epoch. This preserves
+completed configurations even though warmup, patience and phase reserves depend
+on the budget. A run interrupted before its old ceiling first finishes that
+epoch, then uses the extension. `search.budget_history` reports the limits.
+The retained streams and best completed winner survive each extension; exhausted
+candidates or unavailable evidence can still prevent further useful trials.
+Checkpoints created before this code change require a fresh solve.
 
 The manifest is committed before the winner file, so resume can finish an
 interrupted winner update. Checkpoints retain diagnostics and observation IDs,

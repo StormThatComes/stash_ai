@@ -115,6 +115,7 @@ def hybrid_neighbours(config, changes, options, measured):
 def refinement(config, changes, options):
     """Small local probes and reversions after useful coarse progress stops."""
     from .merge_solver_domains import registry
+    from .config import digest
     domains=registry(config)
     streams = []
     for key, current in sorted(changes.items()):
@@ -131,7 +132,7 @@ def refinement(config, changes, options):
                 step = .005 if current <= 1 else max(1., abs(current)*.01)
                 values += [round(max(0., current+sign*step/divisor), 6)
                            for divisor in (1, 2, 5) for sign in (-1, 1)]
-        streams.append([dict(changes, **{key:value}) for value in dict.fromkeys(values)
+        streams.append([dict(changes, **{key:value}) for value in {digest(v): v for v in values}.values()
                         if value != current])
     yield from interleave(streams)
 
@@ -170,6 +171,7 @@ class BeamSearch:
         self.last_parent = None
         self.operators = {}
         self.restarts = 0
+        self.early_restart_limit = 1
         self.restart_pending = None
         self.restart_executed = 0
         self.restart_allowance = 8
@@ -321,7 +323,7 @@ class BeamSearch:
         return self.restart_alternatives | ({'baseline': self.baseline} if self.baseline else {}) | self.beam
 
     def _restart(self):
-        if self.stop_on_stagnation and self.restarts >= 1:
+        if self.stop_on_stagnation and self.restarts >= self.early_restart_limit:
             return False
         parents = self._restart_parents()
         self.restart_streams = {n: s for n, s in self.restart_streams.items() if n in parents}
@@ -353,6 +355,18 @@ class BeamSearch:
         self.plateau_restarted = True
         self.restart_pending = chain((first,), pending)
         return True
+
+    def extend(self, maximum):
+        """Continue existing streams after an authorized budget extension."""
+        self.maximum = maximum
+        self.patience = max(24, min(64, maximum//4))
+        self.early_restart_limit = self.restarts + 1
+        self.stop_reason = None
+        self.refining = False
+        self.refinements.clear()
+        self.restart_pending = None
+        self.stale = 0
+        self.plateau_restarted = False
 
     def _plateau_finished(self, reason):
         if self.stop_on_stagnation:

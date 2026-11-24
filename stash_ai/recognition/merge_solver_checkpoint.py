@@ -61,6 +61,26 @@ def fingerprint(config,goals,db,settings):
                 database=str(config.database.resolve()),config_path=str(config.source_path))
 
 
+def resume_budgets(document, signature):
+    """Only a monotonic replay-budget increase may change a search signature."""
+    from copy import deepcopy
+    old, new = deepcopy(document['signature']), deepcopy(signature)
+    before = old.get('settings', {}).pop('maximum', None)
+    after = new.get('settings', {}).pop('maximum', None)
+    if old != new or type(before) is not type(after):
+        raise ValueError('Solver checkpoint is incompatible with retained inputs, config, goals, code or search settings.')
+    if before is None:
+        return []
+    budgets = list(document.get('budgets', [before]))
+    if (type(before) is not int or type(after) is not int or not budgets or budgets[0] != before or
+            any(type(n) is not int or n < 1 for n in budgets) or
+            any(b <= a for a, b in zip(budgets, budgets[1:]))):
+        raise ValueError('Invalid solver checkpoint budget history.')
+    if after < budgets[-1]:
+        raise ValueError('Solver checkpoint is incompatible with a smaller max_trials; keep or increase the last budget.')
+    return budgets
+
+
 class Journal:
     def __init__(self,path,signature,*,resume=False,winner=None):
         from contextlib import ExitStack
@@ -105,8 +125,7 @@ class Journal:
             raw=self.path.read_bytes()
             from .solver_journal_events import read
             self.document, sequence, previous, valid_bytes = read(self.path)
-            if self.document['signature']!=signature:
-                raise ValueError('Solver checkpoint is incompatible with retained inputs, config, goals, code or search settings.')
+            budgets = resume_budgets(self.document, signature)
             self.file=AtomicFile(self.path,sha(raw))
             saved=self.document.get('winner')
             if saved is None and winner is not None and winner.expected is not None:
@@ -127,12 +146,22 @@ class Journal:
             self.file=AtomicFile(self.path)
             self.directory.mkdir()  # Existing journals are never silently overwritten.
             self.document=dict(signature=signature,records=[],winner=None)
+            budgets = [signature['settings']['maximum']] if 'maximum' in signature.get('settings', {}) else []
+            if budgets:
+                self.document['budgets'] = budgets
             from .solver_journal_events import Events
             self.events = Events(self)
             self.file.write(json.dumps(self.document,allow_nan=False))
         if resume:
             from .solver_journal_events import Events
             self.events = Events(self, resume=True, state=(sequence,previous,valid_bytes) if self.document.get('journal_format') == 1 else None)
+            if budgets:
+                self.document.setdefault('budgets', budgets)
+                requested = signature['settings']['maximum']
+                if requested > budgets[-1]:
+                    self.events.append(dict(kind='budget', maximum=requested))
+                    self.document['budgets'].append(requested)
+        self.budgets = tuple(self.document.get('budgets', ()))
 
     def flush_snapshot(self):
         self.document['journal_applied'] = self.events.sequence
