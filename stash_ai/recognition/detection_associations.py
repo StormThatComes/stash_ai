@@ -67,6 +67,8 @@ def _references(prefix, indices):
 
 def face_label(index, face, match, explanation):
     title = f'F{index} {face.score:.3f} -> ' + (f'P{match}' if match is not None else 'unmatched')
+    if not getattr(face, 'landmarks_available', True):
+        title += '\nlandmarks unavailable'
     reason = explanation['reason']
     if reason is None:
         return title

@@ -461,21 +461,28 @@ normal preprocessing. Crop-local
 points are restored to cue coordinates; the full-frame face box and score are
 preserved. The crop result must match the same head and pass the existing
 confidence, ownership and alignment checks, including alignment with the original
-box. It need not improve the original similarity-fit residual: that residual
-alone cannot distinguish an accurate constellation from a translated one.
+box. Full-frame landmarks are discarded: they neither select crop orientations
+nor set the crop's alignment threshold (normalized fit error at most 0.20).
+They remain available only in the audit's `original` diagnostic record.
 
 The default `false` preserves the existing conditional retry behavior described
 below. `true` adds one crop inference per face; when existing rotation recovery
-is enabled, rolled or uncertain faces can use up to four crop orientations. It
+is enabled, every face uses all four crop orientations. It
 does not enable rotation recovery by itself or introduce a separate landmark
-model. A missing, invalid or ambiguous crop result leaves the original points
-intact. This mode can change context and effective face resolution but is not a
+model. A missing, invalid or ambiguous crop result retains the box and score but
+marks all five landmarks unavailable (`[-1, -1]`). There is no full-frame
+landmark fallback. Tune Detection and Inspect Scene show the box without points
+and label the missing landmarks; recognition rejects that face as
+`face_landmarks_invalid` before embedding or FaceOcc inference. This mode can
+change context and effective face resolution but is not a
 guarantee of improved accuracy on extreme profiles.
 
 The setting is available under `face.detector` in Tune Detection. Press **Detect**
 again to compare it on the same cue. Recognition uses the same detector path;
 rerun the affected scenes and refresh Inspect Scene to view the new measurements.
-Changing this setting invalidates face inference and scan identities, while
+The crop-only policy invalidates older `true` face inference and scan identities,
+including cached full-frame fallback points. Changing this setting also invalidates
+face inference and scan identities, while
 `false` retains compatibility with existing results from before the option.
 
 With `face.detector.pose_guided_rotation: true`, SCRFD and RetinaFace retry already detected

@@ -19,10 +19,12 @@ face:
     max_faces_per_frame: 100
     # Maximum face detections processed per VTT thumbnail. Range: 1..1000.
     landmarks_from_facebox: false
-    # Re-estimate five landmarks for every detected face on a crop with 25% box margin using the selected
-    # detector. Preserve the original box and score; keep the original points if the crop has no reliable,
-    # unambiguous match. Works with SCRFD, RetinaFace and YuNet without body collection. Adds a crop inference
-    # per face; existing rotation retries may add more. false preserves the existing retry policy. Boolean.
+    # Use only five landmarks re-estimated on a crop with 25% box margin using the selected detector. Preserve
+    # the original box and score; if the crop has no reliable, unambiguous match, landmarks are unavailable and
+    # the face cannot supply an embedding. Never fall back to full-frame points or use them to choose crop
+    # rotations or acceptance. Works with SCRFD, RetinaFace and YuNet without body collection. Adds one crop
+    # inference per face, or four when existing rotation recovery is enabled. false preserves the existing retry
+    # policy. Boolean.
     pose_guided_rotation: true
     # Repair rolled/suspect SCRFD or RetinaFace faces before encoding and recover missing faces from pose.
     # Unknown one-eye orientation tries up to four quarter turns. Requires SCRFD or RetinaFace and body

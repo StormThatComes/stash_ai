@@ -166,6 +166,8 @@ def render(image, geometry, layers=None, *, database=None):
         color = COLORS[kind]
         if shape.get('context') and not shape['selected']:color=tuple(c//2 for c in color)
         mask_label = ''
+        if kind == 'face' and points == [[-1., -1.]] * 5:
+            mask_label = ' · landmarks unavailable'
         if kind == 'body' and layers.get('masks'):
             transform = (1/sx, 0, left-box[0], 0, 1/sy, top-box[1])
             mask_label = ' · ' + _draw_mask(annotated, data, masks.get(shape.get('id'), (None, None, None)), transform)

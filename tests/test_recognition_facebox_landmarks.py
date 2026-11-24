@@ -1,4 +1,4 @@
-"""Optional crop measurements preserve full-frame boxes and source coordinates."""
+"""Crop-only measurements preserve full-frame boxes, never full-frame points."""
 from contextlib import closing
 from types import SimpleNamespace
 
@@ -104,7 +104,8 @@ def test_scrfd_facebox_content_keeps_fixed_anchors_and_exact_source_scale(shape)
 
 
 @pytest.mark.parametrize('failure', ['empty', 'different_head', 'competing_head', 'ambiguous', 'weak', 'invalid'])
-def test_failed_or_ambiguous_crop_keeps_original_and_records_reason(failure):
+@pytest.mark.parametrize('key', ['scrfd_10g', 'scrfd_2_5g', 'retinaface_r50', 'yunet'])
+def test_failed_or_ambiguous_crop_clears_points_and_records_reason(failure, key):
     original = shifted(PROFILE, -7)
     target = PROFILE
     faces = [original]
@@ -117,13 +118,16 @@ def test_failed_or_ambiguous_crop_keeps_original_and_records_reason(failure):
     if failure == 'invalid': target = shifted(PROFILE, -70)
     answers = [] if failure == 'empty' else [project(target, CROP, 0)]
     if failure == 'ambiguous': answers *= 2
-    model, _ = model_for('scrfd_10g', faces, answers)
-    with audit.capture() as reports:
-        result = model.detect(np.zeros((300, 300, 3), np.uint8))
-    assert result == faces
+    model, _ = model_for(key, faces, answers)
+    with audit.capture() as reports, Image.new('RGB', (300, 300)) as image:
+        result = model.detect(image if key == 'yunet' else np.asarray(image))
+    assert result == [face.without_landmarks() for face in faces]
+    assert all(not face.landmarks_available for face in result)
     trace = reports[0]['faces'][0]
     assert trace['status'] == 'no_eligible_candidate'
-    assert trace['result'] == trace['original']
+    assert trace['result']['landmarks'] == [[-1., -1.]] * 5
+    assert trace['original']['landmarks'] == [list(p) for p in original.landmarks]
+    assert trace['result']['box'] == trace['original']['box']
 
 
 def test_crop_points_must_also_fit_preserved_original_box():
@@ -133,7 +137,7 @@ def test_crop_points_must_also_fit_preserved_original_box():
     target = checked_detection([62,60,60,100,64,85,92,86,82,100,80,125,94,125,.99])
     model, _ = model_for('scrfd_10g', [original], [project(target, CROP, 0)])
     with audit.capture() as reports:
-        assert model.detect(np.zeros((300, 300, 3), np.uint8)) == [original]
+        assert model.detect(np.zeros((300, 300, 3), np.uint8)) == [original.without_landmarks()]
     attempt = reports[0]['faces'][0]['attempts'][0]
     assert attempt['candidates'][0]['rejection'] == 'invalid_original_box_alignment'
 

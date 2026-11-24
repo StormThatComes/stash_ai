@@ -371,7 +371,7 @@ HELP.update({
 
 HELP.update({
  'face.detector.candidate_score_threshold': 'Optional lower SCRFD/RetinaFace candidate floor; detections below score_threshold can query identities but cannot seed face anchors. Null disables. Range: 0..score_threshold.',
- 'face.detector.landmarks_from_facebox': 'Re-estimate five landmarks for every detected face on a crop with 25% box margin using the selected detector. Preserve the original box and score; keep the original points if the crop has no reliable, unambiguous match. Works with SCRFD, RetinaFace and YuNet without body collection. Adds a crop inference per face; existing rotation retries may add more. false preserves the existing retry policy. Boolean.',
+ 'face.detector.landmarks_from_facebox': 'Use only five landmarks re-estimated on a crop with 25% box margin using the selected detector. Preserve the original box and score; if the crop has no reliable, unambiguous match, landmarks are unavailable and the face cannot supply an embedding. Never fall back to full-frame points or use them to choose crop rotations or acceptance. Works with SCRFD, RetinaFace and YuNet without body collection. Adds one crop inference per face, or four when existing rotation recovery is enabled. false preserves the existing retry policy. Boolean.',
  'face.detector.alignment_retry_error': 'Retry one local SCRFD/RetinaFace crop when normalized alignment error exceeds this value or landmarks lie outside the box. 0 disables this error-triggered retry; landmarks_from_facebox requests crops for all faces and pose_guided_rotation controls rotated retries. Range: 0..1.',
 })
 

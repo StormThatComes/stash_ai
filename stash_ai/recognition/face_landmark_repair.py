@@ -8,7 +8,7 @@ from .models import checked_detection
 
 
 BOX_TOLERANCE = .05
-FACEBOX_CONTRACT = 'facebox-landmarks-v1'
+FACEBOX_CONTRACT = 'facebox-landmarks-v2-crop-only'
 
 
 def box_consistent(face):
@@ -71,7 +71,11 @@ def candidate_rejection(other, candidate, original, peers, turn, error, spatial,
     if not quality['alignment_valid']:
         return 'invalid_alignment', quality
     new_error = quality.get('alignment_error', 1.)
-    if spatial or rotate or from_facebox:
+    if from_facebox:
+        # Raw full-frame points must not set the crop's acceptance threshold.
+        if new_error > .20:
+            return 'alignment_error', quality
+    elif spatial or rotate:
         if new_error > max(.20, error):
             return 'alignment_error', quality
     elif new_error >= error:
@@ -91,17 +95,29 @@ def repair(detector, images, found):
         audit.finish(traces, found)
         return found
     requests = []
+    # In crop-only mode the full-frame pass supplies boxes and scores, never
+    # fallback landmarks. Empty/failed/ambiguous retries retain this sentinel.
+    result = [[face.without_landmarks() if from_facebox else face for face in faces]
+              for faces in found]
     for frame, (pixels, faces) in enumerate(zip(images, found, strict=True)):
         for index, face in enumerate(faces):
-            turn = quarter_turn(face) if rotation else 0
-            spatial = not box_consistent(face)
-            rotate = rotation and (turn != 0 or spatial)
-            if not from_facebox and not rotate and not threshold:
-                continue
-            quality = alignment_measurements(face)
-            error = quality.get('alignment_error', 1.)
-            if not from_facebox and not rotate and not (threshold and (error > threshold or spatial)):
-                continue
+            if from_facebox:
+                # Do not let the discarded points choose or exclude rotations.
+                turn, error, spatial, rotate = None, 0., False, rotation
+                turns = (0, 1, 2, 3) if rotation else (0,)
+            else:
+                turn = quarter_turn(face) if rotation else 0
+                spatial = not box_consistent(face)
+                rotate = rotation and (turn != 0 or spatial)
+                if not rotate and not threshold:
+                    continue
+                quality = alignment_measurements(face)
+                error = quality.get('alignment_error', 1.)
+                if not rotate and not (threshold and (error > threshold or spatial)):
+                    continue
+                # Out-of-box points cannot reliably choose their own repair
+                # orientation. Keep the measured turn as a diagnostic hint.
+                turns = (0, 1, 2, 3) if rotation and (spatial or turn is None) else (turn,)
             x, y, w, h = face.box
             box = (max(0, math.floor(x-.25*w)), max(0, math.floor(y-.25*h)),
                    min(pixels.shape[1], math.ceil(x+1.25*w)), min(pixels.shape[0], math.ceil(y+1.25*h)))
@@ -109,18 +125,12 @@ def repair(detector, images, found):
                 if traces is not None:
                     traces[frame][index]['status'] = 'empty_crop'
                 continue
-            # Out-of-box landmarks cannot reliably choose their own repair
-            # orientation. Keep the measured turn only as a diagnostic hint.
-            turns = (0, 1, 2, 3) if rotation and (spatial or turn is None) else (turn,)
-            if from_facebox and 0 not in turns:
-                turns = (0, *turns)
             if traces is not None:
                 traces[frame][index].update(status='no_eligible_candidate',
                     estimated_turn_degrees=None if turn is None else turn*90,
                     crop_xyxy=list(box), tried_turn_degrees=[n*90 for n in turns])
             for degrees in turns:
                 requests.append((frame, index, box, degrees, error, spatial, rotate))
-    result = [list(faces) for faces in found]
     candidates = {}
     infer = (getattr(detector, '_raw_facebox_many', detector._raw_many)
              if from_facebox else detector._raw_many)

@@ -320,8 +320,9 @@ The following options are opt-in until validated on held-out VTT cues:
 - `face.detector.alignment_retry_error`: one local landmark-repair attempt per face.
 - `face.detector.landmarks_from_facebox`: opt-in crop-based landmark measurement
   for every face, preserving the original box and score. Compare point accuracy
-  and added inference time on the same cues; failed/ambiguous crops retain the
-  original points and report their rejection reasons in the detection audit.
+  and added inference time on the same cues; failed/ambiguous crops mark landmarks
+  unavailable and report their rejection reasons in the detection audit. No
+  full-frame points are reused, and those faces cannot supply embeddings.
 - `matching.body.identities.correct_contact_face_links`: independent clean endpoints
   may correct a body link and demote its body anchor, with reversible derived proof.
 - `matching.body.identities.defer_contact_births` and `contact_birth_support`.
