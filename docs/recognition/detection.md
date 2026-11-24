@@ -455,8 +455,10 @@ rolled faces and spatially inconsistent landmarks before face embeddings or body
 collection consume them. The existing option still requires SCRFD and enabled
 body collection. It does not depend on `alignment_retry_error`: a translation of
 all five landmarks leaves the similarity-fit residual unchanged. The crop is
-rotated using the measured facial axis, including the eye-to-mouth profile axis;
-an unavailable axis tries at most four quarter turns. Retry batches remain bounded
+rotated using the measured facial axis, including the eye-to-mouth profile axis.
+If landmarks are outside the box tolerance, their measured axis is untrusted:
+all four quarter turns are tried, even if that axis appears well-defined. An
+unavailable axis also tries all four quarter turns. Retry batches remain bounded
 by `execution.detector_batch_size` and eight inputs.
 
 Replacement requires a consistent face box, valid source alignment, comparable
@@ -479,3 +481,25 @@ ordering. The legacy stricter `landmarks_inside` pose check is still optional.
 Face inference, quality and selected-scene scan versions are updated. Rerun
 recognition for affected scenes to replace old detections; refresh Inspect Scene
 after the run. Model weights and identity namespaces are unchanged.
+
+Detection audits and Tune Detection also retain numeric `face_landmark_repairs`
+in the frame record. Each SCRFD batch frame records source dimensions and whether
+rotation/local retries were enabled. Each face records its original geometry and
+alignment measurements, estimated orientation, crop (`crop_xyxy`), attempted
+counterclockwise `turn_degrees`, and final `result`. An attempt retains both
+`crop_detection` (coordinates in the rotated crop) and `source_detection`
+(coordinates restored to the original cue). These are independent of the
+annotation's `display_offset`.
+
+Candidate `rejection` is null for an eligible result, or explains the first
+failed check: `retry_not_upright`, `different_face_box`, `competing_face`,
+`lower_detection_score`, `invalid_alignment`, `alignment_error`, or
+`alignment_not_improved`. The optional candidate `quality` is null when an earlier
+check rejected it before alignment was measured. An empty `candidates` list means
+that the retry returned no detections. Attempt status distinguishes
+`ambiguous_candidates` from `no_eligible_candidate`; face status also identifies
+`repaired`, `conflicting_orientations`, `empty_crop`, or `not_requested`.
+This evidence makes failed retries inspectable without sharing PNGs. It contains
+no images or model tensors and is collected only during audit/tuner rendering.
+An unrepaired detection remains visible in the diagnostic overlay; the mandatory
+alignment gate still prevents invalid landmarks from producing recognition evidence.

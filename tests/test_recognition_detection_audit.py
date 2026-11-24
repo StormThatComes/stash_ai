@@ -99,6 +99,30 @@ def test_pmpose_probabilities_are_retained_in_detection_manifest(tmp_path, monke
     assert person['drawn_indices'] == [0, 1]
 
 
+def test_failed_face_repair_keeps_raw_retry_and_display_coordinates_separate():
+    from contextlib import nullcontext
+    from tests.test_recognition_landmark_repair import OBSERVED, detector as face_detector
+    model,_=face_detector([OBSERVED],[])
+    def detect(image, *, force_pose):
+        assert force_pose
+        return model.detect(np.asarray(image)[:,:,::-1])
+    backend=SimpleNamespace(detect=detect,prepared_frame=lambda image:nullcontext(),
+                            frame_people=[],face_matches=[None])
+    cue=SimpleNamespace(start=0.,end=1.,rect=(0,0,448,252))
+    with Image.new('RGB',(448,252)) as image, detection_audit.render_frame(
+            image,backend,'1',0,cue) as (_,record):
+        trace=record['face_landmark_repairs'][0]['faces'][0]
+        assert trace['status']=='no_eligible_candidate'
+        assert trace['original']==trace['result']
+        assert [attempt['turn_degrees'] for attempt in trace['attempts']]==[0,90,180,270]
+        assert all(attempt['candidates']==[] for attempt in trace['attempts'])
+        face=record['faces'][0]
+        assert face['landmarks']==trace['original']['landmarks']
+        np.testing.assert_allclose(np.asarray(face['display_landmarks'])-face['display_offset'],
+                                   OBSERVED.landmarks,atol=1e-6)
+        json.dumps(record,allow_nan=False)
+
+
 @pytest.mark.parametrize('args', [[], ['--scene-id', '1'], ['--output-dir', 'out'],
                                 ['--scene-id', '0', '--output-dir', 'out']])
 def test_parser_requires_one_positive_scene_and_output(args):

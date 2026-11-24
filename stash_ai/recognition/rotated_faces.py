@@ -10,7 +10,7 @@ from .database import encoded
 from .models import checked_detection
 from stash_ai.runtime.cleanup import closing
 
-CONTRACT = 'rotated-head-v4-profile-repair'
+CONTRACT = 'rotated-head-v5-untrusted-landmark-axis'
 
 
 def enabled(config):
