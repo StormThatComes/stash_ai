@@ -24,6 +24,11 @@ def scan_identity(config, namespace):
         detection.pop('candidate_score_threshold',None)
     if not detection.get('alignment_retry_error'):
         detection.pop('alignment_retry_error',None)
+    if detection.get('landmarks_from_facebox', False):
+        from .face_landmark_repair import FACEBOX_CONTRACT
+        detection['landmarks_from_facebox'] = FACEBOX_CONTRACT
+    else:
+        detection.pop('landmarks_from_facebox', None)
     from .rotated_faces import enabled, CONTRACT as rotation_contract
     if enabled(config):
         from .body_observations import contract

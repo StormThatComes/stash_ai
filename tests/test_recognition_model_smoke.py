@@ -224,3 +224,39 @@ def test_pinned_retinaface_landmarks_on_public_domain_portrait(tmp_path):
                     restored=restore(faces[0],(0,0,*image.size),ccw)
                     assert np.max(np.linalg.norm(np.asarray(restored.landmarks)-upright.landmarks,axis=1))<20
     finally:backend.close()
+
+
+@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned facebox-landmark smoke')
+@pytest.mark.parametrize('key', ['scrfd_10g', 'scrfd_2_5g', 'retinaface_r50', 'yunet'])
+def test_pinned_facebox_landmarks_preserve_box_on_public_domain_portrait(tmp_path, key):
+    import hashlib
+    from io import BytesIO
+    import requests
+    import numpy as np
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.models import ensure_assets, YuNetDetector
+    from stash_ai.recognition.quality import alignment_measurements
+    from stash_ai.recognition.landmark_repair_audit import capture
+    with requests.get('https://raw.githubusercontent.com/matplotlib/matplotlib/v3.10.1/lib/matplotlib/mpl-data/sample_data/grace_hopper.jpg', timeout=30) as response:
+        response.raise_for_status(); data = response.content
+    assert hashlib.sha256(data).hexdigest() == 'a8ca6d734765703b09728ab47fe59f473d93ae3967fc24c7c0288c3c7adb7130'
+    path = tmp_path/'facebox.yml'
+    path.write_text(f'version: 2\nface: {{detector: {{backend: {key}, score_threshold: 0.55, landmarks_from_facebox: true}}}}\nexecution: {{gpu: {{device: cpu}}}}\n')
+    config = load(path)
+    backend = YuNetDetector(config, ensure_assets(config, keys=[key]))
+    try:
+        with Image.open(BytesIO(data)) as image, capture() as reports:
+            faces = backend.detect(image)
+            assert len(faces) == 1 and alignment_measurements(faces[0], image)['alignment_valid']
+            trace = reports[0]['faces'][0]
+            assert trace['status'] == 'refined_from_facebox'
+            assert trace['result']['box'] == trace['original']['box']
+            assert trace['result']['score'] == trace['original']['score']
+            assert trace['result']['landmarks'] != trace['original']['landmarks']
+            # Approximate visible landmark locations catch coordinate/channel
+            # errors. This frontal portrait is not an extreme-profile benchmark.
+            reference = np.array([[227,193],[308,195],[266,240],[229,268],[302,270]])
+            assert np.max(np.linalg.norm(np.asarray(faces[0].landmarks)-reference, axis=1)) < 20
+    finally:
+        backend.close()

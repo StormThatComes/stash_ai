@@ -11,7 +11,7 @@ from .config_units import BYTE_LIMITS, from_mb
 
 _GROUPS = (
     ('face.detector', 'models', 'backend=detector'),
-    ('face.detector', 'detection', 'score_threshold nms_threshold max_faces_per_frame pose_guided_rotation candidate_score_threshold alignment_retry_error'),
+    ('face.detector', 'detection', 'score_threshold nms_threshold max_faces_per_frame landmarks_from_facebox pose_guided_rotation candidate_score_threshold alignment_retry_error'),
     ('face.quality', 'detection',
      'min_face_pixels min_sharpness sharpness_metric profile_min_sharpness quality_diagnostics min_visible_face_fraction faceocc_logit_threshold min_face_source_fraction max_pose_deviation require_complete_face'),
     ('face.recognizer', 'models', 'backend=recognizer'),

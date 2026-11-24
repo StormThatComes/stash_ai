@@ -24,6 +24,7 @@ def defaults():
         'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
         'detection': {'score_threshold': .9, 'nms_threshold': .3, 'pose_guided_rotation': False, 'candidate_score_threshold': None, 'alignment_retry_error': 0.,
+                      'landmarks_from_facebox': False,
                       'sharpness_metric': 'raw', 'profile_min_sharpness': None, 'quality_diagnostics': False,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
@@ -190,6 +191,8 @@ def validate(data, *, detection_preview=False):
         raise ValueError('detection.quality_diagnostics must be boolean.')
     if type(data['detection']['pose_guided_rotation']) is not bool:
         raise ValueError('detection.pose_guided_rotation must be boolean.')
+    if type(data['detection']['landmarks_from_facebox']) is not bool:
+        raise ValueError('detection.landmarks_from_facebox must be boolean.')
     if data['detection']['max_pose_deviation'] is not None:
         _number(data['detection']['max_pose_deviation'], 'detection.max_pose_deviation', 0, 1)
     anchor = data['clustering']['max_anchor_pose_deviation']

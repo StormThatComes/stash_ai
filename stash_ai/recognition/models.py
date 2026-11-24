@@ -327,15 +327,26 @@ class YuNetDetector:
 
     def _detect(self, image):
         data = self._bgr(image)
-        if self.ort_detector is not None:
-            return self.ort_detector.detect(data)
-        self.detector.setInputSize((image.width, image.height))
-        _, rows = self.detector.detect(data)
-        if rows is None:
-            return []
-        if len(rows) > self.config.data['detection']['max_faces_per_frame']:
-            raise ValueError('Face detector exceeded configured result count.')
-        return [checked_detection(row) for row in rows]
+        found = self._raw_many([data])
+        # SCRFD/RetinaFace apply refinement in their own detect_many path.
+        # YuNet has no batch API; share the same bounded crop policy here.
+        if self.config.data['detection'].get('landmarks_from_facebox', False):
+            from .face_landmark_repair import repair
+            return repair(self, [data], found)[0]
+        return found[0]
+
+    def _raw_many(self, images):
+        result = []
+        for data in images:
+            if self.ort_detector is not None:
+                result.append(self.ort_detector.detect(data))
+                continue
+            self.detector.setInputSize((data.shape[1], data.shape[0]))
+            _, rows = self.detector.detect(data)
+            if rows is not None and len(rows) > self.config.data['detection']['max_faces_per_frame']:
+                raise ValueError('Face detector exceeded configured result count.')
+            result.append([] if rows is None else [checked_detection(row) for row in rows])
+        return result
 
     def close(self):
         self._prepared_frame = None

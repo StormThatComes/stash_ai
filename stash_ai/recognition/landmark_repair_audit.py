@@ -21,7 +21,7 @@ def geometry(face):
     return dict(box=list(face.box), landmarks=[list(p) for p in face.landmarks], score=face.score)
 
 
-def begin(images, found, *, rotation, threshold):
+def begin(images, found, *, rotation, threshold, from_facebox=False):
     reports = _CURRENT.get()
     if reports is None:
         return None
@@ -33,7 +33,8 @@ def begin(images, found, *, rotation, threshold):
                      original_quality=alignment_measurements(face, image),
                      status='not_requested', attempts=[]) for i, face in enumerate(faces)]
         reports.append(dict(batch_frame_index=index, source_dimensions=[image.width, image.height],
-                            rotation_enabled=rotation, alignment_retry_error=threshold, faces=rows))
+                            rotation_enabled=rotation, alignment_retry_error=threshold,
+                            landmarks_from_facebox=from_facebox, faces=rows))
         frames.append(rows)
     return frames
 

@@ -6,8 +6,12 @@ def face(config):
     from .models import ASSETS
     from .rotated_faces import enabled, CONTRACT as rotation_contract
     model=config.data['models']['detector']
+    settings = {k:config.data['detection'][k] for k in ('score_threshold','nms_threshold','max_faces_per_frame','candidate_score_threshold','alignment_retry_error')}
+    if config.data['detection'].get('landmarks_from_facebox', False):
+        from .face_landmark_repair import FACEBOX_CONTRACT
+        settings['landmarks_from_facebox'] = FACEBOX_CONTRACT
     return ['face-detector-v3-landmark-location',model,ASSETS[model].sha256,
-            {k:config.data['detection'][k] for k in ('score_threshold','nms_threshold','max_faces_per_frame','candidate_score_threshold','alignment_retry_error')},
+            settings,
             config.data['models']['device'], rotation_contract if enabled(config) else None]
 
 
