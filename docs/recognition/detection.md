@@ -450,6 +450,34 @@ occurs and normal recognition is unchanged.
 
 ## Rolled and translated face landmarks
 
+Set `face.detector.landmarks_from_facebox: true` to re-estimate the five landmarks
+on **every detected face**, including upright faces with an already valid alignment.
+This optional mode works with SCRFD, RetinaFace and YuNet, independently of body
+collection and `alignment_retry_error`. The selected detector runs again on the
+original image pixels inside the face box plus 25% margin on each side, clipped
+to the cue boundary. SCRFD fits the crop within 320px on its fixed 640px input
+canvas to avoid excessive face magnification; RetinaFace and YuNet use their
+normal preprocessing. Crop-local
+points are restored to cue coordinates; the full-frame face box and score are
+preserved. The crop result must match the same head and pass the existing
+confidence, ownership and alignment checks, including alignment with the original
+box. It need not improve the original similarity-fit residual: that residual
+alone cannot distinguish an accurate constellation from a translated one.
+
+The default `false` preserves the existing conditional retry behavior described
+below. `true` adds one crop inference per face; when existing rotation recovery
+is enabled, rolled or uncertain faces can use up to four crop orientations. It
+does not enable rotation recovery by itself or introduce a separate landmark
+model. A missing, invalid or ambiguous crop result leaves the original points
+intact. This mode can change context and effective face resolution but is not a
+guarantee of improved accuracy on extreme profiles.
+
+The setting is available under `face.detector` in Tune Detection. Press **Detect**
+again to compare it on the same cue. Recognition uses the same detector path;
+rerun the affected scenes and refresh Inspect Scene to view the new measurements.
+Changing this setting invalidates face inference and scan identities, while
+`false` retains compatibility with existing results from before the option.
+
 With `face.detector.pose_guided_rotation: true`, SCRFD and RetinaFace retry already detected
 rolled faces and spatially inconsistent landmarks before face embeddings or body
 collection consume them. The existing option still requires SCRFD or RetinaFace and enabled
@@ -465,8 +493,8 @@ Replacement requires a consistent face box, valid source alignment, comparable
 detection confidence and no competing detected head. Multiple eligible heads or
 inconsistent results across orientations leave the original detection intact.
 This is a new detector measurement, never a fixed offset applied to landmarks.
-Upright spatially consistent faces add no inference unless the separate local
-`alignment_retry_error` trigger is active. When that trigger is nonzero it also
+Upright spatially consistent faces add no inference unless `landmarks_from_facebox`
+or the separate local `alignment_retry_error` trigger is active. When that trigger is nonzero it also
 retries out-of-box landmarks, even when the alignment residual is small.
 
 For a pose without a face, a missing or compressed far eye now leaves orientation
@@ -483,8 +511,9 @@ recognition for affected scenes to replace old detections; refresh Inspect Scene
 after the run. Model weights and identity namespaces are unchanged.
 
 Detection audits and Tune Detection also retain numeric `face_landmark_repairs`
-in the frame record. Each SCRFD/RetinaFace batch frame records source dimensions and whether
-rotation/local retries were enabled. Each face records its original geometry and
+in the frame record. Each SCRFD/RetinaFace batch frame (and YuNet with crop mode
+enabled) records source dimensions and whether rotation/local retries and
+`landmarks_from_facebox` were enabled. Each face records its original geometry and
 alignment measurements, estimated orientation, crop (`crop_xyxy`), attempted
 counterclockwise `turn_degrees`, and final `result`. An attempt retains both
 `crop_detection` (coordinates in the rotated crop) and `source_detection`
@@ -493,8 +522,10 @@ annotation's `display_offset`.
 
 Candidate `rejection` is null for an eligible result, or explains the first
 failed check: `retry_not_upright`, `different_face_box`, `competing_face`,
-`lower_detection_score`, `invalid_alignment`, `alignment_error`, or
-`alignment_not_improved`. The optional candidate `quality` is null when an earlier
+`lower_detection_score`, `invalid_alignment`, `invalid_original_box_alignment`,
+`alignment_error`, or `alignment_not_improved`. A successful crop-only point
+replacement has face status `refined_from_facebox`; its final `result` retains
+the original box and score. The optional candidate `quality` is null when an earlier
 check rejected it before alignment was measured. An empty `candidates` list means
 that the retry returned no detections. Attempt status distinguishes
 `ambiguous_candidates` from `no_eligible_candidate`; face status also identifies

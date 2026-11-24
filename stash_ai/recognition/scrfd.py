@@ -12,6 +12,7 @@ class ScrfdDetector:
     STRIDES = (8, 16, 32)
     ANCHORS = 2
     INPUT_SIZE = 640
+    FACEBOX_CONTENT_SIZE = 320
 
     def __init__(self, config, paths, *, runtime_info=None):
         self.config = config
@@ -52,7 +53,7 @@ class ScrfdDetector:
             raise
 
     @classmethod
-    def _blob(cls, bgr):
+    def _blob(cls, bgr, *, content_size=None):
         """Preserve aspect ratio, upscale small VTT images, pad right/bottom."""
         import cv2
         import numpy as np
@@ -60,7 +61,8 @@ class ScrfdDetector:
         height, width = bgr.shape[:2]
         if height < 1 or width < 1 or bgr.shape[2:] != (3,) or bgr.dtype != np.uint8:
             raise ValueError('SCRFD requires a nonempty uint8 BGR source image.')
-        scale = min(cls.INPUT_SIZE / width, cls.INPUT_SIZE / height)
+        limit = cls.INPUT_SIZE if content_size is None else content_size
+        scale = min(limit / width, limit / height)
         output_width = max(1, min(cls.INPUT_SIZE, int(width * scale)))
         output_height = max(1, min(cls.INPUT_SIZE, int(height * scale)))
         resized = cv2.resize(bgr, (output_width, output_height), interpolation=cv2.INTER_LINEAR)
@@ -129,10 +131,16 @@ class ScrfdDetector:
                                     config.data['detection']['nms_threshold'])
         return [detections[int(n)] for n in np.asarray(selected).reshape(-1)[:maximum]]
 
-    def _raw(self, bgr):
-        tensor, scale_x, scale_y = self._blob(bgr)
+    def _raw(self, bgr, *, content_size=None):
+        tensor, scale_x, scale_y = self._blob(bgr, content_size=content_size)
         outputs = self.session.run(self.output_names, {self.input_name: tensor})
         return self.decode(outputs, scale_x=scale_x, scale_y=scale_y, config=self.config)
+
+    def _raw_facebox_many(self, images):
+        # A tight crop enlarged to fill 640px makes the face much larger than
+        # on a typical full frame. Keep crop content within 320px on the same
+        # fixed 640px canvas, retaining normal anchors and exact resize scales.
+        return [self._raw(image, content_size=self.FACEBOX_CONTENT_SIZE) for image in images]
 
     def detect(self,bgr):
         return self.detect_many([bgr])[0]

@@ -8,6 +8,7 @@ from .models import checked_detection
 
 
 BOX_TOLERANCE = .05
+FACEBOX_CONTRACT = 'facebox-landmarks-v1'
 
 
 def box_consistent(face):
@@ -53,7 +54,8 @@ def restore(face, box, turns):
     return restore_crop(face, box, (0, True, 180, False)[turns])
 
 
-def candidate_rejection(other, candidate, original, peers, turn, error, spatial, rotate, image):
+def candidate_rejection(other, candidate, original, peers, turn, error, spatial, rotate, image,
+                        *, from_facebox=False):
     from .quality import alignment_measurements
     # A rotated retry must actually find an upright head.
     if turn and quarter_turn(other) != 0:
@@ -69,7 +71,7 @@ def candidate_rejection(other, candidate, original, peers, turn, error, spatial,
     if not quality['alignment_valid']:
         return 'invalid_alignment', quality
     new_error = quality.get('alignment_error', 1.)
-    if spatial or rotate:
+    if spatial or rotate or from_facebox:
         if new_error > max(.20, error):
             return 'alignment_error', quality
     elif new_error >= error:
@@ -83,8 +85,9 @@ def repair(detector, images, found):
     from . import landmark_repair_audit as audit
     threshold = detector.config.data['detection'].get('alignment_retry_error', 0.)
     rotation = enabled(detector.config)
-    traces = audit.begin(images, found, rotation=rotation, threshold=threshold)
-    if not threshold and not rotation:
+    from_facebox = detector.config.data['detection'].get('landmarks_from_facebox', False)
+    traces = audit.begin(images, found, rotation=rotation, threshold=threshold, from_facebox=from_facebox)
+    if not threshold and not rotation and not from_facebox:
         audit.finish(traces, found)
         return found
     requests = []
@@ -93,11 +96,11 @@ def repair(detector, images, found):
             turn = quarter_turn(face) if rotation else 0
             spatial = not box_consistent(face)
             rotate = rotation and (turn != 0 or spatial)
-            if not rotate and not threshold:
+            if not from_facebox and not rotate and not threshold:
                 continue
             quality = alignment_measurements(face)
             error = quality.get('alignment_error', 1.)
-            if not rotate and not (threshold and (error > threshold or spatial)):
+            if not from_facebox and not rotate and not (threshold and (error > threshold or spatial)):
                 continue
             x, y, w, h = face.box
             box = (max(0, math.floor(x-.25*w)), max(0, math.floor(y-.25*h)),
@@ -109,6 +112,8 @@ def repair(detector, images, found):
             # Out-of-box landmarks cannot reliably choose their own repair
             # orientation. Keep the measured turn only as a diagnostic hint.
             turns = (0, 1, 2, 3) if rotation and (spatial or turn is None) else (turn,)
+            if from_facebox and 0 not in turns:
+                turns = (0, *turns)
             if traces is not None:
                 traces[frame][index].update(status='no_eligible_candidate',
                     estimated_turn_degrees=None if turn is None else turn*90,
@@ -117,12 +122,14 @@ def repair(detector, images, found):
                 requests.append((frame, index, box, degrees, error, spatial, rotate))
     result = [list(faces) for faces in found]
     candidates = {}
+    infer = (getattr(detector, '_raw_facebox_many', detector._raw_many)
+             if from_facebox else detector._raw_many)
     maximum = max(1, min(8, detector.config.data['execution']['detector_batch_size']))
     for start in range(0, len(requests), maximum):
         batch = requests[start:start+maximum]
         crops = [np.rot90(images[f][box[1]:box[3], box[0]:box[2]], turn)
                  for f, _, box, turn, *_ in batch]
-        repairs = detector._raw_many(crops)
+        repairs = infer(crops)
         for request, alternatives in zip(batch, repairs, strict=True):
             frame, index, box, turn, error, spatial, rotate = request
             original = found[frame][index]
@@ -137,14 +144,23 @@ def repair(detector, images, found):
                 other = checked_detection(getattr(other, 'row', other))
                 candidate = restore(other, box, turn)
                 reason, quality = candidate_rejection(other, candidate, original, peers,
-                    turn, error, spatial, rotate, image)
+                    turn, error, spatial, rotate, image, from_facebox=from_facebox)
+                replacement = candidate
+                if from_facebox:
+                    # The full-frame detector owns the box/score. The crop only
+                    # contributes points, which must fit that original geometry.
+                    replacement = checked_detection([*original.row[:4], *candidate.row[4:14], original.score])
+                    if reason is None:
+                        quality = alignment_measurements(replacement, image)
+                        if not quality['alignment_valid']:
+                            reason = 'invalid_original_box_alignment'
                 if attempt is not None:
                     attempt['candidates'].append(dict(crop_detection=audit.geometry(other),
                         source_detection=audit.geometry(candidate), rejection=reason, quality=quality))
                 if reason is not None:
                     continue
                 new_error = quality.get('alignment_error', 1.)
-                eligible.append((new_error, -candidate.score, candidate.row, turn, candidate))
+                eligible.append((new_error, -candidate.score, replacement.row, turn, replacement))
             # Multiple heads in the same crop are not resolved by confidence.
             if attempt is not None:
                 attempt['status'] = ('eligible' if len(eligible) == 1 else
@@ -161,6 +177,7 @@ def repair(detector, images, found):
         selected = min(options, key=lambda row: row[:3])
         result[frame][index] = selected[-1]
         if traces is not None:
-            traces[frame][index].update(status='repaired', selected_turn_degrees=selected[3]*90)
+            traces[frame][index].update(status='refined_from_facebox' if from_facebox else 'repaired',
+                                       selected_turn_degrees=selected[3]*90)
     audit.finish(traces, result)
     return result
