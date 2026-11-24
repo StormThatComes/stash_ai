@@ -86,7 +86,10 @@ def restore(face, box, ccw):
         return (r-offset-y,t+x) if ccw else (l+y,b-offset-x)
     x,y,w,h = face.box
     a,c = point(x,y,True),point(x+w,y+h,True)
-    marks = [v for xy in face.landmarks for v in point(*xy)]
+    # An absent measurement is not a crop-local coordinate. Real negative
+    # predictions still need the normal transform (e.g. points beyond an edge).
+    marks = ([v for xy in face.landmarks for v in point(*xy)]
+             if face.landmarks_available else face.row[4:14])
     return checked_detection([min(a[0],c[0]),min(a[1],c[1]),(w if type(ccw) is int else h),(h if type(ccw) is int else w),*marks,face.score])
 
 

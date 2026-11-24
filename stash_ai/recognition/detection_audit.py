@@ -93,6 +93,7 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
                 drawn = _draw(annotated, layout['bounds'], layout['landmarks'],
                               face_only=True, box_color=box_color, point_color=BOX_COLOR)
                 record['faces'].append(dict(face_index=face_index, box=list(face.box), score=face.score,
+                    landmarks_available=getattr(face, 'landmarks_available', True),
                     landmarks=[list(point) for point in face.landmarks], drawn_indices=drawn,
                     annotation_color=list(BOX_COLOR), box_color=list(box_color),
                     display_offset=layout['offset'],

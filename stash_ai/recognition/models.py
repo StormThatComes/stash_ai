@@ -193,6 +193,9 @@ def namespace(config):
                               (config.data['models']['detector'], config.data['models']['recognizer'])}})
 
 
+UNAVAILABLE_LANDMARKS = (-1.,) * 10
+
+
 @dataclass(frozen=True)
 class Detection:
     row: tuple[float, ...]
@@ -204,6 +207,14 @@ class Detection:
     @property
     def landmarks(self):
         return tuple(zip(self.row[4:14:2], self.row[5:14:2]))
+
+    @property
+    def landmarks_available(self):
+        """Distinguish absent measurements from real (possibly invalid) points."""
+        return self.row[4:14] != UNAVAILABLE_LANDMARKS
+
+    def without_landmarks(self):
+        return Detection((*self.box, *UNAVAILABLE_LANDMARKS, self.score))
 
     @property
     def score(self):
