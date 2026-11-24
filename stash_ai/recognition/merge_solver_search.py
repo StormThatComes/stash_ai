@@ -1,6 +1,6 @@
 """Budgeted exploration independent of frozen catalogue nominations."""
 from collections import deque
-from itertools import islice
+from itertools import islice, chain
 import math
 
 from .merge_report_policy import parameter
@@ -145,8 +145,9 @@ class BeamSearch:
     width = 5
     refinement_budget = 24
 
-    def __init__(self, families, factory, maximum, config=None):
+    def __init__(self, families, factory, maximum, config=None, *, stop_on_stagnation=False):
         self.config = config
+        self.stop_on_stagnation = stop_on_stagnation
         self.families, self.factory, self.maximum = tuple(families), factory, maximum
         self.beam, self.streams, self.root = {}, {}, {}
         self.stats = {f: statistics() for f in families}
@@ -171,12 +172,21 @@ class BeamSearch:
         self.restarts = 0
         self.restart_pending = None
         self.restart_executed = 0
+        self.restart_allowance = 8
+        self.restart_streams = {}
+        self.restart_alternatives = {}
+        self.baseline = None
+        self.plateau_restarted = False
         self.initial_mechanisms = {}
+        self.milestone_best = {}
+        self.progress_events = 0
+        self.last_progress = False
+        self.mechanism_allowances = {}
         self.mechanism_due = []
         self.mechanism_parents = set()
 
     def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=(), phase=None,
-                mechanisms=None, admissible=True):
+                mechanisms=None, admissible=True, intermediate=None):
         # Patch-size tie-breaks must not turn a plateau into endless "progress".
         improved = self.best_quality is None or rank[:-2] > self.best_quality
         gain = quality_gain(self.best_quality, rank[:-2])
@@ -210,11 +220,15 @@ class BeamSearch:
                 stat['recent'] = (stat['recent']+[gain])[-4:]
         milestones = {r['key']: 3 if r['supported'] else 2 if r['rooted'] else 1 if r['admitted'] else 0
                       for r in (mechanisms or {}).get('cohorts', ())}
+        milestones.update(intermediate or {})
         if name == 'baseline':
             self.initial_mechanisms = milestones
+            self.milestone_best = dict(milestones)
         progress = tuple(sorted((key, value) for key, value in milestones.items()
                                 if key in self.initial_mechanisms and value > self.initial_mechanisms[key])) if admissible else ()
         candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers), mechanisms=progress)
+        if name == 'baseline':
+            self.baseline = candidate
         pool = dict(self.beam, **{name: candidate})
         ordered = sorted(pool, key=lambda n: pool[n]['rank'], reverse=True)
         self.incumbent = ordered[0]
@@ -248,11 +262,20 @@ class BeamSearch:
                 if len(selected) >= limit:
                     break
         self.beam = {n: pool[n] for n in selected[:self.width]}
-        if name in self.beam and progress and name != self.incumbent:
-            previous = {p.get('mechanisms', ()) for n,p in pool.items() if n != name}
-            if progress not in previous:
+        novel = [(key, value) for key, value in progress if value > self.milestone_best[key]]
+        self.last_progress = bool(name in self.beam and novel)
+        if self.last_progress:
+            self.milestone_best.update(novel)
+            self.progress_events += 1
+            self.stale = 0
+            self.refining = False
+            self.refinements.clear()
+            self.restart_pending = None
+            if name not in self.mechanism_due:
                 self.mechanism_due.append(name)
+            self.mechanism_allowances[name] = 4
         self.mechanism_due = [n for n in self.mechanism_due if n in self.beam]
+        self.mechanism_allowances = {n: v for n, v in self.mechanism_allowances.items() if n in self.beam}
         self.peak_beam = max(self.peak_beam, len(self.beam))
         if name in self.beam:
             self.admitted += 1
@@ -294,17 +317,57 @@ class BeamSearch:
             try:yield next(pending[key])
             except StopIteration:del pending[key]
 
+    def _restart_parents(self):
+        return self.restart_alternatives | ({'baseline': self.baseline} if self.baseline else {}) | self.beam
+
     def _restart(self):
-        if self.restarts>=1:return False
-        self.restarts+=1;self.restart_executed=0;self.refining=False
-        def tagged(n,c):
-            for item in self.factory(n,c['changes'],None,'restart'):yield (n,*item)
-        self.restart_pending=interleave(tagged(n,c) for n,c in self.beam.items())
+        if self.stop_on_stagnation and self.restarts >= 1:
+            return False
+        parents = self._restart_parents()
+        self.restart_streams = {n: s for n, s in self.restart_streams.items() if n in parents}
+        ordered = sorted(parents, key=lambda n: (n != self.incumbent, n == 'baseline', n))
+        if len(ordered) > 1:
+            offset = self.restarts % (len(ordered)-1)
+            rest = ordered[1:]
+            ordered[1:] = rest[offset:] + rest[:offset]
+        def tagged(name):
+            if name not in self.restart_streams:
+                self.restart_streams[name] = iter(self.factory(name, parents[name]['changes'], None, 'restart'))
+            stream = self.restart_streams[name]
+            # A parent can be pruned while a parallel restart batch is running.
+            # Its lazy generator must not read already retired feedback.
+            while name in self._restart_parents():
+                try:
+                    item = next(stream)
+                except StopIteration:
+                    return
+                yield name, *item
+        pending = interleave(tagged(n) for n in ordered)
+        first = next(pending, None)
+        if first is None:
+            return False
+        self.restarts += 1
+        self.restart_allowance = min(32, 8+4*(self.restarts-1))
+        self.restart_executed = 0
+        self.refining = False
+        self.plateau_restarted = True
+        self.restart_pending = chain((first,), pending)
         return True
+
+    def _plateau_finished(self, reason):
+        if self.stop_on_stagnation:
+            self.stop_reason = reason
+            raise StopIteration
+        # Resume the unconsumed ordinary streams. A plateau is not evidence
+        # that their remaining candidates cannot solve the goals.
+        self.refining = False
+        self.refinements.clear()
+        self.stale = 0
+        self.plateau_restarted = False
 
     def next(self):
         if self.restart_pending is not None:
-            if self.restart_executed<8:
+            if self.restart_executed < self.restart_allowance:
                 try:
                     parent,family,strategy,changes=next(self.restart_pending)
                     return family,'restart',parent,strategy,changes
@@ -313,11 +376,11 @@ class BeamSearch:
             self.refining=True;self.refined=0
             self.refinements={n:iter(self.factory(n,c['changes'],None,True)) for n,c in self.beam.items()}
         if self.refining and self.refined >= self.refinement_budget:
-            if self._restart():return self.next()
-            self.stop_reason = 'stagnation_after_refinement'
-            raise StopIteration
+            if not self.plateau_restarted and self._restart():return self.next()
+            self._plateau_finished('stagnation_after_refinement')
         if not self.refining and self.stale >= self.patience:
             self.refining, self.refined = True, 0
+            self.plateau_restarted = False
             self.refinements = {n: iter(self.factory(n, c['changes'], None, True)) for n,c in self.beam.items()}
         if self.refining:
             while self.refinements:
@@ -329,9 +392,8 @@ class BeamSearch:
                     continue
                 self.refinements[n] = stream
                 return family, 'refinement', n, strategy, changes
-            if self._restart():return self.next()
-            self.stop_reason = 'refinement_exhausted'
-            raise StopIteration
+            if not self.plateau_restarted and self._restart():return self.next()
+            self._plateau_finished('refinement_exhausted')
         # Count only this lane's completed trials: interleaved even/odd lanes
         # otherwise alias with the modulo schedule and can starve the winner.
         baseline_first = (self.normal_completed - self.last_root >= 3 or
@@ -368,6 +430,7 @@ class BeamSearch:
                             return family, 'adaptive', n, strategy, changes
                         except StopIteration:
                             continue
+        if self._restart():return self.next()
         self.stop_reason = 'frontier_exhausted'
         raise StopIteration
 
@@ -379,8 +442,10 @@ class BeamSearch:
             self.focus_due = False
             selected = parent if parent is not None else self.last_parent
             if selected in self.mechanism_due:
-                self.mechanism_due.remove(selected)
                 self.mechanism_parents.add(selected)
+                self.mechanism_allowances[selected] -= 1
+                if self.mechanism_allowances[selected] <= 0:
+                    self.mechanism_due.remove(selected)
             if (parent if parent is not None else self.last_parent) != self.incumbent:
                 self.parent_turn += 1
         if phase == 'baseline_exploration':

@@ -853,6 +853,9 @@ execution:
     # Solver configuration policy and strategy comparison on retained training evidence.
     strict: true
     # Enforce matching constraints on solver recommendations. Override with --no-strict.
+    stop_on_stagnation: false
+    # Stop after bounded plateau refinement. Default false resumes unconsumed candidates; total replay and
+    # proposal limits still apply.
     compare_scene_strategies: true
     # Compare scene matching strategies while solving with body identities enabled. A holdout manifest is
     # optional.

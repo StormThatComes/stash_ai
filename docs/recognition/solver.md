@@ -242,8 +242,25 @@ While no fully solved configuration exists, after 64 completed trials without an
 (with a smaller patience for smaller budgets, at least 24), the solver refines
 around the retained beam. Refinement tries measured brackets, smaller steps and
 reverting unnecessary changes. Up to 24 completed refinement trials run; material
-improvement resumes exploration. Otherwise it tries at most eight distant restart trials once, refines again,
-and performs the reserved local stability checks before stopping. Patch-size tie-breaks alone do not reset patience.
+improvement resumes exploration. Otherwise it runs a distant restart, refines again, and resumes unconsumed
+exploration candidates. Later plateaus can restart again. Restart batches grow
+from 8 to at most 32 completed trials, all within the global budget. They rotate
+the incumbent, alternative construction states and baseline, continuing each
+parent's unconsumed restart stream rather than replaying its prefix. Joint probes
+cover pairs, four gates and whole face/body/View/local/global parameter groups,
+with measured mechanism recipes and crossovers between retained parents. Stagnation alone does
+not end an unsolved search. Set `execution.solver.stop_on_stagnation: true`
+(v1 `execution.solver_stop_on_stagnation`) or pass `--stop-on-stagnation` to
+retain bounded early stopping; `--no-stop-on-stagnation` overrides that setting.
+Before deciding that candidates are exhausted or starting final polishing,
+parallel search drains outstanding results and reconsiders new parents. Patch-size tie-breaks alone do not reset patience. New admissible, retained
+construction milestones can reset patience and reserve four descendant trials.
+These use fixed goal scene/core counts and fixed cohort admission, authority and
+support evidence. Only a new high-water mark on a baseline-known metric counts;
+repeating a milestone, changing sampled witnesses or producing an inadmissible
+state does not extend patience. These rewards never change winner ranking.
+`search.intermediate_progress_events`, `mechanism_parents`, `restarts` and
+`restart_trial_allowance` report the exploration work.
 The configured replay limit and proposal-attempt guard always remain in force.
 
 `search.stop_reason` explains budget exhaustion, stagnation, exhausted candidates
