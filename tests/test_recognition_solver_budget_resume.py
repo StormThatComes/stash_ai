@@ -54,23 +54,44 @@ def test_serial_extensions_preserve_completed_trials_and_owned_winner(tmp_path, 
 
 
 @pytest.mark.parametrize('scheduling', ['batch', 'async'])
-def test_eight_worker_extension_reconstructs_dispatch_and_retirement(tmp_path, monkeypatch, scheduling):
+@pytest.mark.parametrize('resource_failure', [False, True])
+def test_eight_worker_extension_reconstructs_dispatch_and_retirement(tmp_path, monkeypatch, scheduling, resource_failure):
     from stash_ai.recognition import solver_execution
+    from stash_ai.recognition.resource_errors import ResourceLimit
+    from stash_ai.recognition.solver_pool import Trials
     monkeypatch.setattr(solver_execution.os, 'process_cpu_count', lambda: 16, raising=False)
+    unpack, injected = Trials.unpack, []
+    def fail_first_result(self, result, **kwargs):
+        # Keep real workers and dispatch order; fail one coordinator admission
+        # deterministically instead of depending on the CI runner's resources.
+        evaluated = unpack(self, result, **kwargs)
+        if resource_failure and not injected:
+            injected.append(True)
+            raise ResourceLimit('Synthetic parallel trial resource limit')
+        return evaluated
+    monkeypatch.setattr(Trials, 'unpack', fail_first_result)
     config, goals = fixture(tmp_path/'input', 'disjoint')
     path = tmp_path/'checkpoint.json'
     execution = dict(cpus=16, trials=8, scheduling=scheduling, memory_bytes=16*1024**3)
     def stop(name, phase, item):
-        if name == 'trial-2' and phase == 'complete':
+        candidate = name != 'baseline' if resource_failure else name == 'trial-2'
+        if candidate and phase == 'complete':
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
         first = solve(config, goals, db, maximum=10, checkpoint=path, progress=stop, execution=execution)
         assert first['interrupted']
+        failed = first['simulation'].get('failed_trials', {})
+        if resource_failure:
+            assert injected and any(t['error'] == 'Synthetic parallel trial resource limit' for t in failed.values())
+        assert first['search']['attempted'] == len(first['simulation']['trials']) + len(failed)
         extended = solve(config, goals, db, maximum=18, checkpoint=path, resume=True, execution=execution)
         repeated = solve(config, goals, db, maximum=18, checkpoint=path, resume=True, execution=execution)
-    assert extended['search']['restored_trials'] == len(first['simulation']['trials'])
+    # Durable resource failures consume a trial and are restored without retry.
+    assert extended['search']['restored_trials'] == first['search']['attempted']
+    assert all(extended['simulation']['failed_trials'][name] == trial for name, trial in failed.items())
     assert repeated['simulation']['trials'] == extended['simulation']['trials']
-    assert repeated['search']['restored_trials'] == len(extended['simulation']['trials'])
+    assert repeated['simulation'].get('failed_trials', {}) == extended['simulation'].get('failed_trials', {})
+    assert repeated['search']['restored_trials'] == extended['search']['attempted']
     assert repeated['search']['attempted'] <= 18 and repeated['best_result']['fully_solved']
     document = json.loads(path.read_text())
     assert document['budgets'] == [10, 18]
