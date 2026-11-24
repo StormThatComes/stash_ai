@@ -217,6 +217,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement, interaction_proposals
     from .merge_solver_preflight import boundary_probes, ordered
     from .merge_solver_bidirectional import BidirectionalSearch
+    from .merge_solver_milestones import measurements as milestones
     from .hybrid_query_observer import observe_queries
     from .offline_evaluation import _selection
     from .merge_solver_options import compact
@@ -452,7 +453,13 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             del factories['hybrid']
         def factory(parent, changes, family, refine):
             if refine == 'restart':
-                for candidate in restart_probes(config, changes, options):
+                from .merge_solver_restarts import joint_probes
+                source = feedback[parent]
+                peers = [c['changes'] for n, c in search._restart_parents().items() if n != parent]
+                recipes = (dict(changes, **p['patch']) for p in source.get('mechanisms', {}).get('plans', ()))
+                for candidate in _interleave((restart_probes(config, changes, options),
+                        joint_probes(config, changes, dict(options, **source['options'])),
+                        crossovers(changes, peers), recipes)):
                     family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in candidate) else 'face'
                     yield family,'restart_probe',candidate
                 return
@@ -485,7 +492,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                           'crossover':mixing,'boundary_probe':boundaries,'learned_interaction':interactions})
         search = BeamSearch(factories, factory, search_limit, config, stop_on_stagnation=stop_on_stagnation)
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'],
-                       mechanisms=feedback['baseline'].get('mechanisms'), admissible=summaries['baseline']['admissible'])
+                       mechanisms=feedback['baseline'].get('mechanisms'), admissible=summaries['baseline']['admissible'],
+                       intermediate=milestones(summaries['baseline'], feedback['baseline'].get('mechanisms')))
         tightening.observe({}, summaries['baseline']['fully_solved'])
         bidirectional = BidirectionalSearch(config, goals, search_limit, feedback['baseline'])
         bidirectional.observe('baseline', {}, summaries['baseline'], ranking('baseline'), outcomes['baseline'])
@@ -509,14 +517,16 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             search.completed(phase, parent=parent)
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
                 elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase,
-                mechanisms=feedback[name].get('mechanisms'), admissible=summaries[name]['admissible'])
-            if improved or (search.stop_reason == 'frontier_exhausted' and name in search.beam):
+                mechanisms=feedback[name].get('mechanisms'), admissible=summaries[name]['admissible'],
+                intermediate=milestones(summaries[name], feedback[name].get('mechanisms')))
+            if improved or search.last_progress or (search.stop_reason == 'frontier_exhausted' and name in search.beam):
                 normal_exhausted = False
                 search.stop_reason = None
                 stop_reason = None
                 if not summaries[best]['fully_solved']:
                     polishing = None
             bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
+            search.restart_alternatives = dict(bidirectional.frontier)
             # Keep detailed hints only for parents that can still be expanded.
             for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
                         {'baseline', best} - set(robustness) -
@@ -971,6 +981,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         beam_width=search.width if search else BeamSearch.width, peak_beam=search.peak_beam if search else 0,
                         beam_trials=list(search.beam) if search else [],
                         mechanism_parents=sorted(search.mechanism_parents) if search else [],
+                        intermediate_progress_events=search.progress_events if search else 0,
+                        restart_trial_allowance=search.restart_allowance if search else 0,
                         pruned_trials=search.pruned if search else 0,
                         operators=search.operators if search else {}, restarts=search.restarts if search else 0,
                         stagnation_patience=search.patience if search else None,
