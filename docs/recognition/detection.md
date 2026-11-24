@@ -342,7 +342,7 @@ audit and requires a new output directory.
 
 Use the opt-in `recognition audit-alignment` action to inspect detector landmarks
 and the shared ArcFace 112 × 112 crop for the detector selected in
-`face.detector.backend` (YuNet or SCRFD). It never loads face recognizer weights,
+`face.detector.backend` (YuNet, SCRFD or RetinaFace). It never loads face recognizer weights,
 produces embeddings, modifies SQLite, or publishes to Stash.
 
 ```powershell
@@ -450,9 +450,9 @@ occurs and normal recognition is unchanged.
 
 ## Rolled and translated face landmarks
 
-With `face.detector.pose_guided_rotation: true`, SCRFD retries already detected
+With `face.detector.pose_guided_rotation: true`, SCRFD and RetinaFace retry already detected
 rolled faces and spatially inconsistent landmarks before face embeddings or body
-collection consume them. The existing option still requires SCRFD and enabled
+collection consume them. The existing option still requires SCRFD or RetinaFace and enabled
 body collection. It does not depend on `alignment_retry_error`: a translation of
 all five landmarks leaves the similarity-fit residual unchanged. The crop is
 rotated using the measured facial axis, including the eye-to-mouth profile axis.
@@ -483,7 +483,7 @@ recognition for affected scenes to replace old detections; refresh Inspect Scene
 after the run. Model weights and identity namespaces are unchanged.
 
 Detection audits and Tune Detection also retain numeric `face_landmark_repairs`
-in the frame record. Each SCRFD batch frame records source dimensions and whether
+in the frame record. Each SCRFD/RetinaFace batch frame records source dimensions and whether
 rotation/local retries were enabled. Each face records its original geometry and
 alignment measurements, estimated orientation, crop (`crop_xyxy`), attempted
 counterclockwise `turn_degrees`, and final `result`. An attempt retains both

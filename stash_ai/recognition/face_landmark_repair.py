@@ -1,4 +1,4 @@
-"""Bounded SCRFD retries before any face/body evidence is encoded."""
+"""Bounded five-landmark detector retries before face/body evidence is encoded."""
 import math
 from types import SimpleNamespace
 

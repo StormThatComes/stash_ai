@@ -163,9 +163,9 @@ def validate(data, *, detection_preview=False):
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('facial_recognition.yml version must be 1.')
     models = data['models']
-    if models['detector'] not in ('yunet', 'scrfd_10g', 'scrfd_2_5g') or models['recognizer'] not in (
+    if models['detector'] not in ('yunet', 'scrfd_10g', 'scrfd_2_5g', 'retinaface_r50') or models['recognizer'] not in (
             'sface', 'auraface', 'lvface_b', 'adaface_ir50'):
-        raise ValueError('Supported detectors: scrfd_10g, scrfd_2_5g, yunet; '
+        raise ValueError('Supported detectors: scrfd_10g, scrfd_2_5g, yunet, retinaface_r50; '
                          'recognizers: sface, auraface, lvface_b, adaface_ir50.')
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')

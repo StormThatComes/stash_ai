@@ -1,4 +1,4 @@
-"""Bounded pose-guided SCRFD recovery, including one-eye profiles."""
+"""Bounded pose-guided SCRFD/RetinaFace recovery, including one-eye profiles."""
 import json
 import math
 import uuid
@@ -14,8 +14,9 @@ CONTRACT = 'rotated-head-v5-untrusted-landmark-axis'
 
 
 def enabled(config):
+    model = config.data['models']['detector']
     return (config.data['detection'].get('pose_guided_rotation', False) and collect_bodies(config)
-            and config.data['models']['detector'].startswith('scrfd_'))
+            and (model.startswith('scrfd_') or model == 'retinaface_r50'))
 
 
 def reliable_head_points(person, size):
