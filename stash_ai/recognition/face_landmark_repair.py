@@ -53,12 +53,39 @@ def restore(face, box, turns):
     return restore_crop(face, box, (0, True, 180, False)[turns])
 
 
+def candidate_rejection(other, candidate, original, peers, turn, error, spatial, rotate, image):
+    from .quality import alignment_measurements
+    # A rotated retry must actually find an upright head.
+    if turn and quarter_turn(other) != 0:
+        return 'retry_not_upright', None
+    if not same_box(original, candidate):
+        return 'different_face_box', None
+    # Reserve ownership using boxes, not the defective landmark positions.
+    if any(overlap(candidate, peer) >= .25 for peer in peers):
+        return 'competing_face', None
+    if candidate.score < original.score-.05:
+        return 'lower_detection_score', None
+    quality = alignment_measurements(candidate, image)
+    if not quality['alignment_valid']:
+        return 'invalid_alignment', quality
+    new_error = quality.get('alignment_error', 1.)
+    if spatial or rotate:
+        if new_error > max(.20, error):
+            return 'alignment_error', quality
+    elif new_error >= error:
+        return 'alignment_not_improved', quality
+    return None, quality
+
+
 def repair(detector, images, found):
     from .quality import alignment_measurements
     from .rotated_faces import enabled
+    from . import landmark_repair_audit as audit
     threshold = detector.config.data['detection'].get('alignment_retry_error', 0.)
     rotation = enabled(detector.config)
+    traces = audit.begin(images, found, rotation=rotation, threshold=threshold)
     if not threshold and not rotation:
+        audit.finish(traces, found)
         return found
     requests = []
     for frame, (pixels, faces) in enumerate(zip(images, found, strict=True)):
@@ -76,8 +103,16 @@ def repair(detector, images, found):
             box = (max(0, math.floor(x-.25*w)), max(0, math.floor(y-.25*h)),
                    min(pixels.shape[1], math.ceil(x+1.25*w)), min(pixels.shape[0], math.ceil(y+1.25*h)))
             if box[2] <= box[0] or box[3] <= box[1]:
+                if traces is not None:
+                    traces[frame][index]['status'] = 'empty_crop'
                 continue
-            turns = (turn,) if turn is not None else (0, 1, 2, 3)
+            # Out-of-box landmarks cannot reliably choose their own repair
+            # orientation. Keep the measured turn only as a diagnostic hint.
+            turns = (0, 1, 2, 3) if rotation and (spatial or turn is None) else (turn,)
+            if traces is not None:
+                traces[frame][index].update(status='no_eligible_candidate',
+                    estimated_turn_degrees=None if turn is None else turn*90,
+                    crop_xyxy=list(box), tried_turn_degrees=[n*90 for n in turns])
             for degrees in turns:
                 requests.append((frame, index, box, degrees, error, spatial, rotate))
     result = [list(faces) for faces in found]
@@ -93,38 +128,39 @@ def repair(detector, images, found):
             original = found[frame][index]
             image = SimpleNamespace(width=images[frame].shape[1], height=images[frame].shape[0])
             eligible = []
+            attempt = None
+            if traces is not None:
+                attempt = dict(turn_degrees=turn*90, candidates=[], status='no_eligible_candidate')
+                traces[frame][index]['attempts'].append(attempt)
+            peers = [peer for j, peer in enumerate(found[frame]) if j != index]
             for other in alternatives:
                 other = checked_detection(getattr(other, 'row', other))
-                # A rotated retry must actually find an upright head.
-                if turn and quarter_turn(other) != 0:
-                    continue
                 candidate = restore(other, box, turn)
-                if not same_box(original, candidate):
-                    continue
-                # Landmark displacement is the defect being repaired: use boxes
-                # to reserve ownership, not proximity to the defective points.
-                if any(j != index and overlap(candidate, peer) >= .25
-                       for j, peer in enumerate(found[frame])):
-                    continue
-                if candidate.score < original.score-.05:
-                    continue
-                quality = alignment_measurements(candidate, image)
-                if not quality['alignment_valid']:
+                reason, quality = candidate_rejection(other, candidate, original, peers,
+                    turn, error, spatial, rotate, image)
+                if attempt is not None:
+                    attempt['candidates'].append(dict(crop_detection=audit.geometry(other),
+                        source_detection=audit.geometry(candidate), rejection=reason, quality=quality))
+                if reason is not None:
                     continue
                 new_error = quality.get('alignment_error', 1.)
-                if spatial or rotate:
-                    if new_error > max(.20, error):
-                        continue
-                elif new_error >= error:
-                    continue
-                eligible.append((new_error, -candidate.score, candidate.row, candidate))
+                eligible.append((new_error, -candidate.score, candidate.row, turn, candidate))
             # Multiple heads in the same crop are not resolved by confidence.
+            if attempt is not None:
+                attempt['status'] = ('eligible' if len(eligible) == 1 else
+                                     'ambiguous_candidates' if eligible else 'no_eligible_candidate')
             if len(eligible) == 1:
                 candidates.setdefault((frame, index), []).extend(eligible)
     for (frame, index), options in candidates.items():
         # Different orientations must agree on both the head and its landmarks.
         from .rotated_faces import duplicate_face
         if any(not duplicate_face(a[-1], b[-1]) for i, a in enumerate(options) for b in options[i+1:]):
+            if traces is not None:
+                traces[frame][index]['status'] = 'conflicting_orientations'
             continue
-        result[frame][index] = min(options, key=lambda row: row[:3])[-1]
+        selected = min(options, key=lambda row: row[:3])
+        result[frame][index] = selected[-1]
+        if traces is not None:
+            traces[frame][index].update(status='repaired', selected_turn_degrees=selected[3]*90)
+    audit.finish(traces, result)
     return result

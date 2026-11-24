@@ -48,7 +48,7 @@ def detector(faces, correct, *, rotation=True, threshold=0.):
         calls.append([np.array(pixels) for pixels in images])
         if len(calls)==1:
             return [faces for _ in images]
-        return [correct for _ in images]
+        return [correct(pixels) if callable(correct) else correct for pixels in images]
     model._raw_many=raw
     return model,calls
 
@@ -64,12 +64,15 @@ def test_existing_sideways_profile_is_repaired_even_when_shape_error_is_unchange
     x,y,w,h=wrong.box
     crop=(int(x-.25*w),int(y-.25*h),int(x+1.25*w),int(y+1.25*h))
     answer=project(expected,crop,turn)
-    model,calls=detector([wrong],[answer])
     pixels=np.arange(300*300*3,dtype=np.uint8).reshape(300,300,3)
+    upright=np.rot90(pixels[crop[1]:crop[3],crop[0]:crop[2]],turn)
+    model,calls=detector([wrong],lambda img:[answer] if np.array_equal(img,upright) else [])
     result=model.detect_many([pixels])
     np.testing.assert_allclose(result[0][0].row,expected.row,atol=1e-6)
-    assert len(calls)==2
-    np.testing.assert_array_equal(calls[1][0],np.rot90(pixels[crop[1]:crop[3],crop[0]:crop[2]],turn))
+    retries=[img for batch in calls[1:] for img in batch]
+    assert len(retries)==(1 if box_consistent(wrong) else 4)
+    assert sum(np.array_equal(img,upright) for img in retries)==1
+    assert all(len(batch)<=2 for batch in calls[1:])
     assert model.config.data['detection']['alignment_retry_error']==0.
 
 
@@ -276,7 +279,12 @@ def test_scan_embeds_and_persists_repaired_geometry_before_downstream_collection
     model,_=detector([wrong],[])
     model.config=cfg
     corrected=project(expected,crop,quarter_turn(wrong))
-    model._raw_many=lambda images:[[wrong] if img.shape[:2]==(160,160) else [corrected] for img in images]
+    # Distinguish actual crop orientations; returning one fixed result for
+    # every orientation would describe conflicting detector measurements.
+    pixels=np.arange(160*160*3,dtype=np.uint8).reshape(160,160,3)
+    upright=np.rot90(pixels[crop[1]:crop[3],crop[0]:crop[2]],quarter_turn(wrong))
+    model._raw_many=lambda images:[[wrong] if img.shape[:2]==(160,160) else
+        [corrected] if np.array_equal(img,upright) else [] for img in images]
     backend=Backend();embedded=[];collected=[]
     backend.detect=lambda image:model.detect(np.asarray(image)[:,:,::-1])
     def embed(image,face):
@@ -287,6 +295,10 @@ def test_scan_embeds_and_persists_repaired_geometry_before_downstream_collection
         collected.extend(json.loads(row[0]) for row in db.execute(
             'SELECT geometry FROM observations WHERE scan=? AND cue=?',(scan,index)))
     client=MediaClient(count=1)
+    from io import BytesIO
+    with Image.fromarray(pixels[:,:,::-1]) as image:
+        output=BytesIO();image.save(output,format='PNG')
+        client.data['http://stash/sprite/1.jpg']=output.getvalue()
     with FaceDatabase(cfg.database) as db, SpriteInput(client,client.scene,cfg) as source:
         scan,reused=scan_scene(db,'scope',client.scene,cfg,'ns',source,lambda:backend,on_cue=on_cue)
         record=db.connection.execute('SELECT geometry,quality,rejected,embedding FROM observations WHERE scan=?',(scan,)).fetchone()
@@ -308,3 +320,127 @@ def test_face_cache_and_scan_contract_change_when_rotation_becomes_active(tmp_pa
     assert face(cfg)!=old_face and scan_identity(cfg,'ns')!=old_scan
     cfg.data['sapiensid']['collection']['enabled']=False
     assert face(cfg)==old_face and scan_identity(cfg,'ns')==old_scan
+
+
+# Source coordinates from the supplied manifest, without media or scene metadata.
+OBSERVED = checked_detection([
+    -37.9178352355957,55.63352966308594,299.5679626464844,133.7397918701172,
+    113.60991668701172,139.78175354003906,71.60289001464844,72.05097961425781,
+    164.61428833007812,22.920503616333008,228.0191192626953,89.1190185546875,
+    193.78591918945312,33.22037887573242,.8640366792678833])
+OBSERVED_CROP = (0,22,337,223)
+
+
+def synthetic_retry(turn):
+    """A controlled model response, NOT inferred ground truth for the user's cue."""
+    face=project(PROFILE,(0,0,300,300),(-turn)%4)
+    points=(np.asarray(face.landmarks)-face.box[:2])/face.box[2:]*[260,134]+[0,55]
+    return checked_detection([0,55,260,134,*points.ravel(),.85])
+
+
+@pytest.mark.parametrize('turn',[0,1,2,3])
+def test_out_of_box_axis_cannot_exclude_any_retry_orientation(turn):
+    from stash_ai.recognition import landmark_repair_audit as audit
+    assert quarter_turn(OBSERVED)==3
+    assert not box_consistent(OBSERVED)
+    expected=synthetic_retry(turn)
+    answer=project(expected,OBSERVED_CROP,turn)
+    pixels=np.arange(252*448*3,dtype=np.uint8).reshape(252,448,3)
+    upright=np.rot90(pixels[22:223,0:337],turn)
+    model,calls=detector([OBSERVED],lambda img:[answer] if np.array_equal(img,upright) else [])
+    with audit.capture() as reports:
+        result=model.detect(pixels)
+    np.testing.assert_allclose(result[0].row,expected.row,atol=1e-6)
+    trace=reports[0]['faces'][0]
+    assert trace['original']==audit.geometry(OBSERVED)
+    assert not trace['original_quality']['alignment_valid']
+    assert trace['estimated_turn_degrees']==270
+    assert trace['crop_xyxy']==list(OBSERVED_CROP)
+    assert trace['tried_turn_degrees']==[0,90,180,270]
+    assert trace['selected_turn_degrees']==turn*90 and trace['status']=='repaired'
+    assert trace['result']==audit.geometry(result[0])
+    candidate=trace['attempts'][turn]['candidates'][0]
+    assert candidate['rejection'] is None
+    assert candidate['crop_detection']==audit.geometry(answer)
+    assert candidate['source_detection']==audit.geometry(result[0])
+    assert [len(batch) for batch in calls]==[1,2,2]
+    # Export must be numeric JSON; no image, tensor, or model object survives.
+    import json
+    json.dumps(reports,allow_nan=False)
+
+
+def test_disagreeing_retry_orientations_preserve_original_and_explain_failure():
+    from stash_ai.recognition import landmark_repair_audit as audit
+    pixels=np.arange(252*448*3,dtype=np.uint8).reshape(252,448,3)
+    choices={turn:project(synthetic_retry(turn),OBSERVED_CROP,turn) for turn in (1,3)}
+    def responses(img):
+        return [answer for turn,answer in choices.items()
+                if np.array_equal(img,np.rot90(pixels[22:223,0:337],turn))]
+    model,_=detector([OBSERVED],responses)
+    with audit.capture() as reports:
+        assert model.detect(pixels)==[OBSERVED]
+    trace=reports[0]['faces'][0]
+    assert trace['status']=='conflicting_orientations'
+    assert trace['result']==trace['original']
+
+
+@pytest.mark.parametrize('mode',['empty','weak','wrong_head','invalid_alignment','ambiguous'])
+def test_failed_retry_exports_coordinates_and_rejection_without_png(mode):
+    from stash_ai.recognition import landmark_repair_audit as audit
+    pixels=np.arange(252*448*3,dtype=np.uint8).reshape(252,448,3)
+    row=list(synthetic_retry(1).row)
+    if mode=='weak':row[-1]=.7
+    if mode=='wrong_head':row[0]+=100
+    if mode=='invalid_alignment':
+        for i in range(5,14,2):row[i]-=100
+    answer=project(checked_detection(row),OBSERVED_CROP,1)
+    upright=np.rot90(pixels[22:223,0:337],1)
+    alternatives=[] if mode=='empty' else [answer]*(2 if mode=='ambiguous' else 1)
+    model,_=detector([OBSERVED],lambda img:alternatives if np.array_equal(img,upright) else [])
+    with audit.capture() as reports:
+        assert model.detect(pixels)==[OBSERVED]
+    trace=reports[0]['faces'][0]
+    assert trace['status']=='no_eligible_candidate' and trace['result']==trace['original']
+    attempt=trace['attempts'][1]
+    if mode=='empty':
+        assert attempt['candidates']==[]
+    elif mode=='ambiguous':
+        assert attempt['status']=='ambiguous_candidates'
+        assert all(item['rejection'] is None for item in attempt['candidates'])
+    else:
+        candidate=attempt['candidates'][0]
+        assert candidate['rejection']==dict(weak='lower_detection_score',
+            wrong_head='different_face_box',invalid_alignment='invalid_alignment')[mode]
+        assert candidate['crop_detection']==audit.geometry(answer)
+        np.testing.assert_allclose(candidate['source_detection']['landmarks'],
+                                   checked_detection(row).landmarks,atol=1e-6)
+
+
+def test_retry_audit_is_scoped_and_resets_after_failure():
+    from stash_ai.recognition import landmark_repair_audit as audit
+    pixels=np.zeros((252,448,3),np.uint8)
+    model,_=detector([OBSERVED],[])
+    with audit.capture() as outer:
+        model.detect(pixels)
+        with pytest.raises(RuntimeError), audit.capture() as inner:
+            model.detect(pixels)
+            raise RuntimeError('failed inference')
+        assert len(outer)==len(inner)==1
+    before=len(outer)
+    model.detect(pixels)
+    assert len(outer)==before
+    with audit.capture() as fresh:
+        assert fresh==[]
+
+
+def test_rotation_policy_version_invalidates_cached_geometry(monkeypatch):
+    from stash_ai.recognition import rotated_faces
+    from stash_ai.recognition.inference_contracts import face
+    from stash_ai.recognition.scanning import scan_identity
+    cfg=SimpleNamespace(data=defaults())
+    cfg.data['sapiensid']['enabled']=True
+    cfg.data['sapiensid']['collection']['enabled']=True
+    cfg.data['detection']['pose_guided_rotation']=True
+    current=(face(cfg),scan_identity(cfg,'ns'))
+    monkeypatch.setattr(rotated_faces,'CONTRACT','rotated-head-v4-profile-repair')
+    assert face(cfg)!=current[0] and scan_identity(cfg,'ns')!=current[1]

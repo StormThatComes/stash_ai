@@ -14,6 +14,7 @@ from .person_audit import BOX_COLOR, _draw
 from .person_association import policy as association_policy
 from .pose_mask_capture import capture_masks
 from . import pose_deduplication_audit as dedup_audit
+from . import landmark_repair_audit
 
 
 PERSON_COLORS = ((128, 0, 128), (0, 128, 0), (0, 0, 255))  # purple, green, blue
@@ -39,7 +40,7 @@ def _label(image, bounds, text, *, color):
 def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
     """Draw one fresh detection using the same annotations in scene and sweep audits."""
     mask_options = mask_options or MaskOptions()
-    with dedup_audit.capture(image) as dedup_reports, capture_masks(
+    with landmark_repair_audit.capture() as landmark_reports, dedup_audit.capture(image) as dedup_reports, capture_masks(
             image, enabled=mask_options.view != 'off') as masks, detector.prepared_frame(image):
         faces = detector.detect(image, force_pose=True)
         from .detection_phases import finish
@@ -56,6 +57,8 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
         record = dict(shot=getattr(image,'_recognition_cue_signature',(None,None))[1], previous_cue_available=bool(getattr(image,'_previous_cue_available',False)),cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
                       source_rect=list(cue.rect), source_dimensions=list(image.size),
                       output_dimensions=list(output_size), file=name, faces=[], people=[])
+        if landmark_reports:
+            record['face_landmark_repairs'] = landmark_reports
         from PIL import Image, ImageDraw
         with Image.new('RGB', output_size, (24, 24, 24)) as annotated:
             annotated.paste(image, (0, 0))
