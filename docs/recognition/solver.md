@@ -132,7 +132,7 @@ that no possible configuration works. The selected result is the best among
 completed trials, not a guarantee of the global optimum. If no changed candidate
 beats baseline, the current configuration is explicitly selected as unchanged.
 
-The default budget is **500 completed replays, including baseline**. It is a
+The default budget is **500 attempted replays, including baseline and failed trials**. It is a
 ceiling, not a target or an exhaustive Cartesian grid. `--max-trials 1` evaluates
 only baseline when the input already satisfies the active policy. A strict repair needs
 at least two slots for the input comparison and the repaired baseline. The separate `recognition tune` Cartesian-grid command retains its
