@@ -145,8 +145,9 @@ class BeamSearch:
     width = 5
     refinement_budget = 24
 
-    def __init__(self, families, factory, maximum, config=None):
+    def __init__(self, families, factory, maximum, config=None, *, stop_on_stagnation=False):
         self.config = config
+        self.stop_on_stagnation = stop_on_stagnation
         self.families, self.factory, self.maximum = tuple(families), factory, maximum
         self.beam, self.streams, self.root = {}, {}, {}
         self.stats = {f: statistics() for f in families}
@@ -302,6 +303,16 @@ class BeamSearch:
         self.restart_pending=interleave(tagged(n,c) for n,c in self.beam.items())
         return True
 
+    def _plateau_finished(self, reason):
+        if self.stop_on_stagnation:
+            self.stop_reason = reason
+            raise StopIteration
+        # Resume the unconsumed ordinary streams. A plateau is not evidence
+        # that their remaining candidates cannot solve the goals.
+        self.refining = False
+        self.refinements.clear()
+        self.stale = 0
+
     def next(self):
         if self.restart_pending is not None:
             if self.restart_executed<8:
@@ -314,8 +325,7 @@ class BeamSearch:
             self.refinements={n:iter(self.factory(n,c['changes'],None,True)) for n,c in self.beam.items()}
         if self.refining and self.refined >= self.refinement_budget:
             if self._restart():return self.next()
-            self.stop_reason = 'stagnation_after_refinement'
-            raise StopIteration
+            self._plateau_finished('stagnation_after_refinement')
         if not self.refining and self.stale >= self.patience:
             self.refining, self.refined = True, 0
             self.refinements = {n: iter(self.factory(n, c['changes'], None, True)) for n,c in self.beam.items()}
@@ -330,8 +340,7 @@ class BeamSearch:
                 self.refinements[n] = stream
                 return family, 'refinement', n, strategy, changes
             if self._restart():return self.next()
-            self.stop_reason = 'refinement_exhausted'
-            raise StopIteration
+            self._plateau_finished('refinement_exhausted')
         # Count only this lane's completed trials: interleaved even/odd lanes
         # otherwise alias with the modulo schedule and can starve the winner.
         baseline_first = (self.normal_completed - self.last_root >= 3 or

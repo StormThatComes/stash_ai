@@ -33,7 +33,7 @@ def test_stagnation_has_one_bounded_restart_and_keeps_best():
         for i in range(200):
             if mode:yield 'face','restart_probe' if mode=='restart' else 'local_refinement',{'x':i}
             else:yield 'coordinate_probe',{'x':i}
-    search=BeamSearch(['face'],factory,500)
+    search=BeamSearch(['face'],factory,500,stop_on_stagnation=True)
     search.observe('baseline',{},(1,0,0),'baseline')
     phases=[]
     for i in range(200):

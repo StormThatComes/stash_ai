@@ -243,7 +243,12 @@ While no fully solved configuration exists, after 64 completed trials without an
 around the retained beam. Refinement tries measured brackets, smaller steps and
 reverting unnecessary changes. Up to 24 completed refinement trials run; material
 improvement resumes exploration. Otherwise it tries at most eight distant restart trials once, refines again,
-and performs the reserved local stability checks before stopping. Patch-size tie-breaks alone do not reset patience.
+and resumes unconsumed exploration candidates by default. Stagnation alone does
+not end an unsolved search. Set `execution.solver.stop_on_stagnation: true`
+(v1 `execution.solver_stop_on_stagnation`) or pass `--stop-on-stagnation` to
+retain bounded early stopping; `--no-stop-on-stagnation` overrides that setting.
+Before deciding that candidates are exhausted or starting final polishing,
+parallel search drains outstanding results and reconsiders new parents. Patch-size tie-breaks alone do not reset patience.
 The configured replay limit and proposal-attempt guard always remain in force.
 
 `search.stop_reason` explains budget exhaustion, stagnation, exhausted candidates

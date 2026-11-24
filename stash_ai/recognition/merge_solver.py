@@ -150,13 +150,17 @@ def rebuilt_goals(db, goals):
 
 
 @solver_scope
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False, compare_scene_strategies=False, strict=None):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None, feasibility_trials=6, targeted_trials=8, execution=None, compare_anchor_rules=False, compact_report=False, compare_scene_strategies=False, strict=None, stop_on_stagnation=None):
     from .solver_execution import current as execution_plan
     runtime = execution_plan()
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside, outsiders
     outside_limits = validate_outside(outside_limits)
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
+    if stop_on_stagnation is None:
+        stop_on_stagnation = config.data['execution']['solver_stop_on_stagnation']
+    if type(stop_on_stagnation) is not bool:
+        raise ValueError('stop_on_stagnation must be boolean.')
     if type(feasibility_trials) is not int or feasibility_trials < 0:
         raise ValueError('feasibility_trials must be a nonnegative integer.')
     if type(targeted_trials) is not int or targeted_trials < 0:
@@ -227,7 +231,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         search=dict(executed=0, attempted=0, restored_trials=0, failed_trials=0, max_trials=maximum,
                     stop_reason='strict_config_budget'))
     with heartbeat('initialization', progress, 'Validate solver checkpoint'):
-        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,strict=strict,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
+        journal = Journal(checkpoint, fingerprint(input_config,goals,db,dict(maximum=maximum,strict=strict,stop_on_stagnation=stop_on_stagnation,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits,feasibility_trials=feasibility_trials,targeted_trials=targeted_trials,compare_anchor_rules=compare_anchor_rules,**({'scene_strategies':3} if compare_scene_strategies else {}),execution=runtime.signature() if runtime else None)),
                           resume=resume,winner=winner_writer) if checkpoint else None
     replay_selection = replay_scope, scans, inputs
     from .merge_solver_feasibility import Feasibility, resource_limit
@@ -479,7 +483,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                           if any(k.startswith(PERSON_PREFIX) for k in item['patch']) == (family == 'hybrid'))
             yield from search.operations({'measured_blockers':directed,'mechanism_plan':mechanisms,'coordinate_probe':probes,
                                           'crossover':mixing,'boundary_probe':boundaries,'learned_interaction':interactions})
-        search = BeamSearch(factories, factory, search_limit, config)
+        search = BeamSearch(factories, factory, search_limit, config, stop_on_stagnation=stop_on_stagnation)
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'],
                        mechanisms=feedback['baseline'].get('mechanisms'), admissible=summaries['baseline']['admissible'])
         tightening.observe({}, summaries['baseline']['fully_solved'])
@@ -491,7 +495,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         normal_exhausted = False
         alternate_streak = 0
         def completed(name):
-            nonlocal normal_exhausted, alternate_streak
+            nonlocal normal_exhausted, alternate_streak, polishing, stop_reason
             if name not in pending_search:
                 return
             normalized, family, phase, parent, strategy = pending_search.pop(name)
@@ -506,9 +510,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
                 elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase,
                 mechanisms=feedback[name].get('mechanisms'), admissible=summaries[name]['admissible'])
-            if improved:
+            if improved or (search.stop_reason == 'frontier_exhausted' and name in search.beam):
                 normal_exhausted = False
                 search.stop_reason = None
+                stop_reason = None
+                if not summaries[best]['fully_solved']:
+                    polishing = None
             bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
             # Keep detailed hints only for parents that can still be expanded.
             for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
@@ -648,6 +655,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                     else:
                         family, phase, parent, strategy, changes = search.next()
                 except StopIteration:
+                    if pending_search:
+                        # Completed workers may introduce new parents, blockers
+                        # or a solution. Do not close the generator before them.
+                        yield None
+                        continue
                     if not normal_exhausted:
                         normal_exhausted = True
                         continue  # Finish the bounded alternate frontier before stopping.
@@ -655,12 +667,18 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                     polishing = Polisher(config, min(reserve, search_limit-trials))
             else:
                 if polishing is None:
+                    if pending_search:
+                        yield None
+                        continue
                     polishing = Polisher(config, min(reserve, search_limit-trials))
             if polishing is not None:
                 try:
                     phase, parent, strategy, changes = polishing.next(best,
                         sorted(ranks,key=ranking,reverse=True), changes_for, feedback)
                 except StopIteration:
+                    if pending_search:
+                        yield None
+                        continue
                     stop_reason=stop_reason or 'polishing_complete'
                     break
                 family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
@@ -956,6 +974,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         pruned_trials=search.pruned if search else 0,
                         operators=search.operators if search else {}, restarts=search.restarts if search else 0,
                         stagnation_patience=search.patience if search else None,
+                        stop_on_stagnation=stop_on_stagnation,
                         refinement_budget=BeamSearch.refinement_budget,
                         executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
                                             for family in ('hybrid', 'face')},

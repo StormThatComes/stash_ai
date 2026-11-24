@@ -179,6 +179,7 @@ def execute(args, config):
             with report_phase('Solve merge goals', quiet=True, interrupted=lambda: result.get('interrupted')):
                 result.update(solve(config, result, db, maximum=args.max_trials,
                                      strict=getattr(args, 'strict', None),
+                                    stop_on_stagnation=getattr(args, 'stop_on_stagnation', None),
                                     progress=progress if args.progress_style != 'off' else None,
                                     checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),

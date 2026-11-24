@@ -63,7 +63,7 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'host_memory_bytes': 0, 'pmpose_precision': 'fp32', 'sam_precision': 'fp32', 'profile_cuda_every': 0, 'sam_frame_batch_size': 4, 'sam_prompt_batch_size': 8, 'refinement_queue_bytes': 134217728, 'pmpose_fused_flip': True, 'retained_memory_bytes': 17179869184, 'model_bytes_cache_bytes': 536870912, 'solver_compare_scene_strategies': False, 'solver_strict': True, 'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'vitpose_device_decode': False, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
+        'execution': {'host_memory_bytes': 0, 'pmpose_precision': 'fp32', 'sam_precision': 'fp32', 'profile_cuda_every': 0, 'sam_frame_batch_size': 4, 'sam_prompt_batch_size': 8, 'refinement_queue_bytes': 134217728, 'pmpose_fused_flip': True, 'retained_memory_bytes': 17179869184, 'model_bytes_cache_bytes': 536870912, 'solver_compare_scene_strategies': False, 'solver_strict': True, 'solver_stop_on_stagnation': False, 'cpu_residency_bytes': 0, 'disk_total_bytes': 0, 'disk_free_bytes': 0, 'rebuild_storage': 'disk', 'rebuild_sqlite_cache_bytes': 67108864, 'rebuild_scratch_bytes': 274877906944, 'rebuild_scratch_directory': None, 'rfdetr_precision': 'fp32', 'vitpose_precision': 'fp32', 'vitpose_device_decode': False, 'sequential_scene_batch_size': 1, 'gpu_model_policy': 'phase', 'log_vram': True,
                       'rebuild_parallel_scenes': True, 'rebuild_nomination_device': 'cpu', 'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'detector_batch_size': 1, 'scan_cpu_workers': 4, 'scan_queue_bytes': 268435456, 'recognizer_batch_size': 1,
@@ -255,6 +255,8 @@ def validate(data, *, detection_preview=False):
         raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['solver_strict']) is not bool:
         raise ValueError('execution.solver_strict must be boolean.')
+    if type(data['execution']['solver_stop_on_stagnation']) is not bool:
+        raise ValueError('execution.solver_stop_on_stagnation must be boolean.')
     if type(data['execution']['solver_compare_scene_strategies']) is not bool:
         raise ValueError('execution.solver_compare_scene_strategies must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:

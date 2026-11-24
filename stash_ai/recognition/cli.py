@@ -55,7 +55,7 @@ class RecognitionParser(argparse.ArgumentParser):
                     self.error('--' + field.replace('_', '-') + ' must be in 1..16.')
             if result.solver_memory_mb is not None and result.solver_memory_mb <= 0:
                 self.error('--solver-memory-mb must be positive.')
-            if not result.solve and (result.strict is not None or result.solver_cpus is not None or result.solver_trials != 1
+            if not result.solve and (result.strict is not None or result.stop_on_stagnation is not None or result.solver_cpus is not None or result.solver_trials != 1
                     or result.solver_memory_mb is not None or result.solver_scheduling != 'batch'):
                 self.error('Solver execution options require --solve.')
             if result.feasibility_trials < 0:
@@ -346,7 +346,9 @@ def parser():
         metavar='PERFORMER_ID:OBSERVATION_ID',
         help='Exclude one retained observation (and its linked face/body addresses) from a goal-set person; '
              'use observation_id from report-identity manifest.json. Repeatable; never forces recognition assignments.')
-    merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
+    merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop when candidates are exhausted).')
+    merge_report.add_argument('--stop-on-stagnation', action=argparse.BooleanOptionalAction, default=None,
+        help='Stop after bounded plateau refinement instead of continuing exploration (YAML default: disabled).')
     merge_report.add_argument('--feasibility-trials', type=int, default=6,
         help='Initial permissive production probes within --max-trials (default: 6; 0 disables early probes). '
              'Reports observed reachability separately from goal acceptance.')

@@ -184,7 +184,7 @@ def test_stagnation_refines_and_stops_without_consuming_500_replays(tmp_path):
     config, people = incomplete_source(tmp_path)
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people], by_performer=False, policy='strict')
-        result = solve(config, goals, db)
+        result = solve(config, goals, db, stop_on_stagnation=True)
     assert result['search']['max_trials'] == 500
     assert result['search']['executed'] < 150
     assert result['search']['stop_reason'] in ('stagnation_after_refinement','refinement_exhausted')

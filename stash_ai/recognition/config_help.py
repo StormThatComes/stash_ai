@@ -1,6 +1,7 @@
 """Operator help for the bundled, migrated and solver-generated v2 YAML."""
 
 HELP = {
+    'execution.solver.stop_on_stagnation': 'Stop after bounded plateau refinement. Default false resumes unconsumed candidates; total replay and proposal limits still apply.',
     'pose.estimator.rtmo': 'Experimental pinned RTMO-S body7 ONNX one-stage COCO17 backend.',
     'pose.estimator.rtmo.directory': 'Local folder containing the verified end2end.onnx; empty uses execution.models.directory/rtmo_s/<SHA256>.',
     'pose.estimator.rtmo.torso_nms': 'Retain overlapping boxes when two distinct reliable torsos are measured; false uses ordinary box NMS. Does not recover predictions removed inside the exported graph.',
