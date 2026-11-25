@@ -31,6 +31,7 @@ def defaults():
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
                       'min_face_source_fraction': DEFAULT_MIN_FACE_SOURCE_FRACTION,
                       'faceocc_logit_threshold': DEFAULT_FACEOCC_LOGIT_THRESHOLD,
+                      'visibility_region': 'mesh',
                       'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
@@ -179,6 +180,8 @@ def validate(data, *, detection_preview=False):
     }.items():
         for key in names:
             _number(data[section][key], f'{section}.{key}', 0, 1)
+    if data['detection']['visibility_region'] not in ('mesh', 'ellipse'):
+        raise ValueError('detection.visibility_region must be mesh or ellipse.')
     _number(data['detection']['faceocc_logit_threshold'], 'detection.faceocc_logit_threshold', -MAX_FLOAT32, MAX_FLOAT32)
     data['detection']['faceocc_logit_threshold'] = float(data['detection']['faceocc_logit_threshold'])
     if data['detection']['candidate_score_threshold'] is not None:

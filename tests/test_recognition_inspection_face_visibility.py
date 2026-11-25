@@ -89,7 +89,13 @@ def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatc
             db.connection.execute('UPDATE observations SET geometry=? WHERE id=?', (json.dumps(geometry), face))
             db.connection.commit()
 
+    model = object.__new__(FaceVisibility)
+    model.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
+    model.model = None
+    monkeypatch.setattr(inspector, 'FaceVisibility', lambda *_: model)
     def assets(*args, **kwargs):
+        if damage == 'clipped':
+            return {'faceocc': None}
         if damage != 'missing_model':
             pytest.fail('invalid source or alignment must be checked before loading FaceOcc')
         raise FileNotFoundError
@@ -103,7 +109,7 @@ def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatc
             assert original is overlay is None and 'VTT source changed' in caption
         else:
             assert original.size == overlay.size and 'Recorded fraction unavailable' in caption
-            expected = {'clipped': 'Insufficient face ellipse coverage', 'eyes': 'distinct eye', 'missing_model': 'weights missing'}
+            expected = {'clipped': 'Insufficient face region coverage', 'eyes': 'distinct eye', 'missing_model': 'weights missing'}
             assert expected[damage] in caption and 'Replay 0.' not in caption
             if damage == 'clipped':
                 import re

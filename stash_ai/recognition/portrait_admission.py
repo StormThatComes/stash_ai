@@ -55,6 +55,6 @@ def reason(quality,config):
     if not config.data['portraits'].get('anchor_only',False):return None
     rejected=pose_reason(quality,config)
     if rejected:return rejected
-    if extra_measurements(config) and (not isinstance(quality,dict) or not cached(quality, config.data['detection']['faceocc_logit_threshold'])):
+    if extra_measurements(config) and (not isinstance(quality,dict) or not cached(quality, config.data['detection']['faceocc_logit_threshold'], config.data['detection']['visibility_region'])):
         return 'portrait_anchor_visibility_unavailable'
     return None if is_anchor(quality,config.data['clustering']) else 'portrait_anchor_required'

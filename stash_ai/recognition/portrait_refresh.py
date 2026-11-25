@@ -38,7 +38,7 @@ class LazyAssets(Mapping):
         return self._load((models['detector'], models['recognizer']))
 
     def __getitem__(self, key):
-        if key in ('expression_mesh', 'expression_blendshapes'):
+        if key == 'expression_blendshapes':
             keys = ('expression_mesh', 'expression_blendshapes')
         elif key in (self.config.data['models']['detector'], self.config.data['models']['recognizer']):
             models = self.config.data['models']

@@ -128,7 +128,11 @@ def face(quality, geometry, config, policies, fingerprint):
     coverage = visibility.get('source_fraction', quality.get('visibility_source_fraction'))
     visibility_note = quality.get('visibility_geometry_error', 'Requires a retained valid visibility measurement.')
     if coverage is not None:
-        visibility_note += f' Face ellipse inside the source: {coverage:.2%}.'
+        visibility_note += f' Face region inside the source: {coverage:.2%}.'
+    if visibility.get('region_method'):
+        visibility_note += ' Region: '+visibility['region_method']+'.'
+    if visibility.get('region_fallback_reason'):
+        visibility_note += ' Fallback: '+visibility['region_fallback_reason']
     source_floor = d.get('min_face_source_fraction')
     checks = [
         check('detection.score_threshold', score, d['score_threshold'], '>'),
@@ -139,7 +143,7 @@ def face(quality, geometry, config, policies, fingerprint):
               enabled=d['max_pose_deviation'] is not None),
         check('detection.min_face_source_fraction', coverage, source_floor, '>' if source_floor == 0 else '>=',
               enabled=measurement_required(scan) and source_floor is not None,
-              note='A nonempty source ellipse is required even at zero.'),
+              note='A nonempty source region is required even at zero.'),
         check('detection.min_visible_face_fraction', visible, d['min_visible_face_fraction'],
               enabled=measurement_required(scan), note=visibility_note),
         check('alignment_valid', quality.get('alignment_valid'), True, '==',

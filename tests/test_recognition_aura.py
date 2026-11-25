@@ -50,7 +50,7 @@ def test_only_selected_recognition_and_enabled_visibility_assets_are_downloaded(
     monkeypatch.setattr(downloads, 'install_hf_asset', lambda repo, filename, revision, destination, **kwargs:
                         calls.append((repo, filename, revision)))
     ensure_assets(load(path), write=lambda text: None)
-    expected = [ASSETS['yunet'].filename, 'glintr100.onnx'] + (['model.safetensors'] if portraits else [])
+    expected = [ASSETS['yunet'].filename, 'glintr100.onnx'] + (['model.safetensors', ASSETS['expression_mesh'].filename] if portraits else [])
     assert [item[1] for item in calls] == expected
     assert all('gender' not in item[1] and '1k3' not in item[1] for item in calls)
 

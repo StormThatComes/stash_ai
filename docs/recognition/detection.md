@@ -395,39 +395,49 @@ portrait ranking retains its separate 256px `portrait_sharpness`. Active portrai
 quality target likewise requires visibility weighting, or anchor-only visibility
 measurement. Portrait quality targets remain preferences, not admission gates.
 
-FaceOcc receives an upright crop and whole-face ellipse fitted to the five
-interior landmarks. A bounded bank of frontal, three-quarter and left/right
-profile templates estimates translation, rotation and scale jointly. Eyes and
-mouth corners occupy expected positions inside each template; its contour
-extends beyond them to include forehead, chin and cheeks. Near profiles retain
-cheek width even when the eye projection is narrow. A stronger width prior
-stabilizes this weakly measured dimension against landmark jitter.
+FaceOcc receives an upright crop from the five-landmark whole-face template,
+including sideways and upside-down faces. `face.quality.visibility_region` is
+`mesh` by default. A pinned MediaPipe mesh-only ONNX session uses those same
+pixels to estimate 478 xyz landmarks; the projected envelope of the 468 facial
+surface points supplies the measurement contour (iris points are excluded).
+It includes the forehead, jaw, cheeks and profile nose. Projected pixels count
+once, so a profile does not acquire an extra denominator for its far side.
+This convex surface envelope is still an estimate, not exact skin segmentation.
 
-The fit checks all five points, tolerates at most one outlier and requires four
-consistent landmarks (RMS residual at most 0.15 eye-to-mouth units, each inlier
-at most 0.25). Profile fits also require a consistent nose to locate the cheek.
-Unusable geometry reports an unavailable measurement. The detector box provides
-only a loose plausibility check; changing a reasonable box cannot move the
-ellipse or resize the model input. The crop follows the fitted region and
-contains its full extent, including for sideways and upside-down faces.
+The contour is independent of FaceOcc logits. Low face presence, inconsistent
+anchors, a clipped contour or implausible area select the five-landmark ellipse
+fallback. Geometry checks normalize by eye-to-mouth distance, not compressed
+profile eye spacing. Both choices require the configured real-source coverage;
+otherwise the measurement is unavailable. Model download/runtime failures are
+reported as model errors, not silently disguised as geometric fallback.
+`ellipse` explicitly selects the previous geometry without loading the mesh.
+The mesh runs on the visibility model owner, including prepared scan and portrait
+batches; blendshape inference is not needed for visibility.
 
-These are geometric priors, not a learned contour model or per-point visibility
-predictions. Five landmarks still only approximate individual anatomy. No region
-is fitted to the FaceOcc mask or selected by whichever visibility scores highest;
-real occluders remain inside the expected region and reduce the score. Use the
-outside-ellipse overlay in Face visibility to distinguish region errors from
-segmentation errors.
+Visibility counts FaceOcc-positive pixels inside the expected contour divided
+by its **full** area, including externally occluded and off-frame portions.
+The contour is never fitted to the visible mask. Foreground sharpness uses the
+same logits with a separate support region: a six-pixel dilation of an accepted
+mesh contour in the 256px crop, intersected with real-source pixels. This retains
+nearby skin without admitting arbitrary distant positive components. Ellipse
+fallback keeps its original support. Adjacent faces touching this narrow support
+remain a limitation; this is a geometric bound, not instance segmentation.
+Masks retain holes and do not fill occluders. Existing sharpness edge exclusion
+and mapping into the exact 112px encoder input remain in place.
 
-Visibility and foreground sharpness share the same semantic region, mapped to
-their respective model coordinates, with one segmentation pass per face.
-With partial boxes enabled, `face.quality.min_face_source_fraction`
-sets how much of the face ellipse must lie in the VTT cue (default 0.85). Off-frame pixels contribute zero to the visible fraction and are
-excluded from sharpness. Inspect Scene reports the measured source coverage.
-The quality/visibility contracts invalidate older measurements:
-the next `recognition run` reprocesses selected scenes, including faces previously
-rejected as `face_occluded`, without changing YAML thresholds or deleting the
-database. Subsequent runs reuse the updated measurements. This requires detected,
-usable landmarks; it does not recover a face that the detector never found.
+With partial boxes enabled, `face.quality.min_face_source_fraction` sets how much
+of the selected region must lie in the VTT cue (default 0.85). Source coverage is
+checked after contour selection. Quality records retain `region_method`,
+`region_requested` and `region_fallback_reason` inside `visibility`; Inspect Scene
+explains fallback alongside the visibility gate. The updated visibility and scan
+contracts reprocess selected scenes, including previously occluded observations,
+without deleting the database. Detector/encoder identity spaces are unchanged.
+
+The mesh needs accurate upright crops and can fail on extreme profiles, heavy
+occlusion or very small faces. Its presence score is not a calibrated contour
+accuracy score. The pinned-model smoke compares a public-domain portrait with
+an artificial lower-face occluder and quarter-turn rotations; representative VTT
+frames are still needed to calibrate thresholds and assess difficult profiles.
 
 Quality records include `sharpness_method` (`faceocc_mask`, `face_ellipse`, or
 `unavailable`), `sharpness_pixels`, and the previous rectangular measurement as

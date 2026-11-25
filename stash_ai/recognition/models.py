@@ -130,10 +130,14 @@ def asset_selection(config):
         selected.append('faceocc')
     if detection_visibility:
         identity_assets.add('faceocc')
+    if 'faceocc' in selected and config.data['detection']['visibility_region'] == 'mesh':
+        selected.append('expression_mesh')
+        if detection_visibility:
+            identity_assets.add('expression_mesh')
     from .expression import required as expression_required
     if config.data['portraits']['enabled'] and expression_required(config.data['portraits']):
         selected.extend(('expression_mesh', 'expression_blendshapes'))
-    return selected, identity_assets
+    return list(dict.fromkeys(selected)), identity_assets
 
 
 def ensure_assets(config, *, write=print, keys=None):
