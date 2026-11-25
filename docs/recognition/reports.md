@@ -720,3 +720,20 @@ background to pan and use the wheel to zoom. Fit, Pause/resume and Reset layout
 control a deterministic layout that settles after a bounded number of updates.
 Refresh retains positions of surviving node IDs. Expand/Collapse groups changes
 presentation only, never reference authority or recognition membership.
+
+Graph diagnostics are explicit actions. **Why here?** highlights recorded upstream
+evidence; **Uses this evidence** follows downstream pointers. Rival and newly
+computed similarity edges never establish dependency. **Weak connections** marks
+structural bridges in the loaded partial graph, not incorrect assignments. Missing
+references and pagination can create apparent bottlenecks. Removal effects need a
+recognition replay because alternate routes may still attach the samples.
+
+**Compare similarity…** calculates bounded top-three cosine neighbours among the
+current observations on this page, separately for face/body. Same-cue and known
+identical-pixel comparisons are excluded. Missing/invalid embeddings remain
+unavailable. Dashed edges are new comparisons; their score is not a probability or
+historical evidence. **Clear similarity** removes only that exploratory layer.
+**Compare performer…** opens the existing merge-path analysis for another current
+identity in the same scope/model, using a retained scene as the replay context.
+View details show independently recorded support counts separately from retained
+examples; multiple Views in a single decision are not fused into a fictitious View.

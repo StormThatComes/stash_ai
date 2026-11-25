@@ -54,3 +54,48 @@ def test_layout_is_finite_repeatable_and_respects_pins():
     expanded,_=project(graph,groups)
     assert len(compact['nodes'])==1 and len(expanded['nodes'])==2
     assert expanded['edges'][0]['source']=='b'
+
+
+def test_diagnostics_exclude_rivals_and_new_similarities():
+    from stash_ai.recognition.inspection_graph_diagnostics import related, bridges
+    graph=dict(nodes=[dict(id=x) for x in 'abcde'],edges=[
+        dict(source='a',target='b',relation='reference'),dict(source='b',target='c',relation='assigned'),
+        dict(source='c',target='d',relation='reference'),dict(source='e',target='c',relation='rival'),
+        dict(source='a',target='d',relation='similarity')])
+    assert related(graph,'c')==set('abc')
+    assert related(graph,'b',downstream=True)==set('bcd')
+    assert bridges(graph)==[('b','c')]
+
+
+def test_similarity_is_explicit_scoped_and_checks_revision(tmp_path):
+    import numpy as np
+    import pytest
+    from stash_ai.recognition.inspection_graph_diagnostics import similarities
+    config,person,_=seed(tmp_path,6)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('UPDATE observations SET embedding=?',(np.array([1,0,0,0],dtype='<f4').tobytes(),))
+        state.connection.commit()
+    reader=IdentityReader(config,identity_id=person);graph=build(reader)
+    result=similarities(reader,graph)
+    nodes={n['id']:n for n in graph['nodes']}
+    assert result['edges'] and not result['missing']
+    for e in result['edges']:
+        a,b=nodes[e['source']],nodes[e['target']]
+        assert a['kind']==b['kind']
+        assert (a['scene'],a['cue'])!=(b['scene'],b['cue'])
+        assert e['provenance']=='new_comparison' and e['score']==1
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('DELETE FROM members');state.connection.commit()
+    with pytest.raises(ValueError,match='changed'):similarities(reader,graph)
+
+
+def test_multiple_recorded_views_are_not_fused_into_one(tmp_path):
+    config,person,_=seed(tmp_path,2)
+    with FaceDatabase(config.database) as state:
+        row=state.connection.execute('SELECT * FROM candidates LIMIT 1').fetchone()
+        payload=json.loads(row['payload']);payload.update(reason='global_view_identity',global_view=dict(
+            view_evidence=[dict(medoid='a',support_ids=['x']),dict(medoid='b',support_ids=['y'])]))
+        state.connection.execute('UPDATE candidates SET payload=? WHERE id=?',(json.dumps(payload),row['id']));state.connection.commit()
+    graph=build(IdentityReader(config,identity_id=person))
+    assert not any(n['type']=='view' for n in graph['nodes'])
+    assert {'face:a','face:b'} <= {n['id'] for n in graph['nodes']}

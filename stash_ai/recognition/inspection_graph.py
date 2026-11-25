@@ -96,6 +96,11 @@ def build(reader, *, scene=None, kind=None, state=None, offset=0, limit=PAGE_SIZ
             nodes[target]['evidence_status'] = trace['evidence_status']
             nodes[target]['decisions'] = len(trace['decisions'])
             for decision in trace['decisions']:
+                raw = (next((d['recorded'].get(explain.FACE_PROOF.get(decision['reason']), {}) for d in decisions
+                             if d['policy']==decision['policy'] and d['supports_membership']), {})
+                       if row['kind']=='face' else proof)
+                support_count = raw.get('support_count',raw.get('support',raw.get('independent_support')))
+                if type(support_count) is not int: support_count=None
                 provenance = trace['evidence_status']
                 did = 'decision:'+fingerprint([person['scope'],person['namespace'],target,decision])
                 if not node(dict(id=did,type='decision',reason=decision['reason'],policy=decision['policy'],
@@ -108,11 +113,11 @@ def build(reader, *, scene=None, kind=None, state=None, offset=0, limit=PAGE_SIZ
                 # freshly rebuilt catalogue or a claim of complete View membership.
                 view_refs = [r for r in refs if r['label'] in ('View medoid','View support','Support ids')]
                 view = None
-                if any(r['label']=='View medoid' for r in view_refs):
+                if len({(r['kind'],r['observation']) for r in view_refs if r['label']=='View medoid'})==1:
                     view = 'view:'+fingerprint([person['scope'],person['namespace'],decision['policy'],
                         decision['reason'],view_refs,decision['metrics']])
                     if node(dict(id=view,type='view',provenance=provenance,policy=decision['policy'],
-                        support_count=decision['metrics'].get('independent_support'),
+                        support_count=support_count,
                         retained_examples=len({(r['kind'],r['observation']) for r in view_refs if r['label']!='View medoid'}),
                         completeness='partial_or_unknown',label='Recorded View evidence')):
                         edge(view,did,'view_match',provenance)
