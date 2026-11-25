@@ -255,3 +255,52 @@ def test_cpu_jobs_share_one_owned_read_only_frame():
             assert len(set(ids))==1 and id(image) not in ids
         finally:release.set();stage.close()
     assert not stage.images
+
+
+@pytest.mark.parametrize('faces_in_first_cue', [1,2,9])
+def test_scan_keeps_mesh_geometry_failure_local_including_singleton_batch_tail(tmp_path, faces_in_first_cue):
+    import json
+    import torch
+    from stash_ai.recognition.visibility import FaceVisibility, LazyVisibility, VisibilityGeometryError
+    from stash_ai.recognition.face_contour import Region
+    settings = config(tmp_path)
+    data = plain(settings.data)
+    data['detection'].update(visibility_region='mesh', min_visible_face_fraction=.5)
+    settings = replace(settings, data=data)
+    client, backend = MediaClient(count=2), Backend()
+    bad = replace(FACE, row=(*FACE.row[:-1], .98))
+    detections = iter([[FACE]*(faces_in_first_cue-1)+[bad], [FACE]])
+    backend.detect = lambda image: next(detections)
+    models = []
+    def mesh(item):
+        if item.face.score == .98:
+            raise VisibilityGeometryError('Mesh contour extends outside the model crop.')
+        mask = np.zeros((256,256), bool); mask[64:192,64:192] = True
+        return Region(mask, int(mask.sum()), mask, 'mesh')
+    def factory(*args):
+        model = object.__new__(FaceVisibility)
+        model.region_requested = 'mesh'
+        model.minimum_source_fraction = settings.data['detection']['min_face_source_fraction']
+        model.logit_threshold = 0.
+        model.device = 'cpu'
+        model.model = lambda inputs: torch.ones_like(inputs[:,:1])
+        model.mesh = SimpleNamespace(region=mesh, close=lambda:None)
+        models.append(model)
+        return model
+    owner = LazyVisibility(settings, {}, factory)
+    try:
+        with FaceDatabase(settings.database) as state, SpriteInput(client,client.scene,settings) as source:
+            identifier, _ = scan_scene(state,'scope',client.scene,settings,'ns',source,lambda:backend,visibility=owner)
+            assert state.connection.execute('SELECT cursor,status FROM scans WHERE id=?',(identifier,)).fetchone()[:] == (2,'complete')
+            rows = state.connection.execute('SELECT rejected,embedding,quality FROM observations WHERE scan=?',(identifier,)).fetchall()
+            rejected = [row for row in rows if row['rejected'] is not None]
+            assert len(rejected) == 1 and rejected[0]['rejected'] == 'face_visibility_unmeasurable'
+            assert rejected[0]['embedding'] is None
+            quality = json.loads(rejected[0]['quality'])
+            assert quality['visibility_geometry_error'] == 'Mesh contour extends outside the model crop.'
+            assert 'visible_face_fraction' not in quality
+            assert sum(row['embedding'] is not None for row in rows) == faces_in_first_cue
+            assert len(models) == 1 and owner._inference_failures == 0
+            assert models[0].model is not None
+    finally:
+        owner.close()

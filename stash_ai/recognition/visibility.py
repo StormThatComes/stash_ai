@@ -136,11 +136,15 @@ class LazyVisibility:
         """Model-owner entry for independently owned CPU preparation buffers."""
         if len(prepared)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         def scalar(item):
+            if isinstance(item,VisibilityGeometryError):return item
             try:
                 model=self._ensure()
-                if isinstance(item,VisibilityGeometryError):return item
                 value=model.measure_prepared_many([item])[0]
-                if not cached(value, self.logit_threshold):raise ValueError('Invalid visibility measurement.')
+                # Prepared inference returns observation-local geometry errors,
+                # including mesh rejection, instead of raising them.
+                if isinstance(value,VisibilityGeometryError):return value
+                if not isinstance(value,dict) or not cached(value, self.logit_threshold):
+                    raise ValueError('Invalid visibility measurement.')
                 return value
             except VisibilityGeometryError as error:return error
             except Exception as error:
@@ -158,7 +162,8 @@ class LazyVisibility:
         except Exception as error:return [error for _ in prepared]
         try:
             values=model.measure_prepared_many(prepared)
-            if len(values)!=len(prepared) or any(not isinstance(v,VisibilityGeometryError) and not cached(v, self.logit_threshold) for v in values):
+            if (not isinstance(values,list) or len(values)!=len(prepared)
+                    or any(not isinstance(v,VisibilityGeometryError) and not (isinstance(v,dict) and cached(v, self.logit_threshold)) for v in values)):
                 raise ValueError('Invalid visibility batch.')
             return values
         except Exception:

@@ -115,3 +115,69 @@ def test_persistent_optional_inference_failure_has_bounded_recovery(tmp_path, ki
             owner.measure(None, None)
     assert len(models) == 2 and all(model.closed for model in models)
     owner.close()
+
+
+@pytest.mark.parametrize('path', ['single', 'mixed_batch', 'batch_disabled', 'batch_recovery'])
+def test_prepared_visibility_geometry_results_preserve_session_and_diagnostics(tmp_path, path):
+    from stash_ai.recognition.visibility import LazyVisibility, VisibilityGeometryError, CONTRACT_ID
+    bad, good = object(), object()
+    geometry = VisibilityGeometryError('Mesh contour extends outside the model crop.',
+                                       source_pixels=5, face_pixels=10)
+    measured = dict(visible_face_fraction=.9, visibility=dict(contract=CONTRACT_ID, region_method='mesh'))
+    models = []
+    class Model:
+        closed = False
+        def measure_prepared_many(self, items):
+            if path == 'batch_recovery' and len(items) > 1:
+                raise RuntimeError('batch inference unavailable')
+            return [geometry if item is bad else measured for item in items]
+        def close(self): self.closed = True
+    def factory(*args):
+        model = Model(); models.append(model); return model
+    owner = LazyVisibility(cluster_config(tmp_path), {}, factory)
+    owner._batch_disabled = path == 'batch_disabled'
+    items = [bad] if path == 'single' else [good, bad, good]
+    try:
+        result = owner.measure_prepared_many(items)
+        assert result == [geometry if item is bad else measured for item in items]
+        # Repeated mesh failures must not consume model recovery or poison later faces.
+        for _ in range(3):
+            assert owner.measure_prepared_many([bad])[0] is geometry
+        assert owner.measure_prepared_many([good]) == [measured]
+        assert geometry.diagnostics['visibility_source_fraction'] == .5
+        assert owner._inference_failures == 0 and owner._initialization_error is None
+        assert len(models) == (2 if path == 'batch_recovery' else 1)
+        assert not models[-1].closed and owner.model is models[-1]
+        if path == 'batch_recovery':
+            assert models[0].closed and owner._batch_disabled
+    finally:
+        owner.close()
+
+
+def test_prepared_visibility_geometry_input_needs_no_model(tmp_path):
+    from stash_ai.recognition.visibility import LazyVisibility, VisibilityGeometryError
+    owner = LazyVisibility(cluster_config(tmp_path), {}, lambda *a: pytest.fail('No inference for invalid preparation'))
+    error = VisibilityGeometryError('Invalid face roll.')
+    assert owner.measure_prepared_many([error]) == [error]
+    assert owner.model is None and owner._inference_failures == 0
+
+
+@pytest.mark.parametrize('failure', ['runtime', 'invalid_result'])
+def test_prepared_visibility_still_bounds_recovery_for_real_model_failures(tmp_path, failure):
+    from stash_ai.recognition.visibility import LazyVisibility, VisibilityError
+    models = []
+    class Model:
+        closed = False
+        def measure_prepared_many(self, items):
+            if failure == 'runtime': raise RuntimeError('broken inference session')
+            return [None for _ in items]
+        def close(self): self.closed = True
+    def factory(*args):
+        model = Model(); models.append(model); return model
+    owner = LazyVisibility(cluster_config(tmp_path), {}, factory)
+    for _ in range(4):
+        result = owner.measure_prepared_many([object()])[0]
+        assert isinstance(result, VisibilityError) and "attribute 'get'" not in str(result)
+    assert len(models) == 2 and all(model.closed for model in models)
+    assert owner._inference_failures == 2 and owner._initialization_error is not None
+    owner.close()
