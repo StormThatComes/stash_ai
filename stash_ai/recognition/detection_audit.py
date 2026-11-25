@@ -59,7 +59,8 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None, qu
                       output_dimensions=list(output_size), file=name, faces=[], people=[])
         if quality_settings is not None:
             from .tune_sharpness import preview
-            record['sharpness_preview'] = preview(image, faces, people, quality_settings)
+            if measurements := preview(image, faces, people, quality_settings):
+                record['sharpness_preview'] = measurements
         if landmark_reports:
             record['face_landmark_repairs'] = landmark_reports
         from PIL import Image, ImageDraw

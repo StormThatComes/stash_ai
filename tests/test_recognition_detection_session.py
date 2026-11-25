@@ -9,8 +9,10 @@ from stash_ai.recognition.detection_session import CueDetector, open_scene, read
 from tests.test_recognition_detection_audit import Detector, run, setup
 
 
-def test_browsing_and_rendering_match_single_cue_cli(tmp_path, monkeypatch):
+@pytest.mark.parametrize('sharpness_mode', ['legacy', 'split'])
+def test_browsing_and_rendering_match_single_cue_cli(tmp_path, monkeypatch, sharpness_mode):
     case = setup(tmp_path, monkeypatch)
+    case.cfg.data['detection']['sharpness_mode'] = sharpness_mode
     case.args.cue_index = 1
     run(case)
     record = json.loads((case.destination / 'manifest.json').read_text())['scene']['frames'][0]
@@ -28,6 +30,11 @@ def test_browsing_and_rendering_match_single_cue_cli(tmp_path, monkeypatch):
         result, actual = engine.render(frame, case.cfg)
         with result:
             assert result.tobytes() == expected.tobytes()
+        if sharpness_mode == 'split':
+            measurements = actual.pop('sharpness_preview')
+            assert measurements and all(
+                {'focus_sharpness', 'motion_sharpness', 'sharpness_confidence'} <= row['quality'].keys()
+                for row in measurements)
         assert actual == record
     engine.close()
     assert not case.stash.writes
