@@ -710,3 +710,13 @@ Recorded View nodes identify a policy and witness set, not an inferred catalogue
 Historical/missing evidence and external references remain explicit. Each page has
 at most 100 current observations and 500 total nodes; omitted context is counted.
 No pixels, embeddings, model loading or recognition writes are needed to build it.
+
+**Graph…** opens the bounded animated graph for the current scene/kind/role
+filters. Previous/Next traverses all current observations; each page includes
+its retained reference context. Double-click a group to expand it, or an
+observation to inspect it in the shared crop/detail panel. Historical references
+open in reference panel B. Drag nodes to pin them, right-click to unpin; drag the
+background to pan and use the wheel to zoom. Fit, Pause/resume and Reset layout
+control a deterministic layout that settles after a bounded number of updates.
+Refresh retains positions of surviving node IDs. Expand/Collapse groups changes
+presentation only, never reference authority or recognition membership.

@@ -14,7 +14,10 @@ class PerformerInspector(Inspector):
         self.metadata_worker = Worker('performer-summary')
         self.summary_data = None
         self.grouping = tk.StringVar(master=self.root, value='Scene')
-        bar = self.entries['scene'].master
+        self.root.geometry('1440x850')
+        bar = ttk.Frame(panel)
+        bar.grid(row=3, column=0, columnspan=2, sticky='ew')
+        ttk.Button(bar, text='Graph…', command=self.open_graph).pack(side='left')
         ttk.Button(bar, text='Performer…', command=self.change_performer).pack(side='left')
         ttk.Button(bar, text='Inspect scene', command=self.open_scene).pack(side='left')
         self.kind = ttk.Combobox(bar, values=['All', 'face', 'body'], width=6, state='readonly')
@@ -73,6 +76,11 @@ class PerformerInspector(Inspector):
         if selected and selected[0] in self.rows:
             self.detail_reader = self.rows[selected[0]].get('reader', self.reader)
         super().select(event)
+
+    def open_graph(self):
+        from .inspection_graph_window import GraphWindow
+        window = GraphWindow(self)
+        self.visual_windows.append(window)
 
     def change_performer(self):
         value = simpledialog.askstring('Inspect performer', 'Numeric performer ID', parent=self.root)
