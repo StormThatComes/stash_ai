@@ -2,7 +2,7 @@
 from functools import partial
 import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 from .inspection_runtime import Worker, stamp
 from .inspection_graph import build, PAGE_SIZE
 from .inspection_graph_layout import initial, step, project
@@ -25,12 +25,19 @@ class GraphWindow:
         self.offset=0; self.selected=None; self.dragging=None; self.drag_start=None
         self.scale=1.;self.origin=[550.,330.];self.paused=False;self.iterations=0
         self.items={};self.lines=[];self.item_nodes={};self.item_edges={}
+        self.highlight=set();self.similarity_edges=[];self.merge_window=None;self.visual_windows=[]
         self.filters={k:v for k,v in host.filters.items() if k in ('scene','kind','state')}
         bar=ttk.Frame(self.window,padding=5);bar.pack(fill='x')
         for label,command in [('Refresh',self.refresh),('Previous',lambda:self.page(-1)),('Next',lambda:self.page(1)),
                 ('Pause / resume',self.pause),('Fit',self.fit),('Reset layout',self.reset),
                 ('Expand groups',self.expand_all),('Collapse groups',self.collapse_all)]:
             ttk.Button(bar,text=label,command=command).pack(side='left')
+        diagnostics=ttk.Frame(self.window,padding=5);diagnostics.pack(fill='x')
+        for label,command in [('Why here?',lambda:self.dependencies(False)),
+                ('Uses this evidence',lambda:self.dependencies(True)),('Weak connections',self.weak_connections),
+                ('Compare similarity…',self.compare_similarity),('Clear similarity',self.clear_similarity),
+                ('Compare performer…',self.compare_performer)]:
+            ttk.Button(diagnostics,text=label,command=command).pack(side='left')
         ttk.Label(self.window,text='Drag: move/pin node or pan background · Right-click: unpin · Double-click: expand group / inspect observation\n'
             'Blue: anchor · Amber: auxiliary · Purple: attachment · Square: body · Diamond: View · Small dot: decision\n'
             'Distances are layout only. Groups are visual containers. Missing links may reflect missing evidence.').pack(anchor='w')
@@ -58,6 +65,7 @@ class GraphWindow:
         self.offset=max(0,self.offset+direction*PAGE_SIZE);self.refresh()
 
     def loaded(self, graph):
+        self.highlight.clear();self.similarity_edges=[]
         self.graph=graph
         self.status.configure(text=f"Current observations {self.offset+1 if graph['total'] else 0}–{min(self.offset+PAGE_SIZE,graph['total'])} / {graph['total']} · "
             f"{graph['omitted']} context nodes omitted · Retained references may be incomplete")
@@ -66,7 +74,8 @@ class GraphWindow:
     def rebuild(self):
         if self.graph is None:return
         self.physics.invalidate()
-        self.display,self.groups=project(self.graph,self.expanded)
+        projected=dict(self.graph,edges=self.graph['edges']+self.similarity_edges)
+        self.display,self.groups=project(projected,self.expanded)
         self.nodes={n['id']:n for n in self.display['nodes']}
         self.positions=initial(self.nodes,self.positions)
         self.pinned.intersection_update(self.positions)
@@ -99,7 +108,8 @@ class GraphWindow:
             if n['type']=='view':self.canvas.coords(item,x,y-radius,x+radius,y,x,y+radius,x-radius,y)
             else:self.canvas.coords(item,x-radius,y-radius,x+radius,y+radius)
             self.canvas.coords(text,x,y+radius+3)
-            self.canvas.itemconfigure(item,width=3 if identifier==self.selected or identifier in self.pinned else 1)
+            self.canvas.itemconfigure(item,width=3 if identifier==self.selected or identifier in self.pinned or identifier in self.highlight else 1,
+                outline='#dc2626' if identifier in self.highlight else '#334155')
 
     def tick(self):
         if self.closed:return
@@ -161,6 +171,75 @@ class GraphWindow:
             self.host.reference_worker.request(partial(self.host.load_reference,self.reader,n['kind'],n['observation'],
                 self.graph['person']['scope']),partial(self.host.display_preview,'B'),self.error)
 
+    def dependencies(self, downstream):
+        if not self.graph or not self.selected:return
+        from .inspection_graph_diagnostics import related
+        node=self.nodes.get(self.selected,{})
+        selected=node.get('members',[self.selected])
+        highlights=set()
+        for identifier in selected:highlights.update(related(self.graph,identifier,downstream=downstream))
+        self.highlight=highlights;self.expand_all()
+        self.describe(dict(explanation='Recorded downstream dependencies; alternate routes require replay.' if downstream else
+            'Recorded upstream evidence; missing links do not prove an independent origin.',nodes=sorted(highlights),
+            coverage='Current graph page and retained references only'))
+
+    def weak_connections(self):
+        if not self.graph:return
+        from .inspection_graph_diagnostics import bridges
+        found=bridges(self.graph)
+        self.highlight={n for pair in found for n in pair};self.expand_all()
+        self.describe(dict(explanation='Structural bridges in this partial graph, not evidence of an incorrect assignment.',bridges=found))
+
+    def compare_similarity(self):
+        if not self.graph:return
+        from .inspection_graph_diagnostics import similarities
+        threshold=simpledialog.askfloat('Exploratory similarity','Minimum cosine similarity (same modality, displayed page only)',
+                                       parent=self.window,initialvalue=.7,minvalue=-1,maxvalue=1)
+        if threshold is not None:
+            self.worker.request(partial(similarities,self.reader,self.graph,threshold=threshold),self.show_similarities,self.error)
+
+    def show_similarities(self,result):
+        self.similarity_edges=result['edges'];self.expand_all()
+        self.describe(dict(explanation='New same-modality comparisons. These edges do not explain historical assignments or create Views.',
+                           edges=len(self.similarity_edges),missing_embeddings=result['missing']))
+
+    def clear_similarity(self):
+        self.similarity_edges=[]
+        if self.graph:self.rebuild()
+
+    def compare_performer(self):
+        if not self.graph:return
+        if self.merge_window is not None:self.merge_window.window.lift();return
+        from .scene_inspection import SceneReader
+        from .inspection_pair_evidence import find_identity
+        value=simpledialog.askstring('Compare performer','Performer ID or identity UUID in the same scope',parent=self.window)
+        if not value:return
+        scene=next((n['scene'] for n in self.graph['nodes'] if n.get('current_member')),None)
+        if scene is None:return
+        reader=SceneReader(self.reader.config,scene,scope=self.graph['person']['scope'])
+        def read():
+            catalogue=reader.catalogue()
+            other=find_identity(reader,catalogue['scan']['scope'],value.strip())
+            if other['identity']==self.graph['person']['id']:raise ValueError('Choose a different performer.')
+            return reader,catalogue['scan'],other
+        self.worker.request(read,self.show_comparison,self.error)
+
+    def show_comparison(self,result):
+        from types import SimpleNamespace
+        from .inspection_merge_window import MergeWindow
+        reader,scan,other=result
+        owner=self.graph['person']
+        # The existing comparison expects a scene context for tracking/replay.
+        host=SimpleNamespace(root=self.window,reader=reader,scan=scan,visual_windows=self.visual_windows,merge_window=None)
+        window=MergeWindow(host,[dict(identity=owner['id'],performer=owner['performer']),other])
+        host.merge_window=window;self.visual_windows.append(window)
+        self.merge_window=window
+        original=window.close
+        def close():
+            original();self.merge_window=None
+        window.close=close
+        window.window.protocol('WM_DELETE_WINDOW',close)
+
     def hover(self,event):
         identifier=self.at(event)
         if identifier:self.status.configure(text=identifier+' · '+self.nodes[identifier].get('provenance',''))
@@ -191,5 +270,6 @@ class GraphWindow:
 
     def close(self):
         if self.closed:return
+        for window in list(self.visual_windows):window.close()
         self.closed=True;self.window.after_cancel(self.timer);self.worker.close();self.physics.close();self.window.destroy()
         if self in self.host.visual_windows:self.host.visual_windows.remove(self)
