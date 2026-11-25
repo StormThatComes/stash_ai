@@ -143,4 +143,6 @@ def test_equal_span_contract_refreshes_unmasked_faces_and_preserves_v11_body_ban
     monkeypatch.setattr(scanning, 'digest', lambda payload: captured.append(payload))
     scanning.scan_identity(config, 'test')
     assert captured[0]['visibility_contract'] is None
-    assert captured[0]['quality_format'] > 12
+    # The contour change on main also used format 13, with the old split metric.
+    # Its unmasked scans must not be reused for equal-span measurements either.
+    assert captured[0]['quality_format'] > 13

@@ -222,6 +222,8 @@ def test_visibility_device_policy_has_no_implicit_cuda_fallback(tmp_path, monkey
     import safetensors.torch
     import stash_ai.recognition.faceocc as faceocc
     import stash_ai.recognition.visibility as visibility
+    from stash_ai.recognition import face_contour
+    monkeypatch.setattr(face_contour, 'Mesh', lambda *_: type('MeshStub', (), {'close': lambda self: None})())
     calls = []
     class Model:
         def load_state_dict(self, value, strict): assert strict

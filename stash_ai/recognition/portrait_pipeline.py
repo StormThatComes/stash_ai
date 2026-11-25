@@ -192,6 +192,7 @@ class ModelProxy:
     def __init__(self,model,executor,cpu=None,cpu_limit=0):
         self.cpu,self.cpu_limit=cpu,cpu_limit
         self.model,self.executor=model,executor
+        self.config = getattr(model, 'config', None)
         self.owner=threading.get_ident();self.assets_ready=False
 
     def prepare_assets(self):
@@ -202,6 +203,8 @@ class ModelProxy:
         from .expression import FaceExpression
         factory=getattr(self.model,'factory',None)
         keys=('faceocc',) if factory is FaceVisibility else ('expression_mesh','expression_blendshapes') if factory is FaceExpression else ()
+        if factory is FaceVisibility and self.config.data['detection']['visibility_region'] == 'mesh':
+            keys = ('faceocc', 'expression_mesh')
         try:
             for key in keys:self.model.paths[key]
         except Exception:
@@ -245,7 +248,7 @@ class ModelProxy:
                     for future in futures:future.cancel()
             else:
                 for image,face in items:
-                    try:prepared.append(prepare_measurement(image, face, minimum))
+                    try:prepared.append(prepare_measurement(image, face, minimum, defer_source_check=True))
                     except VisibilityGeometryError as error:prepared.append(error)
             return self.executor.submit(self.model.measure_prepared_many,prepared).result()
         owned=[(image.copy(),face) for image,face in items]

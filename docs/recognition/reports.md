@@ -532,25 +532,24 @@ network or model work. Crops and recognition evidence are never modified.
 In `inspect-scene`, select a face (including an unassigned `face_occluded`
 observation) and click **Face visibility…**. The two synchronized panes show
 the original VTT cue and the selected face on the same cue. The gold outline
-marks the measurement ellipse. Green marks the pixels FaceOcc counted as
-visible inside it. The ellipse and model crop follow a whole-face template fitted
-to landmarks, including its center, scale and rotation. The caption identifies
-the fitted view and any ignored outlier. This preserves margins for forehead,
-chin and cheeks instead of tightly enclosing the landmark cloud or anchoring
-the face to a potentially loose detector box.
+marks the selected measurement region. Green marks counted FaceOcc pixels.
+**Measured contour** uses the same selection as recognition; disable it to
+compare the previous landmark ellipse on the same logits. **Mesh landmarks**
+shows the projected dense points. The caption identifies the region, any
+geometric fallback reason and the fraction of real-source FaceOcc positives
+excluded by the selected region. The fallback reason is also retained in the
+observation's visibility admission details.
 
-**Legacy box ellipse (preview)** compares the previous vertical/horizontal
-box-based region on the same logits. If that ellipse extends outside the new
-model crop, the comparison is disabled with an explanation: its full denominator
-cannot be measured on those logits. The default **Face ellipse** is the region
-used by recognition; switching previews never changes the saved result.
+**Legacy box ellipse (preview)** compares the older box-based region. It is
+disabled when its full extent cannot be measured in the model crop. It overrides
+the contour preview while checked. Preview choices never change saved results.
 
-**Show predicted face outside ellipse (purple)** also displays the raw positive
-FaceOcc pixels excluded by the selected ellipse. Purple pixels do not enter
-the numerator or denominator and may include background false positives. This
-distinguishes skin recognized by FaceOcc but clipped by the measurement region
-from skin that the model itself missed. Neither preview triggers another model
-pass. Use the mouse wheel to zoom and drag either pane to pan.
+**Show predicted face outside region (purple)** shows positive FaceOcc pixels
+excluded by the chosen measurement region. These pixels do not enter visibility;
+nearby skin can still participate in the separate sharpness mask. Purple may
+also include false positives or another face. Switching regions, points and
+pixel thresholds reuses the same predictions without further model inference.
+Use the mouse wheel to zoom and drag either pane to pan.
 
 The **Pixel logit threshold (preview)** slider starts at
 `face.quality.faceocc_logit_threshold` from the loaded YAML. Drag it left to
@@ -562,9 +561,9 @@ recognition, set it in your YAML and rerun the affected scenes.
 
 The window displays the recorded `visible_face_fraction` alongside a fresh
 FaceOcc result using the current configuration. The replay shows the visible
-pixel count divided by the full ellipse pixel count in the 256 × 256 model
-input. Source coverage shows how much of that ellipse fell inside the cue.
-A clipped ellipse can lower the score even when all its in-frame pixels are
+pixel count divided by the full selected-region pixel count in the 256 × 256 model
+input. Source coverage shows how much of that region fell inside the cue.
+A clipped region can lower the score even when all its in-frame pixels are
 green. If alignment, minimum source coverage or model loading fails, the
 window gives the reason and shows the ellipse when geometry is available.
 

@@ -68,7 +68,8 @@ def test_ort_contract_matches_cpu_sface_and_handles_non_square_yunet(tmp_path):
 
 
 @pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned visibility-model smoke')
-def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrait(tmp_path):
+@pytest.mark.parametrize('region_mode', ['mesh', 'ellipse'])
+def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrait(tmp_path, region_mode):
     from contextlib import ExitStack
     import hashlib
     from io import BytesIO
@@ -76,7 +77,9 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
     from PIL import Image, ImageDraw
     from stash_ai.recognition.config import load
     from stash_ai.recognition.models import checked_detection, ensure_assets
-    from stash_ai.recognition.visibility import FaceVisibility, prepare_aligned
+    from stash_ai.recognition.visibility import FaceVisibility, prepare_measurement
+    from stash_ai.recognition.face_contour import resolve
+    from dataclasses import replace
     from tests.test_recognition_visibility_rotation import quarter_turn
     # Grace Hopper, US Navy/public domain; immutable content checked independently
     # of the matplotlib tag. Download only in the explicit model smoke jobs.
@@ -86,6 +89,7 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
         data = response.content
     assert hashlib.sha256(data).hexdigest() == 'a8ca6d734765703b09728ab47fe59f473d93ae3967fc24c7c0288c3c7adb7130'
     config = load(root=tmp_path, device='cpu')
+    config = replace(config, data=dict(config.data, detection=dict(config.data['detection'], visibility_region=region_mode)))
     model = FaceVisibility(config, ensure_assets(config, keys=['faceocc']))
     face = checked_detection([182.86642, 120.47789, 170.25731, 212.48526, 227.11728, 193.32774,
                               307.84845, 195.3718, 266.4793, 240.008, 228.50974, 267.86563,
@@ -96,11 +100,15 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
             ImageDraw.Draw(covered).rectangle((x, y + height * .6, x + width, y + height), fill=(70, 90, 160))
             visible = model.measure(image, face)
             occluded = model.measure(covered, face)
-            blob, region, total, _ = prepare_aligned(covered, face, model.minimum_source_fraction)
+            prepared = prepare_measurement(covered, face, 0.)
+            selected = resolve(model, prepared)
+            blob, region, total = prepared[0], selected.mask, selected.total
+            assert visible['visibility']['region_method'] == region_mode
+            assert occluded['visibility']['region_method'] == region_mode
             assert total == occluded['visibility']['face_pixels']
             assert int(model.inspect_foreground(blob, region).sum()) == occluded['visibility']['visible_pixels']
             batched = model.measure_many([(image,face),(covered,face)])
-            assert [v['visibility']['face_pixels'] for v in batched]==[visible['visibility']['face_pixels']]*2
+            assert [v['visibility']['face_pixels'] for v in batched]==[visible['visibility']['face_pixels'],occluded['visibility']['face_pixels']]
             assert [v['visible_face_fraction'] for v in batched]==pytest.approx(
                 [visible['visible_face_fraction'],occluded['visible_face_fraction']],abs=.001)
             with ExitStack() as images:
@@ -119,7 +127,9 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
         assert visible['visible_face_fraction'] > .8
         assert occluded['visible_face_fraction'] < .8
         assert visible['visible_face_fraction'] - occluded['visible_face_fraction'] > .2
-        assert visible['visibility']['face_pixels'] == occluded['visibility']['face_pixels']
+        # Occlusion must not shrink the denominator along with the visible mask.
+        assert occluded['visibility']['face_pixels'] == pytest.approx(
+            visible['visibility']['face_pixels'], rel=.05 if region_mode == 'mesh' else 0)
         assert model.device == 'cpu'
     finally:
         model.close()

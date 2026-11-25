@@ -38,7 +38,7 @@ def compact_quality(raw):
         from .visibility import cached
         if cached(record):
             selected.update(visible_face_fraction=record['visible_face_fraction'],
-                            visibility={k: record['visibility'][k] for k in ('contract', 'logit_threshold')
+                            visibility={k: record['visibility'][k] for k in ('contract', 'logit_threshold', 'region_requested')
                                         if k in record['visibility']})
         return json.dumps(selected,separators=(',',':'))
     except (TypeError, ValueError, AttributeError):

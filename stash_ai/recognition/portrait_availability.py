@@ -13,10 +13,16 @@ from .visibility import required as visibility_required, cached as visibility_ca
 from .expression import required as expression_required, cached as expression_cached
 
 
+def _visibility_cached(quality, model):
+    config = getattr(model, 'config', None)
+    region = config.data['detection']['visibility_region'] if config is not None else None
+    return visibility_cached(quality, region=region)
+
+
 def measure_available(client, image, face, quality, policy, visibility, expression, *, force=(), extra_required=()):
     errors = {}
     for name, required, cached, model in (
-        ('visibility', visibility_required, visibility_cached, visibility),
+        ('visibility', visibility_required, lambda q: _visibility_cached(q, visibility), visibility),
         ('expression', expression_required, expression_cached, expression),
     ):
         if not (required(policy) or name in extra_required) or (cached(quality) and name not in force):
@@ -52,7 +58,7 @@ def measurement_basis(row, source_type):
 def refresh_cached_quality(client, existing, metadata, policy, visibility, expression, *, extra_required=()):
     """Retry optional cues from verified cached pixels, without another video seek."""
     quality = dict(metadata.get('quality', {}))
-    if not ((visibility_required(policy) or 'visibility' in extra_required) and not visibility_cached(quality)
+    if not ((visibility_required(policy) or 'visibility' in extra_required) and not _visibility_cached(quality, visibility)
             or expression_required(policy) and not expression_cached(quality)):
         return
     if hashlib.sha256(existing['image']).hexdigest() != existing['digest']:

@@ -51,6 +51,7 @@ def _policy_value(config):
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
                    'visibility_contract': CONTRACT_ID if uses_visibility else None,
+                   'visibility_region': config.data['detection']['visibility_region'] if uses_visibility else None,
                    'min_face_source_fraction': config.data['detection']['min_face_source_fraction'] if uses_visibility else None,
                    'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None}
 

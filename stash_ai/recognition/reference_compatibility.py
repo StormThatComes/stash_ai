@@ -40,7 +40,7 @@ def fallback_sql(db,config,namespace,*,observation='o'):
                 if rejection(quality,policy) is not None:
                     return 0
                 if needs_visibility:
-                    if not visibility_cached(quality, policy['faceocc_logit_threshold']):
+                    if not visibility_cached(quality, policy['faceocc_logit_threshold'], policy['visibility_region']):
                         return 0
                     coverage = quality['visibility'].get('source_fraction', 1. if quality['complete'] else None)
                     return int(valid_fraction(coverage) and coverage > 0 and
