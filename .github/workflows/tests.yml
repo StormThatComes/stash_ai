@@ -124,7 +124,7 @@ jobs:
         if: matrix.shard == 1
         env:
           STASH_AI_DESKTOP_TEST: '1'
-        run: xvfb-run -a python -m pytest -q tests/test_recognition_identity_inspector.py tests/test_recognition_detection_tuner.py
+        run: xvfb-run -a python -m pytest -q tests/test_recognition_identity_inspector.py tests/test_recognition_detection_tuner.py tests/test_recognition_performer_inspector.py
       - name: Run tests
         env:
           STASH_API_KEY: ""

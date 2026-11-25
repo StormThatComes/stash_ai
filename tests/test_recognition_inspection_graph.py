@@ -37,3 +37,20 @@ def test_graph_paging_filters_and_unknown_provenance(tmp_path):
     with FaceDatabase(config.database) as state:
         state.connection.execute('DELETE FROM candidates'); state.connection.commit()
     assert all(n['authority']=='unknown' for n in build(reader)['nodes'])
+
+
+def test_layout_is_finite_repeatable_and_respects_pins():
+    import math
+    from stash_ai.recognition.inspection_graph_layout import initial, step, project
+    p=initial(['a','b','c'])
+    assert p==initial(['a','b','c'])
+    edges=[dict(source='a',target='b',relation='reference')]
+    for _ in range(40):p,_=step(p,edges,{'a'})
+    assert p['a']==initial(['a'])['a']
+    assert all(math.isfinite(v) for xy in p.values() for v in xy)
+    graph=dict(nodes=[dict(id='a',type='observation',current_member=True,scene='1'),
+                      dict(id='b',type='decision')],edges=[dict(source='b',target='a',relation='assigned')])
+    compact,groups=project(graph,set())
+    expanded,_=project(graph,groups)
+    assert len(compact['nodes'])==1 and len(expanded['nodes'])==2
+    assert expanded['edges'][0]['source']=='b'
