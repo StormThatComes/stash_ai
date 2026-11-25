@@ -18,10 +18,10 @@ def identity_batch(payload):
     return result
 
 
-def visibility_input(image, face, minimum_source_fraction):
+def visibility_input(image, face, minimum_source_fraction, region_mode='ellipse'):
     from .visibility import prepare_measurement, VisibilityGeometryError
     try:
-        return prepare_measurement(image, face, minimum_source_fraction, defer_source_check=True)
+        return prepare_measurement(image, face, minimum_source_fraction, defer_source_check=True, region_mode=region_mode)
     except VisibilityGeometryError as error:
         return error
     finally:

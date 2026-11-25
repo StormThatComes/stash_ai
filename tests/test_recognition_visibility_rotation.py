@@ -159,6 +159,7 @@ def upright_mask_model():
             foreground = rgb.amax(dim=1) > .05
             return torch.where(foreground & upright[:, None, None], 1., -1.)[:, None]
     model = object.__new__(FaceVisibility)
+    model.region_requested = 'ellipse'  # The synthetic colored pixels use the template crop.
     model.logit_threshold = 0.0
     model.device, model.model = 'cpu', Model()
     model.minimum_source_fraction = 1.0
@@ -174,6 +175,7 @@ def test_scan_keeps_rolled_faces_but_rejects_real_occlusion(tmp_path, batch_size
     from tests.test_recognition_detection_quality import settings
     config = settings(tmp_path, min_visible_face_fraction=.8, min_sharpness=1)
     data = plain(config.data)
+    data['detection']['visibility_region'] = 'ellipse'
     data['execution'].update(scan_cpu_workers=2, recognizer_batch_size=batch_size)
     config = replace(config, data=data)
     faces = []

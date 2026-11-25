@@ -100,7 +100,7 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
             ImageDraw.Draw(covered).rectangle((x, y + height * .6, x + width, y + height), fill=(70, 90, 160))
             visible = model.measure(image, face)
             occluded = model.measure(covered, face)
-            prepared = prepare_measurement(covered, face, 0.)
+            prepared = prepare_measurement(covered, face, 0., region_mode=region_mode)
             selected = resolve(model, prepared)
             blob, region, total = prepared[0], selected.mask, selected.total
             assert visible['visibility']['region_method'] == region_mode

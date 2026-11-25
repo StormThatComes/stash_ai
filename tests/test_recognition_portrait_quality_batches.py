@@ -194,3 +194,29 @@ def test_native_limit_cleanup_preserves_primary_error(tmp_path,monkeypatch):
     with pytest.raises(ValueError,match='primary') as caught:
         with budget:raise ValueError('primary')
     assert any('cleanup' in note for note in caught.value.__notes__)
+
+
+@pytest.mark.parametrize('region_mode',['mesh','ellipse'])
+@pytest.mark.parametrize('parallel',[False,True])
+def test_portrait_preparation_uses_configured_region_on_both_cpu_paths(tmp_path, region_mode, parallel):
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+    from stash_ai.recognition.portrait_pipeline import ModelProxy
+    from stash_ai.recognition.visibility import prepare_measurement
+    config=setup(tmp_path)
+    config=replace(config,data=dict(config.data,detection=dict(config.data['detection'],visibility_region=region_mode)))
+    visibility=LazyVisibility(config,{})
+    owner=threading.get_ident()
+    with Image.new('RGB',(500,350),(200,90,60)) as image:
+        expected=prepare_measurement(image,FACE,0.,region_mode=region_mode)
+        def measured(items):
+            assert threading.get_ident()!=owner
+            for item in items:
+                assert item.region_mode == region_mode
+                assert (item[1] is None) == (region_mode=='mesh')
+                np.testing.assert_array_equal(item[0],expected[0])
+            return [dict(visible_face_fraction=.9,visibility=dict(contract=CONTRACT_ID)) for _ in items]
+        visibility.model=SimpleNamespace(measure_prepared_many=measured)
+        with ThreadPoolExecutor(1) as inference, ThreadPoolExecutor(2) as cpu:
+            proxy=ModelProxy(visibility,inference,cpu if parallel else None,cpu_limit=10**8)
+            assert len(proxy.measure_many([(image,FACE)]*2)) == 2

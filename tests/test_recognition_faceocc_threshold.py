@@ -100,6 +100,8 @@ def test_yaml_changes_scan_admission_and_keeps_evidence_for_each_cutoff(tmp_path
     ids = []
     for cutoff, rejected, fraction in [(0, 'face_occluded', 0.), (-0.2, None, 1.), (0, 'face_occluded', 0.)]:
         config = configuration(tmp_path, cutoff)
+        # Exercise pixel thresholds on a synthetic sprite without loading a real mesh.
+        config = replace(config, data=dict(config.data, detection=dict(config.data['detection'], visibility_region='ellipse')))
         model = visibility.FaceVisibility(config, {'faceocc': None})
         try:
             with FaceDatabase(config.database) as db, SpriteInput(media, media.scene, config) as source:

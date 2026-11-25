@@ -142,6 +142,7 @@ def test_scan_gates_actual_prepared_pixels_and_reuses_encoder_tensor(tmp_path,fl
     from tests.test_recognition_detection_quality import settings
     config = settings(tmp_path,min_sharpness=5,min_visible_face_fraction=.5)
     data = plain(config.data)
+    data['detection']['visibility_region'] = 'ellipse'  # No mesh model in this encoder-pixel fixture.
     if not masked:
         data['detection']['min_visible_face_fraction'] = 0
         data['clustering'].update(min_anchor_visible_face_fraction=0,min_auxiliary_visible_face_fraction=0)
@@ -162,6 +163,7 @@ def test_scan_gates_actual_prepared_pixels_and_reuses_encoder_tensor(tmp_path,fl
             self.calls += len(tensors)
             return [np.asarray(self.vector,np.float32) for _ in tensors]
     visibility = object.__new__(FaceVisibility)
+    visibility.region_requested='ellipse'
     visibility.device='cpu';visibility.minimum_source_fraction=0.;visibility.logit_threshold=0.;visibility.diagnostics=False
     visibility.model=lambda pixels: torch.ones((len(pixels),1,256,256))
     backend,client = Prepared(),MediaClient()

@@ -14,30 +14,35 @@ from .models import checked_detection, ensure_assets
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD
 from .face_region import outline as face_outline, fit as fit_face_region
 from .visibility import (FaceVisibility, VisibilityGeometryError, cached, ellipse_radii, foreground_mask,
-                         prepare_aligned, prepare_measurement, valid_fraction)
+                         prepare_measurement, valid_fraction)
+
+
+def ellipse_roi(center, horizontal, radii, source_size, affine):
+    """Project an optional comparison ellipse onto the measured crop."""
+    center = np.asarray(center)
+    c, s = horizontal
+    axes = np.array([[c, -s], [s, c]])
+    reverse = np.linalg.inv([affine[:3], affine[3:], (0,0,1)])
+    mapped = (reverse @ [*center, 1])[:2]
+    basis = reverse[:2,:2] @ axes @ np.diag(radii)
+    extents = np.linalg.norm(basis, axis=1)
+    if (mapped-extents < 0).any() or (mapped+extents > 256).any():
+        return None  # Never compare using a clipped denominator.
+    yy, xx = np.ogrid[:256,:256]
+    sx = affine[0]*(xx+.5) + affine[1]*(yy+.5) + affine[2]
+    sy = affine[3]*(xx+.5) + affine[4]*(yy+.5) + affine[5]
+    dx, dy = sx-center[0], sy-center[1]
+    region = ((c*dx+s*dy)/radii[0])**2 + ((-s*dx+c*dy)/radii[1])**2 <= 1
+    total = int(region.sum())
+    region &= (sx >= 0) & (sx < source_size[0]) & (sy >= 0) & (sy < source_size[1])
+    angles = np.linspace(0,2*np.pi,129)
+    points = np.stack((radii[0]*np.cos(angles),radii[1]*np.sin(angles)),axis=1) @ axes.T + center
+    return region, total, [tuple(p) for p in points]
 
 
 def legacy_roi(face, source_size, affine):
-    """Previous source-axis box ellipse, for comparison only."""
-    x,y,width,height = face.box
-    cx,cy = x + width/2, y + height/2
-    rx,ry = ellipse_radii(width,height)
-    reverse = np.linalg.inv([affine[:3],affine[3:],(0,0,1)])
-    center = (reverse @ [cx,cy,1])[:2]
-    extents = np.hypot(reverse[:2,0]*rx,reverse[:2,1]*ry)
-    if (center-extents<0).any() or (center+extents>256).any():
-        # The new crop follows landmarks; a loose old box may extend beyond
-        # its logits. A clipped denominator would invent a legacy score.
-        return None
-    yy,xx = np.ogrid[:256,:256]
-    sx = affine[0]*(xx+.5) + affine[1]*(yy+.5) + affine[2]
-    sy = affine[3]*(xx+.5) + affine[4]*(yy+.5) + affine[5]
-    region = (((sx-cx)/rx)**2 + ((sy-cy)/ry)**2) <= 1
-    total = int(region.sum())
-    region &= (sx>=0) & (sx<source_size[0]) & (sy>=0) & (sy<source_size[1])
-    angles = np.linspace(0,2*np.pi,97)
-    outline = np.stack((cx+rx*np.cos(angles),cy+ry*np.sin(angles)),axis=1)
-    return region, total, [tuple(p) for p in outline]
+    x, y, width, height = face.box
+    return ellipse_roi((x+width/2,y+height/2),(1,0),ellipse_radii(width,height),source_size,affine)
 
 
 @dataclass
@@ -55,12 +60,22 @@ class FaceReplay:
     fit_note: str = ''
     contour: object = None
     source_mask: np.ndarray | None = None
+    requested: str = 'ellipse'
 
     def render(self, threshold, use_legacy=False, show_outside=False, use_contour=True, show_points=False):
-        if self.ellipse is None:
+        if self.image is None:
             return None, self.caption
         annotated = self.image.copy()
         caption = self.caption
+        if self.requested == 'mesh' and self.contour is None:
+            return annotated, caption + ' · Mesh unavailable; no ellipse measurement substituted.'
+        if not use_contour and not use_legacy and self.region is None:
+            return annotated, caption + ' · Landmark ellipse comparison unavailable.'
+        if use_legacy and self.comparison is None:
+            return annotated, caption + ' · Legacy ellipse comparison unavailable.'
+        preview = ('Legacy box ellipse (comparison)' if use_legacy else
+                   'Landmark ellipse (comparison)' if not use_contour else 'Measured '+self.requested)
+        caption += ' · Preview: '+preview
         if self.logits is not None:
             region, total = self.region, self.total
             if use_contour and self.contour is not None:
@@ -80,7 +95,7 @@ class FaceReplay:
             label = 'contour' if use_contour and not use_legacy and self.contour is not None and self.contour.method == 'mesh' else 'ellipse'
             caption += (f' · Replay {visible / total:.3f} ({visible:,} visible / {total:,} {label} pixels)'
                         f' · Source coverage {source / total:.1%}')
-            if self.comparison:
+            if self.comparison and self.region is not None:
                 alternate, denominator, _ = self.comparison
                 base_score = foreground_mask(self.logits,self.region,threshold).sum() / self.total
                 alternate_score = foreground_mask(self.logits,alternate,threshold).sum() / denominator
@@ -92,7 +107,7 @@ class FaceReplay:
             if raw:
                 caption += f' · Predicted mask outside region: {1-visible/raw:.1%}'
             if show_outside:
-                caption += ' · Purple: predicted face outside the ellipse (not counted)'
+                caption += ' · Purple: predicted face outside the selected region (not counted)'
         if self.fit_note:
             caption += ' · ' + self.fit_note
         if show_points and self.contour is not None and self.contour.landmarks is not None:
@@ -105,7 +120,7 @@ class FaceReplay:
             ImageDraw.Draw(annotated).line(self.comparison[2], fill='gold', width=1)
         elif self.outline is not None:
             ImageDraw.Draw(annotated).line(self.outline, fill='gold', width=1)
-        else:
+        elif self.ellipse is not None:
             ImageDraw.Draw(annotated).ellipse(self.ellipse, outline='gold', width=1)
         return annotated, caption
 
@@ -140,15 +155,18 @@ def replay(previews, address, scope):
     x, y, width, height = face.box
     cx, cy = x + width / 2, y + height / 2
     rx, ry = ellipse_radii(width, height)
-    result = FaceReplay(image, recorded, (cx - rx, cy - ry, cx + rx, cy + ry))
+    mode = previews.config.data['detection']['visibility_region']
+    result = FaceReplay(image, recorded+' · Requested region: '+mode,
+                        (cx - rx, cy - ry, cx + rx, cy + ry), requested=mode)
     minimum = previews.config.data['detection']['min_face_source_fraction']
     try:
-        fitted = fit_face_region(face)
-        result.outline = face_outline(face,fitted=fitted)
-        result.fit_note = f'Landmark fit: {fitted.view}'
-        if fitted.ignored:
-            result.fit_note += f'; ignored outlier: {fitted.ignored}'
-        prepared = prepare_measurement(image, face, minimum, defer_source_check=True)
+        if mode == 'ellipse':
+            fitted = fit_face_region(face)
+            result.outline = face_outline(face,fitted=fitted)
+            result.fit_note = f'Landmark fit: {fitted.view}'
+            if fitted.ignored:
+                result.fit_note += f'; ignored outlier: {fitted.ignored}'
+        prepared = prepare_measurement(image, face, minimum, defer_source_check=True, region_mode=mode)
         blob, region, total = prepared
         affine = prepared.affine
     except VisibilityGeometryError as error:
@@ -165,9 +183,7 @@ def replay(previews, address, scope):
         with closing(FaceVisibility(previews.config, paths)) as model:
             from .face_contour import resolve
             result.contour = resolve(model, prepared)
-            result.fit_note += ' · Region: '+result.contour.method
-            if result.contour.reason:
-                result.fit_note += ' · Fallback: '+result.contour.reason
+            result.fit_note = (result.fit_note+' · ' if result.fit_note else '')+'Region: '+result.contour.method
             logits = model.inspect_logits(blob)
     except VisibilityGeometryError as error:
         result.caption += f' · Replay unavailable: {error}'
@@ -186,6 +202,17 @@ def replay(previews, address, scope):
     # Pillow maps each displayed source pixel back into the aligned score map.
     result.source_to_model = tuple(np.linalg.inv([affine[:3], affine[3:], (0, 0, 1)])[:2].ravel())
     result.logits, result.region, result.total = logits, region, total
+    if mode == 'mesh':
+        # Comparison only: an invalid ellipse cannot veto an accepted mesh.
+        try:
+            fitted = fit_face_region(face)
+            comparison = ellipse_roi(fitted.center, fitted.axis, fitted.radii, image.size, affine)
+            if comparison is None:
+                result.fit_note += '; landmark ellipse comparison extends outside the model crop'
+            else:
+                result.region, result.total, result.outline = comparison
+        except VisibilityGeometryError as error:
+            result.fit_note += '; landmark ellipse comparison unavailable: '+str(error)
     from .face_contour import real_pixels
     result.source_mask = real_pixels(affine, image.size)
     result.comparison = legacy_roi(face, image.size, affine)
@@ -209,10 +236,14 @@ class FaceVisibilityWindow:
         ttk.Button(bar, text='Fit', command=lambda: self.images.fit('A')).pack(side='left')
         ttk.Button(bar, text='100%', command=lambda: self.images.set_zoom('A', 1.)).pack(side='left')
         ttk.Label(bar, text='Gold outline: selected measurement region    Green: pixels counted as visible').pack(side='left')
-        self.use_legacy = tk.BooleanVar(master=self.window, value=False)
-        self.roi_toggle = ttk.Checkbutton(bar, text='Legacy box ellipse (preview)', variable=self.use_legacy,
-                                          command=lambda: self.set_threshold(self.value.get()))
-        self.roi_toggle.pack(side='left')
+        region_bar = ttk.Frame(self.window)
+        region_bar.pack(fill='x', padx=8)
+        ttk.Label(region_bar, text='Region (preview)').pack(side='left', padx=(0,8))
+        self.measured_label = 'Measured '+host.previews.config.data['detection']['visibility_region']
+        self.region_choice = tk.StringVar(master=self.window, value=self.measured_label)
+        self.region_selector = ttk.Combobox(region_bar, textvariable=self.region_choice, state='disabled', width=30)
+        self.region_selector.bind('<<ComboboxSelected>>', lambda _: self.set_threshold(self.value.get()))
+        self.region_selector.pack(side='left')
         mask_bar = ttk.Frame(self.window)
         mask_bar.pack(fill='x', padx=8)
         self.show_outside = tk.BooleanVar(master=self.window, value=False)
@@ -220,12 +251,10 @@ class FaceVisibilityWindow:
                                               variable=self.show_outside,
                                               command=lambda: self.set_threshold(self.value.get()))
         self.outside_toggle.pack(side='left')
-        self.use_contour = tk.BooleanVar(master=self.window, value=True)
         self.show_points = tk.BooleanVar(master=self.window, value=False)
-        ttk.Checkbutton(mask_bar, text='Measured contour (off: landmark ellipse)', variable=self.use_contour,
-                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
-        ttk.Checkbutton(mask_bar, text='Mesh landmarks', variable=self.show_points,
-                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
+        self.points_toggle = ttk.Checkbutton(region_bar, text='Mesh landmarks', variable=self.show_points,
+                        command=lambda: self.set_threshold(self.value.get()))
+        self.points_toggle.pack(side='left')
         controls = ttk.Frame(self.window)
         controls.pack(fill='x', padx=8)
         ttk.Label(controls, text='Pixel logit threshold (preview)').pack(side='left')
@@ -250,7 +279,9 @@ class FaceVisibilityWindow:
         self.window.title(f"Face visibility · Scene {row['scene']} · cue {row['cue']} · {row['id']}")
         self.window.lift()
         self.result = None
-        self.roi_toggle.state(['disabled'])
+        self.region_selector.configure(state='disabled')
+        self.region_choice.set(self.measured_label)
+        self.points_toggle.state(['disabled'])
         self.outside_toggle.state(['disabled'])
         self.slider.state(['disabled'])
         self.reset.state(['disabled'])
@@ -268,9 +299,14 @@ class FaceVisibilityWindow:
         self.images.fit('A')
         if result.logits is not None:
             low, high = result.slider_range(self.configured)
-            self.roi_toggle.state(['!disabled'] if result.comparison else ['disabled'])
-            if result.comparison is None:
-                self.use_legacy.set(False)
+            options = [self.measured_label]
+            if result.requested == 'mesh' and result.region is not None:
+                options.append('Landmark ellipse (comparison)')
+            if result.comparison is not None:
+                options.append('Legacy box ellipse (comparison)')
+            self.region_selector.configure(values=options, state='readonly')
+            if result.contour is not None and result.contour.landmarks is not None:
+                self.points_toggle.state(['!disabled'])
             self.outside_toggle.state(['!disabled'])
             self.slider.configure(from_=low, to=high)
             self.slider.state(['!disabled'])
@@ -291,8 +327,9 @@ class FaceVisibilityWindow:
         self.value_label.configure(text=str(threshold))
         if self.result is not None:
             result = self.result
-            use_legacy, show_outside = self.use_legacy.get(), self.show_outside.get()
-            contour, points = self.use_contour.get(), self.show_points.get()
+            selected = self.region_choice.get()
+            use_legacy, show_outside = selected == 'Legacy box ellipse (comparison)', self.show_outside.get()
+            contour, points = selected == self.measured_label, self.show_points.get()
             self.worker.request(lambda: result.render(threshold, use_legacy, show_outside, contour, points), self.display_overlay, self.failed)
 
     def display_overlay(self, overlay):

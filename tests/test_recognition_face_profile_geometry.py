@@ -22,7 +22,10 @@ def test_short_eye_line_uses_nose_and_mouth_axis_including_quarter_turn():
                                 (1,0,0,0,1,0),comparison)
             for use_legacy in (True,False):
                 overlay, caption = replay.render(0.,use_legacy)
-                assert 'Replay 1.000' in caption
+                if use_legacy and comparison is None:
+                    assert 'Legacy ellipse comparison unavailable' in caption
+                else:
+                    assert 'Replay 1.000' in caption
                 overlay.close()
 
 

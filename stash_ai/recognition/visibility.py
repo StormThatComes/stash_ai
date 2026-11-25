@@ -8,9 +8,9 @@ from .models import ASSETS, verified_bytes
 from .sharpness_policy import ALGORITHM
 from .split_blur import METHOD as SPLIT_METHOD
 
-CONTRACT = {'version': 10, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
-            'crop': 'landmark-template-square-padding-profile-roll-aligned-v1',
-            'region': 'mesh-envelope-or-landmark-ellipse-v1',
+CONTRACT = {'version': 11, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+            'crop': 'mesh-box-roll-aligned-or-explicit-landmark-ellipse-v2',
+            'region': 'independent-mesh-envelope-no-ellipse-fallback-v2',
             'mesh': asdict(ASSETS['expression_mesh']), 'sharpness_region': 'contour-dilate-6px-real-source-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/full-region-pixels',
             'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1', 'split_sharpness': SPLIT_METHOD}
@@ -199,13 +199,21 @@ class PreparedMeasurement(tuple):
         return result
 
 
-def prepare_measurement(image, face, minimum_source_fraction, *, recognition_pixels=None, defer_source_check=False):
+def prepare_measurement(image, face, minimum_source_fraction, *, recognition_pixels=None,
+                        defer_source_check=False, region_mode='ellipse'):
     """Prepare upright pixels; model owners may defer coverage until contour selection."""
     from .model_input_quality import face_input
-    blob, region, count, affine = prepare_aligned(image, face, 0. if defer_source_check else minimum_source_fraction)
+    if region_mode == 'mesh':
+        from .face_contour import prepare
+        blob, region, count, affine = prepare(image, face)
+    elif region_mode == 'ellipse':
+        blob, region, count, affine = prepare_aligned(image, face, 0. if defer_source_check else minimum_source_fraction)
+    else:
+        raise ValueError('Visibility region must be mesh or ellipse.')
     quality = face_input(image, face, affine, recognition_pixels)
     result = PreparedMeasurement((blob, region, count), quality)
     result.face, result.affine, result.source_size = face, affine, image.size
+    result.region_mode = region_mode
     return result
 
 
@@ -387,7 +395,8 @@ class FaceVisibility:
         if len(items)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         prepared=[]
         for image,face in items:
-            try:prepared.append(prepare_measurement(image, face, self.minimum_source_fraction, defer_source_check=True))
+            try:prepared.append(prepare_measurement(image, face, self.minimum_source_fraction, defer_source_check=True,
+                                                    region_mode=getattr(self, 'region_requested', 'ellipse')))
             except VisibilityGeometryError as error:prepared.append(error)
         result=self.measure_prepared_many(prepared)
         if len(items)==1 and isinstance(result[0],Exception):raise result[0]

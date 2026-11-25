@@ -744,24 +744,45 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
         def logits(blob):
             mask_runs.append(get_ident())
             return np.full((256, 256), -0.1, dtype='float32')
+        from tests.test_recognition_face_contour import sample
+        from stash_ai.recognition.face_contour import mesh_region
+        _, points = sample()
+        mesh_runs = []
+        def contour(item):
+            mesh_runs.append(get_ident())
+            return mesh_region(points, 5., item)
         monkeypatch.setattr(inspection_face_visibility, 'ensure_assets', lambda *a, **kw: {})
         monkeypatch.setattr(inspection_face_visibility, 'FaceVisibility',
                             lambda *_: SimpleNamespace(
-                                inspect_logits=logits, close=lambda: None, mesh=None,
+                                inspect_logits=logits, close=lambda: None,
+                                mesh=SimpleNamespace(region=contour), region_requested='mesh',
                                 minimum_source_fraction=config.data['detection']['min_face_source_fraction']))
         ui.face_visibility_button.invoke()
         wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
+        assert window.region_choice.get() == 'Measured mesh'
+        assert 'Region: mesh' in window.status.cget('text')
+        assert window.points_toggle.instate(['!disabled'])
+        assert window.region_selector.winfo_width() > 100
+        assert window.region_selector.winfo_x()+window.region_selector.winfo_width() <= window.window.winfo_width()
         assert window.slider.instate(['!disabled']) and window.value.get() == -0.25
         window.slider.set(0.)
         wait_for(lambda: 'Replay 0.000' in window.status.cget('text'))
         assert window.nudge(-0.01) == 'break' and window.value.get() == -0.01
         window.reset.invoke()
         wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
-        window.roi_toggle.invoke()
-        wait_for(lambda: window.use_legacy.get() and 'Legacy box ellipse 1.000' in window.status.cget('text'))
+        window.region_choice.set('Legacy box ellipse (comparison)')
+        window.region_selector.event_generate('<<ComboboxSelected>>')
+        wait_for(lambda: 'Preview: Legacy box ellipse (comparison)' in window.status.cget('text'))
         window.outside_toggle.invoke()
         wait_for(lambda: window.show_outside.get() and 'Purple:' in window.status.cget('text'))
+        window.region_choice.set('Landmark ellipse (comparison)')
+        window.region_selector.event_generate('<<ComboboxSelected>>')
+        wait_for(lambda: 'Preview: Landmark ellipse (comparison)' in window.status.cget('text'))
+        window.region_choice.set('Measured mesh')
+        window.region_selector.event_generate('<<ComboboxSelected>>')
+        wait_for(lambda: 'Preview: Measured mesh' in window.status.cget('text') and 'contour pixels' in window.status.cget('text'))
         assert window.value.get() == -0.25 and len(mask_runs) == 1 and mask_runs[0] != main_thread
+        assert len(mesh_runs) == 1 and mesh_runs[0] != main_thread
         window.close()
         assert backend.calls==0
     finally:

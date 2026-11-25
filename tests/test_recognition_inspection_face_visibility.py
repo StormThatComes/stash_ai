@@ -11,6 +11,13 @@ from tests.helpers.recognition import FACE
 from tests.test_recognition_identity_inspector import vtt_fixture
 
 
+def ellipse_fixture(tmp_path):
+    from dataclasses import replace
+    config, *rest = vtt_fixture(tmp_path)
+    data = dict(config.data, detection=dict(config.data['detection'],visibility_region='ellipse'))
+    return replace(config, data=data), *rest
+
+
 @pytest.mark.parametrize('roll,visible,unmarked', [
     (0, (60, 80), (100, 80)), (45, (65, 65), (95, 95)),
     (90, (80, 60), (80, 100)), (180, (100, 80), (60, 80)),
@@ -20,7 +27,7 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
     import torch
     from stash_ai.recognition.models import checked_detection
 
-    config, reader, client, _, face, backend, _ = vtt_fixture(tmp_path)
+    config, reader, client, _, face, backend, _ = ellipse_fixture(tmp_path)
     angle = np.deg2rad(roll)
     c, s = np.cos(angle), np.sin(angle)
     points = (np.array(FACE.landmarks) - 80) @ [[c, s], [-s, c]] + 80
@@ -55,7 +62,7 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
         model.model = split
         expected = model.measure(original, geometry)['visibility']
         assert f"({expected['visible_pixels']:,} visible / {expected['face_pixels']:,} ellipse pixels)" in caption
-        assert 'Recorded 0.230 at logit 0 · Replay 0.500' in caption and 'Source coverage 100.0%' in caption
+        assert 'Recorded 0.230 at logit 0' in caption and 'Replay 0.500' in caption and 'Source coverage 100.0%' in caption
         assert original.size == overlay.size == (160, 160)
         assert overlay.getpixel(visible) != original.getpixel(visible)
         assert overlay.getpixel(unmarked) == original.getpixel(unmarked)
@@ -74,7 +81,7 @@ def test_replay_uses_selected_geometry_and_the_recognition_mask_on_verified_pixe
 
 @pytest.mark.parametrize('damage', ['changed_source', 'clipped', 'eyes', 'missing_model'])
 def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatch, damage):
-    config, reader, client, media, face, _, _ = vtt_fixture(tmp_path)
+    config, reader, client, media, face, _, _ = ellipse_fixture(tmp_path)
     if damage == 'changed_source':
         key = client.url + 'vtt/1.vtt'
         media.data[key] = media.data[key].replace(b'00:00:00.000', b'00:00:00.100')
@@ -115,5 +122,40 @@ def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatc
                 import re
                 fraction = float(re.search(r'Source coverage ([\d.]+)%',caption).group(1))
                 assert 45 < fraction < 55
+    finally:
+        previews.close()
+
+
+@pytest.mark.parametrize('mesh_ok', [True, False])
+def test_mesh_replay_does_not_depend_on_ellipse_or_draw_it_on_failure(tmp_path, monkeypatch, mesh_ok):
+    from types import SimpleNamespace
+    from stash_ai.recognition.face_contour import mesh_region
+    from stash_ai.recognition.visibility import VisibilityGeometryError
+    from tests.test_recognition_face_contour import sample
+    config, reader, client, _, face, _, _ = vtt_fixture(tmp_path)
+    _, points = sample()
+    def old_ellipse(*args, **kwargs):
+        raise VisibilityGeometryError('Old ellipse is inaccurate.')
+    monkeypatch.setattr(inspector, 'fit_face_region', old_ellipse)
+    monkeypatch.setattr(inspector, 'ensure_assets', lambda *a, **kw: {})
+    model = SimpleNamespace(region_requested='mesh', minimum_source_fraction=.85,
+        mesh=SimpleNamespace(region=lambda item: mesh_region(points,5. if mesh_ok else -1.,item)),
+        inspect_logits=lambda _: np.ones((256,256),np.float32), close=lambda:None)
+    monkeypatch.setattr(inspector, 'FaceVisibility', lambda *_:model)
+    previews = VttPreviews(config,client_factory=lambda:client)
+    try:
+        replay = inspector.replay(previews,face,reader.scan['scope'])
+        overlay, caption = replay.render(0.)
+        with overlay:
+            if mesh_ok:
+                assert 'Region: mesh' in caption and 'contour pixels' in caption
+                assert 'ellipse comparison unavailable' in caption
+                assert replay.region is None  # Only the explicitly selected comparison is unavailable.
+                assert overlay.tobytes() != replay.image.tobytes()
+            else:
+                assert 'Mesh unavailable; no ellipse measurement substituted' in caption
+                assert replay.logits is None and replay.contour is None
+                assert overlay.tobytes() == replay.image.tobytes()
+        replay.image.close()
     finally:
         previews.close()
