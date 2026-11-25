@@ -108,4 +108,7 @@ class PhaseNavigation(ttk.Frame):
             matches = sum(face['person_index'] is not None for face in record['faces'])
             caption = (f"Final result | Faces: {len(record['faces'])}    People: {len(record['people'])}"
                        f'    Matched faces: {matches}')
+            if record.get('sharpness_preview'):
+                from .tune_sharpness import caption as sharpness_caption
+                caption += '\n' + sharpness_caption(record['sharpness_preview'])
         self.images.show(name, image, caption + timing_caption(history, position), points=points)

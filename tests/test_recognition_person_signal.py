@@ -56,6 +56,7 @@ def test_partial_association_refreshes_evidence_and_keeps_legacy_body_competitor
     old_person = contract(config, legacy_association=True)
     collection = plain(data['sapiensid']['collection'])
     collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     old_body = digest(['independent-person-v2-rgb-pixels', old_person, collection])
     assert contract(config) != old_person
     assert body_contract(config) != old_body

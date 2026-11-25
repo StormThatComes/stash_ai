@@ -16,7 +16,7 @@ def compact_quality(raw):
             if type(record.get(key)) is bool:selected[key]=record[key]
         if record.get('_inspection_auxiliary_only'):
             selected['_inspection_auxiliary_only'] = True
-        for key in ('pixels','sharpness','pose_deviation','roll_deviation',
+        for key in ('focus_sharpness','motion_sharpness','sharpness_confidence','pixels','sharpness','pose_deviation','roll_deviation',
                     'alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage'):
             number=record.get(key)
             if type(number) in (int,float) and math.isfinite(number) and number>=0:
@@ -63,7 +63,8 @@ def anchor_visibility(grouping):
 
 
 def restricted(grouping):
-    return (grouping['max_anchor_pose_deviation'] is not None or anchor_visibility(grouping)>0 or
+    from .sharpness_gates import active, policy
+    return (active(policy(grouping, 'anchor_', 'min_anchor_sharpness')) or grouping['max_anchor_pose_deviation'] is not None or anchor_visibility(grouping)>0 or
             any(grouping.get(k) is not None for k in ('min_anchor_face_pixels','min_anchor_sharpness')))
 
 
@@ -125,13 +126,17 @@ def auxiliary_sql(alias, grouping):
 def _floors(grouping,anchor):
     return {field:max([grouping.get('min_auxiliary_'+suffix) or 0]+
                      ([grouping.get('min_anchor_'+suffix) or 0] if anchor else []))
-            for field,suffix in (('pixels','face_pixels'),('sharpness','sharpness'))}
+            for field,suffix in (('pixels','face_pixels'),)}
 
 
 def quality_allows(quality,grouping,*,anchor=False):
     try:
         quality=metadata(quality) if isinstance(quality,str) else quality
         if quality.get('alignment_valid') is False:
+            return False
+        from .sharpness_gates import failure, policy
+        roles = ('auxiliary', 'anchor') if anchor else ('auxiliary',)
+        if any(failure(quality, policy(grouping, r+'_', 'min_'+r+'_sharpness')) for r in roles):
             return False
         return all(not floor or (type(quality.get(field)) in (int,float) and
             math.isfinite(quality[field]) and quality[field]>=floor)
@@ -146,6 +151,9 @@ def quality_sql(alias,grouping,*,anchor=False):
         if floor:
             conditions.append(f"COALESCE(json_type({alias}.quality,'$.{field}') IN ('integer','real') AND "
                               f"json_extract({alias}.quality,'$.{field}')>={floor!r},0)")
+    from .sharpness_gates import sql, policy
+    for role in (('auxiliary', 'anchor') if anchor else ('auxiliary',)):
+        conditions.append(sql(alias, policy(grouping, role+'_', 'min_'+role+'_sharpness')))
     return ' AND '.join(conditions)
 
 

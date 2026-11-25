@@ -263,7 +263,8 @@ def matching_policy(config):
                       'collection_quality':config.data['sapiensid']['collection'],
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
         **({'body_anchor_quality':{k:config.data['sapiensid']['identities'][k] for k in
-              ('anchor_min_person_pixels','anchor_min_keypoints','anchor_min_sharpness')},
+              ('anchor_min_person_pixels','anchor_min_keypoints','anchor_min_sharpness',
+               'anchor_sharpness_mode','anchor_min_focus_sharpness','anchor_min_motion_sharpness')},
             'body_anchor_keypoint_rules':policy_rules(config.data['sapiensid']['identities'].get('anchor_keypoint_rules', {})),
             'body_anchor_face_landmark_fallback':fallback_policy(config.data['sapiensid']['identities'].get('anchor_face_landmark_fallback', {}))}
            if config.data['sapiensid']['enabled'] else {}),

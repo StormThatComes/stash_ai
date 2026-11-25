@@ -108,7 +108,7 @@ def test_face_encoder_mask_projection_cpu_device_parity_and_scalar_transfers(mon
         face_pixels=[count],sharpness_inputs=[prepared.sharpness_input])[0]
     for name in ('sharpness','portrait_sharpness','sharpness_pixels','sharpness_noise','visible_face_fraction'):
         assert actual[name] == pytest.approx(expected[name],abs=1e-4)
-    assert copied == [1,4,4]
+    assert copied == [1,7,7]
     assert actual['sharpness_input_size'] == [112,112] and actual['sharpness_space'] == SPACE
     projected = project_masks((logits[:,0]>0)&region[None],[prepared.sharpness_input])[0]
     assert measure(prepared.sharpness_input[0],projected)['sharpness'] == pytest.approx(actual['sharpness'],abs=1e-4)
@@ -197,5 +197,6 @@ def test_prior_sharpness_space_is_a_frozen_contract_even_without_masks():
     data=defaults();data['sapiensid']['pose']['refinement']['enabled']=False
     config=SimpleNamespace(data=data)
     collection=plain(data['sapiensid']['collection']);collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     previous=digest(['independent-person-v9-directional-sharpness',person_contract(config,legacy_input_sharpness=True),collection])
     assert contract(config)!=previous and previous in compatible_contracts(config)[1:]

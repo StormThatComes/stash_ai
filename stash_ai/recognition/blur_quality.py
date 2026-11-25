@@ -88,7 +88,7 @@ def _quartile(values, valid, xp):
 
 
 def batch(values, masks, xp=np):
-    """Return N x 4 scalar summaries: score, supported pixels, contrast, noise.
+    """Return N x 7 summaries: legacy four, focus, motion, split confidence.
 
     Inputs are finite float32 N,H,W arrays on the same device, masks are bool.
     NumPy and Torch execute the same arithmetic and reduction policy.
@@ -102,7 +102,7 @@ def batch(values, masks, xp=np):
     contrast = (((values-means[:, None, None])**2)*weights).sum(axis=(1, 2))/counts
     zeros = contrast*0
     if min(values.shape[-2:]) <= 2*RADIUS:
-        return xp.stack((zeros, zeros, contrast, zeros), axis=1)
+        return xp.stack((zeros, zeros, contrast, zeros, zeros, zeros, zeros), axis=1)
     support = _interior(weights)
     weight = xp.where(support, values[:, RADIUS:-RADIUS, RADIUS:-RADIUS]*0+1, 0.)
     count = _pool(weight)
@@ -138,13 +138,16 @@ def batch(values, masks, xp=np):
         # Compare only tiles where both scales have a measurable energy loss.
         valid = valid & (energies[1] <= base) & (energies[2] <= base)
         losses = [(1-energy/base.clip(1e-8, None)).clip(0, 1) for energy in energies[1:]]
-        scores.append(_quartile((losses[0]+losses[1])*.5, valid, xp))
+        local = (losses[0]+losses[1])*.5
+        scores.append(_quartile(local, valid, xp))
     directional = xp.stack(scores, axis=1)
     score = directional.min(axis=1) if xp is np else directional.min(dim=1).values
     score = xp.where(xp.isfinite(score), 100*score, 0.)
     pixels = weight.sum(axis=(1, 2))
     estimated_noise = (noise*count).sum(axis=1)/pixels.clip(1, None)
-    return xp.stack((score, pixels, contrast, estimated_noise), axis=1)
+    from .split_blur import estimate
+    split = estimate(smooth, support, noise, xp)
+    return xp.concatenate((xp.stack((score, pixels, contrast, estimated_noise), axis=1), split), axis=1)
 
 
 def records(summaries, *, diagnostics):
@@ -152,8 +155,13 @@ def records(summaries, *, diagnostics):
     return [dict(sharpness=float(score), sharpness_normalized=float(score),
                  sharpness_pixels=int(count), sharpness_contrast=float(contrast),
                  sharpness_noise=float(noise) if diagnostics else None,
-                 sharpness_algorithm=ALGORITHM)
-            for score, count, contrast, noise in summaries]
+                 sharpness_algorithm=ALGORITHM,
+                 focus_sharpness=float(focus) if confidence >= .6 else None,
+                 motion_sharpness=float(motion) if confidence >= .6 else None,
+                 sharpness_confidence=float(confidence),
+                 sharpness_split_method="edge-spread-covariance-v1",
+                 sharpness_split_status="estimated" if confidence >= .6 else "unavailable")
+            for score, count, contrast, noise, focus, motion, confidence in summaries]
 
 
 def measure(values, mask=None, *, diagnostics=True):

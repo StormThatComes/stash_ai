@@ -1,9 +1,8 @@
 # Foreground sharpness
 
 All face/body admission floors, anchor/query floors and portrait/reference ranking
-now consume one **0–100 directional reblur score**, with larger values indicating
-more resolved detail. Motion blur and optical defocus lower the same score; there
-is no blur-type classifier or additional model. This is an uncalibrated sharpness
+by default consume one **0–100 directional reblur score**, with larger values indicating
+more resolved detail. Motion blur and optical defocus lower the same score; an optional split estimator is described below and requires no additional model. This is an uncalibrated sharpness
 measure, not a probability or an image-quality percentage.
 
 ## Updating an existing installation
@@ -107,3 +106,59 @@ and estimation with a new no-reference perceptual blur metric* (2007),
 [doi:10.1117/12.702790](https://doi.org/10.1117/12.702790). This implementation
 uses local noise-corrected gradient energies and conservative directional pooling;
 it is not the paper's original metric or a call to scikit-image.
+
+## Optional focus and motion thresholds
+
+At `face.quality`, `body.collection`, `matching.face.samples.minimum`,
+`matching.face.anchors.quality`, and `matching.body.anchors`, the following fields
+are available (values below are illustrative, not calibrated defaults):
+
+```yaml
+sharpness_mode: split
+min_sharpness: 10.0        # fallback when the split measurement is unavailable
+min_focus_sharpness: 40.0
+min_motion_sharpness: 60.0
+```
+
+The default is `sharpness_mode: legacy`, with both new floors zero. Legacy scores
+and decisions are unchanged. Each stage selects its own mode. On a reliable
+measurement, split mode replaces that stage's legacy floor with the two component
+floors; both must pass. Other stages still apply their own configured gates. For
+example, switching scan admission alone does not disable a legacy anchor floor.
+A face profile override applies to the legacy fallback only. Portrait ranking
+continues to use the separate portrait-scale score, not these recognition gates.
+
+`focus_sharpness` estimates isotropic softness and `motion_sharpness` estimates
+directional smear. Both range from 0 to 100, with higher meaning sharper; neither
+is a probability, a percentage of image quality, nor convertible from the legacy
+score. Motion and defocus may coexist. The method cannot establish the physical
+cause of blur: resizing, complex camera motion, texture and compression can
+produce ambiguous or misleading evidence. Real VTT calibration is required.
+
+The optional estimator fits an edge-spread covariance from four supported edge
+normal directions. It samples monotonic edge profiles within the same eroded
+foreground support, rejects oscillating/ringing profiles, requires local signal
+above noise, and pools widths from multiple tiles before fitting isotropic and
+directional components. `sharpness_confidence` is a fit-consistency indicator,
+not a calibrated probability. Unsupported, noisy, tiny or one-direction patches
+produce `focus_sharpness: null` and `motion_sharpness: null`; missing evidence is
+never represented as perfect quality. Strong mixed blur may also be unavailable.
+The implementation shares NumPy/Torch arithmetic and transfers seven scalar
+summaries per image, without transferring device image arrays or loading a model.
+
+Inspect Scene/Performer admission details show the active component gates, their
+measurements and fit confidence, or explicitly label the legacy fallback.
+Tune Detection exposes the mode and thresholds in face quality/body collection.
+In split mode its final-result caption shows both measurements and failed blur
+gates. Face previews use an aligned 112px **ellipse mask**, without loading
+FaceOcc, and are labeled accordingly; production FaceOcc masking can give a
+different result. Body previews use the same encoder-size preparation and mask
+policy as recognition. Detection remains unfiltered in the tuner. The preview
+runs only when split mode is selected, and is not persisted as recognition data.
+
+Rerun recognition for affected scenes to obtain the new measurements. Scan,
+visibility and body quality contracts refresh; older body banks remain frozen
+competitors. The merge solver replays the same split/fallback decision using
+retained component measurements; a replay cannot derive missing components from
+an old scalar score. It does not automatically switch sharpness modes or search the new component
+floors; these stay fixed at the configured values during solver exploration.

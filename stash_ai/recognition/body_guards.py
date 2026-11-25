@@ -53,10 +53,12 @@ class FaceGuard:
         raw = row.get('face_quality')
         q = json.loads(raw) if isinstance(raw,str) else (raw or {})
         gates = (('pose_deviation','max_anchor_pose_deviation',True),
-                 ('pixels','min_anchor_face_pixels',False),('sharpness','min_anchor_sharpness',False))
+                 ('pixels','min_anchor_face_pixels',False),)
         weak = any(self.grouping.get(key) is not None and type(q.get(metric)) in (float,int)
                    and (q[metric]>self.grouping[key] if upper else q[metric]<self.grouping[key])
                    for metric,key,upper in gates)
+        from .sharpness_gates import failure, policy
+        weak |= failure(q, policy(self.grouping, 'anchor_', 'min_anchor_sharpness')) is not None
         from .visibility import cached
         weak |= bool(cached(q) and q['visible_face_fraction']<anchor_visibility(self.grouping))
         others = (r for r in bank if r.get('_face_vector') is not None)

@@ -134,10 +134,14 @@ def _assess(image, detection):
 
 
 def sharpness_failed(quality,policy):
-    threshold=policy.get('profile_min_sharpness') if quality.get('face_profile') else None
-    threshold=policy['min_sharpness'] if threshold is None else threshold
-    value=quality.get('sharpness')
-    return threshold>0 and (value is None or value<threshold)
+    from .sharpness_gates import failure
+    return failure(quality, policy) is not None
+
+
+def blur_rejection(quality, policy):
+    from .sharpness_gates import failure
+    metric = failure(quality, policy)
+    return ('face_blurred' if metric == 'sharpness' else 'face_'+metric) if metric else None
 
 
 def rejection(quality, policy):
@@ -147,7 +151,7 @@ def rejection(quality, policy):
     if quality['pixels'] < policy['min_face_pixels']:
         return 'face_too_small'
     if sharpness_failed(quality,policy):
-        return 'face_blurred'
+        return blur_rejection(quality, policy)
     if policy['require_complete_face'] and not quality['complete']:
         return 'face_incomplete'
     if policy['max_pose_deviation'] is not None:

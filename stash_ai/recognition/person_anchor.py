@@ -42,6 +42,7 @@ def body_gate(row, settings, *, collection=None):
 
 def anchor_gate(metadata,settings,*,collection=None,face_evidence=None):
     """Measured pose and sharpness must qualify every body reference route."""
+    from .sharpness_gates import failure, policy
     gate=pixel_gate(metadata,settings)
     from .pose_anchor_rules import evaluate
     rules=settings.get('anchor_keypoint_rules', {})
@@ -79,16 +80,18 @@ def anchor_gate(metadata,settings,*,collection=None,face_evidence=None):
             # Older face projections discarded collection rejection reasons.
             # Re-evaluate measured quality before admitting those retained rows.
             source_pixels=pixels(record);overlap=admission_overlap(quality)
+            blur_failure = failure(quality, collection)
             reason=('person_pixels' if source_pixels is not None and source_pixels<collection['min_person_pixels'] else
-                    'person_sharpness' if valid(sharpness) and sharpness<collection['min_sharpness'] else
+                    'person_'+blur_failure if blur_failure else
                     'person_keypoints' if valid(points) and points<collection['min_keypoints'] else
                     'person_overlap' if valid(overlap) and overlap>collection['max_overlap'] else None)
         if reason is None:
+            blur_failure = failure(quality, policy(settings, 'anchor_', 'anchor_min_sharpness'))
             reason=('body_anchor_keypoints_missing' if not valid(points) else
                     'body_anchor_keypoints' if points<settings['anchor_min_keypoints'] else
                     regional['reason'] if not regional['eligible'] else
                     'body_anchor_sharpness_missing' if not valid(sharpness) else
-                    'body_anchor_sharpness' if sharpness<settings['anchor_min_sharpness'] else None)
+                    'body_anchor_'+blur_failure if blur_failure else None)
     except (ValueError,TypeError,AttributeError,KeyError,OverflowError):
         points=sharpness=None;reason='body_anchor_quality_missing'
     return dict(gate,keypoints=points,sharpness=sharpness,keypoint_rules=regional,

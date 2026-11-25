@@ -107,6 +107,18 @@ class Policies:
         return result
 
 
+def sharpness_checks(quality, settings, path, prefix='', legacy='min_sharpness'):
+    from .sharpness_gates import floors, policy, estimated
+    selected = dict(settings) if not prefix else policy(settings, prefix, legacy)
+    note = (f"Split confidence {quality.get('sharpness_confidence', 'unavailable')}; "
+            + ('estimated focus/motion components' if estimated(quality) else 'using legacy fallback; split unavailable'))
+    rows = []
+    for key, metric, floor in floors(quality, selected):
+        parameter = legacy if key == 'min_sharpness' else prefix+key
+        rows.append(check(path+parameter, quality.get(metric), floor, enabled=bool(floor), note=note))
+    return rows
+
+
 def face(quality, geometry, config, policies, fingerprint):
     scan, source = policies.resolve('face', fingerprint)
     d, c = scan.data['detection'], config.data['clustering']
@@ -121,7 +133,7 @@ def face(quality, geometry, config, policies, fingerprint):
     checks = [
         check('detection.score_threshold', score, d['score_threshold'], '>'),
         check('detection.min_face_pixels', quality.get('pixels'), d['min_face_pixels']),
-        check('detection.min_sharpness', quality.get('sharpness'), d['min_sharpness']),
+        *sharpness_checks(quality, d, 'detection.'),
         check('detection.require_complete_face', quality.get('complete'), d['require_complete_face'], '==', enabled=d['require_complete_face']),
         check('detection.max_pose_deviation', quality.get('pose_deviation'), d['max_pose_deviation'], '<=',
               enabled=d['max_pose_deviation'] is not None),
@@ -140,11 +152,13 @@ def face(quality, geometry, config, policies, fingerprint):
         note='NMS and result limits depend on other detections; their boundary cannot be recovered from one retained crop.')]
     for role in ('anchor', 'auxiliary'):
         checks = []
-        for suffix, field in (('face_pixels', 'pixels'), ('sharpness', 'sharpness')):
+        for suffix, field in (('face_pixels', 'pixels'),):
             keys = ['min_auxiliary_'+suffix] + (['min_anchor_'+suffix] if role == 'anchor' else [])
             for key in keys:
                 floor = c[key]
                 checks.append(check('clustering.'+key, quality.get(field), floor, enabled=bool(floor)))
+        for r in (('auxiliary', 'anchor') if role == 'anchor' else ('auxiliary',)):
+            checks.extend(sharpness_checks(quality, c, 'clustering.', r+'_', 'min_'+r+'_sharpness'))
         keys = ['min_auxiliary_visible_face_fraction'] + (['min_anchor_visible_face_fraction'] if role == 'anchor' else [])
         for key in keys:
             checks.append(check('clustering.'+key, visible, c[key], enabled=bool(c[key])))
@@ -176,8 +190,8 @@ def person(metadata, config, policies, fingerprint, *, independent=False, face_e
         checks = [check('sapiensid.collection.'+key, value, collection[key], op)
             for key, value, op in (
                 ('min_person_pixels', pixels(metadata), '>='),
-                ('min_sharpness', quality.get('sharpness'), '>='),
                 ('min_keypoints', quality.get('keypoints'), '>='))]
+        checks.extend(sharpness_checks(quality, collection, 'sapiensid.collection.'))
         skipped = quality.get('overlap_skipped_peer_indices', [])
         maximum = admission_overlap(quality)
         overlap_check = check('sapiensid.collection.max_overlap', maximum, collection['max_overlap'], '<=',
@@ -217,7 +231,8 @@ def person(metadata, config, policies, fingerprint, *, independent=False, face_e
     floor = identity['anchor_min_person_pixels']
     checks = [check('sapiensid.identities.anchor_min_person_pixels', pixels(metadata), floor, enabled=floor is not None)]
     checks.extend(check('sapiensid.identities.'+key, gate.get(field), identity[key])
-                  for key, field in (('anchor_min_keypoints', 'keypoints'), ('anchor_min_sharpness', 'sharpness')))
+                  for key, field in (('anchor_min_keypoints', 'keypoints'),))
+    checks.extend(sharpness_checks(quality, identity, 'sapiensid.identities.', 'anchor_', 'anchor_min_sharpness'))
     groups.append(group('person_anchor_quality', checks,
         note='Current quality gates only. Face authority, complete evidence, support and matching are separate requirements.'))
     regional = gate['keypoint_rules']

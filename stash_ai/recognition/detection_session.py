@@ -128,7 +128,7 @@ class CueDetector:
             with trial_image(frame,self.detector) as image, capture(
                     image, enabled=capture_phases, backend=config.data['sapiensid']['pose']['backend']) as phases, render_frame(
                     image, self.detector, frame.scene_id, frame.index, frame.cue,
-                    mask_options=mask_options) as (result, record):
+                    mask_options=mask_options, quality_settings=config.data) as (result, record):
                 if phases is not None:
                     return DetectionResult(result.copy(), record, phases)
                 return result.copy(), record

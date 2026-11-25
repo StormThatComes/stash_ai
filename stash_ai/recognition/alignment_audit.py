@@ -5,6 +5,7 @@ sensitive biometric data and are written only in a newly created private folder.
 """
 from collections import Counter
 from contextlib import closing
+from .quality import sharpness_failed, blur_rejection
 import json
 import math
 import os
@@ -186,8 +187,8 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                             quality.update(measurement)
                             if quality['visible_face_fraction'] < policy['min_visible_face_fraction']:
                                 reason = 'face_occluded'
-                            elif quality['sharpness'] < policy['min_sharpness']:
-                                reason = 'face_blurred'
+                            elif sharpness_failed(quality, policy):
+                                reason = blur_rejection(quality, policy)
                     reasons[reason or 'passed_detection_gates'] += 1
                     sizes.append(quality['pixels'])
                     if reason is not None:
@@ -216,7 +217,8 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         'face_index': face_index, 'detection_score': float(face.score),
                         'quality': {key: value for key, value in quality.items()
                                     if key in ('pixels', 'pose_deviation', 'sharpness', 'sharpness_method',
-                                               'sharpness_pixels', 'crop_sharpness', 'exposure',
+                                               'sharpness_pixels', 'focus_sharpness', 'motion_sharpness', 'sharpness_confidence',
+                                               'sharpness_split_status', 'crop_sharpness', 'exposure',
                                                'clipped_fraction', 'visible_face_fraction',
                                                'landmarks_inside', 'complete', 'alignment_valid')},
                         'detection_rejection': None,

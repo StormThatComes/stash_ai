@@ -17,7 +17,8 @@ def apply_edits(config, edits, *, detection_preview=False):
         if not isinstance(parameter, str):
             raise ValueError('Expected a dotted parameter name.')
         public = canonical_path(INTERNAL_PATHS.get(parameter, parameter))
-        if not public.startswith(('pose.', 'face.detector.')):
+        from .tune_sharpness import EDITABLE
+        if not public.startswith(('pose.', 'face.detector.')) and public not in EDITABLE:
             raise ValueError(f'Unsupported detector parameter {parameter!r}. Use face.detector or pose settings.')
         try:
             old = get(document, public)
