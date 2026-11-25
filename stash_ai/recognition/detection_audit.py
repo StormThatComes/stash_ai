@@ -37,7 +37,7 @@ def _label(image, bounds, text, *, color):
 
 
 @contextmanager
-def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
+def render_frame(image, detector, scene_id, index, cue, *, mask_options=None, quality_settings=None):
     """Draw one fresh detection using the same annotations in scene and sweep audits."""
     mask_options = mask_options or MaskOptions()
     with landmark_repair_audit.capture() as landmark_reports, dedup_audit.capture(image) as dedup_reports, capture_masks(
@@ -57,6 +57,10 @@ def render_frame(image, detector, scene_id, index, cue, *, mask_options=None):
         record = dict(shot=getattr(image,'_recognition_cue_signature',(None,None))[1], previous_cue_available=bool(getattr(image,'_previous_cue_available',False)),cue_index=index, start_seconds=float(cue.start), end_seconds=float(cue.end),
                       source_rect=list(cue.rect), source_dimensions=list(image.size),
                       output_dimensions=list(output_size), file=name, faces=[], people=[])
+        if quality_settings is not None:
+            from .tune_sharpness import preview
+            if measurements := preview(image, faces, people, quality_settings):
+                record['sharpness_preview'] = measurements
         if landmark_reports:
             record['face_landmark_repairs'] = landmark_reports
         from PIL import Image, ImageDraw

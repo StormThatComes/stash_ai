@@ -6,11 +6,14 @@ from .config import defaults
 from .config_help import HELP
 from .config_layout import POINT_FIELDS, canonical_path, get, leaf_items, v2_document
 from .detection_parameters import apply_edits
+from .tune_sharpness import EDITABLE
 
 
 PMPOSE_SWITCHES = ('pose.deduplication.enabled',)
 
 CHOICES = {
+    'face.quality.sharpness_mode': ('legacy', 'split'),
+    'body.collection.sharpness_mode': ('legacy', 'split'),
     'face.detector.backend': ('scrfd_10g', 'scrfd_2_5g', 'yunet', 'retinaface_r50'),
     'pose.detector.backend': ('rfdetr_xl', 'dfine_x', 'dfine_l', 'yolo', 'rtmo'),
     'pose.estimator.backend': ('vitpose_plus_large', 'pmpose', 'sapiens', 'yolo', 'rtmo'),
@@ -31,7 +34,7 @@ class Settings:
         self.config = config
         document = v2_document(config.data, source=config.source)
         self.base = {path: value for path, value in leaf_items(document)
-                     if path.startswith(('face.detector.', 'pose.'))}
+                     if path.startswith(('face.detector.', 'pose.')) or path in EDITABLE}
         # An operator may write 1 for a real-valued threshold. Parse according to
         # the schema so that threshold can still be changed to (for example) 0.8.
         self.schema = v2_document(defaults())
@@ -79,7 +82,7 @@ class Settings:
     def groups(self):
         box = self.value('pose.detector.backend')
         estimator = self.value('pose.estimator.backend')
-        allowed = ['face.detector', 'pose.detector',
+        allowed = ['face.detector', 'face.quality', 'body.collection', 'pose.detector',
                    'pose.detector.' + ('dfine' if box.startswith('dfine') else box),
                    'pose.estimator', 'pose.estimator.' + estimator]
         if estimator=='rtmo':allowed.extend(('pose.point_quality','pose.mask'))

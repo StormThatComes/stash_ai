@@ -17,13 +17,14 @@ MAX_FLOAT32 = float.fromhex('0x1.fffffep127')
 def defaults():
     # Conservative starting policies; these are not calibrated probabilities or
     # claims about accuracy on an operator's VTT thumbnails.
+    from .sharpness_gates import defaults as sharpness_defaults
     from .person_signal import defaults as person_defaults
     return {
         'sapiensid': person_defaults(),
         'version': 1,
         'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
-        'detection': {'score_threshold': .9, 'nms_threshold': .3, 'pose_guided_rotation': False, 'candidate_score_threshold': None, 'alignment_retry_error': 0.,
+        'detection': {**sharpness_defaults(), 'score_threshold': .9, 'nms_threshold': .3, 'pose_guided_rotation': False, 'candidate_score_threshold': None, 'alignment_retry_error': 0.,
                       'landmarks_from_facebox': False,
                       'sharpness_metric': 'raw', 'profile_min_sharpness': None, 'quality_diagnostics': False,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
@@ -35,7 +36,7 @@ def defaults():
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
                         'cross_scene_provisional': False,
                         'cooccurrence_merge_threshold': .90},
-        'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
+        'clustering': {**sharpness_defaults('anchor_'), **sharpness_defaults('auxiliary_'), 'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
                        'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
                        'min_anchor_visible_face_fraction': None, 'min_auxiliary_visible_face_fraction': None,
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
@@ -183,6 +184,12 @@ def validate(data, *, detection_preview=False):
     if data['detection']['candidate_score_threshold'] is not None:
         _number(data['detection']['candidate_score_threshold'],'detection.candidate_score_threshold',0,data['detection']['score_threshold'])
     _number(data['detection']['alignment_retry_error'],'detection.alignment_retry_error',0,1)
+    from .sharpness_gates import validate as validate_split
+    validate_split(data['detection'], 'detection')
+    validate_split(data['sapiensid']['collection'], 'sapiensid.collection')
+    validate_split(data['sapiensid']['identities'], 'sapiensid.identities', 'anchor_')
+    for role in ('anchor', 'auxiliary'):
+        validate_split(data['clustering'], 'clustering', role+'_')
     if data['detection']['sharpness_metric'] not in ('raw','normalized'):
         raise ValueError('detection.sharpness_metric must be raw or normalized.')
     if data['detection']['profile_min_sharpness'] is not None:
@@ -224,8 +231,12 @@ def validate(data, *, detection_preview=False):
         auxiliary=data['clustering']['min_auxiliary_'+suffix]
         for role,value in (('anchor',anchor),('auxiliary',auxiliary)):
             if value is not None:
-                _number(value,'clustering.min_'+role+'_'+suffix,data['detection'][hard],upper)
-        if anchor is not None and auxiliary is not None and anchor<auxiliary:
+                low = data['detection'][hard]
+                if suffix == 'sharpness' and (data['detection']['sharpness_mode'] == 'split' or data['clustering'][role+'_sharpness_mode'] == 'split'):
+                    low = 0
+                _number(value,'clustering.min_'+role+'_'+suffix,low,upper)
+        comparable = suffix != 'sharpness' or data['clustering']['anchor_sharpness_mode'] == data['clustering']['auxiliary_sharpness_mode']
+        if comparable and anchor is not None and auxiliary is not None and anchor<auxiliary:
             raise ValueError('Anchor quality floors must not be lower than auxiliary floors.')
     if type(data['recognition']['cross_scene_provisional']) is not bool:
         raise ValueError('recognition.cross_scene_provisional must be boolean.')

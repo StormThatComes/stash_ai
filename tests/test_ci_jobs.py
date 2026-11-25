@@ -93,7 +93,7 @@ def test_pr_diff_uses_merge_base_and_includes_both_sides_of_rename(tmp_path):
 def test_post_merge_and_manual_runs_always_run_the_full_matrix(event):
     result = event_plan(event, {})
     assert all(result[key] for key in ('pytest', 'updater', 'dependencies', 'recognition'))
-    assert len(result['matrix']['include']) == 5
+    assert len(result['matrix']['include']) == 6
     assert all(row['profile'] == 'full' for row in result['matrix']['include'])
 
 
@@ -126,7 +126,8 @@ def test_changed_windows_module_or_imported_fixture_expands_only_affected_suites
     assert windows([source, 'tests/test_recognition_video_recovery.py']) == {
         ('core', 1, 'pr'), ('video', 1, 'full'), ('video', 2, 'full')}
     assert windows([source, 'tests/test_recognition_clustering.py']) == {
-        (suite, shard, 'full') for suite in ('core', 'video') for shard in (1, 2)}
+        ('core', 1, 'full'), ('core', 2, 'full'), ('core', 3, 'full'),
+        ('video', 1, 'full'), ('video', 2, 'full')}
 
 
 def test_unavailable_pr_diff_falls_back_to_full_validation():

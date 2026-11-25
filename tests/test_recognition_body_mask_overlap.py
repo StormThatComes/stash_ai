@@ -167,6 +167,7 @@ def test_contract_refreshes_old_overlap_but_keeps_legacy_banks_recognizable(mask
     previous=person_contract(config,legacy_mask_overlap=True)
     assert pose_contract(config)[1]['quality_mask'] == 'owned-crop-bits-v2'
     collection=plain(data['sapiensid']['collection']);collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     old_body=digest(['independent-person-v4-independent-torso',previous,collection])
     assert person_contract(config) != previous
     assert contract(config) != old_body
@@ -175,7 +176,8 @@ def test_contract_refreshes_old_overlap_but_keeps_legacy_banks_recognizable(mask
     pose['refinement'].update(enabled=False,masked_identity_crop=False)
     assert 'quality_mask' not in pose_contract(config)[1]
     assert person_contract(config,legacy_sharpness=True) == person_contract(config,legacy_mask_overlap=True)
-    assert contract(config) == digest(['independent-person-v10-model-input-sharpness',person_contract(config),collection])
+    current_collection=plain(data['sapiensid']['collection']);current_collection.pop('enabled')
+    assert contract(config) == digest(['independent-person-v11-split-sharpness',person_contract(config),current_collection])
 
 
 def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_path,monkeypatch):

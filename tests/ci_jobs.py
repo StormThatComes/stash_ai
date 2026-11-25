@@ -14,6 +14,7 @@ RECOGNITION_MATRIX = (
     {'os': 'ubuntu-latest', 'suite': 'models', 'shard': 1},
     {'os': 'windows-latest', 'suite': 'core', 'shard': 1},
     {'os': 'windows-latest', 'suite': 'core', 'shard': 2},
+    {'os': 'windows-latest', 'suite': 'core', 'shard': 3},
     {'os': 'windows-latest', 'suite': 'video', 'shard': 1},
     {'os': 'windows-latest', 'suite': 'video', 'shard': 2},
 )

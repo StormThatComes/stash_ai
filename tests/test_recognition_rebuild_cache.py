@@ -68,6 +68,9 @@ def test_multiple_selection_descriptors_require_current_exact_candidates(tmp_pat
     "UPDATE candidates SET status='withheld'",
     "UPDATE observations SET geometry='repaired'",
     "UPDATE scans SET input_sha='repaired'",
+    "UPDATE observations SET quality=json_set(quality,'$.focus_sharpness',50)",
+    "UPDATE observations SET quality=json_set(quality,'$.motion_sharpness',50)",
+    "UPDATE observations SET quality=json_set(quality,'$.sharpness_confidence',0.9)",
 ])
 def test_bad_derived_cache_or_repaired_inputs_force_retained_evidence_replay(tmp_path,monkeypatch,mutation):
     from stash_ai.recognition import rebuild
@@ -215,7 +218,8 @@ def test_assignment_catalogue_keeps_frozen_digest_with_multiple_candidate_polici
     config = changed(setup(tmp_path), anchor_view_matching=True)
     with FaceDatabase(config.database) as state:
         selected = assignment_fixture(state)
-        assert input_context(state.connection, selected, 'scope', 'ns', config) == '327f3bcd1790357bb24c7a1f1dbdf6120d2e8ef03aa183e58c23a7fa17e77bea'
+        # Descriptor includes the three split-quality measurements, including nulls.
+        assert input_context(state.connection, selected, 'scope', 'ns', config) == 'e4460a36665fd467684105cfc54c0cd21f25c4987b8e3f960250e465580e8ad2'
 
 
 def test_assignment_lookup_never_scans_the_global_candidate_table(tmp_path):

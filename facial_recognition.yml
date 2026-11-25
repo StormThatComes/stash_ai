@@ -44,6 +44,16 @@ face:
     # Minimum foreground reblur sharpness (0..100) on the aligned 112px recognition input; filter footprints
     # exclude mask edges. Positive values require an active face visibility floor. 0 disables this gate.
     # Recalibrate former Laplacian thresholds.
+    sharpness_mode: legacy
+    # legacy uses min_sharpness. split replaces that floor with both component floors when the local blur fit is
+    # reliable; otherwise min_sharpness remains the fallback. Modes apply independently at each admission stage.
+    # Default legacy; calibrate on real VTT crops.
+    min_focus_sharpness: 0.0
+    # Minimum estimated isotropic-detail score (0..100, higher is sharper). Used only in split mode.
+    # Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.
+    min_motion_sharpness: 0.0
+    # Minimum estimated directional-detail score (0..100, higher is sharper). Used only in split mode. Both
+    # components can fail together. 0 disables this component.
     sharpness_metric: raw
     # Compatibility selector: raw and normalized both use the same contrast/noise-corrected reblur score
     # (0..100). Recalibrate old thresholds; changing this selector no longer changes units.
@@ -345,6 +355,16 @@ body:
     # input. With pose.mask.apply_to.sharpness: true, positive values require mask.enabled: true and mode: all;
     # missing masks reject the body. False measures the real full input area, excluding padding and synthetic
     # mask outlines. 0 disables this gate. Recalibrate former Laplacian thresholds.
+    sharpness_mode: legacy
+    # legacy uses min_sharpness. split replaces that floor with both component floors when the local blur fit is
+    # reliable; otherwise min_sharpness remains the fallback. Modes apply independently at each admission stage.
+    # Default legacy; calibrate on real VTT crops.
+    min_focus_sharpness: 0.0
+    # Minimum estimated isotropic-detail score (0..100, higher is sharper). Used only in split mode.
+    # Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.
+    min_motion_sharpness: 0.0
+    # Minimum estimated directional-detail score (0..100, higher is sharper). Used only in split mode. Both
+    # components can fail together. 0 disables this component.
     min_keypoints: 3
     # Minimum usable pose keypoints after pose.estimator.keypoint_score_threshold. Range: 1..17.
     max_overlap: 0.65
@@ -376,6 +396,16 @@ matching:
         min_sharpness: 4.0
         # Extra minimum face reblur sharpness (0..100) for queries, including anchors; positive values require
         # an active face visibility floor. Null adds no floor. Must be at least face.quality.min_sharpness.
+        sharpness_mode: legacy
+        # legacy uses min_sharpness. split replaces that floor with both component floors when the local blur
+        # fit is reliable; otherwise min_sharpness remains the fallback. Modes apply independently at each
+        # admission stage. Default legacy; calibrate on real VTT crops.
+        min_focus_sharpness: 0.0
+        # Minimum estimated isotropic-detail score (0..100, higher is sharper). Used only in split mode.
+        # Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.
+        min_motion_sharpness: 0.0
+        # Minimum estimated directional-detail score (0..100, higher is sharper). Used only in split mode. Both
+        # components can fail together. 0 disables this component.
         min_visible_face_fraction: 0.5
         # Minimum visible fraction for attachments; also a floor for anchors; null adds no extra floor. Range:
         # 0..1 or null.
@@ -405,6 +435,16 @@ matching:
         min_sharpness: 4.0
         # Extra minimum face reblur sharpness (0..100) for anchors; positive values require an active face
         # visibility floor. Null adds no anchor floor. Must be at least face.quality.min_sharpness.
+        sharpness_mode: legacy
+        # legacy uses min_sharpness. split replaces that floor with both component floors when the local blur
+        # fit is reliable; otherwise min_sharpness remains the fallback. Modes apply independently at each
+        # admission stage. Default legacy; calibrate on real VTT crops.
+        min_focus_sharpness: 0.0
+        # Minimum estimated isotropic-detail score (0..100, higher is sharper). Used only in split mode.
+        # Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.
+        min_motion_sharpness: 0.0
+        # Minimum estimated directional-detail score (0..100, higher is sharper). Used only in split mode. Both
+        # components can fail together. 0 disables this component.
         min_visible_face_fraction: 0.6
         # Minimum visible fraction for anchor references; null adds no extra anchor floor. Range: 0..1 or null.
         max_pose_deviation: 0.4
@@ -536,6 +576,16 @@ matching:
       min_sharpness: 4.0
       # Minimum body/hybrid anchor reblur sharpness (0..100), using pose.mask.apply_to.sharpness to select
       # masked or full-crop measurement. Missing required masks cannot qualify. 0 disables this floor.
+      sharpness_mode: legacy
+      # legacy uses min_sharpness. split replaces that floor with both component floors when the local blur fit
+      # is reliable; otherwise min_sharpness remains the fallback. Modes apply independently at each admission
+      # stage. Default legacy; calibrate on real VTT crops.
+      min_focus_sharpness: 0.0
+      # Minimum estimated isotropic-detail score (0..100, higher is sharper). Used only in split mode.
+      # Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.
+      min_motion_sharpness: 0.0
+      # Minimum estimated directional-detail score (0..100, higher is sharper). Used only in split mode. Both
+      # components can fail together. 0 disables this component.
       keypoint_rules:
         # Minimum detected COCO17 points in each group or named list. Counts use points inside the person crop
         # before the SapiensID nose and eye filter; optional face_landmark_fallback can supply missing head

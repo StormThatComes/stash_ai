@@ -106,6 +106,7 @@ def test_contracts_refresh_current_proofs_and_preserve_pre_switch_hashes(tmp_pat
     old_data['sapiensid']['pose']['refinement'].pop('mask_contact_confirmation')
     old_person = person_contract(SimpleNamespace(data=old_data), legacy_sharpness=True)
     collection = deepcopy(data['sapiensid']['collection']); collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     old = digest(['independent-person-v7-single-shoulder-contact',old_person,collection])
     before = deepcopy(config.data)
     assert old in compatible_contracts(config) and old != contract(config)

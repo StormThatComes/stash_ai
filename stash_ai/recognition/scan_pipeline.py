@@ -203,7 +203,7 @@ def prepare_record(image,pair,config,cue,assess,rejection,geometry_contract):
     quality['geometry_contract']=geometry_contract(face,cue)
     policy=config.data['detection']
     # Admission uses the prepared encoder pixels, after optional FaceOcc masks.
-    policy=dict(policy,min_sharpness=0.,profile_min_sharpness=0.)
+    policy=dict(policy,min_sharpness=0.,profile_min_sharpness=0.,sharpness_mode='legacy')
     floor=policy.get('candidate_score_threshold')
     if floor is not None and face.score<=policy['score_threshold']:
         quality['query_only']=True
@@ -271,7 +271,7 @@ def cue_visibility(frames,prepared,visibility,config,stage,backend=None):
 
 def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False, prepared_records=None):
     """Yield complete face records; caller checkpoints only after the whole cue."""
-    from .quality import sharpness_failed
+    from .quality import sharpness_failed, blur_rejection
     from .models import normalized_embedding
     from .pose_policy import measurement_required
     from .visibility import VisibilityError, VisibilityGeometryError, cached
@@ -379,7 +379,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                             if measurement['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
                                 entry['reason'] = 'face_occluded'
                             elif sharpness_failed(entry['quality'],config.data['detection']):
-                                entry['reason'] = 'face_blurred'
+                                entry['reason'] = blur_rejection(entry['quality'], config.data['detection'])
                 accepted = [entry for entry in batch if entry['reason'] is None]
                 # JPEG workers can overlap owner-thread inference. Their owned
                 # copies stay alive through cancellation and deferred cue commits.
@@ -388,7 +388,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                                  name='close face alignment preparation') as aligned:
                         accepted = list(aligned)
                     for entry in accepted:
-                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']='face_blurred'
+                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']=blur_rejection(entry['quality'], config.data['detection'])
                     accepted = [entry for entry in accepted if entry['reason'] is None]
                     encoded = encode_jobs(batch)
                     step = settings['recognizer_batch_size']
@@ -404,7 +404,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                             entry['vector'] = normalized_embedding(value, backend.dimensions).astype('<f4').tobytes()
                 else:
                     for entry in accepted:
-                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']='face_blurred'
+                        if sharpness_failed(entry['quality'],config.data['detection']):entry['reason']=blur_rejection(entry['quality'], config.data['detection'])
                     accepted = [entry for entry in accepted if entry['reason'] is None]
                     encoded = encode_jobs(batch)
                     for entry in accepted:

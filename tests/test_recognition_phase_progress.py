@@ -120,9 +120,10 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
         selected = fixture(db, 2, dimensions=4)
         with present(report, 'auto', status_position=2):
             digest = rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
-    # Versioned per-scene descriptors retain deterministic source ordering.
-    assert digest == ('df3967d7acf1b57e44d1ccbe3cbf10810ce285cafda16156451e93adf56f35d5' if assignments else
-                      'e11dc52b4cc4176f60ec5893aa3cc77ba939ca2197e54c5eb8a2f969ec926589')
+    # Versioned per-scene descriptors retain deterministic source ordering and
+    # include focus/motion sharpness and confidence, even when they are null.
+    assert digest == ('0df6a5165ac7af1f4f61148f0f9ab24b599626c799ea3561cb4081f490e09bd1' if assignments else
+                      '6f58b37d3d94d5e953141b10e0e31e821ce44e90bea2bff018e9e4510e3572b1')
     for label in labels:
         assert seen[label] == list(range(3))*2
         rows = [bar for bar in bars if bar.desc == label]

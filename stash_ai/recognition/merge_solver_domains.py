@@ -49,7 +49,10 @@ def registry(config, changes=None):
         for suffix, source, high in (('face_pixels', 'min_face_pixels', 4096),
                                      ('sharpness', 'min_sharpness', 100000),
                                      ('visible_face_fraction', 'min_visible_face_fraction', 1.)):
-            result[f'clustering.min_{role}_{suffix}'] = Domain(low=detection[source], high=high)
+            low = detection[source]
+            if suffix == 'sharpness' and (detection.get('sharpness_mode') == 'split' or config.data['clustering'].get(role+'_sharpness_mode') == 'split'):
+                low = 0
+            result[f'clustering.min_{role}_{suffix}'] = Domain(low=low, high=high)
     if not config.data['sapiensid']['enabled']:
         result = {k: v for k, v in result.items() if not k.startswith('sapiensid.')}
     from .body_parameters import active

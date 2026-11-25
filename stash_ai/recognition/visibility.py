@@ -11,7 +11,7 @@ CONTRACT = {'version': 9, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-
             'crop': 'landmark-template-square-padding-profile-roll-aligned-v1',
             'region': 'robust-five-landmark-whole-face-template-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
-            'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1'}
+            'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1', 'split_sharpness': 'edge-spread-covariance-v1'}
 CONTRACT_ID = digest(CONTRACT)
 TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
 

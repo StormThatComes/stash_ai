@@ -12,6 +12,8 @@ def _face(c):
     has_band = False
     all_paths = []
     for key in FACE_FIELDS:
+        if key == "min_sharpness" and any(c.value(scope+"sharpness_mode") == "split" for scope in ("face.quality.", QUERY, ANCHOR)):
+            continue  # legacy fallback floors do not describe the split quality band
         scan, query, anchor = 'face.quality.' + key, QUERY + key, ANCHOR + key
         all_paths.extend((scan, query, anchor))
         floor = max(c.value(scan), c.value(query) or 0)
@@ -23,6 +25,13 @@ def _face(c):
             has_band |= c.value(anchor) > floor
             c.interval('face-anchor-' + key, (scan, query, anchor), c.value(anchor), floor,
                        'Anchor and query admission can share this quality floor.')
+    if c.value(ANCHOR+'sharpness_mode') == 'split':
+        for component in ('focus', 'motion'):
+            key = 'min_'+component+'_sharpness'
+            floors = [c.value(scope+key) for scope in ('face.quality.', QUERY)
+                      if c.value(scope+'sharpness_mode') == 'split']
+            has_band |= c.value(ANCHOR+key) > max([0, *floors])
+            all_paths.append(ANCHOR+key)
     scan, anchor = 'face.quality.max_pose_deviation', ANCHOR + 'max_pose_deviation'
     all_paths.extend((scan, anchor))
     limit = 1. if c.value(scan) is None else c.value(scan)
@@ -40,6 +49,8 @@ def _face(c):
 def _pose(c):
     collection, anchor = 'body.collection.', 'matching.body.anchors.'
     for key in ('min_person_pixels', 'min_sharpness', 'min_keypoints'):
+        if key == 'min_sharpness' and any(c.value(scope+'sharpness_mode') == 'split' for scope in (collection, anchor)):
+            continue
         first, second = collection + key, anchor + key
         if c.value(second) is not None and c.value(second) > 0:
             c.effective_max('body-anchor-' + key, (first, second), (c.value(first), c.value(second)),

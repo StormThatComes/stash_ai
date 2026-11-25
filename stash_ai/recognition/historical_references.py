@@ -101,7 +101,7 @@ def _context(db,selected,config,scope,namespace):
     visibility_fields=",'$.visible_face_fraction','$.visibility.contract','$.visibility.logit_threshold'" if anchor_visibility(config.data['clustering']) else ''
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
-        "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
+        "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness','$.focus_sharpness','$.motion_sharpness','$.sharpness_confidence',"
         "'$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage','$.evidence_crop_sha256','$.evidence_pixel_sha256','$.evidence_thumbnail','$.evidence_aspect','$.evidence_thumbnail_id'"+visibility_fields+") END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
@@ -124,7 +124,7 @@ def _context(db,selected,config,scope,namespace):
     from .unresolved_pool import hash_context
     if config.data['clustering']['corroborated_view_enrichment']:
         for row in db.execute("SELECT p.id,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,"
-                "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
+                "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness','$.focus_sharpness','$.motion_sharpness','$.sharpness_confidence',"
                 "'$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage','$.evidence_crop_sha256','$.evidence_pixel_sha256','$.evidence_thumbnail','$.evidence_aspect','$.evidence_thumbnail_id'"+visibility_fields+") END "+
                 _source(config,compatibility,attachment=True)+' ORDER BY p.id,o.id',
                 parameters(selected,config,scope,namespace)):

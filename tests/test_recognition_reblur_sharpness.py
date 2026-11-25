@@ -179,6 +179,7 @@ def test_contracts_refresh_unmasked_bodies_and_preserve_old_frozen_banks():
     assert old_person != person_contract(config)
     collection = plain(data['sapiensid']['collection'])
     collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     old = digest(['independent-person-v8-contact-mask-policy', old_person, collection])
     assert old in compatible_contracts(config)[1:]
     assert old != contract(config)

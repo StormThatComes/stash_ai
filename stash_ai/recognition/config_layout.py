@@ -13,7 +13,7 @@ _GROUPS = (
     ('face.detector', 'models', 'backend=detector'),
     ('face.detector', 'detection', 'score_threshold nms_threshold max_faces_per_frame landmarks_from_facebox pose_guided_rotation candidate_score_threshold alignment_retry_error'),
     ('face.quality', 'detection',
-     'min_face_pixels min_sharpness sharpness_metric profile_min_sharpness quality_diagnostics min_visible_face_fraction faceocc_logit_threshold min_face_source_fraction max_pose_deviation require_complete_face'),
+     'min_face_pixels min_sharpness sharpness_mode min_focus_sharpness min_motion_sharpness sharpness_metric profile_min_sharpness quality_diagnostics min_visible_face_fraction faceocc_logit_threshold min_face_source_fraction max_pose_deviation require_complete_face'),
     ('face.recognizer', 'models', 'backend=recognizer'),
 
     ('pose.detector', 'sapiensid.pose',
@@ -46,12 +46,12 @@ _GROUPS = (
     ('body', 'sapiensid', 'enabled'),
     ('body.encoder', 'sapiensid.model', 'variant source_directory checkpoint_directory model_yaml_sha256'),
     ('body.encoder', 'sapiensid.execution', 'batch_size'),
-    ('body.collection', 'sapiensid.collection', 'enabled min_person_pixels min_sharpness min_keypoints max_overlap'),
+    ('body.collection', 'sapiensid.collection', 'enabled min_person_pixels min_sharpness sharpness_mode min_focus_sharpness min_motion_sharpness min_keypoints max_overlap'),
 
     ('matching.face', 'recognition', 'metric match_threshold ambiguity_margin'),
     ('matching.face', 'clustering', 'cohesion_threshold deduplicate_detections'),
     ('matching.face.samples.minimum', 'clustering',
-     'min_face_pixels=min_auxiliary_face_pixels min_sharpness=min_auxiliary_sharpness '
+     'min_face_pixels=min_auxiliary_face_pixels min_sharpness=min_auxiliary_sharpness sharpness_mode=auxiliary_sharpness_mode min_focus_sharpness=auxiliary_min_focus_sharpness min_motion_sharpness=auxiliary_min_motion_sharpness '
      'min_visible_face_fraction=min_auxiliary_visible_face_fraction'),
     ('matching.face.samples.references', 'clustering',
      'max_samples_per_person max_people_per_lookup max_reference_mb=max_reference_bytes'),
@@ -59,7 +59,7 @@ _GROUPS = (
     ('matching.face.anchors', 'clustering', 'revalidate_face_anchors anchor_review_max_cues'),
     ('matching.face.evidence', 'clustering', 'near_duplicate_pixel_rms near_duplicate_similarity'),
     ('matching.face.anchors.quality', 'clustering',
-     'min_face_pixels=min_anchor_face_pixels min_sharpness=min_anchor_sharpness '
+     'min_face_pixels=min_anchor_face_pixels min_sharpness=min_anchor_sharpness sharpness_mode=anchor_sharpness_mode min_focus_sharpness=anchor_min_focus_sharpness min_motion_sharpness=anchor_min_motion_sharpness '
      'min_visible_face_fraction=min_anchor_visible_face_fraction '
      'max_pose_deviation=max_anchor_pose_deviation'),
     ('matching.face.auxiliary', 'clustering', 'enabled=auxiliary_matching min_support=auxiliary_min_support'),
@@ -79,7 +79,7 @@ _GROUPS = (
      'min_appearance_distance'),
     ('matching.body.anchors', 'sapiensid.identities',
      'min_keypoints=anchor_min_keypoints min_person_pixels=anchor_min_person_pixels '
-     'min_sharpness=anchor_min_sharpness'),
+     'min_sharpness=anchor_min_sharpness sharpness_mode=anchor_sharpness_mode min_focus_sharpness=anchor_min_focus_sharpness min_motion_sharpness=anchor_min_motion_sharpness'),
     ('matching.body.anchors.keypoint_rules', 'sapiensid.identities.anchor_keypoint_rules', 'all any'),
     ('matching.body.anchors.face_landmark_fallback', 'sapiensid.identities.anchor_face_landmark_fallback',
      'enabled points min_face_score max_eye_pose_deviation'),

@@ -1,6 +1,7 @@
 """Catch YAML syntax errors before publishing a workflow that cannot start."""
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -44,11 +45,11 @@ def test_windows_lifecycle_lists_are_disjoint_and_resolve_to_test_modules():
 
 def test_windows_pr_selectors_resolve_without_overlapping_modules():
     import ast
-    from tests.ci_windows import selected
+    from tests.ci_windows import SHARDS, selected
 
     root = Path(__file__).resolve().parents[1]
     for suite in ('core', 'video'):
-        full = set(selected(suite, 1, root) + selected(suite, 2, root))
+        full = {path for shard in SHARDS[suite] for path in selected(suite, shard, root)}
         focused = selected(suite, 1, root, profile='pr')
         assert len(set(focused)) == len(focused)
         for selector in focused:
@@ -58,3 +59,26 @@ def test_windows_pr_selectors_resolve_without_overlapping_modules():
                 assert path not in focused
                 module = ast.parse((root / path).read_text(encoding='utf-8'))
                 assert function in {node.name for node in module.body if isinstance(node, ast.FunctionDef)}
+
+
+def test_windows_rebuild_and_checkpoint_suites_use_separate_runners():
+    from tests.ci_jobs import full_plan
+    from tests.ci_windows import selected
+
+    owners = {path: row['shard'] for row in full_plan('test')['matrix']['include']
+              if row['os'] == 'windows-latest' and row['suite'] == 'core'
+              for path in selected('core', row['shard'])}
+    assert owners['tests/test_recognition_rebuild.py'] == 2
+    assert owners['tests/test_recognition_replay_checkpoints.py'] == 3
+    assert owners['tests/test_recognition_identity_inspector.py'] == 1
+
+
+@pytest.mark.parametrize('suite,shard,profile', [
+    ('core', 0, 'full'), ('core', 4, 'full'), ('video', 3, 'full'),
+    ('unknown', 1, 'full'), ('core', 2, 'pr'), ('core', 3, 'pr'),
+])
+def test_windows_rejects_partitions_outside_the_selected_profile(suite, shard, profile):
+    from tests.ci_windows import selected
+
+    with pytest.raises(ValueError):
+        selected(suite, shard, profile=profile)

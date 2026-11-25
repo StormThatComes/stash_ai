@@ -39,7 +39,7 @@ def quality(image,person,people,settings):
         encoder_mask = unpack_mask(packed,right-left,bottom-top) if packed else None
         sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask,encoder_mask=encoder_mask)
     else:
-        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v4-model-input',[(image,bounds)],
+        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v5-split-blur',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     source_pixel_digest = pixel_digest
     if packed:
@@ -48,7 +48,8 @@ def quality(image,person,people,settings):
             _,pixel_digest,appearance_hash = _pixels(crop,(0,0,right-left,bottom-top),measure=False)
     if masked_sharpness and mask is None:
         sharp=dict(sharp,crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_normalized=0.,
-                   portrait_sharpness=0.,sharpness_pixels=0)
+                   portrait_sharpness=0.,sharpness_pixels=0, focus_sharpness=None, motion_sharpness=None,
+                   sharpness_confidence=0., sharpness_split_status='unavailable')
     sharpness=sharp['sharpness']
     sharp['sharpness_method']=('sam_mask' if mask is not None else 'unavailable') if masked_sharpness else 'person_crop'
     from .body_overlap import admission_overlap, measure
@@ -68,9 +69,11 @@ def quality(image,person,people,settings):
         measured['foreground_hash'] = appearance_hash
         # Matching uses the masked input digest. VTT inspection verifies the original pixels.
         measured['source_pixel_digest'] = source_pixel_digest
+    from .sharpness_gates import failure, active
+    blur_failure = failure(sharp, settings)
     reason=('person_pixels' if min(right-left,bottom-top)<settings['min_person_pixels'] else
-            'person_sharpness_mask_unavailable' if settings['min_sharpness']>0 and not sharp['sharpness_pixels'] else
-            'person_sharpness' if sharpness<settings['min_sharpness'] else
+            'person_sharpness_mask_unavailable' if active(settings) and not sharp['sharpness_pixels'] else
+            'person_'+blur_failure if blur_failure else
             'person_keypoints' if points<settings['min_keypoints'] else
             'person_overlap' if overlap is not None and overlap>settings['max_overlap'] else None)
     return measured,reason

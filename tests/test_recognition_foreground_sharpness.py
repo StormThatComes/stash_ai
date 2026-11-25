@@ -155,7 +155,7 @@ def test_device_mask_sharpness_matches_cpu_without_transferring_images(monkeypat
         assert a['visible_face_fraction']==b['visible_face_fraction']
         for key in ('sharpness_normalized','sharpness_contrast','sharpness_noise'):
             assert a[key]==pytest.approx(b[key],rel=1e-4,abs=1e-4)
-    assert copied==[2,8]  # Only scalar statistics cross the device boundary.
+    assert copied==[2,14]  # Only scalar statistics cross the device boundary.
 
 
 @pytest.mark.parametrize('batch_size',[1,2])
@@ -197,6 +197,7 @@ def test_body_sharpness_contract_refresh_preserves_previous_mask_overlap_banks()
     previous=person_contract(config,legacy_foreground_sharpness=True)
     assert previous!=person_contract(config)
     collection=plain(data['sapiensid']['collection']);collection.pop('enabled')
+    for key in ('sharpness_mode', 'min_focus_sharpness', 'min_motion_sharpness'):collection.pop(key)
     old=digest(['independent-person-v4-independent-torso',previous,collection])
     assert old in compatible_contracts(config)[1:] and old!=contract(config)
 

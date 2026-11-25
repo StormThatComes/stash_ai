@@ -1,16 +1,36 @@
 import json
 import sqlite3
 
+import pytest
+
 from stash_ai.recognition.clustering import cluster_scene, matching_policy
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.rebuild import _copy_selection, rebuild_selected, sample_key
+from stash_ai.recognition.sharpness_gates import failure
 from tests.test_recognition_clustering import setup, scan
 
 
-def test_scratch_drops_unused_quality_and_pixels_without_changing_sample_identity(tmp_path):
+@pytest.mark.parametrize('sharpness,split,reason', [
+    (80., {}, None),
+    (80., dict(focus_sharpness=None, motion_sharpness=None, sharpness_confidence=0.), None),
+    (80., dict(focus_sharpness=10., motion_sharpness=80., sharpness_confidence=.9), 'focus_sharpness'),
+    (80., dict(focus_sharpness=80., motion_sharpness=10., sharpness_confidence=.9), 'motion_sharpness'),
+    (1., dict(focus_sharpness=80., motion_sharpness=80., sharpness_confidence=.9), None),
+    (1., dict(focus_sharpness=80., motion_sharpness=80., sharpness_confidence=.59), 'sharpness'),
+], ids=['legacy', 'unavailable', 'focus-rejected', 'motion-rejected', 'split-passed', 'low-confidence'])
+def test_scratch_drops_unused_quality_and_pixels_without_changing_sample_identity(tmp_path, sharpness, split, reason):
     config = setup(tmp_path)
+    settings = dict(sharpness_mode='split', min_sharpness=70., min_focus_sharpness=40., min_motion_sharpness=50.)
     with FaceDatabase(config.database) as database:
         identifier, _ = scan(database, config, '1')
+        for row in database.connection.execute('SELECT id,quality FROM observations').fetchall():
+            quality = json.loads(row['quality'])
+            for key in ('focus_sharpness', 'motion_sharpness', 'sharpness_confidence'):
+                quality.pop(key, None)
+            quality.update(sharpness=sharpness, **split)
+            database.connection.execute('UPDATE observations SET quality=? WHERE id=?',
+                                        (json.dumps(quality), row['id']))
+        database.connection.commit()
         selected = [{'scene': '1', 'scan': identifier}]
         original = database.connection.execute('SELECT o.*,s.scope,s.namespace,s.scene,s.input_sha '
             'FROM observations o JOIN scans s ON s.id=o.scan ORDER BY o.id').fetchall()
@@ -19,7 +39,11 @@ def test_scratch_drops_unused_quality_and_pixels_without_changing_sample_identit
             _copy_selection(database, replay, selected, 'scope', 'ns')
             for row in replay.execute('SELECT * FROM observations ORDER BY id'):
                 source = next(item for item in original if item['id'] == row['id'])
-                assert set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'}
+                compact = json.loads(row['quality'])
+                retained_split = {key: value for key, value in split.items() if value is not None}
+                assert set(compact) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'} | set(retained_split)
+                assert all(compact[key] == value for key, value in retained_split.items())
+                assert failure(json.loads(source['quality']), settings) == failure(compact, settings) == reason
                 assert json.loads(row['quality'])['view_shot'] == json.loads(source['quality'])['view_shot']
                 assert json.loads(row['quality'])['transition_verified'] == json.loads(source['quality'])['transition_verified']
                 assert json.loads(row['quality'])['face_profile'] == json.loads(source['quality'])['face_profile']
@@ -46,7 +70,7 @@ def test_pose_aware_replay_retains_only_pose_not_full_quality(tmp_path):
             rows = replay.execute('SELECT quality,crop FROM observations').fetchall()
             assert rows
             assert all(json.loads(row['quality'])['pose_deviation'] == 0.0
-                       and set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'}
+                       and set(json.loads(row['quality'])) == {'pose_deviation','pixels','sharpness','sharpness_confidence','roll_deviation','alignment_valid','alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage','view_shot','transition_verified','face_profile'}
                        and row['crop'] is None for row in rows)
 
 

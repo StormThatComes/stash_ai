@@ -382,3 +382,14 @@ HELP.update({
  'matching.body.identities.contact_birth_support': 'Independent clean observations required to confirm a contact-born group. Range: 1..8.',
  'matching.body.identities.mixed_mask_score_penalty': 'Cosine penalty for known masked/full body comparisons in local/global banks, tracks and contact proofs; unknown domains and facial vetoes are unchanged. 0 disables. Range: 0..0.3.',
 })
+
+
+for _scope in ('face.quality', 'body.collection', 'matching.face.samples.minimum',
+               'matching.face.anchors.quality', 'matching.body.anchors'):
+    HELP[_scope+'.sharpness_mode'] = ('legacy uses min_sharpness. split replaces that floor with both component floors '
+        'when the local blur fit is reliable; otherwise min_sharpness remains the fallback. '
+        'Modes apply independently at each admission stage. Default legacy; calibrate on real VTT crops.')
+    HELP[_scope+'.min_focus_sharpness'] = ('Minimum estimated isotropic-detail score (0..100, higher is sharper). '
+        'Used only in split mode. Defocus-like softness is a proxy, not a lens diagnosis. 0 disables this component.')
+    HELP[_scope+'.min_motion_sharpness'] = ('Minimum estimated directional-detail score (0..100, higher is sharper). '
+        'Used only in split mode. Both components can fail together. 0 disables this component.')

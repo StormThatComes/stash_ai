@@ -114,7 +114,8 @@ def review_reasons(row, config):
     if row.get('policy_state')=='historical':reasons.append((2,'Decision uses a different matching policy'))
     elif row.get('policy_state')=='missing':reasons.append((2,'No retained matching decision'))
     if row['state']=='unknown':reasons.append((1,'Reference role cannot be established'))
-    if row['kind']=='face':
+    if row['kind']=='face' and all(config.data['clustering'].get(r+'_sharpness_mode', 'legacy') == 'legacy'
+                                   for r in (('auxiliary','anchor') if row['state']=='anchor' else ('auxiliary',))):
         settings=config.data['clustering'];floor=settings['min_auxiliary_sharpness'] or 0
         if row['state']=='anchor':floor=max(floor,settings['min_anchor_sharpness'] or 0)
         sharp=row.get('sharpness')
