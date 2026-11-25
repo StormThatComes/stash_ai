@@ -42,12 +42,26 @@ def test_desktop_performer_graph_navigation_and_shutdown(tmp_path):
         graph=GraphWindow(ui);ui.visual_windows.append(graph)
         wait(lambda:graph.graph is not None)
         assert graph.graph['total']==7
+        assert not graph.loading and len(graph.thumbnail_images)==7
+        assert graph.thumbnail_items  # Collapsed groups show labelled samples.
+        images=dict(graph.thumbnail_images)
+        graph.show_thumbnails.set(False);graph.rebuild()
+        assert not graph.thumbnail_items
+        graph.show_thumbnails.set(True);graph.rebuild()
+        assert graph.thumbnail_images==images
+        graph.refresh()
+        assert graph.loading
+        graph.cancel_loading()
+        assert not graph.loading and graph.thumbnail_images==images
+        assert graph.graph['total']==7
         graph.expand_all();graph.pause();graph.fit()
         target=next(n for n in graph.graph['nodes'] if n.get('current_member'))
         graph.inspect(target)
         wait(lambda:ui.current_row is not None and ui.current_row['id']==target['observation'] and ui.detail_data is not None)
         graph.collapse_all();graph.refresh()
-        wait(lambda:graph.worker.future is None)
+        wait(lambda:not graph.loading and graph.worker.future is None)
+        assert graph.thumbnail_items
+        graph.refresh()  # Closing also cancels a load before any completion arrives.
         graph.close();graph.close()
         assert graph not in ui.visual_windows
     finally:

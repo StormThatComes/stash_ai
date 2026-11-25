@@ -742,3 +742,26 @@ historical evidence. **Clear similarity** removes only that exploratory layer.
 identity in the same scope/model, using a retained scene as the replay context.
 View details show independently recorded support counts separately from retained
 examples; multiple Views in a single decision are not fused into a fictitious View.
+
+**Graph thumbnails and loading:** opening or refreshing the graph first shows a
+cancellable loading panel. Evidence preparation uses an indeterminate indicator;
+thumbnail decoding then reports completed observations / total, including missing
+crops. Tk image preparation runs in short UI batches. The graph appears once the
+current page and its retained reference thumbnails are ready; physics starts then.
+The rest of the inspector remains responsive. Cancel restores the previous page,
+if any; Refresh retries. Closing cancels work without waiting for completion.
+
+Observation nodes display aspect-preserving retained crops up to 64 × 64 pixels.
+Collapsed groups show one explicitly labelled **sample**, not a new portrait or
+View medoid. Expand a group to see its observations. Role-coloured borders and
+face/body labels remain visible; **Thumbnails** switches to the symbol view without
+reading pixels again. Dragging, physics and zoom reuse the same images. Thumbnails
+keep a readable screen size while zoom changes node spacing.
+
+Only crops already retained locally are loaded, for the bounded graph page and its
+references (at most 500 nodes). Missing/unreadable crops keep their symbol; hover
+shows the reason and the loading summary counts them. This preload never fetches
+Stash media or runs inference. A selected observation can still use the existing
+verified VTT detail preview. Full-resolution crops are discarded immediately after
+downsizing; the next page replaces the thumbnail set. A database revision change
+invalidates the entire pending load rather than mixing images and stale evidence.
