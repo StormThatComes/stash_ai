@@ -690,3 +690,14 @@ The result reports stage entries, the A/B join, protected
 C, additional identities and unassigned observations in each trial. A necessity
 finding applies to the selected goal, observations and YAML. Open any changed cue
 from the comparison to examine the retained evidence.
+
+### Desktop performer inspector
+
+`python stash_ai.py recognition inspect-performer --performer-id 123` opens the
+shared observation inspector with performer-wide counts, scene/role grouping,
+face/body and role filters, and paged current memberships. Internal identity IDs
+and `--scope` are also supported. Groups cover the displayed page; counts cover
+all current accepted observations. `--offline` disables VTT preview reconstruction.
+Right-click an identity in the scene inspector and choose **Inspect performer**.
+**Inspect scene** opens the selected observation's scene. Crops, geometry, masks,
+galleries, reference comparisons and decision details reuse the existing viewer.
