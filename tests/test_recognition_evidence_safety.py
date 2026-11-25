@@ -66,7 +66,7 @@ def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
     from stash_ai.recognition.admission_report import Policies, face as face_report
     from stash_ai.recognition.scanning import scan_identity
     path = tmp_path / 'faces.yml'
-    path.write_text(f'version: 1\ndetection: {{min_sharpness: 0, require_complete_face: {str(strict).lower()}}}\n')
+    path.write_text(f'version: 1\ndetection: {{visibility_region: ellipse, min_sharpness: 0, require_complete_face: {str(strict).lower()}}}\n')
     config, client, backend = load(path), MediaClient(count=4), Backend()
     detections = []
     for shift in (0, 23, 47, 0):
@@ -79,6 +79,7 @@ def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
 
     # Positive logits even over padding expose a cropped-denominator regression.
     model = object.__new__(FaceVisibility)
+    model.region_requested = 'ellipse'
     model.logit_threshold = 0.0
     model.device = 'cpu'
     model.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
@@ -118,7 +119,7 @@ def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
 
             # Retune the same scene and database using the public v2 YAML setting.
             path.write_text('version: 2\nface:\n  quality: {min_sharpness: 0, require_complete_face: false, '
-                            'min_face_source_fraction: 0.8}\n')
+                            'min_face_source_fraction: 0.8, visibility_region: ellipse}\n')
             relaxed = load(path)
             frames = iter(detections)
             model.minimum_source_fraction = relaxed.data['detection']['min_face_source_fraction']

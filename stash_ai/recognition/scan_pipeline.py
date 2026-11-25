@@ -245,7 +245,7 @@ def cue_visibility(frames,prepared,visibility,config,stage,backend=None):
     def pixels(image,entry):
         try:
             rgb = recognition_pixels(image, entry, backend)
-            return prepare_measurement(image, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb, defer_source_check=True)
+            return prepare_measurement(image, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb, defer_source_check=True, region_mode=config.data['detection']['visibility_region'])
         except VisibilityGeometryError as error:
             return error
     for start in range(0,len(requests),step):
@@ -291,7 +291,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
         from .visibility import prepare_measurement
         try:
             rgb = recognition_pixels(pixels, entry, backend)
-            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb, defer_source_check=True)
+            entry['visibility_input'] = prepare_measurement(pixels, entry['face'], config.data['detection']['min_face_source_fraction'], recognition_pixels=rgb, defer_source_check=True, region_mode=config.data['detection']['visibility_region'])
         except VisibilityGeometryError as error:
             entry['visibility_input'] = error
         return entry

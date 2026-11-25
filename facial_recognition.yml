@@ -69,8 +69,8 @@ face:
     # Count a pixel inside the expected face region when its raw FaceOcc logit is strictly above this value.
     # Lower values include more pixels in visibility and masked sharpness. Range: finite float32; default 0.0.
     visibility_region: mesh
-    # Expected facial surface: mesh (default, verified MediaPipe contour with geometric ellipse fallback) or
-    # ellipse. Independent of FaceOcc segmentation.
+    # Expected facial surface: mesh (default, independent MediaPipe contour; failure is unavailable, never an
+    # ellipse fallback) or explicit ellipse. Independent of FaceOcc segmentation.
     min_face_source_fraction: 0.5
     # Minimum fraction of the expected face region inside the source image for a FaceOcc measurement. Range:
     # 0..1. Zero still requires some real pixels; 1 requires the full region.

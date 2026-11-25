@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .visibility import VisibilityGeometryError
+from .visibility import VisibilityError, VisibilityGeometryError
 
 
 @dataclass
@@ -25,6 +25,26 @@ def real_pixels(affine, size):
     a, b, c, d, e, f = affine
     return ((a*x+b*y+c >= 0) & (a*x+b*y+c < size[0])
             & (d*x+e*y+f >= 0) & (d*x+e*y+f < size[1]))
+
+
+def prepare(image, face):
+    """Box-centered upright input; no ellipse fit, mask or area is required."""
+    from PIL import Image
+    from .face_frame import pose_axis
+    from .visibility import _constants
+    (cosine, sine), _ = pose_axis(face.landmarks)
+    x, y, width, height = face.box
+    side = max(width, height) * 1.5
+    scale = side / 256
+    cx, cy = x+width/2, y+height/2
+    affine = (scale*cosine, -scale*sine, cx-side/2*(cosine-sine),
+              scale*sine, scale*cosine, cy-side/2*(sine+cosine))
+    with image.convert('RGB') as rgb, rgb.transform((256,256), Image.Transform.AFFINE,
+            affine, resample=Image.Resampling.BILINEAR) as crop:
+        pixels = np.asarray(crop, dtype=np.float32)/255.
+    mean, std, _, _ = _constants()
+    blob = np.ascontiguousarray(((pixels-mean)/std).transpose(2,0,1)[None])
+    return blob, None, 0, affine
 
 
 def mesh_region(points, presence, item):
@@ -51,7 +71,10 @@ def mesh_region(points, presence, item):
         expected[pair] = expected[pair][np.argsort(expected[pair, 0])]
     scale = np.linalg.norm(expected[3:].mean(axis=0)-expected[:2].mean(axis=0))
     errors = np.linalg.norm(anchors-expected, axis=1)/max(scale, 1.)
-    if np.mean(errors) > .22 or np.max(errors) > .45:
+    # Associate to the selected detection, allowing one faulty interior point.
+    # These points do not prescribe the contour's shape, center or area.
+    inliers = np.sort(errors)[:4]
+    if np.mean(inliers) > .22 or np.max(inliers) > .45:
         raise VisibilityGeometryError('Mesh disagrees with the selected face landmarks.')
     # Iris landmarks do not define the skin contour. A projected envelope also
     # avoids the crossing oval polygon of a nearly side-on face.
@@ -62,7 +85,7 @@ def mesh_region(points, presence, item):
     cv2.fillConvexPoly(mask, np.rint((hull-.5)*256).astype('int32'), 1, shift=8)
     total = int(mask.sum())
     # Reject collapsed or implausibly enlarged surfaces, independently of logits.
-    if not .65*item[2] <= total <= 1.65*item[2]:
+    if not .02*256**2 <= total <= .85*256**2:
         raise VisibilityGeometryError('Mesh contour has implausible facial area.')
     real = real_pixels(item.affine, item.source_size)
     # Sharpness may use nearby visible skin outside the reference contour, but
@@ -104,15 +127,20 @@ class Mesh:
 
 
 def resolve(model, item):
-    region = Region(item[1], item[2], item[1], 'ellipse')
     mesh = getattr(model, 'mesh', None)
-    if mesh is not None and hasattr(item, 'face'):
-        try:
-            region = mesh.region(item)
-        except VisibilityGeometryError as error:
-            region.reason = str(error)
-    if mesh is not None and not hasattr(item, 'face'):
-        region.reason = 'Prepared input has no mesh geometry; using its retained ellipse.'
+    mode = getattr(model, 'region_requested', 'mesh' if mesh is not None else 'ellipse')
+    if mode == 'mesh':
+        if mesh is None:
+            raise VisibilityError('Mesh visibility model is unavailable; ellipse fallback is disabled.')
+        if not hasattr(item, 'face'):
+            raise VisibilityGeometryError('Mesh visibility requires prepared face geometry; no ellipse fallback.')
+        if getattr(item, 'region_mode', None) != 'mesh':
+            raise VisibilityGeometryError('Mesh visibility requires its box-based crop, not an ellipse input.')
+        region = mesh.region(item)
+    else:
+        if item[1] is None or not item[2]:
+            raise VisibilityGeometryError('Ellipse visibility requires an explicitly prepared ellipse.')
+        region = Region(item[1], item[2], item[1], 'ellipse')
     count = int(region.mask.sum())
     if not count or count/region.total < model.minimum_source_fraction:
         raise VisibilityGeometryError('Insufficient face region coverage in the real source.',

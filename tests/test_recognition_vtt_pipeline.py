@@ -215,15 +215,19 @@ def test_jpeg_work_overlaps_owner_inference(tmp_path,monkeypatch):
         assert state.connection.execute('SELECT status FROM scans').fetchone()[0]=='complete'
 
 
-def test_scan_batches_visibility_on_the_inference_owner(tmp_path):
+@pytest.mark.parametrize('region_mode', ['mesh', 'ellipse'])
+def test_scan_batches_visibility_on_the_inference_owner(tmp_path, region_mode):
     from stash_ai.recognition.visibility import CONTRACT_ID
     owner=get_ident();calls=[]
     class Visibility:
         def measure_prepared_many(self,items):
             assert get_ident()==owner and all(isinstance(item,tuple) for item in items)
+            assert all(item.region_mode == region_mode for item in items)
+            assert all((item[1] is None) == (region_mode == 'mesh') for item in items)
             calls.append(len(items))
             return [dict(visible_face_fraction=.9,visibility=dict(contract=CONTRACT_ID)) for _ in items]
     settings=config(tmp_path);data=plain(settings.data);data['detection']['min_visible_face_fraction']=.5
+    data['detection']['visibility_region']=region_mode
     settings=replace(settings,data=data);client=MediaClient(count=1);backend=Backend()
     backend.detect=lambda image:[FACE]*9
     with FaceDatabase(settings.database) as state, SpriteInput(client,client.scene,settings) as source:

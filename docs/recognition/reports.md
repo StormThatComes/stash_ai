@@ -533,16 +533,18 @@ In `inspect-scene`, select a face (including an unassigned `face_occluded`
 observation) and click **Face visibility…**. The two synchronized panes show
 the original VTT cue and the selected face on the same cue. The gold outline
 marks the selected measurement region. Green marks counted FaceOcc pixels.
-**Measured contour** uses the same selection as recognition; disable it to
-compare the previous landmark ellipse on the same logits. **Mesh landmarks**
-shows the projected dense points. The caption identifies the region, any
-geometric fallback reason and the fraction of real-source FaceOcc positives
-excluded by the selected region. The fallback reason is also retained in the
-observation's visibility admission details.
+The region selector defaults to **Measured mesh** (or **Measured ellipse** when
+explicitly configured). **Landmark ellipse (comparison)** and **Legacy box ellipse
+(comparison)** are optional comparisons on the same logits. Only one region can
+be selected; each newly opened observation resets to the measured region.
+A comparison is unavailable if its geometry is invalid or extends beyond the
+model crop. It cannot veto or replace an accepted mesh.
 
-**Legacy box ellipse (preview)** compares the older box-based region. It is
-disabled when its full extent cannot be measured in the model crop. It overrides
-the contour preview while checked. Preview choices never change saved results.
+**Mesh landmarks** shows points from an accepted mesh. The caption identifies
+both the requested measurement and the selected preview, plus the fraction of
+real-source FaceOcc positives excluded by that preview. A failed mesh shows its
+reason and the original image without drawing an ellipse or inventing a score.
+Preview choices never change saved results.
 
 **Show predicted face outside region (purple)** shows positive FaceOcc pixels
 excluded by the chosen measurement region. These pixels do not enter visibility;
@@ -565,7 +567,8 @@ pixel count divided by the full selected-region pixel count in the 256 × 256 mo
 input. Source coverage shows how much of that region fell inside the cue.
 A clipped region can lower the score even when all its in-frame pixels are
 green. If alignment, minimum source coverage or model loading fails, the
-window gives the reason and shows the ellipse when geometry is available.
+window gives the reason. Mesh mode never substitutes an ellipse; the explicit
+ellipse mode can retain its geometric outline as a diagnostic.
 
 Replay requires access to the verified VTT source and uses the configured
 device and FaceOcc asset download policy. It also works for observations
