@@ -533,12 +533,17 @@ In `inspect-scene`, select a face (including an unassigned `face_occluded`
 observation) and click **Face visibility…**. The two synchronized panes show
 the original VTT cue and the selected face on the same cue. The gold outline
 marks the measurement ellipse. Green marks the pixels FaceOcc counted as
-visible inside it. The ellipse follows the face orientation and uses the whole
-detector box for its scale and center. **Legacy box ellipse (preview)** compares
-the previous vertical/horizontal box-based region on the same logits. This
-replaces the small experimental landmark ROI, which could miss the forehead,
-chin and cheeks of a profile. The default **Face ellipse** is the region used
-by recognition; switching previews never changes the saved result.
+visible inside it. The ellipse and model crop follow a whole-face template fitted
+to landmarks, including its center, scale and rotation. The caption identifies
+the fitted view and any ignored outlier. This preserves margins for forehead,
+chin and cheeks instead of tightly enclosing the landmark cloud or anchoring
+the face to a potentially loose detector box.
+
+**Legacy box ellipse (preview)** compares the previous vertical/horizontal
+box-based region on the same logits. If that ellipse extends outside the new
+model crop, the comparison is disabled with an explanation: its full denominator
+cannot be measured on those logits. The default **Face ellipse** is the region
+used by recognition; switching previews never changes the saved result.
 
 **Show predicted face outside ellipse (purple)** also displays the raw positive
 FaceOcc pixels excluded by the selected ellipse. Purple pixels do not enter

@@ -103,7 +103,11 @@ def test_replay_explains_unavailable_masks_without_guessing(tmp_path, monkeypatc
             assert original is overlay is None and 'VTT source changed' in caption
         else:
             assert original.size == overlay.size and 'Recorded fraction unavailable' in caption
-            expected = {'clipped': 'Source coverage 50.0%', 'eyes': 'distinct eye', 'missing_model': 'weights missing'}
+            expected = {'clipped': 'Insufficient face ellipse coverage', 'eyes': 'distinct eye', 'missing_model': 'weights missing'}
             assert expected[damage] in caption and 'Replay 0.' not in caption
+            if damage == 'clipped':
+                import re
+                fraction = float(re.search(r'Source coverage ([\d.]+)%',caption).group(1))
+                assert 45 < fraction < 55
     finally:
         previews.close()

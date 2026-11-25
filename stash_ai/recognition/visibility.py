@@ -7,9 +7,9 @@ from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 from .sharpness_policy import ALGORITHM
 
-CONTRACT = {'version': 8, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
-            'crop': 'square-face-box-padding-0.25-profile-roll-aligned',
-            'region': 'oriented-box-supported-ellipse-0.45w-0.48h-v1',
+CONTRACT = {'version': 9, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+            'crop': 'landmark-template-square-padding-profile-roll-aligned-v1',
+            'region': 'robust-five-landmark-whole-face-template-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
             'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1'}
 CONTRACT_ID = digest(CONTRACT)
@@ -211,11 +211,12 @@ def prepare_aligned(image, face, minimum_source_fraction):
     """Return the FaceOcc input, real ROI, full count and model-to-source affine."""
     import numpy as np
     from PIL import Image
-    _, _, width, height = face.box
     from .face_region import ellipse
     (center_x, center_y), axis, (radius_x, radius_y) = ellipse(face)
     cosine, sine = map(float, axis)
-    side = max(width, height) * 1.5
+    # Size and position must follow the fitted face, including when the box
+    # moves independently. Retain context while keeping the full ROI on-grid.
+    side = max(radius_x / .45, radius_y / .48) * 1.5
     scale = side / 256
     # PIL maps output coordinates back into the source. Rotate in this single
     # resampling pass, including upside-down faces; never mirror eye ordering.
@@ -231,8 +232,8 @@ def prepare_aligned(image, face, minimum_source_fraction):
     dx = cosine * (columns + .5 - 128) - sine * (rows + .5 - 128)
     dy = sine * (columns + .5 - 128) + cosine * (rows + .5 - 128)
     # The ROI is upright in the aligned model frame, and rotates with the face
-    # in source coordinates. Its full extent is supported by the detector box,
-    # not a small ellipse around eyes/nose/mouth or the predicted visible mask.
+    # in source coordinates. A whole-face template supplies the missing contour
+    # around the interior landmarks, independently of the predicted mask.
     region = (((columns + .5 - 128) / (radius_x / scale)) ** 2
               + ((rows + .5 - 128) / (radius_y / scale)) ** 2 <= 1)
     # Padding cannot contribute to foreground or sharpness.
@@ -284,7 +285,7 @@ def _counts(visible, source_count, device, face_pixels, threshold):
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
             'visibility': {'contract': CONTRACT_ID if threshold == DEFAULT_FACEOCC_LOGIT_THRESHOLD else TUNED_CONTRACT_ID,
-                           'logit_threshold': threshold, 'method': 'faceocc-oriented-box-ellipse-v5', 'device': device,
+                           'logit_threshold': threshold, 'method': 'faceocc-landmark-template-ellipse-v6', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
