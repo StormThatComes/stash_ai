@@ -395,18 +395,28 @@ portrait ranking retains its separate 256px `portrait_sharpness`. Active portrai
 quality target likewise requires visibility weighting, or anchor-only visibility
 measurement. Portrait quality targets remain preferences, not admission gates.
 
-FaceOcc receives an upright crop based on the eye-line direction, including
-sideways and upside-down faces. Narrow profiles use the supported eye-to-mouth
-axis. The measurement ellipse rotates with that frame and remains centered on
-the detector box, retaining its full facial scale rather than shrinking to the
-five landmarks. Its upright dimensions are estimated from the box's projected
-extents. Near 45 degrees these extents do not determine the aspect ratio, so a
-bounded eye-to-mouth height prior resolves that ambiguity. Forehead, chin and
-cheeks remain part of the expected region even when FaceOcc marks them occluded.
-No region is fitted to the visible mask or selected by whichever scores highest.
-Five landmarks still only approximate the contour; an inaccurate detector box
-or landmark layout can misplace it. Use the outside-ellipse overlay in Face
-visibility to distinguish region errors from segmentation errors.
+FaceOcc receives an upright crop and whole-face ellipse fitted to the five
+interior landmarks. A bounded bank of frontal, three-quarter and left/right
+profile templates estimates translation, rotation and scale jointly. Eyes and
+mouth corners occupy expected positions inside each template; its contour
+extends beyond them to include forehead, chin and cheeks. Near profiles retain
+cheek width even when the eye projection is narrow. A stronger width prior
+stabilizes this weakly measured dimension against landmark jitter.
+
+The fit checks all five points, tolerates at most one outlier and requires four
+consistent landmarks (RMS residual at most 0.15 eye-to-mouth units, each inlier
+at most 0.25). Profile fits also require a consistent nose to locate the cheek.
+Unusable geometry reports an unavailable measurement. The detector box provides
+only a loose plausibility check; changing a reasonable box cannot move the
+ellipse or resize the model input. The crop follows the fitted region and
+contains its full extent, including for sideways and upside-down faces.
+
+These are geometric priors, not a learned contour model or per-point visibility
+predictions. Five landmarks still only approximate individual anatomy. No region
+is fitted to the FaceOcc mask or selected by whichever visibility scores highest;
+real occluders remain inside the expected region and reduce the score. Use the
+outside-ellipse overlay in Face visibility to distinguish region errors from
+segmentation errors.
 
 Visibility and foreground sharpness share the same semantic region, mapped to
 their respective model coordinates, with one segmentation pass per face.

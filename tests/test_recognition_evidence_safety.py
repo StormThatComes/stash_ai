@@ -92,8 +92,17 @@ def test_scan_partial_face_coverage_and_rejections(tmp_path, strict):
         assert all((r['embedding'] is not None) == (r['rejected'] is None) for r in rows)
         assert cluster_scene(db, scan, config)[0]['observations'] == reasons.count(None)
         if not strict:
+            complete = json.loads(rows[0]['quality'])['visibility']
             quality = json.loads(rows[1]['quality'])
-            assert quality['visible_face_fraction'] == pytest.approx(19766/19780)
+            visibility = quality['visibility']
+            # Translating the same face clips real pixels, not the denominator.
+            # Check this against the uncut face instead of pinning pixel counts
+            # to the previous detector-box ellipse.
+            assert complete['visible_pixels'] == complete['source_pixels'] == complete['face_pixels']
+            assert visibility['face_pixels'] == complete['face_pixels']
+            assert 0 < visibility['visible_pixels'] == visibility['source_pixels'] < visibility['face_pixels']
+            assert quality['visible_face_fraction'] == pytest.approx(
+                visibility['source_pixels'] / complete['face_pixels'])
             assert quality['visibility']['source_fraction'] == quality['visible_face_fraction']
             rejected = json.loads(rows[2]['quality'])
             assert rejected['alignment_valid'] and .84 < rejected['visibility_source_fraction'] < .85

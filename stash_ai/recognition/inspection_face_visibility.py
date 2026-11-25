@@ -12,7 +12,7 @@ from .inspection_images import InspectorImages
 from .inspection_runtime import Worker, check_cancelled, local
 from .models import checked_detection, ensure_assets
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD
-from .face_region import outline as face_outline
+from .face_region import outline as face_outline, fit as fit_face_region
 from .visibility import (FaceVisibility, VisibilityGeometryError, cached, ellipse_radii, foreground_mask,
                          prepare_aligned, valid_fraction)
 
@@ -22,6 +22,13 @@ def legacy_roi(face, source_size, affine):
     x,y,width,height = face.box
     cx,cy = x + width/2, y + height/2
     rx,ry = ellipse_radii(width,height)
+    reverse = np.linalg.inv([affine[:3],affine[3:],(0,0,1)])
+    center = (reverse @ [cx,cy,1])[:2]
+    extents = np.hypot(reverse[:2,0]*rx,reverse[:2,1]*ry)
+    if (center-extents<0).any() or (center+extents>256).any():
+        # The new crop follows landmarks; a loose old box may extend beyond
+        # its logits. A clipped denominator would invent a legacy score.
+        return None
     yy,xx = np.ogrid[:256,:256]
     sx = affine[0]*(xx+.5) + affine[1]*(yy+.5) + affine[2]
     sy = affine[3]*(xx+.5) + affine[4]*(yy+.5) + affine[5]
@@ -45,6 +52,7 @@ class FaceReplay:
 
     comparison: tuple | None = None
     outline: list | None = None
+    fit_note: str = ''
 
     def render(self, threshold, use_legacy=False, show_outside=False):
         if self.ellipse is None:
@@ -74,6 +82,8 @@ class FaceReplay:
                 caption += f' · Face ellipse {base_score:.3f} · Legacy box ellipse {alternate_score:.3f}'
             if show_outside:
                 caption += ' · Purple: predicted face outside the ellipse (not counted)'
+        if self.fit_note:
+            caption += ' · ' + self.fit_note
         if use_legacy and self.comparison:
             ImageDraw.Draw(annotated).line(self.comparison[2], fill='gold', width=1)
         elif self.outline is not None:
@@ -116,7 +126,11 @@ def replay(previews, address, scope):
     result = FaceReplay(image, recorded, (cx - rx, cy - ry, cx + rx, cy + ry))
     minimum = previews.config.data['detection']['min_face_source_fraction']
     try:
-        result.outline = face_outline(face)
+        fitted = fit_face_region(face)
+        result.outline = face_outline(face,fitted=fitted)
+        result.fit_note = f'Landmark fit: {fitted.view}'
+        if fitted.ignored:
+            result.fit_note += f'; ignored outlier: {fitted.ignored}'
         blob, region, total, affine = prepare_aligned(image, face, minimum)
     except VisibilityGeometryError as error:
         coverage = error.diagnostics.get('visibility_source_fraction')
@@ -143,6 +157,8 @@ def replay(previews, address, scope):
     result.source_to_model = tuple(np.linalg.inv([affine[:3], affine[3:], (0, 0, 1)])[:2].ravel())
     result.logits, result.region, result.total = logits, region, total
     result.comparison = legacy_roi(face, image.size, affine)
+    if result.comparison is None:
+        result.fit_note += '; legacy box extends outside the model crop (comparison unavailable)'
     return result
 
 
@@ -214,7 +230,9 @@ class FaceVisibilityWindow:
         self.images.fit('A')
         if result.logits is not None:
             low, high = result.slider_range(self.configured)
-            self.roi_toggle.state(['!disabled'])
+            self.roi_toggle.state(['!disabled'] if result.comparison else ['disabled'])
+            if result.comparison is None:
+                self.use_legacy.set(False)
             self.outside_toggle.state(['!disabled'])
             self.slider.configure(from_=low, to=high)
             self.slider.state(['!disabled'])

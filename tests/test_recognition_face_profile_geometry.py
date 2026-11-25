@@ -16,14 +16,13 @@ def test_short_eye_line_uses_nose_and_mouth_axis_including_quarter_turn():
             _,region,total,affine = prepare_aligned(image,face,0.)
             axis = np.array([affine[0],affine[3]])
             assert np.dot(axis/np.linalg.norm(axis), rotation[:,0]) > .99
-            alternate, alt_total, old_outline = legacy_roi(face,image.size,affine)
-            assert 0 < alt_total and alt_total == alternate.sum()
-            logits = np.where(alternate,1.,-1.)
+            comparison = legacy_roi(face,image.size,affine)
+            logits = np.ones((256,256))
             replay = FaceReplay(image,'',face.box,logits,region,total,
-                                (1,0,0,0,1,0),(alternate,alt_total,old_outline))
+                                (1,0,0,0,1,0),comparison)
             for use_legacy in (True,False):
                 overlay, caption = replay.render(0.,use_legacy)
-                assert 'Legacy box ellipse 1.000' in caption
+                assert 'Replay 1.000' in caption
                 overlay.close()
 
 
@@ -65,7 +64,9 @@ def test_tilted_full_face_keeps_forehead_chin_and_both_cheeks(angle, profile):
     truth = (local[...,0]/40)**2+(local[...,1]/70)**2 <= 1
     logits = np.where(truth,1.,-1.).astype('float32')[None,None]
     score = measurement(logits,region,'cpu',face_pixels=total)['visible_face_fraction']
-    assert score > .99
+    # Landmark fitting need not reproduce the synthetic detector contour
+    # exactly. It must retain the anatomy and a high score without using it.
+    assert score > .95
     assert np.count_nonzero(truth & region)/truth.sum() > .85
     if abs(angle) == 45:
         assert not old[yy[:2],xx[:2]].any()  # Reproduces the reported lost chin/forehead.
@@ -83,28 +84,32 @@ def test_diagonal_box_ambiguity_does_not_collapse_or_expand_region(angle):
     face,rotation = tilted_face(angle)
     center,axis,radii = ellipse(face)
     np.testing.assert_allclose(axis,rotation[:,0],atol=1e-10)
-    np.testing.assert_allclose(radii,[36,67.2],rtol=.001)
-    assert center == pytest.approx((160,160))
+    reference = ellipse(tilted_face(0)[0])
+    np.testing.assert_allclose(radii,reference[2],rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(center)-.5,
+                               (np.asarray(reference[0])-.5-160) @ rotation.T+160,atol=1e-10)
 
 
-def test_compressed_profile_features_cannot_shrink_the_diagonal_face_to_their_cloud():
+def test_smaller_face_inside_same_box_scales_full_template_not_just_feature_cloud():
     from stash_ai.recognition.face_region import ellipse
     face,_ = tilted_face(45)
+    before = ellipse(face)
     points = np.asarray(face.landmarks)
-    # Simulate compressed features while retaining the independent full box.
-    points = (points-points.mean(axis=0))*.4 + points.mean(axis=0)
+    origin = points.mean(axis=0)
+    points = (points-origin)*.4 + origin
     face = checked_detection([*face.box,*points.ravel(),.99])
     _,_,(rx,ry) = ellipse(face)
-    w,h = face.box[2:]
-    assert (rx/.45)**2+(ry/.48)**2 == pytest.approx(w*w+h*h)
-    assert ry/.48 >= rx/.45 - 1e-6
+    np.testing.assert_allclose([rx,ry],np.asarray(before[2])*.4,rtol=1e-10)
+    # The fitted ellipse is still much taller than the eye-to-mouth cloud.
+    assert ry*2 > 2*np.linalg.norm(points[3:].mean(axis=0)-points[:2].mean(axis=0))
 
 
 @pytest.mark.parametrize('threshold', [0.,-.2])
 def test_previous_axis_aligned_measurements_are_not_reused(threshold):
     from stash_ai.recognition.config import digest
     from stash_ai.recognition.visibility import CONTRACT, cached
-    old = dict(CONTRACT,version=7,region='source-face-box-ellipse-0.45w-0.48h-inverse-mapped')
+    old = dict(CONTRACT,version=8,region='oriented-box-supported-ellipse-0.45w-0.48h-v1',
+               crop='square-face-box-padding-0.25-profile-roll-aligned')
     if threshold:
         old['mask_threshold'] = 'logit>record.logit_threshold'
     quality = dict(visible_face_fraction=.9,

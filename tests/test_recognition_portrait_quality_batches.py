@@ -18,15 +18,17 @@ def test_fixed_preprocessing_constants_preserve_exact_arrays_and_masks():
     face=FACE
     pixels=np.random.default_rng(9).integers(0,256,(350,500,3),dtype=np.uint8)
     with Image.fromarray(pixels) as image:
-        blob,region=prepare(image,face)
-        x,y,w,h=face.box;side=max(w,h)*1.5
-        left,top=x+w/2-side/2,y+h/2-side/2
+        from stash_ai.recognition.visibility import prepare_aligned
+        from stash_ai.recognition.face_region import ellipse
+        blob,region,_,affine=prepare_aligned(image,face,1.)
+        _,_,(rx,ry)=ellipse(face)
+        scale=np.hypot(affine[0],affine[3])
         with image.convert('RGB') as rgb,rgb.transform((256,256),Image.Transform.AFFINE,
-            (side/256,0,left,0,side/256,top),resample=Image.Resampling.BILINEAR) as crop:
+            affine,resample=Image.Resampling.BILINEAR) as crop:
             expected=np.asarray(crop,dtype=np.float32)/255.
         expected=(expected-np.array([.485,.456,.406],dtype=np.float32))/np.array([.229,.224,.225],dtype=np.float32)
         rows,columns=np.indices((256,256),dtype=np.float32)
-        mask=(((columns+.5-128)/(w*.45*256/side))**2+((rows+.5-128)/(h*.48*256/side))**2<=1)
+        mask=(((columns+.5-128)/(rx/scale))**2+((rows+.5-128)/(ry/scale))**2<=1)
         assert np.array_equal(blob,np.ascontiguousarray(expected.transpose(2,0,1)[None]))
         assert np.array_equal(region,mask)
     assert all(not value.flags.writeable for value in _constants())
