@@ -735,7 +735,9 @@ def test_native_scene_inspector_reconstructs_selected_unassigned_crop_on_worker(
             return np.full((256, 256), -0.1, dtype='float32')
         monkeypatch.setattr(inspection_face_visibility, 'ensure_assets', lambda *a, **kw: {})
         monkeypatch.setattr(inspection_face_visibility, 'FaceVisibility',
-                            lambda *_: SimpleNamespace(inspect_logits=logits, close=lambda: None))
+                            lambda *_: SimpleNamespace(
+                                inspect_logits=logits, close=lambda: None, mesh=None,
+                                minimum_source_fraction=config.data['detection']['min_face_source_fraction']))
         ui.face_visibility_button.invoke()
         wait_for(lambda: 'Replay 1.000' in window.status.cget('text'))
         assert window.slider.instate(['!disabled']) and window.value.get() == -0.25
