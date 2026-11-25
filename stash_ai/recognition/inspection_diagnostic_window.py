@@ -82,6 +82,16 @@ class DiagnosticWindow:
                 child=tree.insert(item,'end',text=check['label'],values=(check['status'],check['value'],check['note']),tags=(check['status'],))
                 if 'reference' in check:
                     ref=check['reference'];self.action(tree,child,partial(self.navigate,ref['kind'],ref['observation']))
+        from .sharpness_details import decision_text
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text='Sharpness')
+        text = tk.Text(frame, wrap='word', padx=10, pady=10)
+        scrollbar = ttk.Scrollbar(frame, command=text.yview)
+        scrollbar.pack(side='right', fill='y')
+        text.configure(yscrollcommand=scrollbar.set)
+        text.pack(fill='both', expand=True)
+        text.insert('1.0', decision_text(self.detail.get('admission') or {}))
+        text.configure(state='disabled')
         if self.row and self.row['kind'] == 'body':
             from .inspection_diagnostics import pose_landmarks
             landmarks = self.tree('Pose landmarks', ('first_pass', 'prompt_gates', 'sam_input', 'final_pose'))

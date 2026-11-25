@@ -88,7 +88,7 @@ def _quartile(values, valid, xp):
 
 
 def batch(values, masks, xp=np):
-    """Return N x 7 summaries: legacy four, focus, motion, split confidence.
+    """Return scalar summaries: legacy four, components/confidence and fit diagnostics.
 
     Inputs are finite float32 N,H,W arrays on the same device, masks are bool.
     NumPy and Torch execute the same arithmetic and reduction policy.
@@ -102,7 +102,9 @@ def batch(values, masks, xp=np):
     contrast = (((values-means[:, None, None])**2)*weights).sum(axis=(1, 2))/counts
     zeros = contrast*0
     if min(values.shape[-2:]) <= 2*RADIUS:
-        return xp.stack((zeros, zeros, contrast, zeros, zeros, zeros, zeros), axis=1)
+        from .split_blur import unavailable
+        return xp.concatenate((xp.stack((zeros, zeros, contrast, zeros), axis=1),
+                               unavailable(zeros, 1, xp)), axis=1)
     support = _interior(weights)
     weight = xp.where(support, values[:, RADIUS:-RADIUS, RADIUS:-RADIUS]*0+1, 0.)
     count = _pool(weight)
@@ -152,6 +154,7 @@ def batch(values, masks, xp=np):
 
 def records(summaries, *, diagnostics):
     # Both legacy selectors now expose the same units for every quality gate.
+    from .split_blur import METHOD, REASONS
     return [dict(sharpness=float(score), sharpness_normalized=float(score),
                  sharpness_pixels=int(count), sharpness_contrast=float(contrast),
                  sharpness_noise=float(noise) if diagnostics else None,
@@ -159,9 +162,12 @@ def records(summaries, *, diagnostics):
                  focus_sharpness=float(focus) if confidence >= .6 else None,
                  motion_sharpness=float(motion) if confidence >= .6 else None,
                  sharpness_confidence=float(confidence),
-                 sharpness_split_method="edge-spread-covariance-v1",
-                 sharpness_split_status="estimated" if confidence >= .6 else "unavailable")
-            for score, count, contrast, noise, focus, motion, confidence in summaries]
+                 sharpness_split_method=METHOD,
+                 sharpness_split_status="estimated" if confidence >= .6 else "unavailable",
+                 sharpness_split_reason=REASONS[int(reason)],
+                 sharpness_split_diagnostics=dict(fit_residual=float(residual) if residual >= 0 else None,
+                     edge_counts=[int(v) for v in support[:4]], tile_counts=[int(v) for v in support[4:]]))
+            for score, count, contrast, noise, focus, motion, confidence, reason, residual, *support in summaries]
 
 
 def measure(values, mask=None, *, diagnostics=True):

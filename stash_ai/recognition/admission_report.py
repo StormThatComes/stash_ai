@@ -7,6 +7,7 @@ from .body_overlap import admission_overlap
 from .person_anchor import pixels
 from .pose_policy import measurement_required
 from .visibility import cached
+from .sharpness_details import summary as sharpness_summary, gate_note
 
 
 def check(parameter, measured, threshold, operator='>=', *, enabled=True, note=None):
@@ -108,10 +109,9 @@ class Policies:
 
 
 def sharpness_checks(quality, settings, path, prefix='', legacy='min_sharpness'):
-    from .sharpness_gates import floors, policy, estimated
+    from .sharpness_gates import floors, policy
     selected = dict(settings) if not prefix else policy(settings, prefix, legacy)
-    note = (f"Split confidence {quality.get('sharpness_confidence', 'unavailable')}; "
-            + ('estimated focus/motion components' if estimated(quality) else 'using legacy fallback; split unavailable'))
+    note = gate_note(quality, selected)
     rows = []
     for key, metric, floor in floors(quality, selected):
         parameter = legacy if key == 'min_sharpness' else prefix+key
@@ -172,7 +172,7 @@ def face(quality, geometry, config, policies, fingerprint):
                                 enabled=maximum is not None))
         groups.append(group('face_'+role+'_quality', checks,
             note='Additional current quality gates after scan admission; passing does not establish identity membership.'))
-    return report(config, evidence_kind='face', groups=groups)
+    return report(config, evidence_kind='face', groups=groups, sharpness=sharpness_summary(quality))
 
 
 def person(metadata, config, policies, fingerprint, *, independent=False, face_evidence=None):
@@ -218,7 +218,7 @@ def person(metadata, config, policies, fingerprint, *, independent=False, face_e
         for row in checks:
             if row['parameter'].endswith('.min_sharpness') and 'sharpness_pixels' in quality:
                 detail = person.get('pose_refinement', {})
-                row['note'] = (f"Method {quality.get('sharpness_method', 'unknown')}, "
+                row['note'] += (f" Method {quality.get('sharpness_method', 'unknown')}, "
                                f"{quality['sharpness_pixels']} interior pixels. "
                                f"Pose {detail.get('status', 'unavailable')}.")
                 if detail.get('reason'):
@@ -273,4 +273,4 @@ def person(metadata, config, policies, fingerprint, *, independent=False, face_e
             summary['status'] = 'unknown' if any(row['measured'] is None for row in rows) else 'fail'
         groups.append(summary)
     return report(config, evidence_kind='person', route='independent' if independent else 'face_associated',
-                groups=groups, anchor_gate=gate)
+                groups=groups, anchor_gate=gate, sharpness=sharpness_summary(quality))

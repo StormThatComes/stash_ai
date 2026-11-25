@@ -79,7 +79,18 @@ def test_native_window_selects_observation_and_displays_recorded_reason(tmp_path
         ui.decision_details()
         diagnostics=ui.visual_windows[-1]
         assert diagnostics.worker.future is None  # Opening evidence does not calculate rivals.
-        assert len(diagnostics.tabs.tabs())==3
+        tabs = {diagnostics.tabs.tab(tab, 'text'): tab for tab in diagnostics.tabs.tabs()}
+        assert list(tabs) == ['Decision chain', 'Sharpness', 'Recorded rivals', 'New comparison']
+        diagnostics.tabs.select(tabs['Sharpness'])
+        panel = diagnostics.tabs.nametowidget(tabs['Sharpness'])
+        sharpness = next(widget for widget in panel.winfo_children() if isinstance(widget, tk.Text))
+        assert str(sharpness.cget('state')) == 'disabled'
+        text = sharpness.get('1.0', 'end')
+        assert 'Focus sharpness (isotropic softness): unavailable' in text
+        assert 'Motion sharpness (directional smear): unavailable' in text
+        assert 'Split measurements were not retained; rerun recognition' in text
+        assert 'Sharpness gates by stage' in text and 'Legacy mode' in text
+        assert diagnostics.worker.future is None  # Viewing sharpness never runs inference or matching.
         diagnostics.close()
         assert diagnostics not in ui.visual_windows
         ui.pin_selected()

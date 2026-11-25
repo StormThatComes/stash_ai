@@ -177,7 +177,7 @@ def test_contract_refreshes_old_overlap_but_keeps_legacy_banks_recognizable(mask
     assert 'quality_mask' not in pose_contract(config)[1]
     assert person_contract(config,legacy_sharpness=True) == person_contract(config,legacy_mask_overlap=True)
     current_collection=plain(data['sapiensid']['collection']);current_collection.pop('enabled')
-    assert contract(config) == digest(['independent-person-v11-split-sharpness',person_contract(config),current_collection])
+    assert contract(config) == digest(['independent-person-v12-equal-span-sharpness',person_contract(config),current_collection])
 
 
 def test_old_box_cues_are_recollected_and_only_scalar_overlap_is_persisted(tmp_path,monkeypatch):

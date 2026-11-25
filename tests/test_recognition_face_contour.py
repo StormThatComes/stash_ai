@@ -79,6 +79,12 @@ def test_separate_sharpness_mask_has_identical_numpy_and_torch_results():
     assert cpu['visibility'] == device['visibility']
     assert cpu['sharpness_pixels'] == device['sharpness_pixels']
     assert cpu['sharpness'] == pytest.approx(device['sharpness'],abs=.001)
+    for key in ('focus_sharpness', 'motion_sharpness', 'sharpness_confidence'):
+        assert cpu[key] == pytest.approx(device[key], abs=.001) if device[key] is not None else cpu[key] is None
+    assert cpu['sharpness_split_method'] == device['sharpness_split_method'] == 'edge-spread-covariance-v2-equal-span'
+    assert cpu['sharpness_split_reason'] == device['sharpness_split_reason']
+    for key in ('edge_counts', 'tile_counts'):
+        assert cpu['sharpness_split_diagnostics'][key] == device['sharpness_split_diagnostics'][key]
 
 
 def test_model_owner_resolves_prepared_inputs_and_records_fallback():

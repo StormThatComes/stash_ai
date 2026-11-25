@@ -39,7 +39,7 @@ def quality(image,person,people,settings):
         encoder_mask = unpack_mask(packed,right-left,bottom-top) if packed else None
         sharp,pixel_digest,appearance_hash = _pixels(image,bounds,mask,encoder_mask=encoder_mask)
     else:
-        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v5-split-blur',[(image,bounds)],
+        sharp,pixel_digest,appearance_hash=many('body_quality','body-pixels-v6-equal-span-blur',[(image,bounds)],
             lambda values:[_pixels(pixels,box) for pixels,box in values])[0]
     source_pixel_digest = pixel_digest
     if packed:
@@ -49,7 +49,8 @@ def quality(image,person,people,settings):
     if masked_sharpness and mask is None:
         sharp=dict(sharp,crop_sharpness=sharp['sharpness'],sharpness=0.,sharpness_normalized=0.,
                    portrait_sharpness=0.,sharpness_pixels=0, focus_sharpness=None, motion_sharpness=None,
-                   sharpness_confidence=0., sharpness_split_status='unavailable')
+                   sharpness_confidence=0., sharpness_split_status='unavailable',
+                   sharpness_split_reason='mask_unavailable', sharpness_split_diagnostics=None)
     sharpness=sharp['sharpness']
     sharp['sharpness_method']=('sam_mask' if mask is not None else 'unavailable') if masked_sharpness else 'person_crop'
     from .body_overlap import admission_overlap, measure
