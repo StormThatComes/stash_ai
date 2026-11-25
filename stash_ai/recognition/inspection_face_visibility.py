@@ -14,7 +14,7 @@ from .models import checked_detection, ensure_assets
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD
 from .face_region import outline as face_outline, fit as fit_face_region
 from .visibility import (FaceVisibility, VisibilityGeometryError, cached, ellipse_radii, foreground_mask,
-                         prepare_aligned, valid_fraction)
+                         prepare_aligned, prepare_measurement, valid_fraction)
 
 
 def legacy_roi(face, source_size, affine):
@@ -53,14 +53,18 @@ class FaceReplay:
     comparison: tuple | None = None
     outline: list | None = None
     fit_note: str = ''
+    contour: object = None
+    source_mask: np.ndarray | None = None
 
-    def render(self, threshold, use_legacy=False, show_outside=False):
+    def render(self, threshold, use_legacy=False, show_outside=False, use_contour=True, show_points=False):
         if self.ellipse is None:
             return None, self.caption
         annotated = self.image.copy()
         caption = self.caption
         if self.logits is not None:
             region, total = self.region, self.total
+            if use_contour and self.contour is not None:
+                region, total = self.contour.mask, self.contour.total
             if use_legacy and self.comparison:
                 region, total, _ = self.comparison
             foreground = foreground_mask(self.logits, region, threshold)
@@ -73,18 +77,31 @@ class FaceReplay:
                                         resample=Image.Resampling.NEAREST) as alpha:
                         annotated.paste(color, (0, 0, *annotated.size), alpha)
             visible, source = int(foreground.sum()), int(region.sum())
-            caption += (f' · Replay {visible / total:.3f} ({visible:,} visible / {total:,} ellipse pixels)'
+            label = 'contour' if use_contour and not use_legacy and self.contour is not None and self.contour.method == 'mesh' else 'ellipse'
+            caption += (f' · Replay {visible / total:.3f} ({visible:,} visible / {total:,} {label} pixels)'
                         f' · Source coverage {source / total:.1%}')
             if self.comparison:
                 alternate, denominator, _ = self.comparison
                 base_score = foreground_mask(self.logits,self.region,threshold).sum() / self.total
                 alternate_score = foreground_mask(self.logits,alternate,threshold).sum() / denominator
                 caption += f' · Face ellipse {base_score:.3f} · Legacy box ellipse {alternate_score:.3f}'
+            raw_mask = self.logits > threshold
+            if self.source_mask is not None:
+                raw_mask &= self.source_mask
+            raw = int(raw_mask.sum())
+            if raw:
+                caption += f' · Predicted mask outside region: {1-visible/raw:.1%}'
             if show_outside:
                 caption += ' · Purple: predicted face outside the ellipse (not counted)'
         if self.fit_note:
             caption += ' · ' + self.fit_note
-        if use_legacy and self.comparison:
+        if show_points and self.contour is not None and self.contour.landmarks is not None:
+            draw = ImageDraw.Draw(annotated)
+            for x,y in self.contour.landmarks:
+                draw.ellipse((x-1,y-1,x+1,y+1),fill='cyan')
+        if use_contour and not use_legacy and self.contour is not None and self.contour.outline:
+            ImageDraw.Draw(annotated).line([tuple(p) for p in self.contour.outline], fill='gold', width=1)
+        elif use_legacy and self.comparison:
             ImageDraw.Draw(annotated).line(self.comparison[2], fill='gold', width=1)
         elif self.outline is not None:
             ImageDraw.Draw(annotated).line(self.outline, fill='gold', width=1)
@@ -131,7 +148,9 @@ def replay(previews, address, scope):
         result.fit_note = f'Landmark fit: {fitted.view}'
         if fitted.ignored:
             result.fit_note += f'; ignored outlier: {fitted.ignored}'
-        blob, region, total, affine = prepare_aligned(image, face, minimum)
+        prepared = prepare_measurement(image, face, minimum, defer_source_check=True)
+        blob, region, total = prepared
+        affine = prepared.affine
     except VisibilityGeometryError as error:
         coverage = error.diagnostics.get('visibility_source_fraction')
         result.caption += f' · Replay unavailable: {error}'
@@ -144,7 +163,18 @@ def replay(previews, address, scope):
         paths = ensure_assets(previews.config, keys=['faceocc'])
         check_cancelled()
         with closing(FaceVisibility(previews.config, paths)) as model:
+            from .face_contour import resolve
+            result.contour = resolve(model, prepared)
+            result.fit_note += ' · Region: '+result.contour.method
+            if result.contour.reason:
+                result.fit_note += ' · Fallback: '+result.contour.reason
             logits = model.inspect_logits(blob)
+    except VisibilityGeometryError as error:
+        result.caption += f' · Replay unavailable: {error}'
+        coverage = error.diagnostics.get('visibility_source_fraction')
+        if coverage is not None:
+            result.caption += f' Source coverage {coverage:.1%} (minimum {minimum:.1%}).'
+        return result
     except FileNotFoundError:
         result.caption += ' · FaceOcc weights missing. Check the model directory and download_missing.'
         return result
@@ -156,6 +186,8 @@ def replay(previews, address, scope):
     # Pillow maps each displayed source pixel back into the aligned score map.
     result.source_to_model = tuple(np.linalg.inv([affine[:3], affine[3:], (0, 0, 1)])[:2].ravel())
     result.logits, result.region, result.total = logits, region, total
+    from .face_contour import real_pixels
+    result.source_mask = real_pixels(affine, image.size)
     result.comparison = legacy_roi(face, image.size, affine)
     if result.comparison is None:
         result.fit_note += '; legacy box extends outside the model crop (comparison unavailable)'
@@ -176,7 +208,7 @@ class FaceVisibilityWindow:
         bar.pack(fill='x', padx=6)
         ttk.Button(bar, text='Fit', command=lambda: self.images.fit('A')).pack(side='left')
         ttk.Button(bar, text='100%', command=lambda: self.images.set_zoom('A', 1.)).pack(side='left')
-        ttk.Label(bar, text='Gold outline: measurement ellipse    Green: pixels counted as visible').pack(side='left')
+        ttk.Label(bar, text='Gold outline: selected measurement region    Green: pixels counted as visible').pack(side='left')
         self.use_legacy = tk.BooleanVar(master=self.window, value=False)
         self.roi_toggle = ttk.Checkbutton(bar, text='Legacy box ellipse (preview)', variable=self.use_legacy,
                                           command=lambda: self.set_threshold(self.value.get()))
@@ -184,10 +216,16 @@ class FaceVisibilityWindow:
         mask_bar = ttk.Frame(self.window)
         mask_bar.pack(fill='x', padx=8)
         self.show_outside = tk.BooleanVar(master=self.window, value=False)
-        self.outside_toggle = ttk.Checkbutton(mask_bar, text='Show predicted face outside ellipse (purple)',
+        self.outside_toggle = ttk.Checkbutton(mask_bar, text='Show predicted face outside region (purple)',
                                               variable=self.show_outside,
                                               command=lambda: self.set_threshold(self.value.get()))
         self.outside_toggle.pack(side='left')
+        self.use_contour = tk.BooleanVar(master=self.window, value=True)
+        self.show_points = tk.BooleanVar(master=self.window, value=False)
+        ttk.Checkbutton(mask_bar, text='Measured contour (off: landmark ellipse)', variable=self.use_contour,
+                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
+        ttk.Checkbutton(mask_bar, text='Mesh landmarks', variable=self.show_points,
+                        command=lambda: self.set_threshold(self.value.get())).pack(side='left')
         controls = ttk.Frame(self.window)
         controls.pack(fill='x', padx=8)
         ttk.Label(controls, text='Pixel logit threshold (preview)').pack(side='left')
@@ -254,7 +292,8 @@ class FaceVisibilityWindow:
         if self.result is not None:
             result = self.result
             use_legacy, show_outside = self.use_legacy.get(), self.show_outside.get()
-            self.worker.request(lambda: result.render(threshold, use_legacy, show_outside), self.display_overlay, self.failed)
+            contour, points = self.use_contour.get(), self.show_points.get()
+            self.worker.request(lambda: result.render(threshold, use_legacy, show_outside, contour, points), self.display_overlay, self.failed)
 
     def display_overlay(self, overlay):
         image, caption = overlay

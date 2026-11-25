@@ -182,7 +182,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         except VisibilityGeometryError:
                             reason = 'face_visibility_unmeasurable'
                         else:
-                            if not visibility_cached(measurement, policy['faceocc_logit_threshold']):
+                            if not visibility_cached(measurement, policy['faceocc_logit_threshold'], policy['visibility_region']):
                                 raise VisibilityError('Alignment audit received invalid FaceOcc measurements.')
                             quality.update(measurement)
                             if quality['visible_face_fraction'] < policy['min_visible_face_fraction']:

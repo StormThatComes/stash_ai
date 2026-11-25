@@ -238,14 +238,16 @@ def test_expression_asset_is_downloaded_only_when_enabled(tmp_path, monkeypatch)
     monkeypatch.setattr(models,'verify',lambda *args: None)
     monkeypatch.setattr(downloads,'install_hf_asset',lambda *a,**k: calls.append(a))
     config=load(root=tmp_path)
-    assert not {'expression_mesh','expression_blendshapes'} & models.ensure_assets(config).keys()
-    assert len(calls)==3
+    assert 'expression_mesh' in models.ensure_assets(config)
+    assert 'expression_blendshapes' not in models.asset_selection(config)[0]
+    assert len(calls)==4
     path=tmp_path/'enabled.yml'; path.write_text('version: 1\nportraits: {weights: {closed_mouth: 2}}\n')
     assert {'expression_mesh','expression_blendshapes'} <= models.ensure_assets(load(path)).keys()
-    assert len(calls)==8
+    assert len(calls)==9
     path.write_text('version: 1\nportraits: {enabled: false, weights: {closed_mouth: 2}}\n')
-    assert not {'expression_mesh','expression_blendshapes'} & models.ensure_assets(load(path)).keys()
-    assert len(calls)==11  # recognition still requires FaceOcc
+    assert 'expression_mesh' in models.ensure_assets(load(path))
+    assert 'expression_blendshapes' not in models.asset_selection(load(path))[0]
+    assert len(calls)==13  # recognition still requires FaceOcc
 
 
 def test_mesh_decoding_preserves_pixel_coordinates_and_validates_presence():

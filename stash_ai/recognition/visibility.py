@@ -7,10 +7,11 @@ from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 from .sharpness_policy import ALGORITHM
 
-CONTRACT = {'version': 9, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
+CONTRACT = {'version': 10, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'landmark-template-square-padding-profile-roll-aligned-v1',
-            'region': 'robust-five-landmark-whole-face-template-v1',
-            'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
+            'region': 'mesh-envelope-or-landmark-ellipse-v1',
+            'mesh': asdict(ASSETS['expression_mesh']), 'sharpness_region': 'contour-dilate-6px-real-source-v1',
+            'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/full-region-pixels',
             'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1', 'split_sharpness': 'edge-spread-covariance-v1'}
 CONTRACT_ID = digest(CONTRACT)
 TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
@@ -40,11 +41,13 @@ def valid_fraction(value):
     return type(value) in (int, float) and 0 <= value <= 1 and math.isfinite(value)
 
 
-def cached(quality, threshold=None):
+def cached(quality, threshold=None, region=None):
     """Validate a recorded measurement, optionally against the requested pixel cutoff."""
     from collections.abc import Mapping
     record = quality.get('visibility')
     if not isinstance(record, Mapping) or not valid_fraction(quality.get('visible_face_fraction')):
+        return False
+    if region is not None and record.get('region_requested', 'mesh') != region:
         return False
     cutoff = record.get('logit_threshold', DEFAULT_FACEOCC_LOGIT_THRESHOLD)
     if type(cutoff) not in (int, float) or not -MAX_FLOAT32 <= cutoff <= MAX_FLOAT32:
@@ -195,12 +198,14 @@ class PreparedMeasurement(tuple):
         return result
 
 
-def prepare_measurement(image, face, minimum_source_fraction, *, recognition_pixels=None):
-    """Prepare FaceOcc input only when the source covers the configured fraction of its ellipse."""
+def prepare_measurement(image, face, minimum_source_fraction, *, recognition_pixels=None, defer_source_check=False):
+    """Prepare upright pixels; model owners may defer coverage until contour selection."""
     from .model_input_quality import face_input
-    blob, region, count, affine = prepare_aligned(image, face, minimum_source_fraction)
+    blob, region, count, affine = prepare_aligned(image, face, 0. if defer_source_check else minimum_source_fraction)
     quality = face_input(image, face, affine, recognition_pixels)
-    return PreparedMeasurement((blob, region, count), quality)
+    result = PreparedMeasurement((blob, region, count), quality)
+    result.face, result.affine, result.source_size = face, affine, image.size
+    return result
 
 
 def ellipse_radii(width, height):
@@ -261,13 +266,15 @@ def foreground_mask(pixel_logits, region, threshold):
     return (pixel_logits > threshold) & region
 
 
-def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD, diagnostics=True, sharpness_input=None):
+def measurement(logits, region, device, *, blob=None, face_pixels=None, threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD, diagnostics=True, sharpness_input=None, sharpness_support=None):
     foreground = foreground_mask(_pixel_logits(logits), region, threshold)
     count = int(region.sum())
     if count <= 0:
         raise ValueError('Visibility face region is empty.')
     visible = int(foreground.sum())
     result = _counts(visible, count, device, face_pixels, threshold)
+    if sharpness_support is not None:
+        foreground = foreground_mask(_pixel_logits(logits), sharpness_support, threshold)
     if blob is not None:
         from .foreground_quality import face
         result.update(face(blob,foreground,'faceocc_mask',diagnostics=diagnostics))
@@ -285,12 +292,12 @@ def _counts(visible, source_count, device, face_pixels, threshold):
         raise ValueError('Visibility mask counts are invalid.')
     return {'visible_face_fraction': visible / count,
             'visibility': {'contract': CONTRACT_ID if threshold == DEFAULT_FACEOCC_LOGIT_THRESHOLD else TUNED_CONTRACT_ID,
-                           'logit_threshold': threshold, 'method': 'faceocc-landmark-template-ellipse-v6', 'device': device,
+                           'logit_threshold': threshold, 'method': 'faceocc-independent-face-region-v7', 'device': device,
                            'model_sha256': ASSETS['faceocc'].sha256, 'model_revision': ASSETS['faceocc'].revision,
                            'visible_pixels': visible, 'face_pixels': count, 'source_pixels': source_count,
                            'source_fraction': source_count / count}}
 
-def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD,diagnostics=True,sharpness_inputs=None):
+def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,threshold=DEFAULT_FACEOCC_LOGIT_THRESHOLD,diagnostics=True,sharpness_inputs=None,sharpness_supports=None):
     """Transfer scalar visibility/sharpness summaries, never full masks."""
     import numpy as np
     import torch
@@ -306,6 +313,9 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,thr
     totals = counts if face_pixels is None else face_pixels
     results = [_counts(int(value), count, device, total, threshold)
                for value, count, total in zip(visible, counts, totals, strict=True)]
+    if sharpness_supports is not None:
+        support = torch.from_numpy(np.stack(sharpness_supports)).to(logits.device)
+        foreground = foreground_mask(logits[:,0], support, threshold)
     if inputs is not None:
         from .foreground_quality import device_faces
         for result,quality in zip(results,device_faces(inputs,foreground,diagnostics=diagnostics)):
@@ -324,6 +334,7 @@ def device_measurements(logits,regions,device,*,inputs=None,face_pixels=None,thr
 
 class FaceVisibility:
     def __init__(self, config, paths):
+        self.region_requested = config.data['detection']['visibility_region']
         self.diagnostics=config.data['detection'].get('quality_diagnostics',False)
         self.logit_threshold = config.data['detection']['faceocc_logit_threshold']
         self.minimum_source_fraction = config.data['detection']['min_face_source_fraction']
@@ -337,6 +348,7 @@ class FaceVisibility:
         if requested == 'cuda' and not available:
             raise ValueError('Face visibility requested CUDA but PyTorch CUDA is unavailable.')
         self.device = 'cuda' if available and requested != 'cpu' else 'cpu'
+        self.mesh = None
         self.model = build_model()
         self.model.load_state_dict(load(blob), strict=True)
         try:
@@ -347,6 +359,13 @@ class FaceVisibility:
                 raise
             self.device = 'cpu'
             self.model.to('cpu').eval()
+        try:
+            if config.data['detection']['visibility_region'] == 'mesh':
+                from .face_contour import Mesh
+                self.mesh = Mesh(config, paths)
+        except BaseException:
+            self.close()
+            raise
 
     def inspect_logits(self, blob):
         """Keep one aligned score map on the CPU for interactive threshold previews."""
@@ -367,7 +386,7 @@ class FaceVisibility:
         if len(items)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         prepared=[]
         for image,face in items:
-            try:prepared.append(prepare_measurement(image, face, self.minimum_source_fraction))
+            try:prepared.append(prepare_measurement(image, face, self.minimum_source_fraction, defer_source_check=True))
             except VisibilityGeometryError as error:prepared.append(error)
         result=self.measure_prepared_many(prepared)
         if len(items)==1 and isinstance(result[0],Exception):raise result[0]
@@ -379,12 +398,21 @@ class FaceVisibility:
         if len(prepared)>8:raise ValueError('Visibility microbatch exceeds eight faces.')
         result = [None] * len(prepared)
         blobs, regions, positions, totals, quality_inputs = [], [], [], [], []
+        resolved = []
         for index,item in enumerate(prepared):
             if isinstance(item,VisibilityGeometryError):
                 result[index]=item;continue
             blob, region, full_count = item
             if not isinstance(blob,np.ndarray) or blob.shape!=(1,3,256,256) or blob.dtype!=np.float32 or not np.isfinite(blob).all():
                 raise ValueError('Invalid prepared FaceOcc tensor.')
+            from .face_contour import resolve
+            try:
+                selection = resolve(self, item)
+            except VisibilityGeometryError as error:
+                result[index] = error
+                continue
+            region, full_count = selection.mask, selection.total
+            resolved.append(selection)
             blobs.append(blob)
             regions.append(region)
             positions.append(index)
@@ -399,14 +427,19 @@ class FaceVisibility:
                     if values.shape!=(len(blobs),1,256,256) or not np.isfinite(values).all():
                         raise ValueError('FaceOcc returned invalid/non-finite mask logits.')
                     measurements = [measurement(values[i:i+1], region, self.device, blob=blobs[i], face_pixels=totals[i], threshold=self.logit_threshold,
-                                                diagnostics=getattr(self,'diagnostics',False), sharpness_input=quality_inputs[i])
+                                                diagnostics=getattr(self,'diagnostics',False), sharpness_input=quality_inputs[i], sharpness_support=resolved[i].support)
                                     for i, region in enumerate(regions)]
                 else:
                     measurements=device_measurements(logits,regions,self.device,inputs=inputs,face_pixels=totals,threshold=self.logit_threshold,
                                                      diagnostics=getattr(self,'diagnostics',False),
-                                                     sharpness_inputs=quality_inputs)
-            for index,value in zip(positions,measurements):result[index]=value
+                                                     sharpness_inputs=quality_inputs, sharpness_supports=[r.support for r in resolved])
+            for index,value,selection in zip(positions,measurements,resolved):
+                value['visibility'].update(selection.record(), region_requested=getattr(self, 'region_requested', 'mesh'))
+                result[index]=value
         return result
 
     def close(self):
+        if getattr(self, 'mesh', None) is not None:
+            self.mesh.close()
+            self.mesh = None
         self.model = None
