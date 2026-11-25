@@ -701,3 +701,12 @@ all current accepted observations. `--offline` disables VTT preview reconstructi
 Right-click an identity in the scene inspector and choose **Inspect performer**.
 **Inspect scene** opens the selected observation's scene. Crops, geometry, masks,
 galleries, reference comparisons and decision details reuse the existing viewer.
+
+The performer graph projects a single read-only SQLite snapshot into typed face,
+body, decision and recorded-View-evidence nodes. Aggregate match scores belong to
+decision nodes. Displayed assignment roles are separate from reference authority;
+`strict_route` still requires quality/reference selection before actual use.
+Recorded View nodes identify a policy and witness set, not an inferred catalogue.
+Historical/missing evidence and external references remain explicit. Each page has
+at most 100 current observations and 500 total nodes; omitted context is counted.
+No pixels, embeddings, model loading or recognition writes are needed to build it.
