@@ -406,6 +406,11 @@ def execute(args, config):
             from .inspection_crops import VttPreviews
             window = SceneInspector(root, reader, 'Scene ' + args.scene_id,
                                     previews=None if args.offline else VttPreviews(config))
+        elif args.command == 'inspect-performer':
+            from .performer_window import PerformerInspector
+            from .inspection_crops import VttPreviews
+            window = PerformerInspector(root, reader, '', args.observation_id,
+                previews=None if args.offline else VttPreviews(config))
         else:
             title = 'Performer ' + args.performer_id if args.performer_id else 'Identity ' + args.identity_id
             window = Inspector(root, reader, title, args.observation_id)

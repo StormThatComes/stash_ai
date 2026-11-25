@@ -52,6 +52,7 @@ class SceneInspector(Inspector):
         self.listing.bind('<<TreeviewOpen>>', self.expand)
         self.listing.bind('<<TreeviewSelect>>', self.select)
         menu = tk.Menu(self.listing, tearoff=False)
+        menu.add_command(label='Inspect performer', command=self.inspect_performer)
         menu.add_command(label='Compare with…', command=self.compare_selected)
         def context(event):
             item = self.listing.identify_row(event.y)
@@ -157,6 +158,13 @@ class SceneInspector(Inspector):
                 return self.merge_owner_items[item]
             item = self.listing.parent(item)
         return None
+
+    def inspect_performer(self):
+        selected = self.listing.selection()
+        owner = self.selected_owner(selected[0]) if selected else None
+        if owner:
+            from .performer_window import PerformerInspector, open_window
+            open_window(self, PerformerInspector, self.reader.identity_reader(owner, self.scan['scope']))
 
     def compare_selected(self):
         selected = self.listing.selection()

@@ -300,6 +300,16 @@ def parser():
     inspect.add_argument('--observation-id', help='Initially show this retained observation.')
     inspect.add_argument('--face-config', type=Path, help='Recognition YAML selecting the model namespace.')
     inspect.add_argument('--faces-db', type=Path, help='Existing recognition SQLite database.')
+    performer = commands.add_parser('inspect-performer', allow_abbrev=False,
+        help='Browse current performer observations across scenes in the desktop inspector.')
+    selector = performer.add_mutually_exclusive_group(required=True)
+    selector.add_argument('--performer-id', type=stash_id)
+    selector.add_argument('--identity-id')
+    performer.add_argument('--scope')
+    performer.add_argument('--observation-id')
+    performer.add_argument('--face-config', type=Path)
+    performer.add_argument('--faces-db', type=Path)
+    performer.add_argument('--offline', action='store_true', help='Use retained crops only.')
     scene_inspect = commands.add_parser('inspect-scene', allow_abbrev=False,
         help='Browse scene identities, all their retained observations and unassigned scene evidence in a desktop tree.')
     scene_inspect.add_argument('--scene-id', type=stash_id, required=True)
@@ -457,7 +467,7 @@ def _execute(args, config, services):
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
-    if args.command in ('inspect-identity', 'inspect-scene'):
+    if args.command in ('inspect-identity', 'inspect-scene', 'inspect-performer'):
         try:
             from .identity_window import execute
         except ImportError as error:
