@@ -99,3 +99,35 @@ def test_multiple_recorded_views_are_not_fused_into_one(tmp_path):
     graph=build(IdentityReader(config,identity_id=person))
     assert not any(n['type']=='view' for n in graph['nodes'])
     assert {'face:a','face:b'} <= {n['id'] for n in graph['nodes']}
+
+
+def test_shared_view_identity_does_not_depend_on_query_score(tmp_path):
+    config,person,_=seed(tmp_path,3)
+    with FaceDatabase(config.database) as state:
+        rows=state.connection.execute('SELECT * FROM candidates ORDER BY id').fetchall()
+        medoid=json.loads(rows[-1]['payload'])['observation']
+        for index,row in enumerate(rows[:2]):
+            payload=json.loads(row['payload']);payload.update(reason='anchor_view_identity',anchor_view=dict(
+                medoid=medoid,support_ids=[medoid],support=8,score=.8+index*.1,threshold=.7))
+            state.connection.execute('UPDATE candidates SET payload=? WHERE id=?',(json.dumps(payload),row['id']))
+        state.connection.commit()
+    graph=build(IdentityReader(config,identity_id=person))
+    views=[n for n in graph['nodes'] if n['type']=='view']
+    assert len(views)==1
+    assert views[0]['support_count']==8 and views[0]['retained_examples']==1
+    assert len([e for e in graph['edges'] if e['source']==views[0]['id']])==2
+
+
+def test_graph_bounds_and_rejects_revision_changes(tmp_path,monkeypatch):
+    import pytest
+    from stash_ai.recognition import inspection_graph as graph
+    config,person,_=seed(tmp_path,12)
+    reader=IdentityReader(config,identity_id=person)
+    monkeypatch.setattr(graph,'MAX_NODES',15)
+    result=graph.build(reader)
+    assert len(result['nodes'])<=15 and result['omitted']>0
+    ids={n['id'] for n in result['nodes']}
+    assert all(e['source'] in ids and e['target'] in ids for e in result['edges'])
+    stamps=iter([('before',),('after',)])
+    monkeypatch.setattr(graph,'stamp',lambda _:next(stamps))
+    with pytest.raises(ValueError,match='changed'):graph.build(reader)

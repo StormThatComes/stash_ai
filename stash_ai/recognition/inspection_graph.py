@@ -99,6 +99,7 @@ def build(reader, *, scene=None, kind=None, state=None, offset=0, limit=PAGE_SIZ
                 raw = (next((d['recorded'].get(explain.FACE_PROOF.get(decision['reason']), {}) for d in decisions
                              if d['policy']==decision['policy'] and d['supports_membership']), {})
                        if row['kind']=='face' else proof)
+                raw = raw if isinstance(raw,dict) else {}
                 support_count = raw.get('support_count',raw.get('support',raw.get('independent_support')))
                 if type(support_count) is not int: support_count=None
                 provenance = trace['evidence_status']
@@ -115,7 +116,7 @@ def build(reader, *, scene=None, kind=None, state=None, offset=0, limit=PAGE_SIZ
                 view = None
                 if len({(r['kind'],r['observation']) for r in view_refs if r['label']=='View medoid'})==1:
                     view = 'view:'+fingerprint([person['scope'],person['namespace'],decision['policy'],
-                        decision['reason'],view_refs,decision['metrics']])
+                        decision['reason'],sorted((r['kind'],r['observation'],r['label']) for r in view_refs),support_count])
                     if node(dict(id=view,type='view',provenance=provenance,policy=decision['policy'],
                         support_count=support_count,
                         retained_examples=len({(r['kind'],r['observation']) for r in view_refs if r['label']!='View medoid'}),
