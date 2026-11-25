@@ -36,6 +36,10 @@ def export(image, admission, directory, name, *, observation, role, rejection):
              (base.name, '#475467'),
              ('PASS/FAIL describe individual gates, not proof of identity or a complete rescan.', '#475467'),
              (f'Retained rejection: {rejection or "none"}. Exact values and gate boundaries: companion JSON.', '#475467')]
+    if admission.get('sharpness'):
+        from .sharpness_details import describe
+        lines.extend((line, '#475467') for text in ('', *describe(admission['sharpness']))
+                     for line in (wrap(text, width=120) or ['']))
     for group in admission['groups']:
         lines.append(('', '#101828'))
         lines.append((group['stage'].replace('_', ' ').upper()+' | '+group['status'].upper()+

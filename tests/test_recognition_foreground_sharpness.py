@@ -42,6 +42,8 @@ def test_body_mask_ignores_background_without_masking_the_identity_input():
         assert measured['sharpness_method']=='sam_mask' and measured['sharpness_pixels']>0
         assert original['crop_sharpness']>1 and original['sharpness_method']=='unavailable'
         assert original['sharpness']==0 and missing=='person_sharpness_mask_unavailable'
+        assert original['sharpness_split_reason']=='mask_unavailable'
+        assert original['sharpness_split_diagnostics'] is None
         assert measured['pixel_digest']==original['pixel_digest']
         selected['pose_refinement']['encoder_mask']=selected['pose_refinement']['overlap_mask']
         masked,_=quality(image,selected,[selected],policy)
@@ -155,7 +157,7 @@ def test_device_mask_sharpness_matches_cpu_without_transferring_images(monkeypat
         assert a['visible_face_fraction']==b['visible_face_fraction']
         for key in ('sharpness_normalized','sharpness_contrast','sharpness_noise'):
             assert a[key]==pytest.approx(b[key],rel=1e-4,abs=1e-4)
-    assert copied==[2,14]  # Only scalar statistics cross the device boundary.
+    assert copied==[2,34]  # Only scalar statistics/fit diagnostics cross the device boundary.
 
 
 @pytest.mark.parametrize('batch_size',[1,2])

@@ -23,10 +23,12 @@ def preview(image, faces, people, data):
 
 
 def caption(rows):
+    from .sharpness_details import reason
     def value(q, key):
         v = q.get(key)
         return 'unavailable' if v is None else f'{v:.1f}'
     return '\n'.join(f"{row['label']} focus {value(row['quality'], 'focus_sharpness')} | "
                      f"motion {value(row['quality'], 'motion_sharpness')} | "
                      f"confidence {value(row['quality'], 'sharpness_confidence')} | "
-                     f"{row['region']} | {row['failed'] or 'blur gates pass'}" for row in rows)
+                     f"{row['region']} | {row['failed'] or 'blur gates pass'} | "
+                     f"{reason(row['quality'])}" for row in rows)

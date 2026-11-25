@@ -56,6 +56,9 @@ def describe_diagnostics(result):
              'Individual quality gates do not establish identity membership.']
     if result.get('contract_current') is False:
         lines.append('Historical body collection contract differs from the current YAML.')
+    if result['admission'].get('sharpness'):
+        from .sharpness_details import describe
+        lines.extend(('', *describe(result['admission']['sharpness'])))
     for decision in result.get('recorded_decisions', []):
         lines.extend(('', 'Recorded ' + decision['status'] + ': ' + str(decision['recorded'].get('reason', 'unknown')),
                       'Policy: ' + decision['policy'] + (' (current)' if decision['current'] else ' (other policy)')))

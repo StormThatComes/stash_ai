@@ -139,18 +139,53 @@ The optional estimator fits an edge-spread covariance from four supported edge
 normal directions. It samples monotonic edge profiles within the same eroded
 foreground support, rejects oscillating/ringing profiles, requires local signal
 above noise, and pools widths from multiple tiles before fitting isotropic and
-directional components. `sharpness_confidence` is a fit-consistency indicator,
+directional components. All four directions use the same 10px profile span and
+1px Euclidean spacing, with bilinear interpolation for diagonal samples. Earlier
+`edge-spread-covariance-v1` profiles reached sqrt(2) times farther diagonally,
+including more unrelated texture and often failing the consistency check.
+The equal-span correction does not lower the acceptance requirements: each
+direction still needs at least 8 reliable edge centers in at least 2 tiles,
+a valid covariance, and a relative fit residual below 0.30.
+
+`sharpness_confidence` is a fit-consistency indicator,
 not a calibrated probability. Unsupported, noisy, tiny or one-direction patches
 produce `focus_sharpness: null` and `motion_sharpness: null`; missing evidence is
 never represented as perfect quality. Strong mixed blur may also be unavailable.
-The implementation shares NumPy/Torch arithmetic and transfers seven scalar
-summaries per image, without transferring device image arrays or loading a model.
+Confidence is `1 - residual` for a supported fit and zero for an unavailable
+estimate. **Zero confidence does not mean zero sharpness.** Split gates require
+confidence at least 0.60 and two finite component scores; otherwise they use
+`min_sharpness`. The implementation shares NumPy/Torch arithmetic and transfers
+17 scalar summaries per image (including reason, fit residual and directional
+support), without transferring device image arrays or loading a model.
 
-Inspect Scene/Performer admission details show the active component gates, their
-measurements and fit confidence, or explicitly label the legacy fallback.
+Inspect Scene/Performer Details includes a separate **Sharpness measurements**
+section and a **Sharpness** tab in Decision details: all three scores, confidence, estimator version, measured input size and
+region, supported pixels, edge/tile counts by direction and fit residual. Each
+stage's gate notes distinguish configured legacy mode, active split components
+and legacy fallback. The PNG/JSON admission exports include the same diagnostics.
+Unavailable estimates retain one of these causes:
+
+- input too small or no complete foreground footprint;
+- too few reliable edges or tiles in one or more directions;
+- invalid fitted covariance or inconsistent directional widths;
+- required foreground mask unavailable.
+
+Old measurements without a retained cause explicitly say it is unknown; Details
+cannot infer a cause or recompute confidence from an old scalar. After updating,
+rerun recognition and refresh the inspector. The scan and body contracts
+invalidate v1 split measurements even when masks or quality floors are disabled;
+previous body banks remain frozen competitors.
+
+For a reproducible natural-texture availability probe, run
+`python -m benchmarks.benchmark_split_sharpness`. It measures fixed head crops
+and person boxes from the existing dance-contact photos. These are approximate
+encoder-sized crops, without face alignment, FaceOcc or SAM. This checks
+availability on varied textures, not blur classification accuracy or calibrated
+thresholds for real VTT crops.
+
 Tune Detection exposes the mode and thresholds in face quality/body collection.
 In split mode its final-result caption shows both measurements and failed blur
-gates. Face previews use an aligned 112px **ellipse mask**, without loading
+gates, with the reason when the split estimate is unavailable. Face previews use an aligned 112px **ellipse mask**, without loading
 FaceOcc, and are labeled accordingly; production FaceOcc masking can give a
 different result. Body previews use the same encoder-size preparation and mask
 policy as recognition. Detection remains unfiltered in the tuner. The preview

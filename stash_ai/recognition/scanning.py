@@ -38,7 +38,7 @@ def scan_identity(config, namespace):
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
         detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
     return digest({'namespace': namespace, 'detection': detection,
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 12,
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 13,
                    'visibility_contract': visibility_contract})
 
 

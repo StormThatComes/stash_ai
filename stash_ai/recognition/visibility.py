@@ -6,12 +6,13 @@ import math
 from .config import DEFAULT_FACEOCC_LOGIT_THRESHOLD, MAX_FLOAT32, digest
 from .models import ASSETS, verified_bytes
 from .sharpness_policy import ALGORITHM
+from .split_blur import METHOD as SPLIT_METHOD
 
 CONTRACT = {'version': 9, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'landmark-template-square-padding-profile-roll-aligned-v1',
             'region': 'robust-five-landmark-whole-face-template-v1',
             'mask_threshold': 'logit>0', 'fraction': 'visible-pixels/ellipse-pixels',
-            'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1', 'split_sharpness': 'edge-spread-covariance-v1'}
+            'sharpness': ALGORITHM, 'sharpness_space': 'encoder-input-sharpness-v1', 'split_sharpness': SPLIT_METHOD}
 CONTRACT_ID = digest(CONTRACT)
 TUNED_CONTRACT_ID = digest(dict(CONTRACT, mask_threshold='logit>record.logit_threshold'))
 
