@@ -37,3 +37,20 @@ def test_preflight_orders_without_dropping_candidates(tmp_path):
     assert result[0]=={key:.5} and len(result)==len(proposals)
     assert list(cells([.2,.4,.8]))==[.3,.6]
     assert list(cells([1,2,3,8],integer=True))==[5]
+
+
+def test_local_screen_uses_real_replays_and_never_removes_a_proposal(tmp_path):
+    from stash_ai.recognition.solver_local_screen import LocalScreen
+    from stash_ai.recognition.offline_evaluation import _selection
+    config,goals = fixture(tmp_path,'disjoint')
+    first,other = goals['groups']
+    subset = dict(goals,groups=[first])
+    candidates = [{'recognition.match_threshold':v} for v in (.86,.87,.89,.91)]
+    with _open_readonly(config.database) as db:
+        _,scans = _selection(db,config,None,goals['scope'])
+        available = scans+[dict(id=f'other{i}',scene=str(i+10)) for i in range(32)]
+        screen = LocalScreen()
+        ordered = list(screen.order(candidates,config,db,subset,available,
+                                    [{'rival':other['members'][0]['identity_id']}]))
+        assert len(screen.info['scenes'])==3 and screen.info['replays']==4
+        assert sorted(p['recognition.match_threshold'] for p in ordered)==[.86,.87,.89,.91]

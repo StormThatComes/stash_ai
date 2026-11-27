@@ -18,5 +18,6 @@ def measure(function, fallback, coverage):
     except ResourceLimit as error:
         coverage.update(complete=False, reason='diagnostic_resource_limit', detail=str(error))
         return fallback
-    coverage.update(complete=True)
+    partial = result.get("partial_coverage") or result.get("evidence",{}).get("partial_coverage") if isinstance(result,dict) else None
+    coverage.update(partial or dict(complete=True))
     return result

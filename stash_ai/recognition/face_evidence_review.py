@@ -57,6 +57,31 @@ def review(rows, grouping):
     return proof
 
 
+def cached_review(rows, grouping):
+    from .run_cache import current, MISSING
+    from .solver_images import current as images
+    cache = current()
+    if cache is None or images() is None:
+        return review(rows,grouping)
+    from hashlib import sha256
+    from .config import digest, plain
+    from .memory_size import size
+    key_hash = sha256()
+    for row in rows:
+        for value in (row['id'],row['scan'],row['cue'],row['seconds'],row['geometry'],row['quality'],
+                      row['dimensions'],row['embedding']):
+            raw = value if isinstance(value,bytes) else str(value).encode()
+            key_hash.update(len(raw).to_bytes(8,'big'))
+            key_hash.update(raw)
+    key = ('solver-anchor-review',key_hash.digest(),digest(plain(grouping)))
+    found = cache.get(key)
+    if found is not MISSING:
+        return found
+    proof = review(rows,grouping)
+    cache.put(key,proof,size(proof)+256)
+    return proof
+
+
 def apply(db, selected, config):
     grouping=config.data['clustering']
     if not grouping.get('revalidate_face_anchors') and not grouping.get('near_duplicate_pixel_rms'):
@@ -67,7 +92,7 @@ def apply(db, selected, config):
         if grouping.get('near_duplicate_pixel_rms'):
             collapse(db,rows,grouping)
         if grouping.get('revalidate_face_anchors'):
-            for oid,proof in review(rows,grouping).items():
+            for oid,proof in cached_review(rows,grouping).items():
                 db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
                     "'$.anchor_review',json(?)) WHERE id=?",(encoded(proof),oid))
 

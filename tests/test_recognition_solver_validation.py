@@ -147,3 +147,14 @@ def test_accepted_exclusion_keeps_measured_route_witnesses_and_margin(tmp_path):
         wrong={'back':dict(expected=None,constraint='exclusion')})['blocker_trace']
     assert trace['route']==row['reason'] and trace['rival']=='A' and trace['witnesses']==row['witnesses']
     assert abs(trace['margin']-.06)<1e-10
+
+
+@pytest.mark.parametrize('verdict',['regressed','insufficient_coverage','no_coverage'])
+def test_holdout_blocks_promotion_but_preserves_report(tmp_path,verdict):
+    from stash_ai.recognition.merge_goal_output import export
+    config,_ = fixture(tmp_path)
+    result=dict(groups=[],namespace='test',best_result={'trial':'test'},holdout_required=True,holdout_validation={'verdict':{'status':verdict}})
+    output,policy=tmp_path/'report.json',tmp_path/'winner.yml'
+    export(config,result,output,policy)
+    assert not policy.exists()
+    assert json.loads(output.read_text())['yaml_withheld_reason']=='holdout_'+verdict

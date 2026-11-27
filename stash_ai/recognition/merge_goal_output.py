@@ -107,7 +107,13 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         raise FileExistsError('Outputs must be distinct new files, separate from source configuration and database.')
     recommendation = result.get('best_result') or result.get('recommendation')
     result['yaml_exported'] = False
-    if yaml_output and recommendation:
+    verdict = result.get('holdout_validation',{}).get('verdict')
+    blocked = (verdict or {}).get('status','pending') if verdict or result.get('holdout_required') else None
+    if blocked in ('improved','unchanged'):
+        blocked = None
+    if blocked:
+        result['yaml_withheld_reason'] = 'holdout_' + blocked
+    if yaml_output and recommendation and not blocked:
         serialized = configuration_document(config, recommendation, result['simulation'].get('input_selection', {}),
                                             mode=yaml_mode)
         verdict = result.get('holdout_validation',{}).get('verdict')
@@ -122,6 +128,8 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
             serialized = '\n'.join(lines) + '\n' + serialized
         destination = yaml_output.expanduser().resolve()
         if yaml_owner is not None:
+            if result.get('holdout_required') and destination.exists() and destination.read_bytes()!=serialized.encode():
+                raise FileExistsError('Validated solver output already exists with different content: '+str(destination))
             yaml_owner.write(serialized)
         else:
             from .merge_solver_checkpoint import AtomicFile

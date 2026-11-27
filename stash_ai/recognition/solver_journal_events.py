@@ -17,6 +17,8 @@ def apply(document, event):
             apply(document, item)
     elif kind == 'schedule':
         document.setdefault('schedule', []).append(event['entry'])
+    elif kind == 'local_screen':
+        document['local_screen'] = event['entry']
     elif kind == 'budget':
         budgets = document.setdefault('budgets', [document['signature']['settings']['maximum']])
         value = event['maximum']
