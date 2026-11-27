@@ -86,12 +86,19 @@ class Budget:
         self.lock=threading.RLock()
         self.reservations={}
         self.directories = {}
+        self.leased_files = {}
+        self.approximated = False
 
-    def check(self, growth=0, path=None, *, throttled=False):
+    def check(self, growth=0, path=None, *, throttled=False, exact=False):
         with self.lock:
-            return self._check(growth,path,throttled=throttled)
+            try:
+                return self._check(growth,path,throttled=throttled,exact=exact)
+            except ResourceLimit:
+                if not self.approximated or exact:
+                    raise
+                return self._check(growth,path,exact=True)
 
-    def _check(self, growth=0, path=None, *, throttled=False):
+    def _check(self, growth=0, path=None, *, throttled=False, exact=False):
         if throttled and not growth and self.volumes and time.monotonic()-self.checked<1:return self.volumes
         if not self.limit and not self.headroom:return {}
         from .scratch_ledger import file_leases
@@ -100,6 +107,10 @@ class Budget:
             if ledger is not None:
                 reservations.update((Path(name), (device, cap))
                                     for name, device, cap in ledger.execute('SELECT path,device,cap FROM files'))
+        self.approximated = False
+        for expired in self.leased_files.keys() - reservations.keys():
+            del self.leased_files[expired]
+        now = time.monotonic()
         counted_sizes = {}
         parent=self.database.parent
         roots=[p for p in parent.glob(self.database.name+'*') if not p.is_symlink()]
@@ -116,6 +127,14 @@ class Budget:
             if item in visited_paths:
                 continue
             visited_paths.add(item)
+            grant = reservations.get(item)
+            cached = self.leased_files.get(item)
+            if not exact and grant and cached and cached[0]==grant and now-cached[1]<1:
+                # Charge the entire enforceable file grant, including unwritten
+                # bytes. Reconcile on expiry or before denying capacity.
+                volumes.setdefault(grant[0],dict(path=str(item),used=0))
+                self.approximated = True
+                continue
             try:
                 entry = _retry_access_denied(_entry_metadata, item, parent_device)
             except (FileNotFoundError, NotADirectoryError):
@@ -144,6 +163,8 @@ class Budget:
                 row['used'] += info.st_size
                 if item in reservations:
                     counted_sizes[item] = info.st_size
+                    if dev==grant[0] and info.st_size<=grant[1] and not _is_reparse_point(info):
+                        self.leased_files[item] = grant,now
             seen.add(key)
         for directory in self.directories.keys() - visited:
             del self.directories[directory]
@@ -211,12 +232,13 @@ def reserve_file(path, maximum):
         info = path.stat()
         dev, existing = _device(path, info), info.st_size
         with file_leases() as ledger:
+            exact = False
             while True:
                 # A directory walk can outlast SQLite's busy timeout. Take the
                 # writer lock only to validate the measurement and publish.
                 version = ledger.execute('PRAGMA data_version').fetchone() if ledger is not None else None
                 try:
-                    volume = budget.check(path=path)[dev]
+                    volume = budget.check(path=path,exact=True)[dev] if exact else budget.check(path=path)[dev]
                 except ResourceLimit:
                     if ledger is None or ledger.execute('PRAGMA data_version').fetchone() == version:
                         raise
@@ -226,6 +248,9 @@ def reserve_file(path, maximum):
                 if budget.limit:
                     cap = min(cap, existing + budget.limit - volume['requested'])
                 cap = max(0, cap)
+                if cap < maximum and budget.approximated and not exact:
+                    exact = True
+                    continue
                 if ledger is None:
                     break
                 ledger.execute('BEGIN IMMEDIATE')
