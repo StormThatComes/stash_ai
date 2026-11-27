@@ -38,6 +38,8 @@ def candidates(db,rows,changed):
                                  (encoded([v['observation'] for v in payloads]),)))
         scenes = dict(db.execute("SELECT id,scene FROM scans WHERE id IN (SELECT value FROM json_each(?))",
                                  (encoded(sorted({row[1] for row in batch})),)))
+        distinct = len({row[0] for row in batch}) == len(batch)
+        writes = []
         for row,fresh in zip(batch,payloads):
             prior_row = old.get(row[0])
             observation = fresh['observation']
@@ -52,13 +54,20 @@ def candidates(db,rows,changed):
                 except (ValueError, TypeError, AttributeError):
                     pass
             if not same or latest.get(observation) != row[0]:
-                db.execute('DELETE FROM candidates WHERE id=?',(row[0],))
                 packed = (*row[:5],pack(row[5]))
-                db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',packed)
+                if distinct:
+                    writes.append(packed)
+                else:
+                    db.execute('DELETE FROM candidates WHERE id=?',(row[0],))
+                    db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',packed)
                 old[row[0]] = packed
                 latest[observation] = row[0]
                 changed.add(scenes[row[1]])
-            yield row
+        if writes:
+            db.execute('DELETE FROM candidates WHERE id IN (SELECT value FROM json_each(?))',
+                       (encoded([r[0] for r in writes]),))
+            db.executemany('INSERT INTO candidates VALUES (?,?,?,?,?,?)',writes)
+        yield from batch
 
 
 def enqueue(db,scope,namespace,item,config,changed,reason):
