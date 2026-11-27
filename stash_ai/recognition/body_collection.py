@@ -139,23 +139,34 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     # A single pose containing distinct accepted faces is still an unresolved pair.
-    distinct_faces = merged_pair = False
-    if len(people)==1 and len(faces)>=2:
-        left,top,right,bottom = people[0]['bounds']
-        heads = [(f.box[0]+f.box[2]/2,f.box[1]+f.box[3]/2,min(f.box[2:]))
-                 for f,row in zip(faces,rows) if row['rejected'] is None]
-        for i,(x,y,size) in enumerate(heads):
-            for u,v,other in heads[i+1:]:
-                if np.hypot(x-u,y-v) >= max(4.,.7*max(size,other)):
-                    distinct_faces = True
-                    merged_pair |= left<=x<right and top<=y<bottom and left<=u<right and top<=v<bottom
+    heads = [(f.box[0]+f.box[2]/2, f.box[1]+f.box[3]/2, min(f.box[2:]), match)
+             for f,row,match in zip(faces,rows,matches) if row['rejected'] is None]
+    merged = set()
+    distinct_faces = False
+    for i,(x,y,size,owner) in enumerate(heads):
+        for u,v,other,peer in heads[i+1:]:
+            if np.hypot(x-u,y-v) < max(4.,.7*max(size,other)):
+                continue
+            distinct_faces = True
+            for index,person in enumerate(people):
+                if owner not in (None,index) or peer not in (None,index):
+                    continue
+                left,top,right,bottom = person['bounds']
+                if left<=x<right and top<=y<bottom and left<=u<right and top<=v<bottom:
+                    # A second available lane can explain an unassigned head.
+                    shared = any(j!=index and any(box['bounds'][0]<=cx<box['bounds'][2] and
+                                 box['bounds'][1]<=cy<box['bounds'][3] for cx,cy in ((x,y),(u,v)))
+                                 for j,box in enumerate(people))
+                    if not shared:
+                        merged.add(index)
     items=[]
     contact_masks = {}
     # Keep unavailable face projections for the existing hybrid/report path.
     for row,match in zip(rows,matches):
-        if row['rejected'] is None and (match is None or merged_pair):
+        if row['rejected'] is None and (match is None or match in merged):
             items.append(([row['id'],dict(person=None,identity_rejection='person_face_association_unavailable'),None,None],None))
     for index,person in enumerate(people):
+        merged_pair = index in merged
         associated=next((i for i,m in enumerate(matches) if m==index),None)
         face=faces[associated] if associated is not None else None
         row=rows[associated] if associated is not None else None
@@ -188,8 +199,8 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measured.update(query_only=True,query_only_reason='contact_pose_recovered')
         if person.get('future_torso_retry'):
             measured.update(query_only=True,query_only_reason='future_torso_retry')
-        if distinct_faces:
-            measured['expected_people'] = 2
+        if distinct_faces and (len(people)==1 or merged_pair):
+            measured['expected_people'] = len(people)+1
         if merged_pair:
             measured.update(query_only=True, query_only_reason='unresolved_partner')
             # Neither face owns a merged body. Keep the independent face observations.
