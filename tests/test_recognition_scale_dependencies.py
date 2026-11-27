@@ -49,3 +49,19 @@ def test_index_moves_owner_and_rolls_back_with_membership(tmp_path):
         assert dict(db.execute('SELECT person,total FROM scene_owners WHERE scan=?',(sid,)))=={'a':1,'b':1}
         db.rollback()
         assert dict(db.execute('SELECT person,total FROM scene_owners WHERE scan=?',(sid,)))=={'a':2}
+
+
+def test_replace_with_unassigned_body_removes_previous_owner_with_recursion_off():
+    import sqlite3
+    from stash_ai.recognition.scene_owner_index import SCHEMA
+    with sqlite3.connect(':memory:') as db:
+        db.execute('PRAGMA recursive_triggers=OFF')
+        for observations,members in [('observations','members'),('body_observations','body_members')]:
+            db.execute(f'CREATE TABLE {observations}(id TEXT PRIMARY KEY,scan TEXT)')
+            db.execute(f'CREATE TABLE {members}(observation TEXT PRIMARY KEY,person TEXT)')
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO body_observations VALUES('b','s')")
+        db.execute("INSERT INTO body_members VALUES('b','owner')")
+        db.execute("INSERT OR REPLACE INTO body_members VALUES('b',NULL)")
+        assert not db.execute('SELECT 1 FROM scene_owner_members').fetchone()
+        assert not db.execute('SELECT 1 FROM scene_owners').fetchone()

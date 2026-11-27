@@ -31,7 +31,9 @@ def triggers(*, legacy=False):
                f"FROM {observations} o WHERE o.id=new.observation "
                "ON CONFLICT(kind,observation) DO UPDATE SET scan=excluded.scan,person=excluded.person;")
         if not legacy:
-            put = put.replace("WHERE o.id=new.observation", "WHERE o.id=new.observation AND new.person IS NOT NULL")
+            forget = (f"DELETE FROM scene_owner_members WHERE kind='{kind}' AND observation=new.observation "
+                      "AND new.person IS NULL;")
+            put = forget + put.replace("WHERE o.id=new.observation", "WHERE o.id=new.observation AND new.person IS NOT NULL")
         delete = f"DELETE FROM scene_owner_members WHERE kind='{kind}' AND observation=old.observation;"
         for event, body in (('INSERT',put),('DELETE',delete),('UPDATE',delete+put)):
             add(f'recognition_owner_{kind}_{event.lower()}',event,members,body)
