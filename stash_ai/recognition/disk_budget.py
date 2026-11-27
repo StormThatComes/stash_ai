@@ -92,7 +92,7 @@ class Budget:
             return self._check(growth,path,throttled=throttled)
 
     def _check(self, growth=0, path=None, *, throttled=False):
-        if throttled and time.monotonic()-self.checked<1:return self.volumes
+        if throttled and not growth and self.volumes and time.monotonic()-self.checked<1:return self.volumes
         if not self.limit and not self.headroom:return {}
         from .scratch_ledger import file_leases
         reservations = dict(self.reservations)
@@ -109,9 +109,13 @@ class Budget:
         volumes = {}
         seen = set()
         visited = set()
-        pending = [(root, None) for root in roots]
+        pending = [(root, None) for root in dict.fromkeys(roots)]
+        visited_paths = set()
         while pending:
             item, parent_device = pending.pop()
+            if item in visited_paths:
+                continue
+            visited_paths.add(item)
             try:
                 entry = _retry_access_denied(_entry_metadata, item, parent_device)
             except (FileNotFoundError, NotADirectoryError):

@@ -54,7 +54,7 @@ _GROUPS = (
      'min_face_pixels=min_auxiliary_face_pixels min_sharpness=min_auxiliary_sharpness sharpness_mode=auxiliary_sharpness_mode min_focus_sharpness=auxiliary_min_focus_sharpness min_motion_sharpness=auxiliary_min_motion_sharpness '
      'min_visible_face_fraction=min_auxiliary_visible_face_fraction'),
     ('matching.face.samples.references', 'clustering',
-     'max_samples_per_person max_people_per_lookup max_reference_mb=max_reference_bytes'),
+     'max_samples_per_person max_people_per_lookup'),
     ('matching.face.anchors', 'recognition', 'min_identity_support'),
     ('matching.face.anchors', 'clustering', 'revalidate_face_anchors anchor_review_max_cues'),
     ('matching.face.evidence', 'clustering', 'near_duplicate_pixel_rms near_duplicate_similarity'),
@@ -117,6 +117,7 @@ _GROUPS = (
      'cache_mb=rebuild_cache_bytes matrix_cache_mb=rebuild_matrix_cache_bytes '
      'queue_mb=rebuild_queue_bytes checkpoint_mode=rebuild_checkpoint_mode checkpoint_scenes=rebuild_checkpoint_scenes '
      'checkpoint_mb=rebuild_checkpoint_bytes replay_snapshot_mb=replay_snapshot_bytes pixel_index_mb=pixel_index_bytes derived_cache_mb=derived_cache_bytes'),
+    ('execution.rebuild.face', 'clustering', 'reference_mb=max_reference_bytes'),
     ('execution.rebuild.body', 'sapiensid.execution',
      'max_candidate_pairs max_witness_comparisons reference_mb=reference_bytes plan_mb=plan_bytes'),
     ('execution.solver', 'execution', 'strict=solver_strict stop_on_stagnation=solver_stop_on_stagnation compare_scene_strategies=solver_compare_scene_strategies'),
@@ -145,6 +146,8 @@ PUBLIC_PATHS = _paths()
 INTERNAL_PATHS = {value: key for key, value in PUBLIC_PATHS.items()}
 LEGACY_BYTE_PATHS = {key[:-3] + '_bytes': value for key, value in PUBLIC_PATHS.items()
                      if value.endswith('_bytes')}
+LEGACY_BYTE_PATHS['matching.face.samples.references.max_reference_bytes'] = 'clustering.max_reference_bytes'
+LEGACY_REFERENCE_MB = 'matching.face.samples.references.max_reference_mb'
 LEGACY_MASK_PATHS = {key.replace('pose.mask.', 'pose.refinement.', 1): value
                      for key, value in PUBLIC_PATHS.items()
                      if key.startswith('pose.mask.') and not key.startswith('pose.mask.apply_to.')}
@@ -156,6 +159,8 @@ LEGACY_MASK_PATHS.update({
 
 
 def canonical_path(path):
+    if path == LEGACY_REFERENCE_MB:
+        return 'execution.rebuild.face.reference_mb'
     internal = LEGACY_MASK_PATHS.get(path)
     if path == 'sapiensid.pose.refinement.generic_second_pass':
         internal = path
@@ -207,6 +212,8 @@ def apply_v2(data, supplied):
     shared_paths = {f'pose.point_quality.{field}': field for field in POINT_FIELDS}
     seen = set()
     for key, value in leaf_items(supplied):
+        if key == LEGACY_REFERENCE_MB:
+            key = 'execution.rebuild.face.reference_mb'
         if key == 'version':
             continue
         if key in shared_paths:
@@ -301,6 +308,8 @@ def v2_document(data, *, source=b''):
 
 def internal_path(path):
     """Resolve a v2 field, including an indexed regional-rule minimum."""
+    if path == LEGACY_REFERENCE_MB:
+        return 'clustering.max_reference_bytes'
     if path in LEGACY_MASK_PATHS:
         return LEGACY_MASK_PATHS[path]
     if path in PUBLIC_PATHS:
@@ -325,7 +334,7 @@ def public_path(path):
 def internal_setting(path, value):
     """Resolve a public edit and convert MB; internal/legacy byte edits stay bytes."""
     resolved = internal_path(path)
-    if path in PUBLIC_PATHS and resolved.endswith('_bytes'):
+    if (path in PUBLIC_PATHS or path == LEGACY_REFERENCE_MB) and resolved.endswith('_bytes'):
         value = from_mb(resolved, value, name=path)
     return resolved, value
 

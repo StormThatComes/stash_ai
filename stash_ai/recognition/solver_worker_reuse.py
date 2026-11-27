@@ -22,6 +22,9 @@ class Reuse:
             self.cache=stack.enter_context(cache(request.config))
             from .disk_budget import scope as disk_scope
             stack.enter_context(disk_scope(request.config))
+            if request.config.data['execution'].get('rebuild_storage') == 'disk':
+                from .scratch_space import scope as scratch_scope
+                stack.enter_context(scratch_scope(request.config))
             stack.enter_context(private_session())
             stack.enter_context(prepared(request.goals))
             stack.enter_context(shared(request.shared_directory,request.shared_bytes))
@@ -62,13 +65,13 @@ class PrivateTrial:
 
     @contextmanager
     def borrow(self, settings, seed, observations):
-        from .offline_evaluation import _ram
+        from .offline_evaluation import private_target
         from .trial_inputs import prepare
         from .solver_slot_index import Slots
         from .profiling import count
         try:
             if self.db is None:
-                self.db = _ram(settings)
+                self.db = private_target(settings)
                 prepare(self.db, seed)
                 if isinstance(observations, Slots):
                     observations.attach(self.db)

@@ -78,6 +78,8 @@ def work(request):
 class Trials(AbstractContextManager):
     def __init__(self, execution, factory, context, journal=None, progress=None):
         self.execution, self.factory, self.context, self.journal = execution, factory, context, journal
+        from weakref import WeakValueDictionary
+        self.open_deltas = WeakValueDictionary()
         self.pending, self.ready = OrderedDict(), {}
         self.progress, self.last_progress = progress, 0.
         self.history = list(journal.document.get('schedule', ())) if journal else []
@@ -194,7 +196,10 @@ class Trials(AbstractContextManager):
         if not isinstance(delta, Delta):
             return result
         directory = self.journal.directory if delta.journal else self.delta_directory
-        values = delta.read(directory)
+        from .solver_delta_transport import DiskChanges
+        values = delta.read(directory, indexed=True)
+        if isinstance(values, DiskChanges):
+            self.open_deltas[id(values)] = values
         if remove and not delta.journal:
             (self.delta_directory/delta.filename).unlink()
         return dict(result, prediction_delta=values)
@@ -348,4 +353,6 @@ class Trials(AbstractContextManager):
                 if self.updates is not None:
                     self.updates.close()
                     self.updates.join_thread()
+                for delta in list(self.open_deltas.values()):
+                    delta.close()
                 self.delta_workspace.cleanup()

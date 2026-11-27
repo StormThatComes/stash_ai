@@ -31,7 +31,7 @@ def copy_history(source, target, selected, scope, namespace, *, commit=True):
             source.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,'
                            'dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY rowid', (row['id'],)))
         from .person_signal import copy_evidence
-        copy_evidence(source,target,row['id'])
+        copy_evidence(source,target,row['id'],compact=True)
         from .pixel_storage import copy_rows
         copy_rows(source,target,source.execute('SELECT quality FROM observations WHERE scan=?',(row['id'],)))
     from .scan_heads import copy_heads

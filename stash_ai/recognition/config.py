@@ -458,17 +458,59 @@ def effective_data(supplied, *, device=None, detection_preview=False):
     return version, data
 
 
-def load(path=None, *, database=None, device=None, root=None, detection_preview=False):
+def _document(path):
+    with path.open('rb') as stream:
+        raw = stream.read(131073)
+    supplied = parse_yaml(raw)
+    if not isinstance(supplied, dict) or 'version' not in supplied:
+        raise ValueError(f'{path.name} requires a versioned mapping.')
+    return raw, supplied
+
+
+def _execution_profile(path):
+    _, document = _document(path)
+    if set(document) != {'version','execution'} or document['version'] != 2 or not isinstance(document['execution'],dict):
+        raise ValueError(f'{path.name} must contain only version 2 and an execution mapping.')
+    return document['execution']
+
+
+def _overlay(base, overrides):
+    for key,value in overrides.items():
+        if isinstance(value,dict) and isinstance(base.get(key),dict):
+            _overlay(base[key],value)
+        else:
+            base[key] = value
+
+
+def load(path=None, *, database=None, device=None, root=None, detection_preview=False, solver_profile=False):
     root = Path.cwd() if root is None else Path(root)
     selected = Path(path).expanduser().resolve() if path is not None else root / 'facial_recognition.yml'
     if path is not None or selected.is_file():
-        # Read bounded bytes before parsing, not an unbounded read_bytes().
-        with selected.open('rb') as stream:
-            raw = stream.read(131073)
-        supplied = parse_yaml(raw)
-        if not isinstance(supplied, dict) or 'version' not in supplied:
-            raise ValueError('facial_recognition.yml requires a versioned mapping.')
+        raw, supplied = _document(selected)
         base = selected.parent
+        solver_file = base / 'facial_recognition_solver.yml'
+        if selected.name == solver_file.name and (base / 'facial_recognition.yml').is_file():
+            base_raw, policy = _document(base / 'facial_recognition.yml')
+            if 'execution_file' in policy or set(supplied) == {'version','execution'}:
+                overrides = _execution_profile(solver_file)
+                solver_profile = True
+                raw, supplied = base_raw, policy
+                if 'execution_file' not in policy:
+                    if policy['version'] != 2:
+                        raise ValueError('An execution-only solver profile requires a v2 recognition policy.')
+                    import yaml
+                    _overlay(supplied.setdefault('execution',{}),overrides)
+                    raw = yaml.safe_dump(supplied,sort_keys=False).encode()
+        if 'execution_file' in supplied:
+            import yaml
+            filename = supplied.pop('execution_file')
+            if not isinstance(filename,str) or not filename or 'execution' in supplied or supplied['version'] != 2:
+                raise ValueError('execution_file requires a v2 policy with a separate execution profile.')
+            shared = _execution_profile(base / filename)
+            if solver_profile:
+                _overlay(shared, _execution_profile(solver_file))
+            supplied['execution'] = shared
+            raw = yaml.safe_dump(supplied,sort_keys=False).encode()
     else:
         raw, supplied, base, selected = b'', {}, root.resolve(), None
     version, data = effective_data(supplied, device=device, detection_preview=detection_preview)
@@ -481,4 +523,4 @@ def load(path=None, *, database=None, device=None, root=None, detection_preview=
                       resolve(data['names']['file']) if data['names']['file'] else None, version,
                       tuple((key, value) for key, value in (
                           ('database', Path(database).expanduser().resolve() if database is not None else None),
-                          ('device', device), ('detection_preview', detection_preview or None)) if value is not None))
+                          ('device', device), ('solver_profile', solver_profile or None), ('detection_preview', detection_preview or None)) if value is not None))

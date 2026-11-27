@@ -34,6 +34,9 @@ class Predictions(Mapping):
         else:
             rows = ((key,person) for key,person in self.baseline.items() if person in owners)
         yield from ((key,person) for key,person in rows if key not in self.changes)
+        if hasattr(self.changes, 'for_owners'):
+            yield from self.changes.for_owners(owners)
+            return
         if self.changed_owners is None:
             from collections import defaultdict
             self.changed_owners = defaultdict(list)

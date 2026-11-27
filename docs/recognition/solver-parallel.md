@@ -1,5 +1,13 @@
 # Parallel merge solver
 
+The shipped policy loads `facial_recognition_execution.yml` from its directory.
+For `report-merge --solve`, the loader then applies the sparse sibling
+`facial_recognition_solver.yml` over those execution settings. Keep the three
+files together. A full solver export or an existing standalone v1/v2 policy
+continues to load on its own. The requested parallel trial count remains a CLI
+setting (`--solver-trials 8`).
+
+
 [Documentation index](../README.md) · [Recognition workflow](../facial-recognition.md)
 
 - [Usage](#usage)

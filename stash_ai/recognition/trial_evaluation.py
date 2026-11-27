@@ -58,7 +58,8 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
     try:
         from .solver_worker_reuse import current_private
         private = current_private() if seed is not None else None
-        target_context = private.borrow(settings, seed, observations) if private else closing(_ram(settings))
+        from .offline_evaluation import private_target
+        target_context = private.borrow(settings, seed, observations) if private else closing(private_target(settings))
         with observe_stages(stage_update), target_context as target:
             with stage('Prepare replay'):
                 if seed is None:

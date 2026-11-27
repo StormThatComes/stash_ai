@@ -96,7 +96,7 @@ measure changes in actual assignments.
 
 ## Recognition YAML v2
 
-The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
+The shipped [policy](../facial_recognition.yml) and [execution profile](../facial_recognition_execution.yml) together list every
 setting with operator help immediately below it. The file groups settings by
 stage: face scanning, pose detection, SapiensID collection, identity matching,
 portraits, execution, storage and naming. Recognition runs use RF-DETR-XL for

@@ -12,9 +12,13 @@ def prepare(target, seed):
         # Standalone callers may supply a RAM seed, which cannot be attached.
         if getattr(target, 'budget', None) is not None:
             required = seed.execute('PRAGMA page_count').fetchone()[0] * seed.execute('PRAGMA page_size').fetchone()[0]
-            target.budget.reserve(target.owner, required)
+            if hasattr(target,'account_pages'):
+                target.budget.reserve(target.owner, required)
+            else:
+                target.budget.set(target,2*required)
+                target.capacity = target.estimate = required
         seed.backup(target)
-        if getattr(target, 'budget', None) is not None:
+        if hasattr(target,'account_pages') and target.budget is not None:
             target.account_pages()
         return
     from .profiling import count

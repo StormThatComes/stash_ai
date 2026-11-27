@@ -96,7 +96,7 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
 def test_shipped_template_matches_default_schema(filename):
     path = Path(__file__).resolve().parents[1] / filename
     # Check the file before load() fills missing fields with defaults.
-    supplied = parse_yaml(path.read_bytes())
+    supplied = parse_yaml(load(path).source)
     def paths(mapping, prefix=''):
         found = set()
         for key, value in mapping.items():
@@ -119,7 +119,8 @@ def test_shipped_template_matches_default_schema(filename):
     for index, line in enumerate(lines):
         if line.strip() and not line.lstrip().startswith('#'):
             assert lines[index + 1].lstrip().startswith('# '), line
-    assert render_v2(v2_document(config.data, source=config.source)) == path.read_text()
+    exported = parse_yaml(render_v2(v2_document(config.data, source=config.source)).encode())
+    assert exported == supplied
     assert collection_enabled(config)
     body = config.data['sapiensid']
     assert body['pose']['detector'] == 'rfdetr_xl'
