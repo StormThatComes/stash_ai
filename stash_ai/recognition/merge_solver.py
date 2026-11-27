@@ -81,7 +81,7 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     from .solver_measurement_budget import settings as diagnostic_settings, measure
     diagnostic = diagnostic_settings(config)
     diagnostic_coverage = {'hybrid': {}, 'body': {}}
-    analysis = measure(lambda: analyse(db, diagnostic, goals),
+    analysis = measure(lambda: analyse(db, diagnostic, goals, allow_partial=True),
         dict(enabled=False, options={}, proposals=[], pairs=[]), diagnostic_coverage['hybrid'])
     analysis['face_measurement_coverage'] = coverage
     from .body_solver import analyse as body_analyse

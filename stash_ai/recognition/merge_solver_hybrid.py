@@ -33,7 +33,7 @@ def mode_boundary(left, right):
     return min(rows + columns)
 
 
-def analyse(db, config, goals):
+def analyse(db, config, goals, *, allow_partial=False):
     """Inspect target pairs and every incident competitor, never outsider pairs.
 
     Goal sets only direct the search. They neither enter production matching nor
@@ -135,6 +135,8 @@ def analyse(db, config, goals):
                 reserve(proof_bytes + size(nearest) + size(options) + size(result['identities']))
 
     except ResourceLimit as error:
+        if not allow_partial:
+            raise
         result['partial_coverage'] = dict(complete=False,reason='diagnostic_resource_limit',
                                           detail=str(error),measured_pairs=len(result['pairs']))
         nearest.clear()
@@ -181,8 +183,7 @@ def analyse(db, config, goals):
     result['proposals'].extend(individual)
     result['nearest_competitors'] = [nearest[p] for p in sorted(nearest)]
     result['options'] = {k: sorted(v, reverse=True) for k, v in options.items()}
-    if not result.get('partial_coverage'):
-        reserve(size(result))
+    reserve(size(result))
     return result
 
 
