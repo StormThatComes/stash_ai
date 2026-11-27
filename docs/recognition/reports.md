@@ -754,11 +754,15 @@ The rest of the inspector remains responsive. Cancel restores the previous page,
 if any; Refresh retries. Closing cancels work without waiting for completion.
 
 Observation nodes display aspect-preserving retained crops up to 64 × 64 pixels.
-Collapsed groups show one explicitly labelled **sample**, not a new portrait or
-View medoid. Expand a group to see its observations. Role-coloured borders and
-face/body labels remain visible; **Thumbnails** switches to the symbol view without
-reading pixels again. Dragging, physics and zoom reuse the same images. Thumbnails
-keep a readable screen size while zoom changes node spacing.
+Each observation carries its displayed role, such as a blue **Anchor** or an amber
+**Auxiliary**, above its face/body and scene/cue label. A green diamond labelled
+**View** marks a recorded witness set. Its medoid and supporting observations keep
+their own labels. A collapsed group shows counts such as **View ×1**, **Anchor ×2**
+and **Auxiliary ×1** for this page. Small dots represent assignment decisions.
+A group thumbnail is labelled **sample**. Double-click a group
+to see its individual nodes. **Thumbnails** switches between retained crops and
+symbols. Both modes keep role labels at a readable screen size during zoom and
+reuse the loaded images.
 
 Only crops already retained locally are loaded, for the bounded graph page and its
 references (at most 500 nodes). Missing/unreadable crops keep their symbol; hover
