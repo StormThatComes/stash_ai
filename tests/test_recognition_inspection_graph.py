@@ -56,6 +56,37 @@ def test_layout_is_finite_repeatable_and_respects_pins():
     assert expanded['edges'][0]['source']=='b'
 
 
+def test_role_labels_follow_memberships_and_count_each_displayed_view_once():
+    from stash_ai.recognition.inspection_graph_labels import role_labels
+    from stash_ai.recognition.inspection_graph_layout import project
+
+    nodes = [
+        dict(id='a', type='observation', kind='face', scene='2', current_member=True,
+             state='anchor', authority='attachment_only'),
+        dict(id='b', type='observation', kind='body', scene='2', current_member=True,
+             state='auxiliary', authority='direct_auxiliary'),
+        dict(id='v', type='view'), dict(id='d1', type='decision'), dict(id='d2', type='decision'),
+        dict(id='witness', type='observation', state='reference'),
+        dict(id='legacy', type='observation', scene='3', current_member=True, authority='strict_route'),
+        dict(id='attached', type='observation', scene='3', current_member=True, state='attachment'),
+    ]
+    graph = dict(nodes=nodes, edges=[
+        dict(source='witness', target='v', relation='medoid'),
+        dict(source='v', target='d1', relation='view_match'), dict(source='d1', target='a', relation='assigned'),
+        dict(source='v', target='d2', relation='view_match'), dict(source='d2', target='b', relation='assigned'),
+    ])
+    compact, groups = project(graph, set())
+    view_group = next(n for n in compact['nodes'] if n.get('label') == 'View matches')
+    assert len(view_group['members']) == 5
+    assert role_labels(view_group) == [('view', 'View ×1'), ('anchor', 'Anchor ×1'), ('auxiliary', 'Auxiliary ×1')]
+    expanded, _ = project(graph, groups)
+    assert {n['id']: role_labels(n) for n in expanded['nodes']} == {
+        'a': [('anchor', 'Anchor')], 'b': [('auxiliary', 'Auxiliary')], 'v': [('view', 'View')],
+        'd1': [], 'd2': [], 'witness': [('reference', 'Reference')],
+        'legacy': [('unknown', 'Unknown')], 'attached': [('attachment', 'Attachment')],
+    }
+
+
 def test_diagnostics_exclude_rivals_and_new_similarities():
     from stash_ai.recognition.inspection_graph_diagnostics import related, bridges
     graph=dict(nodes=[dict(id=x) for x in 'abcde'],edges=[
@@ -116,6 +147,10 @@ def test_shared_view_identity_does_not_depend_on_query_score(tmp_path):
     assert len(views)==1
     assert views[0]['support_count']==8 and views[0]['retained_examples']==1
     assert len([e for e in graph['edges'] if e['source']==views[0]['id']])==2
+    from stash_ai.recognition.inspection_graph_layout import project
+    compact, _ = project(graph, set())
+    view_group = next(n for n in compact['nodes'] if n.get('label') == 'View matches')
+    assert view_group['role_counts'] == {'view': 1, 'anchor': 2}
 
 
 def test_graph_bounds_and_rejects_revision_changes(tmp_path,monkeypatch):

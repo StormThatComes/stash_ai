@@ -36,13 +36,27 @@ def step(positions, edges, pinned=()):
     return {k:tuple(map(float,moved[i])) for i,k in enumerate(ids)}, float(np.max(np.abs(force)))
 
 
+def node_role(node):
+    """The displayed membership role, or the recorded View node itself."""
+    if node['type'] == 'view':
+        return 'view'
+    if node['type'] == 'observation':
+        state = node.get('state')
+        return state if state in ('anchor', 'auxiliary', 'attachment', 'reference') else 'unknown'
+    return None
+
+
 def project(graph, expanded):
     """Presentation groups do not assert production Views or new memberships."""
     nodes = {n['id']:n for n in graph['nodes']}
     groups = {}
+    titles = {}
     for n in nodes.values():
         if n['type']=='observation' and n.get('current_member'):
-            groups[n['id']] = 'group:'+str(n['scene'])+':'+n.get('authority','unknown')
+            authority = n.get('authority', 'unknown')
+            group = f"group:{n['scene']}:{authority}"
+            groups[n['id']] = group
+            titles[group] = f"Scene {n['scene']} · {authority.replace('_', ' ')}"
     for e in graph['edges']:
         if e['relation']=='assigned' and e['target'] in groups:
             groups[e['source']] = groups[e['target']]
@@ -51,6 +65,7 @@ def project(graph, expanded):
     for e in graph['edges']:
         if e['relation']=='view_match':
             group='group:'+e['source'];groups[e['source']]=group;groups[e['target']]=group
+            titles[group] = 'View matches'
             for a in graph['edges']:
                 if a['source']==e['target'] and a['relation']=='assigned':groups[a['target']]=group
     mapped, output = {}, {}
@@ -60,8 +75,15 @@ def project(graph, expanded):
         mapped[identifier]=shown
         if shown==identifier:output[shown]=n
         else:
-            entry=output.setdefault(shown,dict(id=shown,type='group',label=group.removeprefix('group:'),members=[],provenance='presentation_group'))
+            if shown not in output:
+                output[shown] = dict(id=shown, type='group', label=titles[group], members=[],
+                                     role_counts={}, provenance='presentation_group')
+            entry = output[shown]
             entry['members'].append(identifier)
+            role = node_role(n)
+            if role:
+                counts = entry['role_counts']
+                counts[role] = counts.get(role, 0) + 1
     edges={}
     for e in graph['edges']:
         a,b=mapped[e['source']],mapped[e['target']]

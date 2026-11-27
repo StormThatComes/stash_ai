@@ -4,13 +4,12 @@ import json
 from queue import Queue, Empty, Full
 from PIL import ImageTk
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import font as tkfont, ttk, simpledialog
 from .inspection_runtime import Worker, stamp
 from .inspection_graph import build, PAGE_SIZE
-from .inspection_graph_layout import initial, step, project
+from .inspection_graph_layout import initial, step, project, node_role
+from .inspection_graph_labels import NodeCaption, ROLE_COLORS
 from .inspection_context import locate
-
-COLORS = dict(anchor='#2563eb',auxiliary='#d97706',attachment='#7c3aed',unknown='#64748b',reference='#94a3b8')
 
 
 class GraphWindow:
@@ -47,8 +46,17 @@ class GraphWindow:
             ttk.Button(diagnostics,text=label,command=command).pack(side='left')
         self.action_bars.append(diagnostics)
         ttk.Checkbutton(diagnostics,text='Thumbnails',variable=self.show_thumbnails,command=self.rebuild).pack(side='left')
+        self.role_font = tkfont.nametofont('TkDefaultFont', root=self.window).copy()
+        self.role_font.configure(weight='bold')
+        legend = ttk.Frame(self.window, padding=(5, 0))
+        legend.pack(anchor='w')
+        for title, roles in [('Observation role', ('anchor', 'auxiliary', 'attachment')), ('Recorded evidence', ('view',))]:
+            ttk.Label(legend, text=title).pack(side='left', padx=4)
+            for role in roles:
+                tk.Label(legend, text=role.title(), background=ROLE_COLORS[role], foreground='white',
+                         font=self.role_font, padx=5).pack(side='left', padx=1)
+        ttk.Label(legend, text='Diamond = View · Dot = decision · ×N = count in group').pack(side='left', padx=6)
         ttk.Label(self.window,text='Drag: move/pin node or pan background · Right-click: unpin · Double-click: expand group / inspect observation\n'
-            'Blue: anchor · Amber: auxiliary · Purple: attachment · Face/body labels on thumbnails · Diamond: View · Small dot: decision\n'
             'Distances are layout only. Groups are visual containers. Missing links may reflect missing evidence.').pack(anchor='w')
         self.loading_panel=ttk.Frame(self.window,padding=30)
         self.loading_label=ttk.Label(self.loading_panel,text='Preparing graph…')
@@ -185,8 +193,9 @@ class GraphWindow:
             line=self.canvas.create_line(0,0,0,0,fill='#94a3b8',arrow='last',dash=(4,3) if edge['relation'] in ('similarity','rival') else ())
             self.lines.append((line,edge));self.item_edges[line]=edge
         for identifier,n in self.nodes.items():
-            color=COLORS.get(n.get('state'),'#059669' if n['type']=='view' else '#334155')
+            color = ROLE_COLORS.get(node_role(n), '#334155')
             thumbnail=self.thumbnail(n)
+            thumbnail_size = None
             if thumbnail is not None:
                 item=self.canvas.create_rectangle(0,0,0,0,fill=color,outline=color,width=3)
             elif n['type']=='group':
@@ -198,32 +207,35 @@ class GraphWindow:
             if thumbnail is not None:
                 photo=self.canvas.create_image(0,0,image=thumbnail)
                 self.thumbnail_items[identifier]=photo;self.item_nodes[photo]=identifier
-            label=(f"{n.get('label','Group')[:32]} · {len(n['members'])}" + (' · sample' if thumbnail else '') if n['type']=='group' else
-                   'View' if n['type']=='view' else '' if n['type']=='decision' else f"{n.get('kind','?')} {n.get('scene','?')}:{n.get('cue','?')}")
-            text=self.canvas.create_text(0,0,text=label,fill='#0f172a',anchor='n',font=('TkDefaultFont',9))
-            self.items[identifier]=(item,text);self.item_nodes[item]=identifier;self.item_nodes[text]=identifier
+                thumbnail_size = (thumbnail.width() / 2 + 3, thumbnail.height() / 2 + 3)
+            caption = None
+            if n['type'] != 'decision':
+                caption = NodeCaption(self.canvas, item, n, self.role_font, has_thumbnail=thumbnail is not None)
+                self.item_nodes.update(dict.fromkeys(caption.items, identifier))
+            self.items[identifier] = (item, caption, thumbnail_size)
+            self.item_nodes[item] = identifier
         self.draw()
 
     def draw(self):
         def point(identifier):
             x,y=self.positions[identifier];return self.origin[0]+x*self.scale,self.origin[1]+y*self.scale
         for item,e in self.lines:self.canvas.coords(item,*point(e['source']),*point(e['target']))
-        for identifier,(item,text) in self.items.items():
+        for identifier,(item,caption,thumbnail_size) in self.items.items():
             n=self.nodes[identifier];x,y=point(identifier)
             radius=(18 if n['type']=='group' else 12 if n['type']=='view' else 4 if n['type']=='decision' else 8)*min(self.scale,2)
-            thumbnail=self.thumbnail(n)
-            if thumbnail is not None:
+            if thumbnail_size is not None:
                 # Keep readable screen-sized thumbnails while zoom moves nodes.
                 # No pixel decoding/resizing occurs during physics or wheel events.
-                rx,ry=thumbnail.width()/2+3,thumbnail.height()/2+3
+                rx,ry=thumbnail_size
                 self.canvas.coords(item,x-rx,y-ry,x+rx,y+ry)
                 self.canvas.coords(self.thumbnail_items[identifier],x,y)
                 radius=ry
             elif n['type']=='view':self.canvas.coords(item,x,y-radius,x+radius,y,x,y+radius,x-radius,y)
             else:self.canvas.coords(item,x-radius,y-radius,x+radius,y+radius)
-            self.canvas.coords(text,x,y+radius+3)
-            self.canvas.itemconfigure(item,width=4 if identifier==self.selected or identifier in self.pinned or identifier in self.highlight else 3 if thumbnail is not None else 1,
-                outline='#dc2626' if identifier in self.highlight else COLORS.get(n.get('state'),'#334155'))
+            if caption:
+                caption.place(x, y + radius + 3)
+            self.canvas.itemconfigure(item,width=4 if identifier==self.selected or identifier in self.pinned or identifier in self.highlight else 3 if thumbnail_size is not None else 1,
+                outline='#dc2626' if identifier in self.highlight else ROLE_COLORS.get(node_role(n), '#334155'))
 
     def tick(self):
         if self.closed:return
@@ -363,8 +375,12 @@ class GraphWindow:
     def hover(self,event):
         identifier=self.at(event)
         if identifier:
+            node = self.nodes[identifier]
+            if node['type'] == 'group':
+                self.status.configure(text=f"{node['label']} · {len(node['members'])} graph nodes · Double-click to expand")
+                return
             caption=self.thumbnail_captions.get(identifier,'')
-            self.status.configure(text=identifier+' · '+self.nodes[identifier].get('provenance','')+' · '+caption)
+            self.status.configure(text=identifier+' · '+node.get('provenance','')+' · '+caption)
 
     def describe(self,value):
         self.info.configure(state='normal');self.info.delete('1.0','end')
@@ -375,10 +391,21 @@ class GraphWindow:
         self.origin=[event.x+(self.origin[0]-event.x)*ratio,event.y+(self.origin[1]-event.y)*ratio];self.draw()
 
     def fit(self):
-        if not self.positions:return
-        xs,ys=zip(*self.positions.values());w=max(200,self.canvas.winfo_width());h=max(200,self.canvas.winfo_height())
-        self.scale=min(2.,(w-100)/max(100,max(xs)-min(xs)),(h-100)/max(100,max(ys)-min(ys)))
-        self.origin=[w/2-(max(xs)+min(xs))/2*self.scale,h/2-(max(ys)+min(ys))/2*self.scale];self.draw()
+        if not self.positions:
+            return
+        xs, ys = zip(*self.positions.values())
+        width = max(200, self.canvas.winfo_width())
+        height = max(200, self.canvas.winfo_height())
+        bounds = [self.canvas.bbox(caption.tag) for _, caption, _ in self.items.values() if caption]
+        label_width = max((right - left for left, _, right, _ in bounds), default=0)
+        label_height = max((bottom - top for _, top, _, bottom in bounds), default=0)
+        usable_width = max(1, width - max(100, label_width + 12))
+        usable_height = max(1, height - 100 - label_height)
+        self.scale = min(2., usable_width / max(100, max(xs) - min(xs)),
+                         usable_height / max(100, max(ys) - min(ys)))
+        self.origin = [width / 2 - (max(xs) + min(xs)) / 2 * self.scale,
+                       (height - label_height) / 2 - (max(ys) + min(ys)) / 2 * self.scale]
+        self.draw()
 
     def pause(self):
         self.paused=not self.paused;self.physics.invalidate();self.iterations=0
