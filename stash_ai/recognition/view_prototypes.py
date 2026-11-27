@@ -390,13 +390,20 @@ def witness_limit(grouping):
 def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8,db=None):
     index=best_cohort(slots,row,sample,threshold)
     slot=slots[index] if index is not None else None
+    released = 0
     if slot is None:
         if not complete and len(slots)>=32:
-            return 0
+            index = next((i for i,s in enumerate(slots) if len(s.cues)==1), None)
+            if index is None:
+                return 0
+            retired = slots.pop(index)
+            released = retired.metadata_bytes
+            if retired.metadata_reservation is not None:
+                retired.metadata_reservation.set(0)
         slot=_Cluster(pose_view(row['geometry']),row['id'],scene_minimum=scene_minimum,database=db);slots.append(slot)
     before=slot.metadata_bytes
     slot.add(row,sample,maximum=maximum)
-    return slot.metadata_bytes-before
+    return slot.metadata_bytes-before-released
 
 
 def supported_cohorts(slots,cover,minimum,maximum,*,complete,cohesion=.8,primary=False):

@@ -34,3 +34,16 @@ def test_only_two_measured_distinct_torsos_remove_a_rival():
     from stash_ai.recognition.rear_recovery import impossible_owners
     owners = impossible_owners({'id':'query'},pose(40),[('other','B',pose(110)),('near','C',pose(40))])
     assert owners=={'B'}
+
+
+def test_one_marginal_strict_witness_needs_two_independent_strong_faces():
+    cfg = SimpleNamespace(data={'sapiensid':{'matching':{'face_floor':.5,'ambiguity_margin':.05},
+                                            'execution':{'reference_bytes':2**20}}})
+    def check(values):
+        rows = [Witness(2,np.asarray([v,(1-v*v)**.5],dtype='<f4').tobytes(),True,'scan',time,'{}')
+                for time,v in values]
+        guard = FaceGuard(None,cfg,scores=SimpleNamespace(face_similarity=np.dot),frozen={'person':rows})
+        return guard.allows(dict(_face_vector=np.array([1.,0.])),(), 'person')
+    assert check([(0,.47),(1,.91),(2,.98)])
+    assert not check([(0,.43),(1,.91),(2,.98)])
+    assert not check([(0,.47),(1,.91),(1,.98)])

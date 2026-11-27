@@ -441,7 +441,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     for group in groups:
         if group.identifier in proposals:
             continue
-        rows=replay.execute('SELECT id,geometry,dimensions,embedding FROM observations '
+        rows=replay.execute('SELECT id,scan,seconds,quality,geometry,dimensions,embedding FROM observations '
             'WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id',(encoded(group.sample_ids),)).fetchall()
         decisions=[]
         potential=[]
