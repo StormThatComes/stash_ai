@@ -166,13 +166,15 @@ def coverage(db,config,scans):
                 observations=rows[0],ready=rows[1] or 0,rejected=rows[2] or 0)
 
 
-def copy_evidence(source,target,scan):
+def copy_evidence(source,target,scan,*,donor=None):
     if not available(source):return
     target.executemany('INSERT OR REPLACE INTO metadata VALUES (?,?)',
         source.execute('SELECT key,value FROM metadata WHERE key IN (?,?)',('cue-continuity:'+scan,'cue-view-shots:'+scan)))
-    target.executemany('INSERT OR REPLACE INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        source.execute('SELECT id,scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,NULL '
-                       'FROM body_observations WHERE scan=?',(scan,)))
+    from .snapshot_vectors import revision_rows
+    bodies = (revision_rows(source,target,'body_observations',scan,donor) if donor else
+              source.execute('SELECT id,scan,cue,seconds,contract,face,geometry,quality,rejected,embedding,NULL '
+                             'FROM body_observations WHERE scan=?',(scan,)))
+    target.executemany('INSERT OR REPLACE INTO body_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)',bodies)
     target.executemany('INSERT OR REPLACE INTO body_cues VALUES (?,?,?)',
                       source.execute('SELECT * FROM body_cues WHERE scan=?',(scan,)))
 

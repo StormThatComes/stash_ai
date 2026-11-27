@@ -316,10 +316,10 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
         db.execute('UPDATE observations SET quality=quality WHERE id=?',(observation,))
 
 
-def copy_evidence(source,target,scan, *, compact=False):
+def copy_evidence(source,target,scan, *, compact=False, donor=None):
     """Copy only admitted observations into offline trials; never copy pixels."""
     from .body_observations import copy_evidence as copy_bodies
-    copy_bodies(source,target,scan)
+    copy_bodies(source,target,scan,donor=donor)
     if not available(source):return
     feature = 'e.embedding'
     if compact and source.execute("SELECT 1 FROM sqlite_master WHERE name='body_observations'").fetchone():

@@ -64,7 +64,7 @@ def _fingerprint(db, scope, namespace):
         if schema is None:
             add(None);continue
         add(schema[0])
-        columns=[r[1] for r in db.execute(f'PRAGMA table_info({table})') if r[1]!='crop']
+        columns=[r[1] for r in db.execute(f'PRAGMA table_info({table})') if r[1] not in ('crop','rowid')]
         where,args=rules[table]
         for row in db.execute(f'SELECT {",".join(columns)} FROM {table} WHERE {where} ORDER BY rowid',args):
             add('row')

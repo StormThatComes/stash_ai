@@ -15,7 +15,7 @@ def ordered(scans, order, seed):
     return result
 
 
-def copy_history(source, target, selected, scope, namespace, *, commit=True):
+def copy_history(source, target, selected, scope, namespace, *, commit=True, pack_revisions=False):
     """Copy authoritative external evidence only, without images or run caches.
 
     Keep scan insertion order, including partial/newer scans that supersede old
@@ -25,13 +25,18 @@ def copy_history(source, target, selected, scope, namespace, *, commit=True):
     records = source.execute('SELECT * FROM scans WHERE scope=? AND namespace=? '
         'AND scene NOT IN (SELECT value FROM json_each(?)) ORDER BY rowid',
         (scope, namespace, excluded))
+    from .snapshot_vectors import revision_heads, revision_rows
+    heads = revision_heads(source,target,scope,namespace) if pack_revisions else {}
     for row in records:
         target.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(row))
-        target.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-            source.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,'
-                           'dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY rowid', (row['id'],)))
+        head = heads.get(row['scene'])
+        donor = head if head!=row['id'] else None
+        faces = (revision_rows(source,target,'observations',row['id'],donor) if donor else
+                 source.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,'
+                                'dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY rowid',(row['id'],)))
+        target.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',faces)
         from .person_signal import copy_evidence
-        copy_evidence(source,target,row['id'],compact=True)
+        copy_evidence(source,target,row['id'],compact=True,donor=donor)
         from .pixel_storage import copy_rows
         copy_rows(source,target,source.execute('SELECT quality FROM observations WHERE scan=?',(row['id'],)))
     from .scan_heads import copy_heads

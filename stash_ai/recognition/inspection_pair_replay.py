@@ -192,9 +192,10 @@ def _mark_private_anchors(target, omitted):
         target.executemany('INSERT INTO omitted_face_anchors VALUES (?)', [(k,) for k in omitted])
         fields = ["CASE WHEN id IN omitted_face_anchors THEN json_set(quality,'$._inspection_auxiliary_only',1) "
                   "ELSE quality END AS quality" if c == 'quality' else c for c in columns]
+        from .snapshot_vectors import projection
         target.execute('DROP VIEW temp.observations')
         target.execute('CREATE TEMP VIEW observations AS SELECT rowid AS rowid,' + ','.join(fields) +
-                       ' FROM retained.observations')
+                       ' FROM ('+projection(target,'retained','observations')+')')
     else:
         target.execute("UPDATE observations SET quality=json_set(quality,'$._inspection_auxiliary_only',1) "
                        "WHERE id IN (SELECT value FROM json_each(?))", (encoded(omitted),))

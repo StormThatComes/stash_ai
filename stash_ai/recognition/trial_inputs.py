@@ -34,8 +34,9 @@ def prepare(target, seed):
         _copy_private(target)
         if images is not None:
             images.publish('trial.sqlite', target)
+    from .snapshot_vectors import projection
     for table in SHARED:
-        target.execute(f'CREATE TEMP VIEW {table} AS SELECT rowid AS rowid,* FROM retained.{table}')
+        target.execute(f'CREATE TEMP VIEW {table} AS '+projection(target,'retained',table))
     row = seed.execute("SELECT value FROM metadata WHERE key='replay-input-statistics'").fetchone()
     if row:
         import json
