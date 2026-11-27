@@ -146,13 +146,22 @@ BODY_TRIGGER_SCHEMA=';\n'.join(BODY_TRIGGERS.values())+';\n'
 
 def upgrade_artifact_triggers(db):
     """Called only after exact executable-schema validation."""
-    current = {**EXTRA_TRIGGERS, **RAW_TRIGGERS, **BODY_TRIGGERS}
+    from .scene_owner_index import TRIGGERS as owner, triggers
+    legacy_owner = {k:v for k,v in triggers(legacy=True).items() if owner[k] != v}
+    current = {**owner, **EXTRA_TRIGGERS, **RAW_TRIGGERS, **BODY_TRIGGERS}
     with db:
-        for name in LEGACY_ARTIFACT_TRIGGERS:
+        repair_owners = False
+        for name in (*LEGACY_ARTIFACT_TRIGGERS, *legacy_owner):
             row = db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()
             if row and ' '.join(row[0].split()) != ' '.join(current[name].split()):
+                if not db.in_transaction:
+                    db.execute('BEGIN IMMEDIATE')
+                repair_owners |= name in legacy_owner
                 db.execute('DROP TRIGGER '+name)
                 db.execute(current[name])
+        if repair_owners:
+            db.execute("DELETE FROM scene_owner_members WHERE person IS NULL")
+            db.execute("DELETE FROM scene_owners WHERE person IS NULL")
 
 
 PIXEL_TRIGGERS={}
@@ -191,11 +200,13 @@ def validate_triggers(db, *, required=False):
     from .rear_scene_changes import TRIGGERS as rear_triggers
     from .alias_scene_index import TRIGGERS as alias_triggers
     accepted={**alias_triggers,**rear_triggers,**owner_triggers,**local_triggers,**PIXEL_TRIGGERS,**shared_triggers,**pruning_triggers,**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
+    from .scene_owner_index import triggers as owner_definitions
+    old_owners=owner_definitions(legacy=True)
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     legacy=db.execute('PRAGMA user_version').fetchone()[0]<15
     for kind,name,sql in rows:
-        allowed = (accepted.get(name, ''), LEGACY_ARTIFACT_TRIGGERS.get(name, ''),old_local.get(name,'') if legacy else '')
+        allowed = (accepted.get(name, ''), old_owners.get(name, ''), LEGACY_ARTIFACT_TRIGGERS.get(name, ''),old_local.get(name,'') if legacy else '')
         if kind!='trigger' or name not in accepted or normalize(sql) not in {normalize(v) for v in allowed}:
             raise ValueError('Unsupported facial recognition schema triggers or views.')
     expected=set(TRIGGERS)

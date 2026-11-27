@@ -51,8 +51,10 @@ def _fingerprint(db, scope, namespace):
         'body_origins': (f'observation IN ({bodies}) AND person IN ({people})', scoped*2),
         'evidence_thumbnails': ("id IN (SELECT json_extract(CASE WHEN json_valid(quality) THEN quality ELSE '{}' END,"
             f"'$.evidence_thumbnail_id') FROM observations WHERE scan IN ({scan}))", scoped),
-        'metadata': ("key='installation' OR (key LIKE 'recognition-scan-head:%' AND "
-            f"json_extract(value,'$.scan') IN ({scan}) AND json_extract(value,'$.latest_created_scan') IN ({scan}))", scoped*2),
+        'metadata': (f"key IN (SELECT 'cue-continuity:'||id FROM scans WHERE id IN ({scan})) OR "
+            f"key IN (SELECT 'cue-view-shots:'||id FROM scans WHERE id IN ({scan})) OR "
+            "key='installation' OR (key LIKE 'recognition-scan-head:%' AND "
+            f"json_extract(value,'$.scan') IN ({scan}) AND json_extract(value,'$.latest_created_scan') IN ({scan}))", scoped*4),
     }
     result=hashlib.sha256()
     def add(value):

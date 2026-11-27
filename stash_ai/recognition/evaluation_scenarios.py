@@ -59,6 +59,19 @@ def copy_history(source, target, selected, scope, namespace, *, commit=True):
         columns = len(target.execute(f'PRAGMA table_info({table})').fetchall())
         target.executemany(f'INSERT INTO {table} VALUES (' + ','.join('?' for _ in range(columns)) + ')',
             source.execute(f'SELECT * FROM {table} WHERE {where} ORDER BY rowid', args))
+    import hashlib
+    keys = target.execute("""SELECT json_extract(payload,'$.decision_context') FROM candidates WHERE json_valid(payload)
+                             UNION SELECT json_extract(payload,'$.merge_context') FROM candidates WHERE json_valid(payload)""")
+    from itertools import islice
+    while batch := list(islice(keys, 256)):
+        wanted = {row[0] for row in batch if row[0] is not None}
+        if not wanted:
+            continue
+        documents = list(source.execute("SELECT id,payload FROM decision_contexts WHERE id IN (SELECT value FROM json_each(?))",
+                                        (encoded(sorted(wanted)),)))
+        if {key for key, raw in documents if hashlib.sha256(raw.encode()).hexdigest()==key} != wanted:
+            raise ValueError('Missing or corrupt candidate decision context.')
+        target.executemany('INSERT OR IGNORE INTO decision_contexts VALUES (?,?)', documents)
     if commit:
         target.commit()
     return dict(scenes=target.execute('SELECT COUNT(DISTINCT scene) FROM scans').fetchone()[0],

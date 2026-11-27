@@ -26,24 +26,48 @@ def candidates(db,rows,changed):
     from .reference_roles import observation_sql
     from .decision_contexts import unpack,Packer
     pack=Packer(db)
-    for row in rows:
-        old=db.execute('SELECT * FROM candidates WHERE id=?',(row[0],)).fetchone()
-        fresh=json.loads(row[5]);observation=fresh['observation']
-        latest=db.execute('SELECT id FROM candidates c WHERE '+observation_sql('c')+'=? ORDER BY rowid DESC LIMIT 1',(observation,)).fetchone()
-        same=False
-        if old is not None and tuple(old)[:5]==row[:5]:
-            try:
-                prior=unpack(db,old['payload'])
-                for key in ('reference_context','reference_selected'):
-                    prior.pop(key,None);fresh.pop(key,None)
-                same=prior==fresh
-            except (ValueError,TypeError,AttributeError):pass
-        # Refresh precedence across policies even when the payload is identical.
-        if not same or not latest or latest[0]!=row[0]:
-            db.execute('DELETE FROM candidates WHERE id=?',(row[0],))
-            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(*row[:5],pack(row[5])))
-            changed.add(db.execute('SELECT scene FROM scans WHERE id=?',(row[1],)).fetchone()[0])
-        yield row
+    from itertools import islice
+    rows = iter(rows)
+    while batch := list(islice(rows, 256)):
+        payloads = [json.loads(row[5]) for row in batch]
+        old = {r[0]:r for r in db.execute("SELECT * FROM candidates WHERE id IN (SELECT value FROM json_each(?))",
+                                          (encoded([row[0] for row in batch]),))}
+        obs = observation_sql('c')
+        latest = dict(db.execute("SELECT value,(SELECT id FROM candidates c WHERE "+obs+
+                                 "=j.value ORDER BY rowid DESC LIMIT 1) FROM json_each(?) j",
+                                 (encoded([v['observation'] for v in payloads]),)))
+        scenes = dict(db.execute("SELECT id,scene FROM scans WHERE id IN (SELECT value FROM json_each(?))",
+                                 (encoded(sorted({row[1] for row in batch})),)))
+        distinct = len({row[0] for row in batch}) == len(batch)
+        writes = []
+        for row,fresh in zip(batch,payloads):
+            prior_row = old.get(row[0])
+            observation = fresh['observation']
+            same = False
+            if prior_row is not None and tuple(prior_row)[:5] == row[:5]:
+                try:
+                    prior = unpack(db,prior_row[5])
+                    for key in ('reference_context','reference_selected'):
+                        prior.pop(key,None)
+                        fresh.pop(key,None)
+                    same = prior == fresh
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            if not same or latest.get(observation) != row[0]:
+                packed = (*row[:5],pack(row[5]))
+                if distinct:
+                    writes.append(packed)
+                else:
+                    db.execute('DELETE FROM candidates WHERE id=?',(row[0],))
+                    db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',packed)
+                old[row[0]] = packed
+                latest[observation] = row[0]
+                changed.add(scenes[row[1]])
+        if writes:
+            db.execute('DELETE FROM candidates WHERE id IN (SELECT value FROM json_each(?))',
+                       (encoded([r[0] for r in writes]),))
+            db.executemany('INSERT INTO candidates VALUES (?,?,?,?,?,?)',writes)
+        yield from batch
 
 
 def enqueue(db,scope,namespace,item,config,changed,reason):

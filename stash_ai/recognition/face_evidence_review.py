@@ -103,7 +103,8 @@ def collapse(db, rows, grouping):
 
 def publish_proofs(db):
     """Keep the review explanation in derived decisions, without editing raw data."""
+    from .reference_roles import observation_sql
     for oid,proof in db.execute("SELECT id,json_extract(quality,'$.anchor_review') FROM observations "
                                "WHERE json_type(quality,'$.anchor_review')='object'"):
         db.execute("UPDATE candidates SET payload=json_set(payload,'$.anchor_review',json(?)) "
-                   "WHERE json_extract(payload,'$.observation')=?",(proof,oid))
+                   "WHERE "+observation_sql("candidates")+"=?",(proof,oid))
