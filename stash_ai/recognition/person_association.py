@@ -1,10 +1,23 @@
 """Geometry-only face/pose association, shared by inference and audit reasons."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 import math
+
+_version = ContextVar("face_pose_association_version",default="contact-head-ownership-v9")
+
+
+@contextmanager
+def previous_version():
+    token = _version.set("contact-head-ownership-v8")
+    try:
+        yield
+    finally:
+        _version.reset(token)
 
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='contact-head-ownership-v9', containment_tolerance=.05,
+    return dict(version=_version.get(), containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
