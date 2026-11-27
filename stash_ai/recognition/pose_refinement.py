@@ -217,10 +217,11 @@ class RefinedPMPose:
         if selected is None:
             selected = self.candidates(image, bounds, prediction, plan, masks)
         reliable = None
-        if self.requires_second_pass and len(bounds):
-            reliable, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
-        for candidate in selected:
+        for position, candidate in enumerate(selected):
             if getattr(self,'requires_second_pass',True):
+                # The mask selector finishes shared prompt retries before yielding its first mask.
+                if position == 0 and all(record.get('mask_attempts', 0) == 1 for record in records):
+                    reliable, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
                 from .refinement_budget import budget
                 i,box,mask,_=candidate
                 # An isolated complete skeleton already supported by its mask needs no second inference.
