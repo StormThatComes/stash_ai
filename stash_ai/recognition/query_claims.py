@@ -25,13 +25,15 @@ class Claims(AbstractContextManager):
             CREATE TABLE support(family TEXT PRIMARY KEY,total INTEGER,minimum INTEGER);
         ''')
         self.limit = config.data['sapiensid']['execution']['plan_bytes']
+        self.disk = bool(self.db.execute("PRAGMA database_list").fetchone()[2])
         self.used = 0
         self.reservation = Reservation(config.data['execution']['rebuild_memory_bytes'], label='hybrid-query-working')
         self.reservation.set(1024**2)
 
     def add(self, row, claim, family):
         payload = pickle.dumps(claim, protocol=5)
-        self.used += len(payload) + len(row['embedding']) + len(row['geometry']) + 1024
+        live = len(payload) + len(row['embedding']) + len(row['geometry']) + 1024
+        self.used = live if self.disk else self.used + live
         if self.used > self.limit:
             raise ResourceLimit('SapiensID query plan_bytes budget exceeded.')
         self.db.execute('INSERT INTO claims(observation,family,prior,owner,payload) VALUES (?,?,?,?,?)',
@@ -66,6 +68,8 @@ class Claims(AbstractContextManager):
                     claim=pickle.loads(row['payload']);first=claim if first is None else first
                     # Includes graph edges, keys, matching maps and decode scratch.
                     charge += size(claim[5])*8+4096
+                    if self.disk and charge-1024**2 > self.limit:
+                        raise ResourceLimit("Hybrid query family exceeds the live plan_bytes budget.")
                     self.reservation.set(charge)
                     votes.add(claim[5])
                 total=len(votes)

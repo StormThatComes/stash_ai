@@ -41,14 +41,14 @@ def report(db,config,scope,namespace,*,focus=None):
     return deepcopy(found)
 
 
-def _report(db,config,scope,namespace,*,focus=None,compact=False):
+def _report(db,config,scope,namespace,*,focus=None,compact=False,decisions_only=False):
     """Retain candidate proofs and requested diagnostic pairs, not an N² graph."""
     result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),
                 pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
     from .incomplete_rivals import protect
     bank = banks(db,config,scope,namespace)
-    result = plan(db,config,bank,focus=focus,compact=compact)
+    result = plan(db,config,bank,focus=focus,compact=compact,decisions_only=decisions_only)
     from .endpoint_merges import verified
     verified(db,config,scope,namespace,bank,result)
     result = protect(db,scope,namespace,result)
@@ -56,7 +56,7 @@ def _report(db,config,scope,namespace,*,focus=None,compact=False):
     return protect_contracts(db,config,scope,namespace,result)
 
 
-def plan(db,config,bank,*,focus=None,compact=False):
+def plan(db,config,bank,*,focus=None,compact=False,decisions_only=False):
     """Plan on a frozen metadata catalogue; source evidence is only read."""
     from .body_global_search import Search,exact_pairs
     from .memory_size import Reservation,size
@@ -76,12 +76,24 @@ def plan(db,config,bank,*,focus=None,compact=False):
             budget='sapiensid.execution.plan_bytes',limit=limit,requested=plan_bytes)
         reservation.set(plan_bytes)
     reserve()
+    store = None
     try:
+        if decisions_only and config.data["execution"].get("rebuild_storage") != "disk":
+            decisions_only = False
+        if decisions_only:
+            from .pair_proofs import PairProofs
+            store = pairs = PairProofs()
+
         with Search(db,config,bank) as search:
             for pair in exact_pairs(search.nominations(focus),bank,config,search.evidence,compact=compact):
                 a,b=pair['people']
-                reserve(size(pair)+512)
-                pairs[a,b]=pair;result['pairs'].append(pair)
+                if decisions_only:
+                    reserve(0 if pair['blockers'] else 512)
+                else:
+                    reserve(size(pair)+512)
+                pairs[a,b]=pair
+                if not decisions_only:
+                    result['pairs'].append(pair)
                 if not pair['blockers']:edges[a].add(b);edges[b].add(a)
             components=[];seen=set();membership={}
             for start in sorted(bank):
@@ -163,6 +175,8 @@ def plan(db,config,bank,*,focus=None,compact=False):
         if len(encoded(result))>limit:raise ResourceLimit('Global body proof exceeds sapiensid.execution.plan_bytes.')
         return result
     finally:
+        if store is not None:
+            store.close()
         reservation.set(0)
 
 
@@ -201,7 +215,7 @@ def reconcile(database,selected,config):
     from .solver_execution import current as solver
     from .stage_checkpoints import report as checkpoint_report
     result=(report(db,config,scope,namespace) if solver() is not None else
-            checkpoint_report(db,selected,config,'body-global-fragments-v3',lambda:_report(db,config,scope,namespace,compact=True)))
+            checkpoint_report(db,selected,config,'body-global-fragments-v3',lambda:_report(db,config,scope,namespace,compact=True,decisions_only=True)))
     from .publication_queue import enqueue
     from .alias_scene_index import remember, expire
     indexed = db.execute('PRAGMA user_version').fetchone()[0]>=17
@@ -224,7 +238,7 @@ def reconcile(database,selected,config):
                 decision.update(outcome='blocked',blockers=['identity_outside_selected_scenes'],required_scenes=sorted(scenes,key=int))
                 continue
             if fresh is None:
-                fresh = {tuple(sorted(d['people'])):d for d in _report(db,config,scope,namespace,compact=True)['decisions']
+                fresh = {tuple(sorted(d['people'])):d for d in _report(db,config,scope,namespace,compact=True,decisions_only=True)['decisions']
                          if d['outcome']=='merge'}
             verified = fresh.get(tuple(sorted(people)))
             if verified is None:
