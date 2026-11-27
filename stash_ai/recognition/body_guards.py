@@ -72,7 +72,8 @@ class FaceGuard:
         token=current()
         first = None
         marginal = False
-        support = 0
+        first_support = None
+        independent_times = independent_pixels = False
         distinct_time = distinct_pixels = False
         from .independent_evidence import unit
         with tracking(others,'Check body face vetoes',unit='face') as witnesses:
@@ -84,15 +85,17 @@ class FaceGuard:
                 score = self.scores.face_similarity(face, other)
                 strict = person is None or witness.strict
                 if score >= self.floor:
-                    if strict and score >= self.floor+self.margin and person is not None and support < 2:
-                        if support == 0:
-                            first_support = (witness.scan,witness.seconds),unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality))
-                            support = 1
-                        elif (witness.scan,witness.seconds) != first_support[0] and unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality)) != first_support[1]:
-                            support = 2
+                    if strict and score >= self.floor+self.margin and person is not None and not (independent_times and independent_pixels):
+                        stamp = witness.scan,witness.seconds
+                        pixel = unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality))
+                        if first_support is None:
+                            first_support = stamp,pixel
+                        independent_times |= stamp!=first_support[0]
+                        independent_pixels |= pixel!=first_support[1]
                     continue
                 if not weak and strict:
-                    if person is None or score < self.floor-self.margin:
+                    if (person is None or score < self.floor-self.margin
+                            or (row.get('scan'),row.get('seconds'))==(witness.scan,witness.seconds)):
                         return False
                     marginal = True
                 if person is None:
@@ -107,7 +110,7 @@ class FaceGuard:
                 distinct_pixels |= pixel!=first[1]
                 if distinct_time and distinct_pixels:
                     return False
-        return not marginal or support >= 2
+        return not marginal or (independent_times and independent_pixels)
 
 
 def resolve_claims(rows, decisions, config, *, scores=None):
