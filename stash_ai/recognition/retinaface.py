@@ -4,6 +4,8 @@ The adapter follows RetinaFace's prior-box contract: strides 8/16/32,
 two sizes per cell, variances .1/.2 and BGR mean subtraction. No upstream
 Python package or executable model code is downloaded.
 """
+from functools import lru_cache
+
 import numpy as np
 
 from .models import ASSETS, checked_detection, verified_bytes
@@ -50,6 +52,7 @@ class RetinaFaceDetector:
             raise
 
     @classmethod
+    @lru_cache(maxsize=4)
     def priors(cls):
         # Pixel-space centers/sizes; order is level, row, column, anchor size.
         rows = []
@@ -59,7 +62,9 @@ class RetinaFaceDetector:
             centers = (np.column_stack((x.ravel(), y.ravel())) + .5) * stride
             rows.append(np.column_stack((np.repeat(centers, len(sizes), axis=0),
                 np.tile(np.column_stack((sizes, sizes)), (len(centers), 1)))))
-        return np.concatenate(rows).astype(np.float32)
+        values = np.concatenate(rows).astype(np.float32)
+        values.flags.writeable = False
+        return values
 
     @classmethod
     def _blob(cls, bgr):

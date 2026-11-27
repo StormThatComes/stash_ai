@@ -216,10 +216,25 @@ class RefinedPMPose:
         pending = []
         if selected is None:
             selected = self.candidates(image, bounds, prediction, plan, masks)
+        reliable = None
+        if self.requires_second_pass and len(bounds):
+            reliable, _ = prompt_recovery.eligible(*prediction, bounds, self.settings)
         for candidate in selected:
             if getattr(self,'requires_second_pass',True):
                 from .refinement_budget import budget
                 i,box,mask,_=candidate
+                # An isolated complete skeleton already supported by its mask needs no second inference.
+                if reliable is not None and reliable[i].all() and tuple(box) == tuple(bounds[i]) and not any(
+                        j != i and overlaps(bounds[i], other, 0) for j,other in enumerate(bounds)):
+                    xy = prediction[0][i].astype(int)
+                    left,top,right,bottom = bounds[i]
+                    contained = np.count_nonzero(mask) == np.count_nonzero(mask[top:bottom,left:right])
+                    if (contained and len(set(map(tuple,xy))) == len(xy) and (xy >= 0).all()
+                            and (xy[:,0] < mask.shape[1]).all() and (xy[:,1] < mask.shape[0]).all()
+                            and mask[xy[:,1],xy[:,0]].all()):
+                        self._mask_only(image, [candidate], result, records, prediction)
+                        records[i]['second_pass_reason'] = 'complete_isolated_first_pass'
+                        continue
                 if not budget(image,self.settings).admit('masked_pose',record=records[i]):
                     records[i].update(status='skipped',reason='shared_retry_budget')
                     retain_quality_mask(records[i],mask,records[i]['detector_bounds'])

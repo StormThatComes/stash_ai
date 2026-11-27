@@ -155,3 +155,10 @@ def test_retinaface_uses_rotation_repair_and_numeric_audit():
     np.testing.assert_allclose(result[0].row,expected.row,atol=1e-6)
     assert reports[0]['rotation_enabled']
     assert reports[0]['faces'][0]['status']=='repaired'
+
+
+def test_priors_are_shared_and_immutable():
+    from stash_ai.recognition.retinaface import RetinaFaceDetector
+    priors = RetinaFaceDetector.priors()
+    assert RetinaFaceDetector.priors() is priors
+    assert not priors.flags.writeable
