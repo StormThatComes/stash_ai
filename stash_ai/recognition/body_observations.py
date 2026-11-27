@@ -36,7 +36,7 @@ def available(db):
 def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
               legacy_mask_overlap=True,legacy_foreground_sharpness=True,legacy_drift_mask=True,legacy_mask_prompts=True,
               legacy_pair_fallback=False,legacy_contact_masks=True,legacy_sharpness=True,legacy_input_sharpness=True,
-              legacy_split_sharpness=True,legacy_split_profiles=False):
+              legacy_split_sharpness=True,legacy_split_profiles=False,legacy_selective_pose=True):
     from .person_signal import contract as person_contract
     settings=plain(config.data['sapiensid']['collection']);settings.pop('enabled')
     if legacy_split_sharpness:
@@ -50,11 +50,12 @@ def _contract(config,version,*,legacy_boundaries=False,legacy_association=False,
                                           legacy_pair_fallback=legacy_pair_fallback,
                                           legacy_contact_masks=legacy_contact_masks,
                                           legacy_sharpness=legacy_sharpness,legacy_input_sharpness=legacy_input_sharpness,
-                                          legacy_split_sharpness=legacy_split_sharpness,legacy_split_profiles=legacy_split_profiles),settings])
+                                          legacy_split_sharpness=legacy_split_sharpness,legacy_split_profiles=legacy_split_profiles,
+                                          legacy_selective_pose=legacy_selective_pose),settings])
 
 
 def contract(config):
-    return _contract(config,'independent-person-v12-equal-span-sharpness',legacy_split_sharpness=False,legacy_mask_overlap=False,
+    return _contract(config,'independent-person-v12-equal-span-sharpness',legacy_selective_pose=False,legacy_split_sharpness=False,legacy_mask_overlap=False,
                      legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
                      legacy_contact_masks=False,legacy_sharpness=False,legacy_input_sharpness=False)
 
@@ -69,7 +70,10 @@ def _previous_contracts(config):
     old_mask = _contract(config,'independent-person-v3-perspective',legacy_mask_quality=True)
     recent = _contract(config, 'independent-person-v3-perspective', legacy_association='joint')
     previous = _contract(config, 'independent-person-v3-perspective', legacy_association='v3')
-    return [_contract(config,'independent-person-v11-split-sharpness',legacy_split_profiles=True,
+    return [_contract(config,'independent-person-v12-equal-span-sharpness',legacy_split_sharpness=False,
+                      legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False,
+                      legacy_mask_prompts=False,legacy_contact_masks=False,legacy_sharpness=False,legacy_input_sharpness=False),
+            _contract(config,'independent-person-v11-split-sharpness',legacy_split_profiles=True,
                       legacy_split_sharpness=False,legacy_mask_overlap=False,legacy_foreground_sharpness=False,
                       legacy_drift_mask=False,legacy_mask_prompts=False,legacy_contact_masks=False,
                       legacy_sharpness=False,legacy_input_sharpness=False),
