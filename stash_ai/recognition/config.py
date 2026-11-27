@@ -489,18 +489,19 @@ def load(path=None, *, database=None, device=None, root=None, detection_preview=
         raw, supplied = _document(selected)
         base = selected.parent
         solver_file = base / 'facial_recognition_solver.yml'
-        if selected.name == solver_file.name and (base / 'facial_recognition.yml').is_file():
-            base_raw, policy = _document(base / 'facial_recognition.yml')
-            if 'execution_file' in policy or set(supplied) == {'version','execution'}:
-                overrides = _execution_profile(solver_file)
-                solver_profile = True
-                raw, supplied = base_raw, policy
-                if 'execution_file' not in policy:
-                    if policy['version'] != 2:
-                        raise ValueError('An execution-only solver profile requires a v2 recognition policy.')
-                    import yaml
-                    _overlay(supplied.setdefault('execution',{}),overrides)
-                    raw = yaml.safe_dump(supplied,sort_keys=False).encode()
+        if selected.name == solver_file.name and supplied['version'] == 2 and set(supplied) == {'version','execution'}:
+            policy_path = base / 'facial_recognition.yml'
+            if not policy_path.is_file():
+                raise ValueError(f'{solver_file.name} requires its sibling facial_recognition.yml.')
+            overrides = _execution_profile(solver_file)
+            solver_profile = True
+            raw, supplied = _document(policy_path)
+            if 'execution_file' not in supplied:
+                if supplied['version'] != 2:
+                    raise ValueError('An execution-only solver profile requires a v2 recognition policy.')
+                import yaml
+                _overlay(supplied.setdefault('execution',{}),overrides)
+                raw = yaml.safe_dump(supplied,sort_keys=False).encode()
         if 'execution_file' in supplied:
             import yaml
             filename = supplied.pop('execution_file')

@@ -68,12 +68,11 @@ versions retain their individual event records.
 
 ## Resource profiles
 
-The repository provides two complete v2 configurations with the same tuned
-models, detection, matching and portrait settings. Only rebuild resources and
-the face reference memory cap differ. The solver profile is sized for eight
-simultaneous trials sharing 16 CPUs and a 64 GiB admission budget:
+Both commands read models, detection, matching and portrait settings from the
+same policy. The solver overrides nine execution settings for eight simultaneous
+trials sharing 16 CPUs and a 64 GiB admission budget.
 
-| Setting | `facial_recognition.yml` (run) | `facial_recognition_solver.yml` (solver) |
+| Setting | `facial_recognition_execution.yml` (run) | `facial_recognition_solver.yml` (solver) |
 | --- | --- | --- |
 | Rebuild working maximum | 40 GiB | 5 GiB per trial |
 | Evidence / matrix cache | 8 / 64 GiB configured; matrices share the 8 GiB cache | 1 GiB / 512 MiB per trial |
@@ -82,7 +81,7 @@ simultaneous trials sharing 16 CPUs and a 64 GiB admission budget:
 | Body matching plan limit | 2 GiB | 256 MiB per trial |
 | Rebuild workers / cohort backend | 16 / threads | CLI allocation (1 without flags) / threads |
 | Hybrid nomination device | measured CPU or CUDA (`auto`) | CPU |
-| Inner replay storage | SSD | SSD; mutable trial history still uses RAM |
+| Disk-mode storage | SSD | Shared snapshot and private mutable trial databases on SSD |
 
 The solver YAML does **not** set the number of trials or the total CPU/RAM
 budget. Pass all three flags from the example above. At 16 CPUs and eight trials,
@@ -103,14 +102,12 @@ These are not OS RSS caps or a guarantee that every 10,000-scene replay fits.
 If a trial exceeds its working limit, reduce the trial count and raise its
 configured working maximum only within the total machine budget.
 
-Both files are standalone templates with the same model and matching settings;
-neither inherits a locally edited configuration. For an existing tuned setup,
-copy your current YAML to `facial_recognition_solver.yml`, then copy only
-`execution.rebuild` and `matching.face.samples.references.max_reference_mb`
-from the shipped solver profile. Keep both files in the same directory so
-relative database and model paths keep their meaning. Preserve your model,
-detection, matching and anchor-rule settings when transferring solver results
-back to the run configuration; keep the run resource limits.
+To split an existing v2 policy, move its complete `execution` mapping into
+`facial_recognition_execution.yml` alongside `version: 2`. Replace the mapping
+in the policy with `execution_file: facial_recognition_execution.yml` and place the
+shipped execution-only solver profile beside it. Relative model and database paths
+resolve from the policy directory. Explicitly selecting an older complete solver
+configuration continues to use that file's own policy and resources.
 
 The 96 GiB `replay_snapshot_mb` setting is a per-image disk ceiling. Source
 snapshots, parallel private replay images, caches and the recognition database
@@ -136,9 +133,9 @@ The per-trial amount is conservative admission accounting, not measured RSS.
 `configured_rebuild_memory_gib` shows the original YAML maximum. For example,
 a 30 GiB configured maximum and a 64 GiB total solver budget with four trials
 give each trial at most 16 GiB including additional headroom; the solver no
-longer demands two full 30 GiB allocations per trial. Both private RAM databases
-and other registered work share that trial's working limit, with SQLite page
-ceilings updated as reservations change. Source snapshots remain on disk under
+longer demands two full 30 GiB allocations per trial. Disk-mode trials keep private
+mutable state in scratch SQLite files with capped page caches. In RAM mode the
+databases share the trial's working limit. Source snapshots remain on disk under
 `execution.rebuild.replay_snapshot_mb`.
 
 The baseline uses the same effective memory limit as candidate trials, including

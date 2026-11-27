@@ -25,6 +25,20 @@ def test_policy_is_inherited_and_solver_only_overrides_execution(tmp_path):
         load(base,solver_profile=True)
 
 
+def test_explicit_legacy_solver_next_to_a_split_policy_keeps_its_own_threshold(tmp_path):
+    (tmp_path/'facial_recognition.yml').write_text('version: 2\nexecution_file: facial_recognition_execution.yml\n')
+    solver = tmp_path/'facial_recognition_solver.yml'
+    solver.write_text('version: 2\nmatching: {face: {match_threshold: 0.85}}\n')
+    assert load(solver).data['recognition']['match_threshold'] == .85
+
+
+def test_sparse_solver_requires_its_recognition_policy(tmp_path):
+    solver = tmp_path/'facial_recognition_solver.yml'
+    solver.write_text('version: 2\nexecution: {}\n')
+    with pytest.raises(ValueError, match='sibling facial_recognition'):
+        load(solver)
+
+
 def test_dense_delta_has_an_index_and_verifies_integrity(tmp_path,monkeypatch):
     from stash_ai.recognition import solver_delta_transport as transport
     monkeypatch.setattr(transport,'INLINE_ROWS',2)
