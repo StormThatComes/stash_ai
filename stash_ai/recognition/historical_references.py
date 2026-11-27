@@ -437,6 +437,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early,excluded_views=excluded_views)
     refresh_verified(database.connection,selected,config,scope,namespace,history,usage)
     deferred=set()
+    pending_births={}
     partial_sources=set()
     for group in groups:
         if group.identifier in proposals:
@@ -468,7 +469,11 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             from .identity_birth import potential as plausible,defer as defer_birth
             proof=plausible(rows,history,config)
             if proof is not None:
-                defer_birth(replay,group.identifier,proof);deferred.add(group.identifier)
+                if proof['validation'] == 'independent_majority':
+                    partial_sources.add(group.identifier)
+                    pending_births[group.identifier] = proof
+                else:
+                    defer_birth(replay,group.identifier,proof);deferred.add(group.identifier)
         if result is not None:
             if result[1]['mode']=='view':
                 support=replay.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '
@@ -550,4 +555,9 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
         bindings[target]=target
     from .cohort_resolution import recover
     recover(replay,groups,history,config,bindings,source_ids=partial_sources)
+    # Preserve independently recovered members and the cohort verdict on its outlier.
+    # Only a source still owning its local candidates can publish a duplicate birth.
+    for source, proof in pending_births.items():
+        if source not in bindings:
+            defer_birth(replay,source,proof)
     return bindings
