@@ -35,7 +35,12 @@ def private_target(config):
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         db.execute('PRAGMA temp_store=FILE')
-        pages = config.data['execution']['rebuild_sqlite_cache_bytes']
+        settings = config.data['execution']
+        if hasattr(db,'page_limit'):
+            db.page_limit = settings['replay_snapshot_bytes']
+            db.execute('PRAGMA max_page_count='+str(db.page_limit//db.page))
+        db.execute('PRAGMA mmap_size=0')
+        pages = min(settings['rebuild_sqlite_cache_bytes'],settings['rebuild_memory_bytes']//16)
         db.execute('PRAGMA cache_size=-'+str(max(32,pages//1024)))
         db.executescript(SCHEMA)
         return db

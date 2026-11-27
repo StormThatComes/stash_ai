@@ -12,7 +12,7 @@ LOCAL_PATHS = (
     'sapiensid.pose.path', 'sapiensid.pose.vitpose_directory',
     'sapiensid.pose.sapiens_directory', 'sapiensid.pose.dfine_directory',
     'sapiensid.pose.rtmo_directory', 'sapiensid.pose.pmpose_directory', 'sapiensid.pose.rfdetr_directory',
-    'sapiensid.pose.refinement.directory',
+    'sapiensid.pose.refinement.directory', 'execution.rebuild_scratch_directory',
 )
 
 

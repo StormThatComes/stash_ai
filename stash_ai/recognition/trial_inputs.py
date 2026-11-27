@@ -59,11 +59,24 @@ def _copy_private(target):
             columns = [r[1] for r in target.execute(f'PRAGMA table_info({table})')]
             minimal = dict(embedding='NULL', crop='NULL', geometry="'[]'", quality="'{}'", source="''", rect="'[]'")
             fields = ','.join(minimal.get(c, c) if table in SHARED else c for c in columns)
-            target.execute(f'INSERT INTO main.{table}(rowid,{",".join(columns)}) '
-                           f'SELECT rowid,{fields} FROM retained.{table} ORDER BY rowid')
+            insert = f'INSERT INTO main.{table}(rowid,{",".join(columns)}) '
+            select = f'SELECT rowid,{fields} FROM retained.{table} ORDER BY rowid'
+            if getattr(target,'owned_path',None):
+                # A bulk INSERT SELECT reserves all remaining scratch. Workers
+                # copying mutable rows from one shared seed grow in paid batches.
+                placeholders = ','.join('?' for _ in range(1+len(columns)))
+                target.executemany(insert+f'VALUES ({placeholders})',target.execute(select))
+            else:
+                target.execute(insert+select)
         for table in ('evidence_versions', 'evidence_fingerprints'):
             target.execute(f'DELETE FROM main.{table}')
-            target.execute(f'INSERT INTO main.{table} SELECT * FROM retained.{table}')
+            select = f'SELECT * FROM retained.{table}'
+            if getattr(target,'owned_path',None):
+                rows = target.execute(select)
+                fields = ','.join('?' for _ in rows.description)
+                target.executemany(f'INSERT INTO main.{table} VALUES ({fields})',rows)
+            else:
+                target.execute(f'INSERT INTO main.{table} '+select)
         for _, sql in triggers:
             target.execute(sql)
         target.execute('RELEASE trial_prepare')
