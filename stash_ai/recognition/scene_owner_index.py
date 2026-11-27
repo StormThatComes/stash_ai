@@ -14,7 +14,7 @@ CREATE TABLE scene_owners(scan TEXT,person TEXT,total INTEGER NOT NULL,
 '''
 
 
-def triggers():
+def triggers(*, legacy=False):
     result = {}
     def add(name, event, table, body, when=''):
         result[name] = f'CREATE TRIGGER {name} AFTER {event} ON {table} {when} BEGIN {body} END'
@@ -30,6 +30,8 @@ def triggers():
         put = (f"INSERT INTO scene_owner_members SELECT '{kind}',new.observation,o.scan,new.person "
                f"FROM {observations} o WHERE o.id=new.observation "
                "ON CONFLICT(kind,observation) DO UPDATE SET scan=excluded.scan,person=excluded.person;")
+        if not legacy:
+            put = put.replace("WHERE o.id=new.observation", "WHERE o.id=new.observation AND new.person IS NOT NULL")
         delete = f"DELETE FROM scene_owner_members WHERE kind='{kind}' AND observation=old.observation;"
         for event, body in (('INSERT',put),('DELETE',delete),('UPDATE',delete+put)):
             add(f'recognition_owner_{kind}_{event.lower()}',event,members,body)
@@ -49,5 +51,5 @@ def populate(db):
     db.execute('DELETE FROM scene_owners')
     for kind, members, observations in (('face','members','observations'),('body','body_members','body_observations')):
         db.execute(f"INSERT INTO scene_owner_members SELECT '{kind}',m.observation,o.scan,m.person "
-                   f'FROM {members} m JOIN {observations} o ON o.id=m.observation')
+                   f'FROM {members} m JOIN {observations} o ON o.id=m.observation WHERE m.person IS NOT NULL')
     db.execute('INSERT INTO scene_owners SELECT scan,person,COUNT(*) FROM scene_owner_members GROUP BY scan,person')
