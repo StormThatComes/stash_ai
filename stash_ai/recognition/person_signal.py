@@ -180,7 +180,7 @@ def validate(settings, *, detection_preview=False):
 def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_mask_quality=False,
              legacy_mask_overlap=False,legacy_foreground_sharpness=False,legacy_drift_mask=False,legacy_mask_prompts=False,
              legacy_pair_fallback=False,legacy_contact_masks=False,legacy_sharpness=False,legacy_input_sharpness=False,
-             legacy_split_sharpness=False,legacy_split_profiles=False):
+             legacy_split_sharpness=False,legacy_split_profiles=False,legacy_selective_pose=False):
     """Version collected evidence; omit paths, identity thresholds and budgets."""
     s=config.data['sapiensid']
     variant=s['model']['variant'];model=MODELS[variant]
@@ -284,6 +284,10 @@ def contract(config,*,legacy_boundaries=False,legacy_association=False,legacy_ma
             if not legacy_split_sharpness:
                 from .split_blur import METHOD, LEGACY_METHOD
                 evidence['split_sharpness'] = LEGACY_METHOD if legacy_split_profiles else METHOD
+                if not legacy_selective_pose and not legacy_split_profiles:
+                    masks = (evidence.get('pose_mask',{}),evidence.get('pose_refiner',{}).get('refinement',{}))
+                    if any(mask.get('enabled') and mask.get('pose_second_pass') for mask in masks):
+                        evidence['masked_second_pass'] = 'isolated-complete-skeleton-v1'
     return digest(evidence)
 
 

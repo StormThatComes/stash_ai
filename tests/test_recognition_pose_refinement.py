@@ -327,3 +327,18 @@ def test_shared_foreground_disables_both_encoder_masks_and_prompts_against_partn
     assert all(negatives) and all(r['mask_conflict'] for r in records)
     assert all(not r['separated'] and 'encoder_mask' not in r for r in records)
     assert all('overlap_mask' not in r for r in records)
+
+
+def test_clean_contained_skeleton_reuses_first_pass_and_keeps_mask():
+    model = wrapper()
+    segment = model.segmenter.predict
+    def contained(*args,**kwargs):
+        mask,score = segment(*args,**kwargs)
+        mask[:,BOX[2]:] = False
+        return mask,score
+    model.segmenter.predict = contained
+    with Image.new('RGB',(160,100)) as image:
+        result, = model.predict_many([(image,[BOX])])
+    assert model.pose.calls == [('first',1)]
+    assert result[3][0]['second_pass_reason']=='complete_isolated_first_pass'
+    assert result[3][0]['overlap_mask']
