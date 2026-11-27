@@ -139,8 +139,13 @@ def collect(pipeline,db,model,config,scan,cue,seconds,image,rows,faces, *, expec
             measurement['detected_people'] = len(people)
             measurement['orientation'] = orientation(person)
     # A single pose containing distinct accepted faces is still an unresolved pair.
-    heads = [(f.box[0]+f.box[2]/2, f.box[1]+f.box[3]/2, min(f.box[2:]), match)
-             for f,row,match in zip(faces,rows,matches) if row['rejected'] is None]
+    accepted = [(face, owner) for face, row, owner in zip(faces, rows, matches)
+                if row['rejected'] is None]
+    heads = []
+    if people and len(accepted) >= 2:
+        for face, owner in accepted:
+            left, top, width, height = face.box
+            heads.append((left + width / 2, top + height / 2, min(width, height), owner))
     merged = set()
     distinct_faces = False
     for i,(x,y,size,owner) in enumerate(heads):
