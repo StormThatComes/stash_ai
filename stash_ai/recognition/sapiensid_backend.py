@@ -359,6 +359,9 @@ class SapiensIDFaces(YuNetDetector):
         from .crowd_context import remember
         remember(self,image,people)
         matches = associate(faces, people)
+        from . import contact_faces
+        if len(people) >= 2 and faces and contact_faces.enabled(self.config):
+            contact_faces.guard_body_inputs(faces, people, matches, image.size)
         self.frame_people, self.face_matches = people, matches
         self._person_frame = image, {tuple(face.row): people[index] if index is not None else None
                                      for face, index in zip(faces, matches)}

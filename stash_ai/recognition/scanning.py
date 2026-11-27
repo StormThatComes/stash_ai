@@ -35,6 +35,10 @@ def scan_identity(config, namespace):
         detection['pose_guided_rotation'] = [rotation_contract,contract(config)]
     else:
         detection.pop('pose_guided_rotation',None)
+    from . import contact_faces
+    if contact_faces.enabled(config):
+        from .body_observations import contract
+        detection['contact_heads'] = [contact_faces.CONTRACT, contract(config)]
     if visibility_contract is None or detection.get('faceocc_logit_threshold') == DEFAULT_FACEOCC_LOGIT_THRESHOLD:
         detection.pop('faceocc_logit_threshold', None)  # Preserve legacy and visibility-disabled scan keys.
     return digest({'namespace': namespace, 'detection': detection,
