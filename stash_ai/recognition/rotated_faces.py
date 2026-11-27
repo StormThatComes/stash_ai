@@ -10,7 +10,7 @@ from .database import encoded
 from .models import checked_detection
 from stash_ai.runtime.cleanup import closing
 
-CONTRACT = 'rotated-head-v5-untrusted-landmark-axis'
+CONTRACT = 'rotated-head-v6-owned-crop-candidates'
 
 
 def enabled(config):
@@ -93,43 +93,88 @@ def restore(face, box, ccw):
     return checked_detection([min(a[0],c[0]),min(a[1],c[1]),(w if type(ccw) is int else h),(h if type(ccw) is int else w),*marks,face.score])
 
 
-def detect_head(backend, image, box, turn, people, owner, faces):
+def detect_head(backend, image, box, turn, people, owner, faces, *, contact=False):
     from .quality import alignment_measurements
     from .sapiensid_backend import associate
     from .face_landmark_repair import same_box
-    measured = []
-    for person in people:
-        points = reliable_head_points(person,image.size)
-        head = [points.get(i,[-1,-1]) for i in range(5)]
-        measured.append(dict(person,keypoints=head+list(person['keypoints'][5:])))
+    from .contact_faces import measured_people, nearby_heads, ownership, conflicting_duplicate
+    measured = measured_people(people, image.size)
     options = []
     rotations = (0, True, 180, False) if turn is None else (turn,)
     for ccw in rotations:
         with image.crop(box) as tile, (tile.copy() if type(ccw) is int and ccw==0 else tile.transpose(
                 Image.Transpose.ROTATE_180 if ccw==180 else Image.Transpose.ROTATE_90 if ccw else Image.Transpose.ROTATE_270)) as upright:
-            found = backend.detect(upright)
-        if len(found)!=1:
+            detect = getattr(backend, 'contact_candidates', backend.detect) if contact else backend.detect
+            found = detect(upright)
+        candidates = []
+        for detection in found:
+            face = restore(detection, box, ccw)
+            if contact or len(found) > 1:
+                claim, _ = ownership(face, measured, nearby_heads(face, measured))
+                if claim != owner:
+                    continue
+            quality = alignment_measurements(face, image)
+            if not quality['alignment_valid']:
+                continue
+            candidates.append((quality['alignment_error'], -face.score, face.row, face, ccw))
+        if len(candidates) != 1:
             continue
-        face = restore(found[0],box,ccw)
-        quality = alignment_measurements(face,image)
-        if not quality['alignment_valid'] or any(same_box(face,other) or duplicate_face(face,other) for other in faces):
+        candidate = candidates[0]
+        face = candidate[3]
+        if contact:
+            if any(conflicting_duplicate(face, other, measured, owner) for other in faces):
+                continue
+        elif any(same_box(face, other) or duplicate_face(face, other) for other in faces):
             continue
-        if associate(faces+[face],measured)[-1]!=owner:
-            continue
-        options.append((quality['alignment_error'],-face.score,face.row,face,ccw))
+        if associate(faces+[face], measured)[-1] == owner:
+            options.append(candidate)
     if not options or any(not duplicate_face(a[3],b[3]) for i,a in enumerate(options) for b in options[i+1:]):
         return None
     selected = min(options,key=lambda value:value[:3])
     return selected[3],selected[4]
 
 
+def store_recovered(db, scan, index, cue, image, config, backend, visibility, face, body, *,
+                    contract_key, provenance, original=None):
+    """Quality-check, encode and link a pose-verified measurement in the caller's cue transaction."""
+    from .backend import prepared_frame
+    from .scan_pipeline import process
+    from .scanning import assess, rejection, crop_bytes, geometry_contract, safe_url
+    from .pixel_storage import compact
+    from .cold_payloads import put
+    with prepared_frame(backend, image):
+        [record] = process(image, [face], backend, visibility, config, cue, assess=assess,
+                           rejection=rejection, crop_bytes=crop_bytes, geometry_contract=geometry_contract)
+    _, _, quality, reason, vector, crop = record
+    if reason is not None:
+        return False
+    oid = original or str(uuid.uuid5(uuid.UUID(scan), encoded([contract_key, index, body['id']])))
+    quality.update(provenance)
+    shot = db.execute("SELECT json_extract(quality,'$.quality.view_shot') FROM body_observations WHERE id=?",
+                      (body['id'],)).fetchone()[0]
+    if shot is not None:
+        quality['view_shot'] = shot
+    if original:
+        old = db.execute('SELECT quality FROM observations WHERE id=?', (oid,)).fetchone()[0]
+        quality.update({k:v for k,v in json.loads(old).items() if k in ('view_shot','transition_verified')})
+    db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+               'geometry=excluded.geometry,quality=excluded.quality,rejected=NULL,embedding=excluded.embedding,'
+               'crop=excluded.crop', (oid, scan, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
+               encoded(face.row), compact(db, encoded(quality)), None, backend.dimensions, vector, put(db, crop)))
+    db.execute("UPDATE body_observations SET face=?,quality=json_set(quality,'$.face_status','accepted') WHERE id=?",
+               (oid, body['id']))
+    if original:
+        db.execute('DELETE FROM person_evidence WHERE observation=?', (oid,))
+    return True
+
+
 def recover(db, scan, source, config, acquire, visibility, release):
+    from . import contact_faces
+    if contact_faces.enabled(config):
+        from .contact_face_review import review
+        review(db, scan, source, config, acquire, visibility, release)
     if not enabled(config):
         return
-    from .scan_pipeline import process
-    from .scanning import geometry_contract, assess, rejection, crop_bytes, safe_url
-    from .cold_payloads import put
-    from .pixel_storage import compact
     expected = contract(config)
     from .dependencies import supported, version, store
     durable = supported(db)
@@ -151,7 +196,6 @@ def recover(db, scan, source, config, acquire, visibility, release):
     if not planned:
         certify()
         return
-    from .backend import prepared_frame
     with closing(acquire(),name='close rotated head face backend') as backend:
         try:
             frames = source.frames_indices(sorted(planned)) if hasattr(source,'frames_indices') else source.frames(min(planned))
@@ -178,22 +222,10 @@ def recover(db, scan, source, config, acquire, visibility, release):
                                 if recovered is None:
                                     continue
                                 face,ccw = recovered
-                                with prepared_frame(backend,image):
-                                    records = list(process(image,[face],backend,visibility,config,cue,assess=assess,
-                                        rejection=rejection,crop_bytes=crop_bytes,geometry_contract=geometry_contract))
-                                for _,face,quality,reason,vector,crop in records:
-                                    if reason is not None:
-                                        continue
-                                    oid = str(uuid.uuid5(uuid.UUID(scan),encoded([CONTRACT,index,row['id']])))
-                                    quality.update(rotated_head_source=row['id'],rotated_head_degrees=ccw if type(ccw) is int else 90 if ccw else -90)
-                                    shot = db.execute("SELECT json_extract(quality,'$.quality.view_shot') FROM body_observations WHERE id=?",(row['id'],)).fetchone()[0]
-                                    if shot is not None:
-                                        quality['view_shot'] = shot
-                                    db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                                        (oid,scan,index,cue.start,safe_url(cue.image),encoded(list(cue.rect)),encoded(list(face.row)),
-                                         compact(db,encoded(quality)),None,backend.dimensions,vector,put(db,crop)))
-                                    db.execute("UPDATE body_observations SET face=?,quality=json_set(quality,'$.face_status','accepted') WHERE id=?",
-                                               (oid,row['id']))
+                                degrees = ccw if type(ccw) is int else 90 if ccw else -90
+                                if store_recovered(db, scan, index, cue, image, config, backend, visibility, face, row,
+                                                   contract_key=CONTRACT,
+                                                   provenance=dict(rotated_head_source=row['id'], rotated_head_degrees=degrees)):
                                     faces.append(face)
                             repair_projections(db,config,scan,cue=index)
                         completed.add(index)

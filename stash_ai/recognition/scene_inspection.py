@@ -177,6 +177,8 @@ class UnassignedReader:
                 if bodies_available(db):
                     associations = [dict(kind='body', observation=r[0], label='Linked body in this cue') for r in
                         db.execute('SELECT id FROM body_observations WHERE scan=? AND face=? AND contract=? ORDER BY id', (row['scan'], address, contract(self.config)))]
+                associations.extend(dict(kind='body', observation=oid, label='Conflicting pose head in this cue')
+                                    for oid in quality.get('conflicting_pose_heads', ()))
             else:
                 from .face_landmark_fallback import retained_body_face
                 admission = admission_report.person(quality, self.config, policies, row['contract'], independent=True,

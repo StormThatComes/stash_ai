@@ -566,3 +566,20 @@ This evidence makes failed retries inspectable without sharing PNGs. It contains
 no images or model tensors and is collected only during audit/tuner rendering.
 An unrepaired detection remains visible in the diagnostic overlay; the mandatory
 alignment gate still prevents invalid landmarks from producing recognition evidence.
+
+### RetinaFace in close contact
+
+With `retinaface_r50` and independent body collection enabled, recognition compares
+disputed face boxes against separately measured pose eyes and noses after collecting
+the cue. A face whose features belong to different people is retained in Inspect
+Scene as `face_landmarks_mixed_people` with links to the conflicting heads. A
+midpoint detection is rejected as `face_between_confirmed_heads` only when a new
+local detection finds exactly the two pose-confirmed faces. An unassociated face
+or a missing profile eye alone does not trigger either rejection.
+
+For disputed crop-only landmarks, recognition remeasures the original face boxes
+and verifies which head owns each crop. When one box covers two measured heads,
+each missing face can be recovered on its own head crop even if the neighbour
+is visible. The usual recognition quality gates apply to each recovered face.
+This review also runs with `face.detector.pose_guided_rotation: false`; rerun
+recognition on the affected scenes to see the recorded decisions in Inspect Scene.

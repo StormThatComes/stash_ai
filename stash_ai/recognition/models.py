@@ -337,6 +337,20 @@ class YuNetDetector:
             return detector.detect_many([self._bgr(image) for image in images])
         return [self._detect(image) for image in images]
 
+    def contact_candidates(self, image, boxes=None):
+        """Provisional RetinaFace measurements; callers must verify independent pose ownership."""
+        from .face_landmark_repair import repair
+        pixels = self._bgr(image)
+        detector = self.ort_detector
+        if boxes is None:
+            if not self.config.data['detection'].get('landmarks_from_facebox'):
+                return self.detect(image)
+            boxes = detector._raw(pixels)
+        # A neighbour's box may be the spurious detection under review. Run
+        # the ordinary crop-only measurement, including score/rotation gates,
+        # independently, then arbitrate all candidates together in source space.
+        return [repair(detector, [pixels], [[box]])[0][0] for box in boxes]
+
     def detect(self, image):
         return self.detect_faces_many([image])[0]
 

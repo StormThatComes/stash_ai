@@ -202,6 +202,13 @@ def _matching(config, kind, decisions):
 
 def suggest(config, kind, admission, decisions, rejection):
     notes = ['Suggestions use retained evidence, not a verified assignment replay. YAML settings affect other observations too.']
+    from . import contact_faces
+    if kind == 'face' and rejection in (contact_faces.MIXED, contact_faces.BETWEEN):
+        explanation = ('Different pose heads support different eye or nose landmarks.'
+                       if rejection == contact_faces.MIXED else
+                       'A separate crop found both pose-confirmed faces around the original detection.')
+        return dict(notes=[explanation], paths=[_path(config, 'Inspect the two conflicting pose heads',
+                    next_action='Open the linked body observations and compare the measured eyes and nose.')])
     if kind == 'body':
         switches = ('sapiensid.enabled', 'sapiensid.collection.enabled', 'sapiensid.identities.enabled')
         changes = {path:True for path in switches if not parameter(config.data,path)}
