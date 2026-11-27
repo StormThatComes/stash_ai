@@ -224,7 +224,8 @@ class RefinedPMPose:
                 from .refinement_budget import budget
                 i,box,mask,_=candidate
                 # An isolated complete skeleton already supported by its mask needs no second inference.
-                if reliable is not None and reliable[i].all() and tuple(box) == tuple(bounds[i]) and not any(
+                edited = any(records[i].get(key) for key in ('bridge_cuts','component_edits','temporal_prompts'))
+                if reliable is not None and not edited and reliable[i].all() and tuple(box) == tuple(bounds[i]) and not any(
                         j != i and overlaps(bounds[i], other, 0) for j,other in enumerate(bounds)):
                     xy = prediction[0][i].astype(int)
                     left,top,right,bottom = bounds[i]
