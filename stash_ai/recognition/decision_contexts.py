@@ -51,6 +51,13 @@ def unpack(db,payload):
         if row is None or hashlib.sha256(row[0].encode()).hexdigest()!=key:
             raise ValueError('Missing or corrupt candidate decision context.')
         value=dict(json.loads(row[0]),**value)
+    proof = value.get('provisional_pool') or {}
+    key = proof.pop('witness_context', None)
+    if key:
+        row = db.execute('SELECT payload FROM decision_contexts WHERE id=?',(key,)).fetchone()
+        if row is None or hashlib.sha256(row[0].encode()).hexdigest()!=key:
+            raise ValueError('Missing or corrupt pooled witnesses.')
+        proof.update(json.loads(row[0]))
     return value
 
 
@@ -64,4 +71,6 @@ def limits_sql(db,alias='c'):
 def collect(db):
     db.execute("DELETE FROM decision_contexts WHERE NOT EXISTS (SELECT 1 FROM candidates "
                "WHERE CASE WHEN json_valid(payload) THEN json_extract(payload,'$.decision_context') END=decision_contexts.id) "
-               f"AND NOT EXISTS (SELECT 1 FROM candidates WHERE {MERGE_KEY}=decision_contexts.id)")
+               f"AND NOT EXISTS (SELECT 1 FROM candidates WHERE {MERGE_KEY}=decision_contexts.id) "
+               "AND NOT EXISTS (SELECT 1 FROM candidates WHERE CASE WHEN json_valid(payload) THEN "
+               "json_extract(payload,'$.provisional_pool.witness_context') END=decision_contexts.id)")

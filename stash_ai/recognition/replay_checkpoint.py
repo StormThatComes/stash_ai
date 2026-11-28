@@ -27,13 +27,14 @@ FORMAT = 1
 ENGINE = 'recognition-cold-replay-v12.0'
 TABLES = ('people', 'members', 'candidates', 'identity_merges', 'merge_support')
 EXTRA_SCHEMA = {
+    'pool_witness_context': 'id TEXT PRIMARY KEY,payload TEXT',
     'local_core_order': 'observation TEXT PRIMARY KEY,position INTEGER',
     'pool_claims': 'observation TEXT PRIMARY KEY,source TEXT,scan TEXT,cue INTEGER,seconds REAL',
     'pool_promotions': 'source TEXT PRIMARY KEY,mode TEXT,selected_ids TEXT,proof TEXT',
 }
 SNAPSHOT_TABLES = TABLES + tuple(EXTRA_SCHEMA)
 ORDER = ('id', 'observation', 'id', 'source', 'source,target,observation,policy',
-         'observation', 'observation', 'source')
+         'id', 'observation', 'observation', 'source')
 SCHEMA = '''
 CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE people(id TEXT PRIMARY KEY, scope TEXT NOT NULL, namespace TEXT NOT NULL,

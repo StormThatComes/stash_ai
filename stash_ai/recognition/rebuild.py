@@ -399,6 +399,9 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
                         (person, scope, namespace, time.time(), None, f'stash-ai-recognition:{database.installation}:{person}'))
             from .assignment_delta import prune,candidates as apply_candidates
+            if replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='pool_witness_context'").fetchone():
+                db.executemany('INSERT OR IGNORE INTO decision_contexts VALUES (?,?)',
+                               replay.execute('SELECT id,payload FROM pool_witness_context'))
             changed=prune(db,replay,selected,scope,namespace,policy)
             with tracking(
                 _apply_members(db, replay, mapping, changed),
