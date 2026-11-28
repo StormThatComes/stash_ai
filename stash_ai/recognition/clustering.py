@@ -25,7 +25,8 @@ MATCHING_FORMAT = 69
 
 def core_floor(samples, threshold):
     """For a tight core, require at least sixty percent of its observed internal similarity."""
-    if len(samples) < 2:
+    # A zero floor explicitly disables the similarity gate for diagnostic replays.
+    if threshold <= 0 or threshold >= 0.60 or len(samples) < 2:
         return threshold
     import numpy as np
     total = np.sum(samples, axis=0, dtype=np.float64)
