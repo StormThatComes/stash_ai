@@ -82,7 +82,7 @@ def resolve(database,replay,selected,config,history,bindings,confirmed,early,usa
     from .query_support import cohorts
     from .config import digest
     claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM pool_view_claims')}
-    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
+    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
         'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
     eligible=cohorts(raw,config,key=lambda r:claims_by_id[r['id']]['owner'],
         prototype=lambda r:claims_by_id[r['id']]['medoid'])
@@ -127,16 +127,20 @@ def finalize(replay,config,mapping):
         expected=json.loads(promotion['selected_ids'])
         memberships=replay.execute('SELECT observation,person FROM members WHERE observation IN '
             '(SELECT value FROM json_each(?))',(encoded(expected),)).fetchall()
-        if len(memberships)==len(expected) and len({mapping.get(r['person'],r['person']) for r in memberships})==1:
+        owner = proof.get('source_owner', proof.get('identity'))
+        canonical_owner = mapping.get(owner, owner)
+        if memberships and len(memberships)==len(expected) and all(
+                mapping.get(r['person'],r['person']) == canonical_owner for r in memberships):
             continue
         current=replay.execute('SELECT observation FROM pool_view_claims WHERE current=1 AND observation IN '
             '(SELECT value FROM json_each(?))',(encoded(proof['query_ids']),)).fetchall()
         for observation, in current:
-            replay.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
+            changed = replay.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','provisional_pool_source_invalidated',"
                 "'$.provisional_pool.source_validation','invalidated_after_auxiliary') WHERE policy=? AND "+
                 observation_sql('candidates')+"=? AND json_extract(payload,'$.provisional_pool.claim_id')=?",
                 (matching_policy(config),observation,proof['claim_id']))
-            replay.execute('DELETE FROM members WHERE observation=?',(observation,))
+            if changed.rowcount:
+                replay.execute('DELETE FROM members WHERE observation=? AND person=?',(observation,owner))
         replay.execute('DELETE FROM pool_promotions WHERE source=?',(promotion['source'],))
         replay.execute('DELETE FROM pool_claims WHERE source=?',(promotion['source'],))

@@ -20,7 +20,18 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 68
+MATCHING_FORMAT = 69
+
+
+def core_floor(samples, threshold):
+    """For a tight core, put the admission boundary halfway to its internal mean."""
+    if len(samples) < 2:
+        return threshold
+    import numpy as np
+    total = np.sum(samples, axis=0, dtype=np.float64)
+    n = len(samples)
+    internal = (float(total @ total) - n) / (n * (n - 1))
+    return max(threshold, (internal + threshold) / 2)
 
 
 def vector(row):
@@ -350,6 +361,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 for group, score, cohesion in contributions(
                         groups, query, frozen, fixed_count, settings['match_threshold'] - settings['ambiguity_margin'],
                         exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None):
+                    if independent and not group.known and score < core_floor(group.samples, settings['match_threshold']):
+                        continue
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold']):

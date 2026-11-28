@@ -206,7 +206,7 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
             if group.identifier in blocked:
                 _deferred(replay,policy,group.identifier,'incoherent_frozen_support')
                 continue
-            current=replay.execute('SELECT o.id,o.scan,o.seconds FROM candidates c JOIN observations o ON o.id='+observation_sql('c')+
+            current=replay.execute('SELECT o.id,o.scan,o.seconds,o.quality FROM candidates c JOIN observations o ON o.id='+observation_sql('c')+
                 " WHERE c.policy=? AND c.person=? AND c.status IN ('accepted','withheld') AND o.rejected IS NULL AND "+
                 anchor_sql('o',grouping),(policy,group.identifier)).fetchall()
             if group.known:
@@ -214,9 +214,16 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
             current_ids=[row['id'] for row in current]
             if not current:
                 continue
-            support=replay.execute('SELECT COUNT(*) FROM (SELECT scan,seconds FROM pool_claims WHERE source=? UNION '
-                'SELECT o.scan,o.seconds FROM observations o WHERE o.id IN (SELECT value FROM json_each(?)))',
-                (group.identifier,encoded(current_ids))).fetchone()[0]
+            from .independent_evidence import Votes
+            votes = Votes()
+            for row in current:
+                votes.add(row)
+            from itertools import islice
+            claims = replay.execute('SELECT observation FROM pool_claims WHERE source=?',(group.identifier,))
+            while batch := [r[0] for r in islice(claims,512)]:
+                for row in database.connection.execute('SELECT scan,seconds,quality FROM observations WHERE id IN (SELECT value FROM json_each(?))',(encoded(batch),)):
+                    votes.add(row)
+            support = len(votes)
             mode='known_strict' if group.known else 'birth'
             match=None
             if not group.known:
@@ -224,9 +231,6 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
                 if match is not None:
                     if not _validate_known(database,replay,group.identifier,current_ids,match[0],history,config,bindings):
                         continue
-                    support=replay.execute('SELECT COUNT(*) FROM (SELECT scan,seconds FROM pool_claims WHERE source=? UNION '
-                        'SELECT o.scan,o.seconds FROM observations o WHERE o.id IN (SELECT value FROM json_each(?)))',
-                        (group.identifier,encoded(current_ids))).fetchone()[0]
                     minimum=grouping['view_attach_min_support'] if match[1]['mode']=='view' else 1
                     if support<minimum:
                         continue
