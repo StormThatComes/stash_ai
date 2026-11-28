@@ -796,6 +796,15 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             if stop_reason is None:
                 stop_reason = 'max_trials' if trials >= search_limit else 'proposal_limit'
     def saved_baseline(state):
+        if 'baseline_archive' in state:
+            from .solver_delta_transport import Delta
+            from .solver_slot_index import apply_baseline
+            changes = Delta.from_archive('baseline', state['baseline_archive']).read(journal.directory, indexed=True)
+            try:
+                return apply_baseline(changes)
+            finally:
+                if hasattr(changes, 'close'):
+                    changes.close()
         if 'baseline_delta' in state:
             from .solver_slot_index import apply_baseline
             return apply_baseline(state['baseline_delta'])
@@ -843,9 +852,21 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             from .solver_slot_index import Slots
             baseline_fields = {}
             if name == 'baseline':
-                baseline_fields = (dict(baseline_delta=dict(baseline.db.execute(
-                    'SELECT id,baseline FROM slots WHERE retained IS NOT baseline')))
-                    if isinstance(baseline, Slots) else dict(baseline=baseline))
+                if isinstance(baseline, Slots):
+                    from .solver_delta_transport import Delta, collect, worker_target
+                    from .solver_images import current as current_images
+                    images = current_images()
+                    with worker_target(images.directory, images.limit):
+                        changes = collect(baseline.db.execute('SELECT id,baseline FROM slots WHERE retained IS NOT baseline'))
+                    if isinstance(changes, Delta):
+                        try:
+                            baseline_fields['baseline_archive'] = changes.archive(images.directory, journal.directory, 'baseline')
+                        finally:
+                            (images.directory / changes.filename).unlink(missing_ok=True)
+                    else:
+                        baseline_fields['baseline_delta'] = changes
+                else:
+                    baseline_fields['baseline'] = baseline
             state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],
                 feedback=latest_feedback,options=options,hybrid=hybrid,hybrid_changes=hybrid_changes,
                 robustness=robustness,**baseline_fields))

@@ -20,20 +20,15 @@ def coordinator(images, source, config, scans):
     selected = encoded([scan['id'] for scan in scans])
     path.touch(exist_ok=False)
     room = images.limit - sum(p.stat().st_size for p in images.directory.iterdir())
-    request = min(room, 8 * 1024**2)
-    while True:
-        try:
-            with reserve_file(path, request) as capacity, closing(sqlite3.connect(path)) as db:
-                _populate(db, source, config, scans, selected, capacity)
-            break
-        except sqlite3.OperationalError as error:
-            if getattr(error, 'sqlite_errorcode', None) != sqlite3.SQLITE_FULL:
-                raise
-            if capacity < request or request == room:
-                raise ResourceLimit('Solver observation index exceeds the admitted disk budget.') from error
-            path.unlink()
-            path.touch(exist_ok=False)
-            request = min(room, 2 * request)
+    # Reserve once. reserve_file clamps to the volume allowance, and releases
+    # the unused portion as soon as the completed index is closed.
+    try:
+        with reserve_file(path, room) as capacity, closing(sqlite3.connect(path)) as db:
+            _populate(db, source, config, scans, selected, capacity)
+    except sqlite3.OperationalError as error:
+        if getattr(error, 'sqlite_errorcode', None) != sqlite3.SQLITE_FULL:
+            raise
+        raise ResourceLimit('Solver observation index exceeds the admitted disk budget.') from error
     # Baseline and trial work need only the actual bytes of the finished index.
     with closing(sqlite3.connect(path)) as db:
         size = db.execute('SELECT count(*) FROM slots').fetchone()[0]

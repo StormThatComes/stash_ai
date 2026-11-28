@@ -10,16 +10,8 @@ def prepare(target, seed):
     path = seed.execute('PRAGMA database_list').fetchone()[2]
     if not path:
         # Standalone callers may supply a RAM seed, which cannot be attached.
-        if getattr(target, 'budget', None) is not None:
-            required = seed.execute('PRAGMA page_count').fetchone()[0] * seed.execute('PRAGMA page_size').fetchone()[0]
-            if hasattr(target,'account_pages'):
-                target.budget.reserve(target.owner, required)
-            else:
-                target.budget.set(target,2*required)
-                target.capacity = target.estimate = required
-        seed.backup(target)
-        if hasattr(target,'account_pages') and target.budget is not None:
-            target.account_pages()
+        from .solver_images import backup
+        backup(seed, target)
         return
     from .profiling import count
     uri = Path(path).resolve().as_uri() + '?mode=ro&immutable=1'

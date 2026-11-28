@@ -57,6 +57,18 @@ def review(rows, grouping):
     return proof
 
 
+def review_policy(grouping):
+    from .config import digest
+    from .sharpness_gates import policy
+    fields = ('revalidate_face_anchors','near_duplicate_pixel_rms','near_duplicate_similarity',
+              'anchor_review_max_cues','view_min_support','view_cohesion_threshold',
+              'view_ambiguity_margin','cohesion_threshold','max_anchor_pose_deviation',
+              'min_anchor_visible_face_fraction','min_auxiliary_visible_face_fraction',
+              'min_anchor_face_pixels','min_auxiliary_face_pixels','_inspection_omit_anchors')
+    return digest([dict((key,grouping.get(key)) for key in fields)] +
+                  [policy(grouping,role+'_','min_'+role+'_sharpness') for role in ('anchor','auxiliary')])
+
+
 def cached_review(rows, grouping):
     from .run_cache import current, MISSING
     from .solver_images import current as images
@@ -64,7 +76,6 @@ def cached_review(rows, grouping):
     if cache is None or images() is None:
         return review(rows,grouping)
     from hashlib import sha256
-    from .config import digest, plain
     from .memory_size import size
     key_hash = sha256()
     for row in rows:
@@ -73,7 +84,7 @@ def cached_review(rows, grouping):
             raw = value if isinstance(value,bytes) else str(value).encode()
             key_hash.update(len(raw).to_bytes(8,'big'))
             key_hash.update(raw)
-    key = ('solver-anchor-review',key_hash.digest(),digest(plain(grouping)))
+    key = ('solver-anchor-review',key_hash.digest(),review_policy(grouping))
     found = cache.get(key)
     if found is not MISSING:
         return found
@@ -82,18 +93,38 @@ def cached_review(rows, grouping):
     return proof
 
 
-def apply(db, selected, config):
+def apply(db, selected, config, *, immutable_input=None):
     grouping=config.data['clustering']
     if not grouping.get('revalidate_face_anchors') and not grouping.get('near_duplicate_pixel_rms'):
         return
+    from .run_cache import current, MISSING
+    from .memory_size import size
+    cache = current()
+    reusable = immutable_input is not None and cache is not None
+    policy = review_policy(grouping) if reusable else None
     for item in selected:
+        key = ('immutable-face-review', immutable_input, item['scan'], policy)
+        found = cache.get(key) if reusable else MISSING
+        if found is not MISSING:
+            units, proof = found
+            db.executemany("UPDATE main.observations SET quality=json_set(quality,'$.evidence_independence_unit',?) WHERE id=?",
+                           ((unit, oid) for oid, unit in units.items()))
+            write_review(db, proof)
+            continue
         rows=[dict(r) for r in db.execute('SELECT id,scan,cue,seconds,geometry,quality,dimensions,embedding '
             'FROM observations WHERE scan=? AND rejected IS NULL AND embedding IS NOT NULL ORDER BY cue,id',(item['scan'],))]
-        if grouping.get('near_duplicate_pixel_rms'):
-            collapse(db,rows,grouping)
+        units = collapse(db,rows,grouping) if grouping.get('near_duplicate_pixel_rms') else {}
+        proof = {}
         if grouping.get('revalidate_face_anchors'):
-            for oid,proof in cached_review(rows,grouping).items():
-                db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
+            proof = review(rows, grouping) if reusable else cached_review(rows,grouping)
+            write_review(db, proof)
+        if reusable:
+            cache.put(key, (units,proof), size((units,proof)) + 256)
+
+
+def write_review(db, decisions):
+    for oid, proof in decisions.items():
+        db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
                     "'$.anchor_review',json(?)) WHERE id=?",(encoded(proof),oid))
 
 
@@ -101,6 +132,7 @@ def collapse(db, rows, grouping):
     """Scene-local, non-transitive thumbnail proof; never an identity merge."""
     from .pixel_storage import read
     representatives=[]
+    units = {}
     rms=grouping['near_duplicate_pixel_rms']
     similarity=grouping.get('near_duplicate_similarity',.995)
     for row in rows:
@@ -118,12 +150,14 @@ def collapse(db, rows, grouping):
             from .config import digest
             unit=digest(['independent-face',row['scan'],representative['id']])
             for target,record in ((row,q),(representative,other)):
+                units[target['id']] = unit
                 record['evidence_independence_unit']=unit
                 target['quality']=encoded(record)
                 db.execute('UPDATE main.observations SET quality=? WHERE id=?',(target['quality'],target['id']))
             break
         else:
             representatives.append((row,q,value,pixels,geometry))
+    return units
 
 
 def publish_proofs(db):
