@@ -387,7 +387,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 if history is not None:
                     from .tune_mask_candidate import record as record_sample
                     record_sample(history, raw, score, f'P{i} · attempt {attempt} · candidate {best}',
-                                  bounds[i], positive, evidence[i], foreign, limbs)
+                                  bounds[i], positive, evidence[i], foreign, limbs, (i, attempt))
                 observer = mask_observer(image, record)
                 rank, mask, box, reason, edits = assessed[best]
                 if observer is not None:
@@ -412,7 +412,7 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 record['reason'] = reason
                 record.pop('mask_pixels', None)
                 record['separated'] = False
-                if observer is not None or phases.active(image) is not None:
+                if observer is not None or (history is not None and not history.samples_only):
                     def observe(stage, pixels):
                         if observer is not None:
                             observer(stage, pixels)

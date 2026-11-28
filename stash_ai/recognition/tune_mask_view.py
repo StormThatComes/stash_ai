@@ -16,8 +16,10 @@ class LiveMasks(ttk.Frame):
         self.samples = {}
         self.settings = {}
         self.indices = {}
+        self.selected_attempt = {}
         self.details = {}
         self.omitted = {}
+        self.tokens = {}
         self.source = None
         self.workers = {name: Worker('cleanup-' + name) for name in ('A', 'B')}
         bar = ttk.Frame(self)
@@ -46,6 +48,7 @@ class LiveMasks(ttk.Frame):
 
     def select(self, _):
         self.indices[self.active] = self.choice.current()
+        self.selected_attempt[self.active] = self.samples[self.active][self.choice.current()].attempt_key
         self.request(self.active)
 
     def configure_panel(self, name, compare):
@@ -63,7 +66,10 @@ class LiveMasks(ttk.Frame):
         else:
             self.choice.set('')
 
-    def clear(self, name):
+    def clear(self, name, *, keep_token=False):
+        if not keep_token:
+            self.tokens.pop(name, None)
+            self.selected_attempt.pop(name, None)
         self.workers[name].invalidate()
         self.samples.pop(name, None)
         self.settings.pop(name, None)
@@ -74,11 +80,16 @@ class LiveMasks(ttk.Frame):
         self.choices()
 
     def set_samples(self, name, history, settings, source):
-        self.clear(name)
+        token = getattr(history, 'replay_token', None)
+        self.clear(name, keep_token=token is not None and token is self.tokens.get(name))
+        self.tokens[name] = token
         self.source = source
         self.samples[name] = getattr(history, 'samples', ())
         self.omitted[name] = getattr(history, 'samples_omitted', 0)
-        self.indices[name] = 0
+        key = self.selected_attempt.get(name)
+        self.indices[name] = next((i for i, sample in enumerate(self.samples[name]) if sample.attempt_key == key), 0)
+        if self.samples[name]:
+            self.selected_attempt[name] = self.samples[name][self.indices[name]].attempt_key
         self.settings[name] = settings
         self.choices()
         self.request(name)

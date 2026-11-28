@@ -88,6 +88,9 @@ class RefinedPMPose:
         return self.refine_many(frames, predictions)
 
     def _plan(self, bounds, prediction, image=None):
+        replay = getattr(image, '_tuner_mask_replay', None)
+        if replay is not None:
+            replay.remember_pose(self, image, bounds, prediction)
         phases.pose(image, 'Initial keypoints (before refinement)', bounds, prediction)
         points, scores, probabilities = prediction
         settings = self.settings

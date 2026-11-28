@@ -22,9 +22,10 @@ class MaskSample:
     own: np.ndarray
     foreign: np.ndarray
     limbs: np.ndarray
+    attempt_key: tuple | None = None
 
 
-def record(history, raw, score, title, box, prompts, own, foreign, limbs):
+def record(history, raw, score, title, box, prompts, own, foreign, limbs, attempt_key):
     arrays = [np.asarray(a).reshape(shape) for a, shape in
               ((prompts, (-1, 2)), (own, (-1, 2)), (foreign, (-1, 2)), (limbs, (-1, 2, 2)))]
     from .detection_phases import MAX_BYTES
@@ -34,7 +35,7 @@ def record(history, raw, score, title, box, prompts, own, foreign, limbs):
         return
     history.bytes += charge
     history.samples.append(MaskSample(title, raw.shape, np.packbits(raw, axis=None).tobytes(), float(score),
-                                      tuple(box), *(a.copy() for a in arrays)))
+                                      tuple(box), *(a.copy() for a in arrays), attempt_key))
 
 
 def preview(source, sample, settings, view):

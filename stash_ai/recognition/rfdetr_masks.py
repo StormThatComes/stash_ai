@@ -48,6 +48,10 @@ class RFDETRMasks(FrameSegmenter):
         self.masks = self.scores = self.instance_ids = None
 
     def encode(self, image):
+        replay = getattr(image, '_tuner_mask_replay', None)
+        if replay is not None and replay.encoded is not None and replay.encoded[0] is self:
+            _, self.instance_ids, self.scores, self.masks = replay.encoded
+            return
         import numpy as np
         import torch
         import torch.nn.functional as F
@@ -74,6 +78,9 @@ class RFDETRMasks(FrameSegmenter):
             mask = F.interpolate(masks[0, index][None, None].float(), size=self.size[::-1],
                                  mode='bilinear', align_corners=False)[0, 0] > 0
             self.masks.append(np.packbits(mask.cpu().numpy(), axis=None))
+
+        if replay is not None and sum(bits.nbytes for bits in self.masks) <= 16 * 1024**2:
+            replay.encoded = self, self.instance_ids, self.scores, self.masks
 
     def iter_instances(self):
         if self.masks is None:

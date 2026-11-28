@@ -20,7 +20,7 @@ zero-based indices. Find a setting by its YAML path or expand a group in the par
 Drag the slider, toggle the checkbox, select an option or enter an exact value and press Enter.
 **Auto** restores a nullable threshold, **Reset** restores the loaded value and **Undo** reverses the last edit in that panel.
 Use **Changed only** and **Copy YAML diff** to transfer the edited settings back to your configuration.
-Only **Run detection** loads models and computes an annotated image. Each detection
+Choose **Run detection** for the first annotated result. Each detection
 starts from fresh cue context, independently of navigation history. Edits are local to the
 window. The recognition database and Stash identities are never modified.
 
@@ -92,7 +92,13 @@ replay the recorded candidate on CPU using its original box, prompts, own and fo
 points and limb segments. Click an island to inspect its size, effective area floor
 and available ownership/distance evidence. Enable A/B and edit B to pin the baseline
 in A. **Check full detection** recomputes candidate selection, retries and final pose
-after changes. Missing candidates and history limits are reported per cue.
+after changes and returns to the detection tab. Missing candidates and history limits
+are reported per cue. After the first run, changing prompt limits, eligibility or retry
+settings automatically regenerates candidates once you release the slider. The tuner
+reuses the captured first pose and its local context. SAM 3 reuses one image embedding,
+and RF-DETR-Seg reuses the current cue's proposals. Changing its confidence threshold
+or editing a panel whose model was released runs full detection again. Model/backend
+changes still use the explicit Run detection button.
 
 Enable **Compare A/B** to show two copies of the same cue. Select **B** under
 **Configuration / phases**, use **Copy A to B** or enter a second file path and choose
