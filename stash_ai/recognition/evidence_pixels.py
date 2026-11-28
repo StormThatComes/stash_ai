@@ -249,7 +249,11 @@ class _LazyAliases:
             from .pixel_catalogue import ready,prepare
             from .dependencies import _writable
             if self.persist and _writable.get() and ready(self.db,self.scope,self.namespace):
-                self.mapping=prepare(self.db,self.scope,self.namespace,disk_bytes=_disk_budget.get())
+                prepare_separately = getattr(self.db, 'prepare_pixel_catalogue', None)
+                if prepare_separately:
+                    self.mapping = prepare_separately(self.scope,self.namespace,_disk_budget.get())
+                else:
+                    self.mapping=prepare(self.db,self.scope,self.namespace,disk_bytes=_disk_budget.get())
             else:self.mapping=dict(aliases(self.db,self.scope,self.namespace,budget=self.budget,persist=self.persist))
         return self.mapping.get(value,default)
 
