@@ -12,7 +12,7 @@ def potential(rows,history,config):
     from .historical_references import _rank_bank
     groups, views = _rank_bank(history, config, False)
     candidates={}
-    for row in rows:
+    for index,row in enumerate(rows):
         choices={};query=vector(row)
         for group,score,low in comparisons(history.groups,query,settings['match_threshold']-settings['ambiguity_margin'],grouping['cohesion_threshold']):
             if low>=grouping['cohesion_threshold'] and score>=settings['match_threshold']-settings['ambiguity_margin']:
@@ -23,14 +23,27 @@ def potential(rows,history,config):
             if low>=grouping['view_cohesion_threshold'] and score>=threshold-margin and pose_matches(row['geometry'],view.pose):
                 if score>choices.get(group.identifier,(float('-inf'),))[0]:
                     choices[group.identifier]=(score,'view',threshold)
-        for person,value in choices.items():candidates.setdefault(person,[]).append(value)
-    rivals=[dict(identity=person,score=sum(v[0] for v in values)/len(values),
-                 authority=sorted({v[1] for v in values}))
-            for person,values in candidates.items() if len(values)==len(rows)]
+        for person,value in choices.items():candidates.setdefault(person,[]).append((*value,index))
+    from .independent_evidence import count
+    rivals = []
+    for person,values in candidates.items():
+        whole = len(values) == len(rows)
+        if not whole:
+            if len(values) < 3 or len(values) != len(rows)-1:
+                continue
+            supporting = [rows[value[3]] for value in values]
+            if any('scan' not in r.keys() or 'seconds' not in r.keys() for r in supporting) or count(supporting)<3:
+                continue
+            excluded = set(range(len(rows))) - {value[3] for value in values}
+            if any(v[3] in excluded and v[0] >= v[2] for other, records in candidates.items()
+                   if other != person for v in records):
+                continue
+        rivals.append(dict(identity=person,score=sum(v[0] for v in values)/len(values),
+                           authority=sorted({v[1] for v in values}),support=len(values)))
     if not rivals:return None
     return dict(format=1,frozen=True,outcome='plausible_existing_identity',context=history.context,
                 rivals=sorted(rivals,key=lambda r:(-r['score'],r['identity']))[:2],
-                validation='whole_frozen_query_cohort',match_threshold=settings['match_threshold'],
+                validation='whole_frozen_query_cohort' if any(r['support']==len(rows) for r in rivals) else 'independent_majority',match_threshold=settings['match_threshold'],
                 view_match_threshold=threshold)
 
 

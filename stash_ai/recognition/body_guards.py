@@ -10,6 +10,7 @@ class FaceGuard:
         self.scores=scores if scores is not None else Scores(config)
         self.db = db
         self.floor = config.data['sapiensid']['matching']['face_floor']
+        self.margin = config.data['sapiensid']['matching'].get('ambiguity_margin',0.)
         self.grouping = config.data.get('clustering', {})
         from collections import OrderedDict
         self.banks = OrderedDict()
@@ -70,6 +71,9 @@ class FaceGuard:
         from stash_ai.runtime.cancellation import current
         token=current()
         first = None
+        marginal = False
+        first_support = None
+        independent_times = independent_pixels = False
         distinct_time = distinct_pixels = False
         from .independent_evidence import unit
         with tracking(others,'Check body face vetoes',unit='face') as witnesses:
@@ -78,10 +82,22 @@ class FaceGuard:
                 other = witness.validated if person is not None else witness['_face_vector']
                 if len(face)!=len(other):
                     return False
-                if self.scores.face_similarity(face,other)>=self.floor:
+                score = self.scores.face_similarity(face, other)
+                strict = person is None or witness.strict
+                if score >= self.floor:
+                    if strict and score >= self.floor+self.margin and person is not None and not (independent_times and independent_pixels):
+                        stamp = witness.scan,witness.seconds
+                        pixel = unit(dict(scan=witness.scan,seconds=witness.seconds,quality=witness.quality))
+                        if first_support is None:
+                            first_support = stamp,pixel
+                        independent_times |= stamp!=first_support[0]
+                        independent_pixels |= pixel!=first_support[1]
                     continue
-                if not weak and (person is None or witness.strict):
-                    return False
+                if not weak and strict:
+                    if (person is None or score < self.floor-self.margin
+                            or (row.get('scan'),row.get('seconds'))==(witness.scan,witness.seconds)):
+                        return False
+                    marginal = True
                 if person is None:
                     record = dict(scan=witness['scan'],seconds=witness['seconds'],quality=witness.get('face_quality') or '{}')
                 else:
@@ -94,7 +110,7 @@ class FaceGuard:
                 distinct_pixels |= pixel!=first[1]
                 if distinct_time and distinct_pixels:
                     return False
-        return True
+        return not marginal or (independent_times and independent_pixels)
 
 
 def resolve_claims(rows, decisions, config, *, scores=None):

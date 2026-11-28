@@ -24,8 +24,17 @@ class Edges:
         return self.scores.get(tuple(sorted((left, right))), float('-inf'))
 
     def proposals(self, people, threshold, margin):
-        if not self.available or len(people) > 128:
-            return ()  # Keep the existing conservative component result.
+        if not self.available:
+            return ()
+        if len(people)>128:
+            members = set(people)
+            adjacent = {p:set() for p in people}
+            for (a,b),value in self.scores.items():
+                if a in members and b in members and value>=threshold:
+                    adjacent[a].add(b)
+                    adjacent[b].add(a)
+            groups,_ = large_subgroups(people,adjacent,self.scores,threshold,margin,self.limit*64)
+            return groups
         found = set()
         for person in sorted(people):
             neighbours = sorted((p for p in people if p != person and self.score(p, person) >= threshold),
@@ -56,7 +65,8 @@ def large_subgroups(people, edges, pairs, threshold, margin, budget, maximum=8):
     """
     from heapq import nsmallest
     def score(a,b):
-        return pairs[tuple(sorted((a,b)))]['score']
+        pair = pairs[tuple(sorted((a,b)))]
+        return pair['score'] if isinstance(pair,dict) else pair
 
     proposals = set()
     used = 0
