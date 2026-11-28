@@ -48,10 +48,11 @@ class DetectionResult(tuple):
 
 
 class History:
-    def __init__(self, image, backend=None):
+    def __init__(self, image, backend=None, *, samples_only=False):
         self.image = image
         self.backend = backend
         self.phases = []
+        self.samples_only = samples_only
         self.samples = []
         self.samples_omitted = 0
         self.people = ()
@@ -83,8 +84,8 @@ class History:
 
 
 @contextmanager
-def capture(image, *, enabled=True, backend=None):
-    history = History(image, backend) if enabled else None
+def capture(image, *, enabled=True, backend=None, samples_only=False):
+    history = History(image, backend, samples_only=samples_only) if enabled else None
     token = _CURRENT.set(history)
     try:
         yield history
@@ -111,7 +112,7 @@ def _snapshot(function):
     @wraps(function)
     def call(image, *args, **kwargs):
         history = active(image)
-        if history is None or history.clock.final is not None:
+        if history is None or history.samples_only or history.clock.final is not None:
             return
         with history.clock.snapshot():
             return function(image, *args, **kwargs)

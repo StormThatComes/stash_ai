@@ -1,5 +1,5 @@
 """Read-only scene browsing and explicit single-cue audit inference."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
@@ -111,10 +111,18 @@ class CueDetector:
         self.services = services
         self.factory = factory
         self.write = write
-        self.config = self.detector = None
+        self.config = self.detector = self.mask_replay = None
 
     def render_phases(self, frame, config):
         return self.render(frame, config, capture_phases=True)
+
+    def drop_mask_replay(self):
+        self.mask_replay = None
+
+    def regenerate_masks(self, frame, token, config):
+        if self.mask_replay is not None and self.mask_replay.supports(token, frame, config):
+            return self.mask_replay.generate(config)
+        return self.render_phases(frame, config)
 
     def render(self, frame, config, *, mask_options=None, capture_phases=False):
         from .detection_audit import render_frame
@@ -123,13 +131,20 @@ class CueDetector:
             self.close()
             self.detector = load_detector(self.services, config, self.factory, self.write)
             self.config = config
+        self.drop_mask_replay()
+        if capture_phases and config.data['sapiensid']['pose']['refinement']['enabled']:
+            from .tune_mask_generation import MaskReplay
+            self.mask_replay = MaskReplay(frame)
         try:
             # A fresh image also isolates single-cue inference from browsing history.
-            with trial_image(frame,self.detector) as image, capture(
+            with trial_image(frame,self.detector) as image, (
+                    self.mask_replay.bind(image) if self.mask_replay is not None else nullcontext()), capture(
                     image, enabled=capture_phases, backend=config.data['sapiensid']['pose']['backend']) as phases, render_frame(
                     image, self.detector, frame.scene_id, frame.index, frame.cue,
                     mask_options=mask_options, quality_settings=config.data) as (result, record):
                 if phases is not None:
+                    if self.mask_replay is not None and self.mask_replay.owner is not None:
+                        phases.replay_token = self.mask_replay.token
                     return DetectionResult(result.copy(), record, phases)
                 return result.copy(), record
         except Exception:
@@ -137,6 +152,7 @@ class CueDetector:
             raise
 
     def close(self):
+        self.drop_mask_replay()
         detector, self.detector = self.detector, None
         self.config = None
         if detector is not None:

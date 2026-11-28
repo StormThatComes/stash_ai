@@ -190,3 +190,59 @@ def test_live_candidate_replays_production_bitmap_without_model_calls():
         _, message, details, cleaned = preview(image, sample, dict(settings, min_mask_score=1.), 'Raw')
         assert cleaned is None and 'low_mask_score' in message
         assert 'did not run' in inspect(details, cleaned, x, y)
+
+
+def test_generation_reuses_first_pose_and_replans_prompts():
+    from stash_ai.recognition.tune_mask_generation import MaskReplay
+    with Image.new('RGB', (160, 100)) as image:
+        frame = SimpleNamespace(image=image)
+        replay = MaskReplay(frame)
+        settings = defaults()
+        segmenter, pose = Segmenter(), Pose()
+        model = RefinedPMPose(pose, segmenter, settings)
+        with replay.bind(image), phases.capture(image) as first:
+            model.predict(image, [BOX])
+        calls = list(pose.calls)
+        tuned = dict(settings, min_prompt_points=3)
+        config = SimpleNamespace(data={'sapiensid': {'pose': {'refinement': tuned, 'backend': 'pmpose'}}})
+        assert replay.supports(replay.token, frame, config)
+        assert not replay.supports(object(), frame, config)
+        generated = replay.generate(config)
+        assert len(first.samples[0].prompts) == 2
+        assert len(generated.samples[0].prompts) == 3
+        assert pose.calls == calls
+        assert not hasattr(image, '_tuner_mask_replay')
+        # The chosen candidate must agree with a fresh full run with these prompts.
+        with phases.capture(image) as full:
+            RefinedPMPose(Pose(), Segmenter(), tuned).predict(image, [BOX])
+        assert [s.bits for s in generated.samples] == [s.bits for s in full.samples]
+        model.settings = dict(settings, backend='rfdetr_seg_large')
+        other = MaskReplay(frame)
+        with other.bind(image):
+            model._plan([BOX], prediction([pose_points()]), image)
+        tuned.update(backend='rfdetr_seg_large', min_mask_score=.2)
+        assert not other.supports(other.token, frame, config)
+
+
+def test_sam3_encoder_cache_lifetime_is_one_selected_cue():
+    from stash_ai.recognition.sam3_masks import SAM3Masks
+    from stash_ai.recognition.tune_mask_generation import MaskReplay
+
+    class Inputs(dict):
+        def to(self, _):
+            return self
+
+    calls = []
+    segmenter = SAM3Masks(SimpleNamespace(get_image_embeddings=lambda pixels: calls.append(pixels) or object()),
+                          lambda **_: Inputs(original_sizes=[(80, 40)], pixel_values='pixels'), 'cpu', 'fp32')
+    with Image.new('RGB', (80, 40)) as image:
+        with MaskReplay(SimpleNamespace(image=image)).bind(image):
+            segmenter.encode(image)
+            first = segmenter.embeddings
+            segmenter.clear()
+            segmenter.encode(image)
+            assert segmenter.embeddings is first
+        segmenter.clear()
+        segmenter.encode(image)
+        assert segmenter.embeddings is not first
+    assert len(calls) == 2

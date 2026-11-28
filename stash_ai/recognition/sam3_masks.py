@@ -68,10 +68,16 @@ class SAM3Masks(FrameSegmenter):
         self.embeddings = self.original_sizes = None
 
     def encode(self, image):
+        replay = getattr(image, '_tuner_mask_replay', None)
+        if replay is not None and replay.encoded is not None and replay.encoded[0] is self:
+            _, self.original_sizes, self.embeddings = replay.encoded
+            return
         with image.convert('RGB') as rgb:
             inputs = self.processor(images=rgb, return_tensors='pt').to(self.device)
         self.original_sizes = inputs['original_sizes']
         self.embeddings = self.model.get_image_embeddings(inputs['pixel_values'])
+        if replay is not None:
+            replay.encoded = self, self.original_sizes, self.embeddings
 
     def options(self, positive, negative, multi):
         import numpy as np

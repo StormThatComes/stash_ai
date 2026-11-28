@@ -108,12 +108,12 @@ class Settings:
 
 
 def nullable(path):
-    return (path == 'pose.mask.min_recovery_mask_score' or
+    return (path in ('pose.mask.min_recovery_mask_score', 'face.detector.candidate_score_threshold') or
             path.startswith(('pose.mask.', 'pose.deduplication.')) and path.rpartition('.')[2] in POINT_FIELDS)
 
 
 def bounds(path):
-    match = re.search(r'Range: (\d+(?:\.\d+)?)\.\.(\d+(?:\.\d+)?)', HELP.get(path, ''))
+    match = re.search(r'(?:Range: |\()(\d+(?:\.\d+)?)(?:\.\.|-)(\d+(?:\.\d+)?)', HELP.get(path, ''))
     return tuple(map(float, match.groups())) if match else None
 
 

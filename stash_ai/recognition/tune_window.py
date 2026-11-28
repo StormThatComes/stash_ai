@@ -4,6 +4,7 @@ from functools import partial
 import gc
 import os
 from threading import Event
+from time import monotonic
 import tkinter as tk
 from tkinter import ttk
 
@@ -15,6 +16,7 @@ from .tune_compare import detect_variants
 from .tune_images import ImagePair
 from .tune_mask_view import LiveMasks
 from .tune_mask_candidate import LOCAL_PATHS
+from .tune_mask_generation import PROMPT_PATHS, generate_edited
 from .tune_phases import PhaseNavigation
 from .tune_editor import ParameterEditor, Settings, display_value
 from .tune_worker import SceneBrowser, Worker
@@ -36,6 +38,7 @@ class Tuner:
         self.settings = {'A': Settings(config), 'B': Settings(compare_config or config)}
         self.revisions = {'A': 0, 'B': 0}
         self.cache = {}
+        self.generation_due = {}
         self.stop = Event()
         self.compare = tk.BooleanVar(value=compare_config is not None)
         self.active = tk.StringVar(value='B' if compare_config else 'A')
@@ -73,7 +76,7 @@ class Tuner:
         work.grid(row=3, column=0, sticky='nsew')
         self.tabs = ttk.Notebook(work)
         self.images = ImagePair(self.tabs)
-        self.live = LiveMasks(self.tabs, self.run_detection)
+        self.live = LiveMasks(self.tabs, self.verify_masks)
         self.tabs.add(self.images, text='Detection phases')
         self.tabs.add(self.live, text='Live mask')
         self.tabs.bind('<<NotebookTabChanged>>', lambda _: self.live.activate(
@@ -220,11 +223,14 @@ class Tuner:
         self.index = index
         self.frame = None
         self.stop.set()
+        self.generation_due.clear()
         self.cache.clear()
         self.live.source = None
         for name in self.settings:
             self.live.clear(name)
         self.inference.invalidate()
+        if hasattr(self.detector, 'drop_mask_replay'):
+            self.inference.request(self.detector.drop_mask_replay, lambda _: None, self.error)
         self.run_button.state(['disabled'])
         for name in self.settings:
             self.show_raw(name)
@@ -250,13 +256,57 @@ class Tuner:
         self.show_raw(name)
         if self.frame is not None:
             self.run_button.state(['!disabled'])
-        if path in LOCAL_PATHS and self.live.samples.get(name):
+        settings = self.settings[name]
+        regenerate = (path in PROMPT_PATHS or name in self.generation_due or
+                      path == 'pose.mask.min_mask_score' and settings.value('pose.mask.backend') == 'rfdetr_seg_large')
+        if regenerate and path in (LOCAL_PATHS | PROMPT_PATHS) and self.live.tokens.get(name):
+            self.live.clear(name, keep_token=True)
+            self.tabs.select(self.live)
+            self.generation_due[name] = monotonic() + .16
+            self.status.set('Updating mask generation from the selected cue...')
+        elif path in LOCAL_PATHS and self.live.samples.get(name):
             self.tabs.select(self.live)
             self.live.request(name)
             self.status.set('Candidate preview. Check full detection for retries, competing masks and final pose.')
         else:
+            self.generation_due.pop(name, None)
             self.live.clear(name)
             self.status.set('Settings changed. Run detection to see the result.')
+
+    def verify_masks(self):
+        self.tabs.select(self.images)
+        self.run_detection()
+
+    def start_generation(self):
+        if self.inference.future is not None or self.editor.drag_start is not None:
+            return
+        for name, due in list(self.generation_due.items()):
+            if due is None or monotonic() < due or name not in self.images.names:
+                continue
+            settings = self.settings[name]
+            revision = self.revisions[name]
+            self.generation_due[name] = None
+            self.inference.request(
+                partial(generate_edited, self.detector, self.frame, self.live.tokens[name],
+                        settings.config, settings.differences()),
+                partial(self.generated, name, revision), partial(self.generation_failed, name, revision))
+            break
+
+    def generated(self, name, revision, output):
+        config, result = output
+        if self.revisions[name] != revision:
+            return
+        self.generation_due.pop(name, None)
+        if isinstance(result, tuple):
+            self.detected({name: config}, {name: revision}, {name: result})
+        else:
+            self.live.set_samples(name, result, self.settings[name], self.frame.image)
+            self.status.set('Mask generation complete. Check full detection for final pose and associations.')
+
+    def generation_failed(self, name, revision, error):
+        if self.revisions[name] == revision:
+            self.generation_due.pop(name, None)
+            self.error(error)
 
     def run_detection(self):
         if self.frame is None:
@@ -272,6 +322,7 @@ class Tuner:
             self.status.set('Results are current.' if all(n in self.cache for n in self.images.names)
                             else 'Check the settings in the indicated panel.')
             return
+        self.generation_due.clear()
         self.stop.set()
         self.stop = Event()
         self.run_button.state(['disabled'])
@@ -304,6 +355,7 @@ class Tuner:
         self.media.poll()
         self.inference.poll()
         self.live.poll()
+        self.start_generation()
         self.poll_id = self.root.after(12 if self.live.visible else 35, self.poll)
 
     def close(self):

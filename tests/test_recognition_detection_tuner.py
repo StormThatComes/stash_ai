@@ -456,3 +456,45 @@ def test_live_masks_edit_only_b_and_discard_late_preview(root):
             assert 'B' not in panel.details
     finally:
         panel.close()
+
+
+def test_prompt_edits_coalesce_and_full_verification_bypasses_preview(root):
+    from types import SimpleNamespace
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.tune_window import Tuner
+
+    config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml', detection_preview=True)
+    calls = []
+    token = object()
+    class Model:
+        def regenerate_masks(self, frame, selection, cfg):
+            assert selection is token
+            calls.append(('mask', cfg.data['sapiensid']['pose']['refinement']['min_prompt_points']))
+            return SimpleNamespace(samples=(), replay_token=token)
+
+        def render(self, frame, cfg):
+            calls.append(('full', frame.index))
+            return frame.image, dict(faces=[], people=[])
+
+        def close(self):
+            pass
+
+    ui = Tuner(root, config, object(), detector=Model())
+    try:
+        ui.frame = SimpleNamespace(image=Image.new('RGB', (80, 40)), index=7)
+        ui.live.set_samples('A', SimpleNamespace(samples=(), replay_token=token), ui.settings['A'], ui.frame.image)
+        ui.editor.query.set('pose.mask.min_prompt_points')
+        for count in (2, 3, 4):
+            ui.editor.commit(str(count))
+        ui.generation_due['A'] = 0
+        ui.start_generation()
+        settle(ui)
+        assert calls == [('mask', 4)]
+        assert not ui.cache and not ui.generation_due
+        ui.verify_masks()
+        settle(ui)
+        assert calls == [('mask', 4), ('full', 7)]
+        assert 'A' in ui.cache
+    finally:
+        ui.close()

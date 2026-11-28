@@ -145,7 +145,11 @@ def test_sam3_real_processor_coordinates_reuse_and_cleanup():
     def process(prompts, initial, decoder):
         assert initial[0][0].shape == (20,30)
         return decoder(positive,negative,True)
-    result = segmenter.refine_frames([(image,[(positive,negative)])], process)
+    from stash_ai.recognition.tune_mask_generation import MaskReplay
+    with MaskReplay(SimpleNamespace(image=image)).bind(image):
+        initial = segmenter.refine_frames([(image,[(positive,negative)])], process)
+        result = segmenter.refine_frames([(image,[(positive,negative)])], process)
+        assert np.array_equal(initial[0][0][0], result[0][0][0])
     assert len(result[0]) == 3 and model.calls == 1
     assert segmenter.embeddings is None and segmenter.size is None
     with pytest.raises(RuntimeError, match='active'):
