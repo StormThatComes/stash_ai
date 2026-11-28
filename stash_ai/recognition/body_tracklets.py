@@ -42,12 +42,12 @@ def paths(rows, settings, scores, occupied=(), *, extended=False, gap_boxes=None
     for cue,target in zip(ordered,ordered[1:]):
         gap = target-cue
         if cadence and times[target] is not None and times[cue] is not None:
-            if times[target]-times[cue] > cadence*(5 if extended else 2):
+            if times[target]-times[cue] > cadence*(5 if extended else 3):
                 continue
         skipped = gap>1
         middle = occupied[bisect_right(occupied,cue):bisect_right(occupied,target-1)]
         verified = len(motion)>target and '0' not in motion[cue+1:target+1]
-        if gap>(5 if extended else 2) or middle and (gap_boxes is None or not verified):
+        if gap>(5 if extended else 3) or middle and (gap_boxes is None or not verified):
             continue
         left,right = cues[cue],cues[target]
         if not right:

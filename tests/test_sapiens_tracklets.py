@@ -133,6 +133,9 @@ def test_visual_track_uses_strongest_root_and_ignores_vtt_spacing():
         weight = Presence([rows[0],rows[-1]],{i:i for i in range(4)}).weight(rows[1])
         return decisions, metrics, weight
     assert replay([0,1,2,3])==replay([0,15,40,110])
+    for row, seconds in zip(rows, (0, 1, 2, 600)):
+        row['seconds'] = seconds
+    assert all(not {'2','3'} <= {r['id'] for r in chain} for chain,_ in paths(rows,defaults(),scores))
     rows[1]['quality'] = json.dumps({'quality':dict(view_shot=1,frame_signature='ee'*48)})
     assert all('0' not in [r['id'] for r in chain] for chain,_ in paths(rows,defaults(),scores))
 
