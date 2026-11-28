@@ -308,6 +308,12 @@ def apply(database,replay,config,mapping):
             target=targets.pop()
         reason=('cross_scene_provisional' if promotion['mode']=='birth' else
                 'pooled_view_identity' if promotion['mode'] in ('known_view','historical_view') else 'late_strict_identity')
+        from .pool_evidence import compact
+        candidate_proof = compact(replay, proof)
+        if 'witness_context' in candidate_proof:
+            key = candidate_proof['witness_context']
+            context = replay.execute('SELECT id,payload FROM pool_witness_context WHERE id=?',(key,)).fetchone()
+            db.execute('INSERT OR IGNORE INTO decision_contexts VALUES (?,?)',tuple(context))
         for observation, in replay.execute('SELECT observation FROM pool_claims WHERE source=? ORDER BY observation',(promotion['source'],)):
             if db.execute('SELECT 1 FROM members WHERE observation=?',(observation,)).fetchone():
                 continue
@@ -320,7 +326,7 @@ def apply(database,replay,config,mapping):
             dirty.add((row['scope'],row['namespace'],row['scene']))
             db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',(sample_key(row),target,observation))
             payload=json.loads(old['payload'])
-            payload.update(reason=reason,prior_reason=payload.get('reason'),provisional_pool=json.loads(promotion['proof']),
+            payload.update(reason=reason,prior_reason=payload.get('reason'),provisional_pool=dict(candidate_proof),
                 identity_basis='frozen_unresolved_pool',policy=policy,reference_role='strict' if reason=='cross_scene_provisional' else 'attachment',
                 reference_selected=False)
             payload['provisional_pool']['identity']=target

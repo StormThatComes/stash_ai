@@ -15,8 +15,7 @@ from . import replay_checkpoint as base
 from .database import encoded
 from .profiling import count
 
-KEYS=dict(zip(base.SNAPSHOT_TABLES,('id','observation','id','source',
-    'source,target,observation,policy','observation','observation','source')))
+KEYS = dict(zip(base.SNAPSHOT_TABLES, base.ORDER))
 SCHEMA=base.SCHEMA+'CREATE TABLE deletions(name TEXT NOT NULL,address TEXT NOT NULL,PRIMARY KEY(name,address));'
 
 

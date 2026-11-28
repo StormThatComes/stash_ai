@@ -72,5 +72,5 @@ def collect(db):
     db.execute("DELETE FROM decision_contexts WHERE NOT EXISTS (SELECT 1 FROM candidates "
                "WHERE CASE WHEN json_valid(payload) THEN json_extract(payload,'$.decision_context') END=decision_contexts.id) "
                f"AND NOT EXISTS (SELECT 1 FROM candidates WHERE {MERGE_KEY}=decision_contexts.id) "
-               "AND NOT EXISTS (SELECT 1 FROM candidates WHERE CASE WHEN json_valid(payload) THEN "
-               "json_extract(payload,'$.provisional_pool.witness_context') END=decision_contexts.id)")
+               "AND id NOT IN (SELECT json_extract(payload,'$.provisional_pool.witness_context') FROM candidates WHERE CASE WHEN json_valid(payload) THEN "
+               "json_extract(payload,'$.provisional_pool.witness_context') END IS NOT NULL)")
