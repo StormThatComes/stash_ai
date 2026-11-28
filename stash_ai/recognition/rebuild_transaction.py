@@ -22,6 +22,11 @@ class Connection:
         self.write_start = None
         self.cache_write_seconds = 0.
 
+    @property
+    def in_transaction(self):
+        # Nested stages join this logical generation, including its read phase.
+        return True
+
     def _version(self):
         return self.raw.execute('PRAGMA main.data_version').fetchone()[0]
 
