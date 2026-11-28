@@ -29,6 +29,9 @@ def core_floor(samples, threshold):
     if threshold <= 0 or threshold >= 0.60 or len(samples) < 2:
         return threshold
     import numpy as np
+    # Repeated copies of one embedding cannot establish within-person variation.
+    if all(np.array_equal(samples[0], sample) for sample in samples[1:]):
+        return threshold
     total = np.sum(samples, axis=0, dtype=np.float64)
     n = len(samples)
     internal = (float(total @ total) - n) / (n * (n - 1))
