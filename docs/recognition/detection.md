@@ -16,7 +16,10 @@ Use `python -m tkinter` to check the interpreter. On Debian the Tk package is
 
 Enter a **Scene ID** and choose **Load scene**, or supply an initial `--scene-id` on the
 command line. The slider, Previous and Next browse raw VTT crops at their original
-zero-based indices. Select a detector setting, enter its value and press **Set value**.
+zero-based indices. Find a setting by its YAML path or expand a group in the parameter sidebar.
+Drag the slider, toggle the checkbox, select an option or enter an exact value and press Enter.
+**Auto** restores a nullable threshold, **Reset** restores the loaded value and **Undo** reverses the last edit in that panel.
+Use **Changed only** and **Copy YAML diff** to transfer the edited settings back to your configuration.
 Only **Run detection** loads models and computes an annotated image. Each detection
 starts from fresh cue context, independently of navigation history. Edits are local to the
 window. The recognition database and Stash identities are never modified.

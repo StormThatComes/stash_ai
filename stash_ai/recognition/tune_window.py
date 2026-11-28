@@ -39,7 +39,7 @@ class Tuner:
         self.active = tk.StringVar(value='B' if compare_config else 'A')
 
         root.title('Detection tuner')
-        root.geometry('1040x720')
+        root.geometry('1220x760')
         root.minsize(760, 500)
         self.body = body = ttk.Frame(root, padding=12)
         body.pack(fill='both', expand=True)
@@ -67,11 +67,13 @@ class Tuner:
         ttk.Button(navigation, text='Next', command=lambda: self.step(1)).pack(side='left')
         self.slider.bind('<Left>', lambda _: self.step(-1))
         self.slider.bind('<Right>', lambda _: self.step(1))
-        self.images = ImagePair(body)
+        work = ttk.Panedwindow(body, orient='horizontal')
+        work.grid(row=3, column=0, sticky='nsew')
+        self.images = ImagePair(work)
         self.images.enable_hover()
         self.phases = PhaseNavigation(body, self.images)
         self.phases.grid(row=2, column=0, sticky='ew', pady=(0, 8))
-        self.images.grid(row=3, column=0, sticky='nsew')
+        work.add(self.images, weight=3)
         tools = ttk.Frame(body)
         tools.grid(row=4, column=0, sticky='ew', pady=8)
         ttk.Label(tools, text='Configuration / phases').pack(side='left')
@@ -93,8 +95,8 @@ class Tuner:
         self.zoom.pack(side='left', padx=(4, 0))
         self.zoom.bind('<<ComboboxSelected>>', lambda _: self.set_zoom())
 
-        self.editor = ParameterEditor(body, self.settings[self.active.get()], self.edited, self.error)
-        self.editor.grid(row=5, column=0, sticky='ew', pady=(0, 8))
+        self.editor = ParameterEditor(work, self.settings[self.active.get()], self.edited, self.error)
+        work.add(self.editor, weight=1)
         self.status = tk.StringVar(value='Load a scene to browse its VTT cues.')
         ttk.Label(body, textvariable=self.status, wraplength=900).grid(row=6, column=0, sticky='w')
         self.toggle_compare()
@@ -224,7 +226,7 @@ class Tuner:
         self.run_button.state(['!disabled'])
         self.status.set('Ready')
 
-    def edited(self):
+    def edited(self, path=None):
         name = self.active.get()
         self.revisions[name] += 1
         self.cache.pop(name, None)
