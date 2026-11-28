@@ -14,6 +14,7 @@ class FaceGuard:
         self.grouping = config.data.get('clustering', {})
         from collections import OrderedDict
         self.banks = OrderedDict()
+        self.owner_versions = db.execute("SELECT 1 FROM sqlite_master WHERE name='scene_owner_members'").fetchone()
         self.bank_bytes = 0
         self.bank_limit = min(8*1024**2, config.data['sapiensid']['execution']['reference_bytes']//16)
 
@@ -23,7 +24,9 @@ class FaceGuard:
             for raw in self.frozen.get(person,()):
                 yield raw if isinstance(raw,Witness) else Witness(raw['dimensions'],raw['embedding'])
             return
-        key = person, self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
+        from .dependencies import version
+        generation = version(self.db,'owner',person) if self.owner_versions else self.db.total_changes
+        key = person, generation, self.db.execute('PRAGMA data_version').fetchone()[0]
         if key in self.banks:
             self.banks.move_to_end(key)
             yield from self.banks[key][0]
