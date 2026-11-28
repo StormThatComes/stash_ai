@@ -244,6 +244,28 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
             "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
             "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
             f'AND o.rejected IS NULL AND {anchor} ORDER BY o.cue,o.id', (scan, policy))
+    # Constituents and their reference samples stay frozen until a merge below.
+    from functools import lru_cache
+    from .clustering import core_floor
+    vetoed = set()
+
+    @lru_cache(maxsize=256)
+    def pair_scores(target, source):
+        first, second = components[target], components[source]
+        scores = _compatible(first, second, config)
+        if (scores is not None and len(first) == len(second) == 1
+                and config.data['clustering']['anchor_view_matching']):
+            threshold = settings['match_threshold']
+            floor = min(core_floor(first[0].samples,threshold), core_floor(second[0].samples,threshold))
+            if scores['minimum_cross_mean'] < floor:
+                return None
+        return scores
+
+    def mark_veto(observation):
+        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
+                   "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
+                   ('cooccurrence_identity_evidence_insufficient', scan, policy, observation))
+
     with tracking(
         scored_rows(observations, scoring_groups, settings['match_threshold'],
                     config.data['clustering']['cohesion_threshold']),
@@ -282,7 +304,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                         continue
                     target, source = sorted((target, source), key=order)
                     count('merge_pairs')
-                    scores = _compatible(components[target], components[source], config)
+                    scores = pair_scores(target, source)
                     if scores is None:
                         continue
                     previous = nominations.get(source)
@@ -292,6 +314,9 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                     nominations[source] = target
                     inserted = db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
                                (source, target, observation['id'], evidence_policy))
+                    if (target,source) in vetoed:
+                        mark_veto(observation['id'])
+                        break
                     supporting = _supporting_cues(db, selected, evidence_policy, source, target,
                                                   components, config, settings['min_merge_support'],
                                                   nomination=(inserted.rowcount == 1, observation))
@@ -300,9 +325,9 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                         stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
                         if cooccurring and scores['minimum_cross_similarity'] < stronger:
                             # Reflections may co-occur, but need stronger proof.
-                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
-                                       "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
-                                       ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
+                            if len(vetoed) < 256:
+                                vetoed.add((target,source))
+                            mark_veto(observation['id'])
                             break
                         evidence = {'format': 3, 'cooccurring': cooccurring,
                             'same_scene_local': local_state is not None,
@@ -325,6 +350,8 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                         for group in components.pop(source):
                             roots[group.identifier] = target
                             components[target].append(group)
+                        pair_scores.cache_clear()
+                        vetoed.clear()
                         merged += 1
                     break
     query = None
