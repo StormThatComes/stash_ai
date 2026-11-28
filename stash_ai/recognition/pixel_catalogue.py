@@ -43,11 +43,34 @@ class Aliases:
                                'WHERE scope=? AND namespace=?',(self.scope,self.namespace))
 
 
-def prepare(db,scope,namespace,*,disk_bytes):
+SCAN_GENERATIONS = ('SELECT s.id,COALESCE(v.version,0),COALESCE(p.version,0),c.generation FROM scans s '
+        "LEFT JOIN evidence_versions v ON v.kind='raw-observations' AND v.key=s.id "
+        "LEFT JOIN evidence_versions p ON p.kind='pixel-scan' AND p.key=s.id "
+        'LEFT JOIN pixel_catalogue_scans c ON c.scan=s.id AND c.scope=s.scope AND c.namespace=s.namespace '
+        'WHERE s.scope=? AND s.namespace=? ORDER BY s.id')
+
+
+def within_budget(db, disk_bytes):
+    from .resource_errors import ResourceLimit
+    size = db.execute('SELECT COALESCE(SUM(length(observation)+length(fingerprint)+length(proof)+256),0) '
+                      'FROM pixel_catalogue_rows').fetchone()[0]
+    if size > disk_bytes:
+        raise ResourceLimit('Persistent pixel index exceeds execution.pixel_index_bytes.')
+
+
+def current_catalogue(db, scope, namespace):
+    args = scope, namespace
+    removed = db.execute('SELECT 1 FROM pixel_catalogue_scans WHERE scope=? AND namespace=? '
+                         'AND scan NOT IN (SELECT id FROM scans WHERE scope=? AND namespace=?) LIMIT 1',args+args)
+    if removed.fetchone():
+        return False
+    return all(previous == encoded([raw,thumb]) for _,raw,thumb,previous in db.execute(SCAN_GENERATIONS,args))
+
+
+def prepare(db,scope,namespace,*,disk_bytes, bump_owners=True):
     from .evidence_pixels import signature,verified
     from .pixel_storage import read
     from .rebuild_cache import _hash_row
-    from .resource_errors import ResourceLimit
     from .dependency_schema import validate_triggers
     validate_triggers(db,required=True)
     args=(scope,namespace)
@@ -60,11 +83,7 @@ def prepare(db,scope,namespace,*,disk_bytes):
         'AND scan NOT IN (SELECT id FROM scans WHERE scope=? AND namespace=?)',args+args)
     db.execute('DELETE FROM pixel_catalogue_scans WHERE scope=? AND namespace=? '
         'AND scan NOT IN (SELECT id FROM scans WHERE scope=? AND namespace=?)',args+args)
-    scans=db.execute('SELECT s.id,COALESCE(v.version,0),COALESCE(p.version,0),c.generation FROM scans s '
-        "LEFT JOIN evidence_versions v ON v.kind='raw-observations' AND v.key=s.id "
-        "LEFT JOIN evidence_versions p ON p.kind='pixel-scan' AND p.key=s.id "
-        'LEFT JOIN pixel_catalogue_scans c ON c.scan=s.id AND c.scope=s.scope AND c.namespace=s.namespace '
-        'WHERE s.scope=? AND s.namespace=? ORDER BY s.id',args)
+    scans = db.execute(SCAN_GENERATIONS,args)
     for scan,raw,thumb,previous in scans:
         generation=encoded([raw,thumb])
         if generation==previous:continue
@@ -82,9 +101,7 @@ def prepare(db,scope,namespace,*,disk_bytes):
             db.execute('INSERT OR IGNORE INTO dirty_pixel_buckets VALUES (?)',(bucket,))
         db.execute('INSERT OR REPLACE INTO pixel_catalogue_scans VALUES (?,?,?,?)',args+(scan,generation))
     # Disk storage has its own admission bound; it is not charged as RAM.
-    size=db.execute('SELECT COALESCE(SUM(length(observation)+length(fingerprint)+length(proof)+256),0) '
-                    'FROM pixel_catalogue_rows').fetchone()[0]
-    if size>disk_bytes:raise ResourceLimit('Persistent pixel index exceeds execution.pixel_index_bytes.')
+    within_budget(db,disk_bytes)
     db.execute('CREATE TEMP TABLE IF NOT EXISTS current_pixel_witnesses(fingerprint TEXT PRIMARY KEY,observation TEXT)')
     for (bucket,) in db.execute('SELECT signature FROM dirty_pixel_buckets ORDER BY signature'):
         count('pixel_index_dirty_buckets')
@@ -105,7 +122,7 @@ def prepare(db,scope,namespace,*,disk_bytes):
             if alias is None:db.execute('INSERT OR IGNORE INTO current_pixel_witnesses VALUES (?,?)',(fingerprint,oid))
             elif alias!=fingerprint:db.execute('INSERT OR REPLACE INTO pixel_catalogue_aliases VALUES (?,?,?,?,?)',args+(bucket,fingerprint,alias))
         new_aliases=[tuple(r) for r in db.execute('SELECT fingerprint,representative FROM pixel_catalogue_aliases WHERE scope=? AND namespace=? AND signature=? ORDER BY fingerprint',args+(bucket,))]
-        if old_aliases!=new_aliases:
+        if bump_owners and old_aliases!=new_aliases:
             db.execute("INSERT INTO evidence_versions SELECT 'owner',m.person,1 FROM members m JOIN pixel_catalogue_rows r "
                 'ON r.observation=m.observation WHERE r.scope=? AND r.namespace=? AND r.signature=? GROUP BY m.person '
                 'ON CONFLICT(kind,key) DO UPDATE SET version=version+1',args+(bucket,))

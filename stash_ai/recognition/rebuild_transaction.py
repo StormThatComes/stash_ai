@@ -20,7 +20,7 @@ class Connection:
         self.derived_records = OrderedDict()
         self.derived_bytes = 0
         self.write_start = None
-        self.cache_write_seconds = 0.
+        self.private_pixels = False
 
     @property
     def in_transaction(self):
@@ -49,22 +49,38 @@ class Connection:
             self.flush_cache()
 
     def prepare_pixel_catalogue(self, scope, namespace, disk_bytes):
-        """Refreshing the derived pixel index does not publish identity decisions."""
-        from .pixel_catalogue import prepare
-        if self.started:
-            return prepare(self, scope, namespace, disk_bytes=disk_bytes)
-        self.raw.execute('BEGIN IMMEDIATE')
-        start = time.monotonic()
-        try:
-            self._check()
-            result = prepare(self.raw, scope, namespace, disk_bytes=disk_bytes)
-            self.raw.commit()
-            return result
-        except BaseException:
-            self.raw.rollback()
-            raise
-        finally:
-            self.cache_write_seconds += time.monotonic() - start
+        """Keep a first index private until the matching decisions can commit."""
+        from .pixel_catalogue import Aliases, SCHEMA, TABLES, current_catalogue, prepare, within_budget
+        from .dependency_schema import validate_triggers
+        if not self.started:
+            validate_triggers(self.raw, required=True)
+            if current_catalogue(self.raw,scope,namespace):
+                within_budget(self.raw,disk_bytes)
+                return Aliases(self,scope,namespace)
+            empty = not any(self.raw.execute(f'SELECT 1 FROM main.{table} LIMIT 1').fetchone()
+                            for table in (*TABLES,'members'))
+            if empty and not self.private_pixels:
+                self.raw.execute('BEGIN')
+                try:
+                    self._check()
+                    for statement in SCHEMA.split(';'):
+                        statement = statement.strip().replace('CREATE TABLE ', 'CREATE TEMP TABLE ',1)
+                        if statement:
+                            self.raw.execute(statement.replace('CREATE INDEX ', 'CREATE INDEX temp.',1))
+                    result = prepare(self.raw,scope,namespace,disk_bytes=disk_bytes,bump_owners=False)
+                    self.raw.commit()  # Only connection-private TEMP tables changed.
+                    self.private_pixels = True
+                    return result
+                except BaseException:
+                    self.raw.rollback()
+                    raise
+        return prepare(self,scope,namespace,disk_bytes=disk_bytes)
+
+    def discard_pixels(self):
+        if self.private_pixels:
+            from .pixel_catalogue import TABLES
+            for table in TABLES:
+                self.raw.execute(f'DROP TABLE IF EXISTS temp.{table}')
 
     def stage_fingerprint(self, kind, key, policy, generation, value):
         if self.started:
@@ -90,18 +106,22 @@ class Connection:
         return True
 
     def flush_cache(self):
-        if not (self.fingerprints or self.derived_records):
+        if not (self.fingerprints or self.derived_records or self.private_pixels):
             return
         if not self.started:
             self._start()
             return
+        if self.private_pixels:
+            from .pixel_catalogue import TABLES
+            for table in TABLES:
+                self.raw.execute(f'INSERT INTO main.{table} SELECT * FROM temp.{table}')
+            # Keep the private tables until cursors in the planning stage close.
         while self.derived_records:
             key, (store, record, charge) = self.derived_records.popitem(last=False)
             self.derived_bytes -= charge
             store._put(key, record)
         if self.fingerprints:
             from .dependencies import store
-            self._start()
             while self.fingerprints:
                 name, (generation, value) = self.fingerprints.popitem(last=False)
                 store(self, *name, generation, value)
@@ -190,5 +210,6 @@ def atomic(database):
         raise
     finally:
         database.connection = raw
-        database.rebuild_writer_seconds = wrapper.cache_write_seconds + (time.monotonic() - wrapper.write_start
+        wrapper.discard_pixels()
+        database.rebuild_writer_seconds = (time.monotonic() - wrapper.write_start
                                            if wrapper.write_start is not None else 0.)
