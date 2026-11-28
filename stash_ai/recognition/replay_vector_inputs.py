@@ -35,6 +35,8 @@ def prepare(source, target):
 def install(db):
     if not db.execute("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='metadata'").fetchone():
         return
+    from .snapshot_vectors import install as expose_vectors, projection
+    expose_vectors(db)
     row = db.execute('SELECT value FROM main.metadata WHERE key=?', (KEY,)).fetchone()
     if row is None:
         return
@@ -46,4 +48,4 @@ def install(db):
     fields = [r[1] for r in db.execute('PRAGMA main.table_info(observations)')]
     columns = ','.join(('v.' if name == 'embedding' else 'o.')+name for name in fields)
     db.execute('CREATE TEMP VIEW observations AS SELECT o.rowid AS rowid,'+columns+
-        ' FROM main.observations o LEFT JOIN replay_vectors.observations v ON v.id=o.id')
+        ' FROM main.observations o LEFT JOIN ('+projection(db,'replay_vectors','observations')+') v ON v.id=o.id')

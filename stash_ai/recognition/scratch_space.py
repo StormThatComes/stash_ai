@@ -23,6 +23,8 @@ class Budget:
         self.free = None
         self.leases={};self.writes={};self.used=0;self.peak=0
     def set(self,owner,size):
+        if self.leases.get(owner,0)==size:
+            return
         total=self.used-self.leases.get(owner,0)+size
         growth=max(0,size-self.leases.get(owner,0))
         if total>self.limit:

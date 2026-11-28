@@ -5,6 +5,8 @@
 
 version: 2
 # Recognition YAML layout. Use 2 for this schema.
+execution_file: facial_recognition_execution.yml
+# Shared execution settings relative to this policy.
 
 face:
   # Face detection, scan admission and embeddings.
@@ -418,9 +420,6 @@ matching:
         # Maximum selected face references per identity; does not limit stored observations. Range: 2..128.
         max_people_per_lookup: 100000
         # Maximum identities loaded into a face lookup; exceeding it stops the lookup. Range: 1..100000.
-        max_reference_mb: 4096
-        # Face reference cap in MB, including views; not a total RAM/VRAM limit. Range: 1..65536 MB; fractions
-        # allowed.
     anchors:
       # Face observations allowed to seed an identity.
       min_identity_support: 2
@@ -727,201 +726,6 @@ portraits:
     # Encoding of the published portrait.
     jpeg_quality: 90
     # Initial JPEG quality (1..100); may decrease to meet storage.max_crop_mb.
-
-execution:
-  # Model locations, concurrency and resource budgets by stage.
-  host_memory_mb: 0
-  # Optional shared host admission ceiling for retained model bytes, sprites, CPU queues and rebuild
-  # allocations. 0 disables it. Uses sampled process RSS and conservative owned-byte accounting, not an OS hard
-  # limit; CUDA VRAM is separate. Range: 0..1048576 MB.
-  models:
-    # Shared model asset directory and download policy.
-    directory: recognition_models
-    # Model asset directory, relative to this YAML.
-    download_missing: true
-    # Allow missing model assets to download during explicit recognition commands.
-    verified_cache_mb: 8192
-    # Verified immutable model bytes retained between phase loads, within scan.retained_memory_mb. Range:
-    # 0..8192 MB; fractions allowed. Zero disables.
-  gpu:
-    # Inference device, model lifetime and memory logging.
-    device: cuda
-    # Inference device: cuda, cpu or auto (prefer CUDA when available).
-    model_policy: sequential
-    # phase: unload inference models/cache after VTT (default); reload lazily for portraits. sequential:
-    # additionally run faces then bodies per scene, unloading between them. retain: keep face models until run
-    # exit (legacy throughput policy).
-    log_vram: true
-    # Phase memory snapshots in console/history; PyTorch and optional nvidia-smi process totals.
-    cpu_residency_mb: 65536
-    # Maximum CPU MB for parked model weights between sequential scene windows. Zero disables parking. Range:
-    # 0..65536 MB; fractions allowed.
-    sequential_scene_batch_size: 8
-    # Scenes per face/body phase when model_policy is sequential. Inputs share the run sprite budget. Range:
-    # 1..16.
-    sam_frame_batch_size: 4
-    # Maximum images sharing one SAM encoder forward. Range: 1..16; CUDA OOM halves the effective batch.
-    sam_prompt_batch_size: 8
-    # Maximum equal-length person prompts per SAM decoder forward. Range: 1..64; preserves prompt tokens and
-    # order.
-    refinement_queue_mb: 128
-    # CPU mask window budget for cross-frame refinement. Range: 1..4096 MB; fractions allowed. Oversized frames
-    # use the scalar path. Excludes caller-owned images, temporary validation arrays and GPU features.
-    pmpose_fused_flip: true
-    # Run original and horizontally flipped crops in one PMPose forward. May double activation memory; adaptive
-    # CUDA OOM reduces the crop batch. False uses two forwards.
-    pmpose_precision: fp32
-    # PMPose forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decode/averaging use float32. Changes
-    # dependent cache and evidence contracts.
-    sam_precision: fp32
-    # SAM encoder/decoder precision: fp32 (default), fp16 or bf16 (CUDA only, requires PMPose refinement).
-    # Validate masks against fp32 before enabling.
-    profile_every_n_batches: 0
-    # Sample PMPose/SAM CUDA events every N forwards, per stage; 0 disables, range: 0..10000. Requires
-    # rebuild.profile. Bounded event queue, no forced synchronization; reports completed samples and
-    # allocated/reserved VRAM.
-    rfdetr_precision: fp32
-    # RF-DETR-XL forward precision: fp32 (default), fp16 or bf16 (CUDA only). Changing this invalidates body
-    # evidence. Validate detection quality before enabling.
-    vitpose_precision: fp32
-    # ViTPose++ forward precision: fp32 (default), fp16 or bf16 (CUDA only). Decoding uses float32. Changing
-    # this invalidates body evidence; validate keypoint quality.
-    vitpose_device_decode: true
-    # Use optional compact CUDA DARK decoding for ViTPose; ambiguous heatmaps use the reference processor.
-  scan:
-    # VTT input, scan workers, queues, caches and checkpoints.
-    retained_memory_mb: 16384
-    # Shared RAM cap for cached sprites, verified model bytes and parked CPU weights. Excludes active models,
-    # in-flight scan work and rebuild RAM; not total RSS. Range: 1..1048576 MB; fractions allowed.
-    max_cues: 0
-    # Maximum VTT cues scanned per selected scene; 0 scans all cues. Range: 0..10000.
-    checkpoint_cues: 100
-    # Persist scan progress every N cues; memory pressure or body collection may save sooner. Range: 1..1000.
-    timeout_seconds: 300.0
-    # Stash API/media request timeout in seconds; not a whole-run time limit. Range: 1..600.
-    cpu_workers: 8
-    # CPU workers for face quality, alignment and JPEG work; inference has one owner. Range: 1..32.
-    queue_mb: 4096
-    # Budget in MB for in-flight scan CPU work; oversized work runs serially. Range: 0.0625..4096 MB; fractions
-    # allowed.
-    detector_batch_size: 1
-    # Face detection microbatch; native batching only for compatible dynamic ONNX models, otherwise serial.
-    # Range: 1..16.
-    recognizer_batch_size: 8
-    # Face embedding microbatch size (1..32); static ONNX models still run one at a time.
-    prefetch_frames: 16
-    # Decoded CPU frames queued ahead of inference; 0 disables frame prefetch. Range: 0..128.
-    prefetch_scenes: true
-    # Download/verify upcoming scenes while scanning; depth is set by prefetch_scene_depth.
-    prefetch_scene_depth: 4
-    # Scenes to prepare ahead when prefetch_scenes is enabled; at most four input workers. Range: 1..16.
-    media_cache_mb: 65536
-    # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags; 0 disables. Range: 0..65536 MB;
-    # fractions allowed.
-    sprite_cache_mb: 65536
-    # Cap in MB for shared compressed/decoded sprites cached during the run; 0 disables. Range: 0..65536 MB;
-    # fractions allowed.
-    inference_cache_mb: 65536
-    # Disk cap for reusable detection/pose/embedding/quality stages keyed by exact pixels; 0 disables. Range:
-    # 0..65536 MB; fractions allowed.
-  rebuild:
-    # Identity rebuild workers, checkpoints and working memory.
-    disk_total_mb: 10485760
-    # Maximum combined recognition database, caches, checkpoints and scratch size in MB per volume; 0 disables.
-    # Range: 0..10485760 MB; fractions allowed.
-    disk_free_mb: 0
-    # Free disk reserve per volume, also covering unattributed SQLite sort files and other applications; 0
-    # disables. Range: 0..1048576 MB; fractions allowed.
-    sqlite_cache_mb: 1024
-    # SQLite page-cache ceiling per replay/reference store, additionally constrained by the shared RAM budget.
-    # Range: 0.03125..1024 MB; fractions allowed.
-    scratch_mb: 1048576
-    # Combined capacity of private replay databases, reference pages, body witnesses and search files; includes
-    # journal headroom. Excludes persistent caches, checkpoints and SQLite internal sort files. Range:
-    # 1..1048576 MB; fractions allowed.
-    scratch_directory: recognition_work
-    # Scratch parent directory, relative to this YAML; null uses recognition_work next to the database.
-    # Run-owned files are removed on exit.
-    parallel_scenes: true
-    # Match independent local face scenes concurrently using the CPU worker/queue budget, then apply in scene
-    # order; requires anchor_view_matching. Values: true, false.
-    storage: disk
-    # Private replay storage: disk (bounded SQLite pages) or memory (legacy RAM image).
-    workers: 16
-    # Rebuild CPU workers: 1 serial, 0 auto (up to 16), or an explicit count up to 256. Range: 0..256.
-    native_threads: 1
-    # Native BLAS threads per compute worker. CPU availability also limits effective workers. Range: 1..16.
-    cohort_backend: threads
-    # Scene-local CPU worker backend: threads or processes (spawn).
-    nomination_device: auto
-    # Hybrid centroid nomination device: cpu, or auto to benchmark CUDA including transfers.
-    prefetch_scenes: true
-    # Experimental preloading of the next scene's immutable rebuild inputs.
-    profile: true
-    # Record rebuild SQL, fetch and pipeline timings in run history.
-    memory_mb: 40960
-    # Shared live RAM budget for replay pages, working reservations and caches; not total process RSS. Range:
-    # 1..1048576 MB; fractions allowed.
-    cache_mb: 8192
-    # Rebuild evidence cache cap in MB; borrows idle working memory and yields to queues/banks; 0 disables.
-    # Range: 0..65536 MB; fractions allowed.
-    matrix_cache_mb: 65536
-    # Packed reference matrix cache cap in MB, within execution.rebuild.cache_mb; 0 disables. Range: 0..65536
-    # MB; fractions allowed.
-    queue_mb: 1024
-    # Pending rebuild CPU work cap in MB; shares the working-memory budget with caches. Range: 0.0625..1024 MB;
-    # fractions allowed.
-    checkpoint_mode: incremental
-    # incremental writes committed row deltas and compacts every 16 generations; snapshot writes full strict
-    # prefixes. Values: snapshot, incremental.
-    checkpoint_scenes: 10
-    # Save strict checkpoints every N scenes and reuse body/global/hybrid stage plans; 0 disables. Range:
-    # 0..1000000.
-    checkpoint_mb: 8192
-    # Maximum MB per rebuild recovery checkpoint generation. Range: 1..8192 MB; fractions allowed.
-    replay_snapshot_mb: 98304
-    # Maximum on-disk evidence snapshot used by offline reports and solver replay. Range: 1..1048576 MB;
-    # fractions allowed.
-    pixel_index_mb: 8192
-    # Disk budget for the persistent duplicate-pixel address index; separate from working RAM. Range: 1..1048576
-    # MB; fractions allowed.
-    derived_cache_mb: 8192
-    # Persistent derived-data disk budget, split between centroids, appearances and plans; 0 disables. Range:
-    # 0..1048576 MB; fractions allowed.
-    body:
-      # Limits for hybrid and body matching plans.
-      max_candidate_pairs: 1000000
-      # Maximum nominated identity pairs per hybrid/global body plan, not embedding pairs. Range: positive
-      # integer.
-      max_witness_comparisons: 100000000
-      # Maximum exact vector comparisons per body scene/global pass, including face vetoes. Range: positive
-      # integer.
-      reference_mb: 4096
-      # Budget in MB for body/hybrid reference banks, metadata and lookup working arrays. Range: >=
-      # 9.5367431640625e-07 MB; fractions allowed.
-      plan_mb: 2048
-      # Budget in MB for retained body/hybrid matching plans and decision proofs. Range: >= 9.5367431640625e-07
-      # MB; fractions allowed.
-  solver:
-    # Solver configuration policy and strategy comparison on retained training evidence.
-    strict: true
-    # Enforce matching constraints on solver recommendations. Override with --no-strict.
-    stop_on_stagnation: false
-    # Stop after bounded plateau refinement. Default false resumes unconsumed candidates; total replay and
-    # proposal limits still apply.
-    compare_scene_strategies: true
-    # Compare scene matching strategies while solving with body identities enabled. A holdout manifest is
-    # optional.
-  portraits:
-    # Portrait CPU workers, inference batches and ranking cache.
-    cpu_threads: 16
-    # Portrait CPU thread budget: 0 default worker settings, 1 serial, 2..16 explicit budget. Range: 0..16.
-    faceocc_batch_size: 4
-    # Faces per portrait visibility inference batch (1..8); 1 disables batching.
-    ranking_cache_mb: 65536
-    # Cap in MB for completed VTT portrait rankings; 0 disables. Range: 0..65536 MB; fractions allowed.
-    prefetch: true
-    # Prepare bounded VTT portrait sources and quality measurements ahead of use.
 
 storage:
   # Recognition database, retained images and retention policy.

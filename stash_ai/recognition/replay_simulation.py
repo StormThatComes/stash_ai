@@ -69,11 +69,13 @@ def prepared_history(db, config, scope, ns, installation, *, excluded_scenes=())
                     from .snapshot_import import bulk
                     with bulk(seed):
                         hidden = [dict(scene=scene) for scene in excluded_scenes]
-                        copy_history(db, seed, hidden, scope, ns, commit=False)
+                        copy_history(db, seed, hidden, scope, ns, commit=False, pack_revisions=True)
                 except sqlite3.OperationalError as error:
                     if getattr(error, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
                         raise ResourceLimit(f'Retained snapshot exceeds the admitted {grant} bytes at {seed_path}.') from error
                     raise
+                from .snapshot_vectors import install as expose_vectors
+                expose_vectors(seed)
                 statistics = dict(embedding_bytes=sum(seed.execute(
                     f'SELECT COALESCE(SUM(length(embedding)),0) FROM {table}').fetchone()[0]
                     for table in ('observations','person_evidence','body_observations')))

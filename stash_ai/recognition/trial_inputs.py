@@ -12,9 +12,13 @@ def prepare(target, seed):
         # Standalone callers may supply a RAM seed, which cannot be attached.
         if getattr(target, 'budget', None) is not None:
             required = seed.execute('PRAGMA page_count').fetchone()[0] * seed.execute('PRAGMA page_size').fetchone()[0]
-            target.budget.reserve(target.owner, required)
+            if hasattr(target,'account_pages'):
+                target.budget.reserve(target.owner, required)
+            else:
+                target.budget.set(target,2*required)
+                target.capacity = target.estimate = required
         seed.backup(target)
-        if getattr(target, 'budget', None) is not None:
+        if hasattr(target,'account_pages') and target.budget is not None:
             target.account_pages()
         return
     from .profiling import count
@@ -30,8 +34,9 @@ def prepare(target, seed):
         _copy_private(target)
         if images is not None:
             images.publish('trial.sqlite', target)
+    from .snapshot_vectors import projection
     for table in SHARED:
-        target.execute(f'CREATE TEMP VIEW {table} AS SELECT rowid AS rowid,* FROM retained.{table}')
+        target.execute(f'CREATE TEMP VIEW {table} AS '+projection(target,'retained',table))
     row = seed.execute("SELECT value FROM metadata WHERE key='replay-input-statistics'").fetchone()
     if row:
         import json
@@ -55,11 +60,24 @@ def _copy_private(target):
             columns = [r[1] for r in target.execute(f'PRAGMA table_info({table})')]
             minimal = dict(embedding='NULL', crop='NULL', geometry="'[]'", quality="'{}'", source="''", rect="'[]'")
             fields = ','.join(minimal.get(c, c) if table in SHARED else c for c in columns)
-            target.execute(f'INSERT INTO main.{table}(rowid,{",".join(columns)}) '
-                           f'SELECT rowid,{fields} FROM retained.{table} ORDER BY rowid')
+            insert = f'INSERT INTO main.{table}(rowid,{",".join(columns)}) '
+            select = f'SELECT rowid,{fields} FROM retained.{table} ORDER BY rowid'
+            if getattr(target,'owned_path',None):
+                # A bulk INSERT SELECT reserves all remaining scratch. Workers
+                # copying mutable rows from one shared seed grow in paid batches.
+                placeholders = ','.join('?' for _ in range(1+len(columns)))
+                target.executemany(insert+f'VALUES ({placeholders})',target.execute(select))
+            else:
+                target.execute(insert+select)
         for table in ('evidence_versions', 'evidence_fingerprints'):
             target.execute(f'DELETE FROM main.{table}')
-            target.execute(f'INSERT INTO main.{table} SELECT * FROM retained.{table}')
+            select = f'SELECT * FROM retained.{table}'
+            if getattr(target,'owned_path',None):
+                rows = target.execute(select)
+                fields = ','.join('?' for _ in rows.description)
+                target.executemany(f'INSERT INTO main.{table} VALUES ({fields})',rows)
+            else:
+                target.execute(f'INSERT INTO main.{table} '+select)
         for _, sql in triggers:
             target.execute(sql)
         target.execute('RELEASE trial_prepare')

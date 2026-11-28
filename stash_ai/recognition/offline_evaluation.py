@@ -25,6 +25,30 @@ from .scanning import scan_identity
 from .scan_heads import predicate as current_scan
 
 
+def private_target(config):
+    """Use the selected rebuild medium for the outer mutable trial as well."""
+    if config.data['execution'].get('rebuild_storage') != 'disk':
+        return _ram(config)
+    from .scratch_space import connect
+    db = connect(uri=True)
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA foreign_keys=ON')
+        db.execute('PRAGMA temp_store=FILE')
+        settings = config.data['execution']
+        if hasattr(db,'page_limit'):
+            db.page_limit = settings['replay_snapshot_bytes']
+            db.execute('PRAGMA max_page_count='+str(db.page_limit//db.page))
+        db.execute('PRAGMA mmap_size=0')
+        pages = min(settings['rebuild_sqlite_cache_bytes'],settings['rebuild_memory_bytes']//16)
+        db.execute('PRAGMA cache_size=-'+str(max(32,pages//1024)))
+        db.executescript(SCHEMA)
+        return db
+    except BaseException:
+        db.close()
+        raise
+
+
 def _ram(config):
     from .ram_database import connect
     db = connect(config, ':memory:', label='sqlite-trial')

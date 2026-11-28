@@ -320,13 +320,18 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
         db.execute('UPDATE observations SET quality=quality WHERE id=?',(observation,))
 
 
-def copy_evidence(source,target,scan):
+def copy_evidence(source,target,scan, *, compact=False, donor=None):
     """Copy only admitted observations into offline trials; never copy pixels."""
     from .body_observations import copy_evidence as copy_bodies
-    copy_bodies(source,target,scan)
+    copy_bodies(source,target,scan,donor=donor)
     if not available(source):return
+    feature = 'e.embedding'
+    if compact and source.execute("SELECT 1 FROM sqlite_master WHERE name='body_observations'").fetchone():
+        feature = ("CASE WHEN length(e.embedding)=16384 THEN COALESCE((SELECT CAST('body:'||b.id AS BLOB) "
+                   "FROM body_observations b WHERE b.face=e.observation AND b.scan=o.scan AND b.embedding=e.embedding "
+                   "ORDER BY b.id LIMIT 1),e.embedding) ELSE e.embedding END")
     target.executemany('INSERT OR REPLACE INTO person_evidence VALUES (?,?,?,?,?,NULL)',source.execute(
-        'SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '
+        'SELECT e.observation,e.contract,e.status,e.metadata,'+feature+' FROM person_evidence e '
         'JOIN observations o ON o.id=e.observation WHERE o.scan=?',(scan,)))
 
 

@@ -74,3 +74,27 @@ def test_parallel_file_admission_rechecks_capacity_after_another_trial_writes(tm
         finally:
             resume.set()
         assert 2*mib < future.result() <= 3*mib
+
+
+def test_active_file_lease_uses_its_cap_between_volume_reconciliations(tmp_path,monkeypatch):
+    from stash_ai.recognition import disk_budget
+    path = tmp_path/'faces'
+    path.write_bytes(b'base')
+    tracked = tmp_path/'faces.scratch'
+    tracked.touch()
+    cfg = SimpleNamespace(database=path,data={'execution':{'disk_total_bytes':1024}})
+    visits = []
+    measure = disk_budget._entry_metadata
+    def checked(item,parent):
+        if item==tracked:
+            visits.append(item)
+        return measure(item,parent)
+    monkeypatch.setattr(disk_budget,'_entry_metadata',checked)
+    with scope(cfg) as budget, reserve_file(tracked,512):
+        budget.check()
+        visits.clear()
+        tracked.write_bytes(bytes(128))
+        volume, = budget.check().values()
+        assert not visits and volume['requested']==516
+        volume, = budget.check(exact=True).values()
+        assert visits and volume['used']==132 and volume['reserved']==384

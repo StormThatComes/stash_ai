@@ -170,6 +170,7 @@ def test_shipped_run_collects_faceless_cues_once(tmp_path, monkeypatch):
     template = Path(__file__).resolve().parents[1] / 'facial_recognition.yml'
     settings = tmp_path / 'facial_recognition.yml'
     settings.write_bytes(template.read_bytes())
+    (tmp_path / 'facial_recognition_execution.yml').write_bytes(template.with_name('facial_recognition_execution.yml').read_bytes())
     face = Backend()
     face.detect = lambda image: []
     services.backend = lambda *args: face

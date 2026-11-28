@@ -15,7 +15,7 @@ SHIPPED = Path(__file__).resolve().parents[1] / 'facial_recognition.yml'
 
 
 def profile(tmp_path, changes):
-    doc = yaml.safe_load(SHIPPED.read_bytes())
+    doc = yaml.safe_load(load(SHIPPED).source)
     for path, value in changes.items():
         put(doc, path, value)
     dest = tmp_path / 'recognition.yml'
