@@ -162,17 +162,21 @@ def _banks(db,config,scope,namespace):
                 signatures[signature]=page_rows(core)
                 if core:bank['cores'].append(signatures[signature])
             for ids in proof.get('face_witnesses',{}).values():face_ids.update(ids)
-        face_ids.update(r[0] for r in db.execute('SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
+        query = ('SELECT value FROM json_each(?) UNION SELECT o.id FROM observations o JOIN members m ON m.observation=o.id '
             'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+strict_sql()+' AND '+
-            anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(person,)))
-        face_ids.update(r[0] for r in db.execute('SELECT b.face FROM body_observations b JOIN body_members m ON m.observation=b.id '
+            anchor_sql('o',config.data['clustering'])+' AND '+current_scan()+
+            ' UNION SELECT b.face FROM body_observations b JOIN body_members m ON m.observation=b.id '
             'JOIN scans s ON s.id=b.scan JOIN observations o ON o.id=b.face WHERE m.person=? '
-            'AND b.rejected IS NULL AND o.rejected IS NULL AND '+current_scan(),(person,)))
-        reserve(size(face_ids))
-        for raw in metadata_rows(db,sorted(face_ids),body=False,reserve=reserve):
-            if raw is None:bank['missing_original']=True
-            else:bank['faces'].append(dict(raw));bank['face_ids'].append(raw['id'])
-        bank['faces']=page_rows(bank['faces']);bank['face_ids']=page_rows(bank['face_ids'])
+            'AND b.rejected IS NULL AND o.rejected IS NULL AND '+current_scan()+' ORDER BY 1')
+        ids = (r[0] for r in db.execute(query,(encoded(sorted(face_ids)),person,person)))
+        def face_rows():
+            for raw in metadata_rows(db,ids,body=False,reserve=reserve):
+                if raw is None:
+                    bank['missing_original'] = True
+                else:
+                    yield raw
+        bank['faces'] = page_rows(face_rows())
+        bank['face_ids'] = page_rows(row['id'] for row in bank['faces'])
         extra=[]
         for row in metadata_rows(db,sorted(confirmation),body=True,contracts=compatible_contracts(config),reserve=reserve):
             if row is None:bank['missing_original']=True

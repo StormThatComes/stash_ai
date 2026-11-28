@@ -214,7 +214,7 @@ def reconcile(database,selected,config):
                 (encoded(dict(reason='body_alias_requires_complete_selection',source=row['source'])),row['source'],encoded([s['scan'] for s in selected])))
     from .solver_execution import current as solver
     from .stage_checkpoints import report as checkpoint_report
-    result=(report(db,config,scope,namespace) if solver() is not None else
+    result=(_report(db,config,scope,namespace,compact=True,decisions_only=True) if solver() is not None else
             checkpoint_report(db,selected,config,'body-global-fragments-v3',lambda:_report(db,config,scope,namespace,compact=True,decisions_only=True)))
     from .publication_queue import enqueue
     from .alias_scene_index import remember, expire
@@ -273,7 +273,8 @@ def reconcile(database,selected,config):
     # A body-born identity may become entirely associated with an existing face
     # identity within the scene. Record that promotion as an explicit alias.
     origins={r[0] for r in db.execute('SELECT DISTINCT i.person FROM body_origins i JOIN body_observations b ON b.id=i.observation '
-        'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND '+current_scan(),(scope,namespace))}
+        'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND b.scan IN (SELECT value FROM json_each(?)) AND '+current_scan(),
+        (scope,namespace,encoded([item['scan'] for item in selected])))}
     for source in sorted(origins):
         if canonical(db,source)!=source or db.execute('SELECT 1 FROM members WHERE person=? LIMIT 1',(source,)).fetchone():continue
         rows=list(db.execute("SELECT b.id,b.scan,b.cue,b.seconds,b.quality,m.person,m.status,s.scene,"

@@ -20,15 +20,15 @@ def recover(database,selected,config):
                 "WHERE b.scan=? AND m.status='withheld' AND (json_extract(m.proof,'$.reason') IN "
                 "(SELECT value FROM json_each(?)) OR json_extract(m.proof,'$.retry_when')='confirmed_core_changes') LIMIT 1",(item['scan'],encoded(sorted(reasons|ambiguous)))).fetchone():continue
         rows=[];decisions={};cost=0
-        for raw in db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+',b.*,m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
+        columns = ','.join('b.'+r[1] for r in db.execute('PRAGMA table_info(body_observations)') if r[1] not in ('embedding','crop'))
+        for raw in db.execute('SELECT '+body_face_sql(settings=config.data['sapiensid']['identities'])+','+columns+',m.person,m.status,m.role,m.proof,o.dimensions AS face_dimensions,'
                 'o.quality AS face_quality,o.embedding AS face_embedding,o.rejected AS face_rejected FROM body_observations b '
                 'JOIN body_members m ON m.observation=b.id LEFT JOIN observations o ON o.id=b.face '
                 'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL AND m.policy=?',
                 (item['scan'],contract(config),policy(config))):
-            row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['proof'])+len(row['anchor_face'] or '')+4096
+            row=dict(raw);cost+=len(row['quality'])+len(row['proof'])+len(row['anchor_face'] or '')+4096
             if cost>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ResourceLimit('Person recovery references exceed sapiensid.execution.reference_bytes.')
-            row['_vector']=vector(row)
             row['_face_vector']=(face_vector(dict(dimensions=row['face_dimensions'],embedding=row['face_embedding']))
                 if row['face_embedding'] is not None and row['face_rejected'] is None else None)
             decisions[row['id']]=dict(json.loads(row['proof']),person=row['person'],status=row['status'],role=row['role'])
@@ -56,6 +56,15 @@ def recover(database,selected,config):
                     proof.get('reason') in reasons and not anchor(row,settings) or
                     proof.get('reason') in ambiguous and competition_changed(proof)):
                 queries.append(row)
+        if queries:
+            from itertools import chain,islice
+            needed = iter(chain(queries, *(bank for bank in banks.values())))
+            while batch := {row['id']:row for row in islice(needed,256)}:
+                cost += len(batch)*4096*4*3
+                if cost > config.data['sapiensid']['execution']['reference_bytes']:
+                    raise ResourceLimit('Person recovery references exceed sapiensid.execution.reference_bytes.')
+                for raw in db.execute('SELECT id,embedding FROM body_observations WHERE id IN (SELECT value FROM json_each(?))',(encoded(list(batch)),)):
+                    batch[raw['id']]['_vector'] = vector(raw)
         scores=Scores(config);guard=FaceGuard(db,config,scores=scores)
         from .body_seed_modes import FrozenSeeds
         modes = FrozenSeeds(banks,scores,settings) if queries else None
