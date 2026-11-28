@@ -124,9 +124,9 @@ def test_only_run_button_loads_detectors_and_navigation_clears_annotations(root,
             ui.slider.set(index)
         ui.step(-1)
         settle(ui)
-        ui.editor.parameter.set('score_threshold')
+        ui.editor.tree.selection_set('face.detector.score_threshold')
         ui.editor.show_value()
-        ui.editor.value_input.set('0.83')
+        ui.editor.manual.set('0.83')
         ui.editor.apply()
         assert not loaded and ui.frame.index == 1
         ui.run_button.invoke()
@@ -300,9 +300,9 @@ def test_comparison_reuses_a_retries_b_and_releases_models_on_owner(root, tmp_pa
         assert ui.cache['A'][1] is ui.cache['B'][1]
         a = ui.cache['A']
         for score in (.77, .82):
-            ui.editor.parameter.set('score_threshold')
+            ui.editor.tree.selection_set('face.detector.score_threshold')
             ui.editor.show_value()
-            ui.editor.value_input.set(str(score))
+            ui.editor.manual.set(str(score))
             ui.editor.apply()
             assert ui.cache == {'A': a}
             ui.run_button.invoke()
@@ -381,3 +381,29 @@ def test_navigating_during_inference_discards_old_result_and_pending_b(root, tmp
     finally:
         release.set()
         ui.close()
+
+
+def test_parameter_sidebar_auto_reset_and_diff(root):
+    import yaml
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.tune_editor import ParameterEditor, Settings
+
+    settings = Settings(load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml'))
+    changes = []
+    editor = ParameterEditor(root, settings, changes.append, pytest.fail)
+    editor.pack()
+    editor.query.set('min_recovery_mask_score')
+    root.update()
+    path = 'pose.mask.min_recovery_mask_score'
+    assert editor.path == path
+    editor.commit('0.71')
+    editor.commit('0.71')
+    assert changes == [path]
+    editor.copy_diff()
+    assert yaml.safe_load(root.clipboard_get()) == {'pose': {'mask': {'min_recovery_mask_score': .71}}}
+    editor.auto.invoke()
+    assert settings.value(path) is None
+    editor.undo()
+    assert settings.value(path) == .71
+    editor.reset()
+    assert settings.value(path) is None
