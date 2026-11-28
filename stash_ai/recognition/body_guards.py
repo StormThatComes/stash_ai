@@ -14,7 +14,7 @@ class FaceGuard:
         self.grouping = config.data.get('clustering', {})
         from collections import OrderedDict
         self.banks = OrderedDict()
-        self.owner_versions = db.execute("SELECT 1 FROM sqlite_master WHERE name='scene_owner_members'").fetchone()
+        self.owner_versions = frozen is None and db is not None and db.execute("SELECT 1 FROM sqlite_master WHERE name='scene_owner_members'").fetchone()
         self.bank_bytes = 0
         self.bank_limit = min(8*1024**2, config.data['sapiensid']['execution']['reference_bytes']//16)
 
