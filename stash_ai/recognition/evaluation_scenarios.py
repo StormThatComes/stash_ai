@@ -89,12 +89,16 @@ def snapshot(target, config, labels):
     import json
     from .clustering import matching_policy
     from .decision_evidence import recorded, explanation
-    members = dict(target.execute('SELECT observation,person FROM members'))
+    from .database import encoded
+    from .reference_roles import observation_sql
+    ids = encoded(sorted(labels))
+    listed = ' IN (SELECT value FROM json_each(?))'
+    members = dict(target.execute('SELECT observation,person FROM members WHERE observation'+listed,(ids,)))
     from .body_reports import members as body_members
-    members.update(body_members(target,config))
+    members.update(body_members(target,config,ids=labels))
     predictions = {identifier: members.get(identifier) for identifier in labels}
     decisions, reasons = {}, Counter()
-    for row in target.execute('SELECT * FROM candidates WHERE policy=? ORDER BY rowid', (matching_policy(config),)):
+    for row in target.execute('SELECT * FROM candidates WHERE policy=? AND '+observation_sql('candidates')+listed+' ORDER BY rowid', (matching_policy(config),ids)):
         payload = json.loads(row['payload'])
         identifier = payload.get('observation')
         if identifier not in labels:
@@ -104,7 +108,7 @@ def snapshot(target, config, labels):
             evidence=recorded(payload), explanation=explanation(payload))
     from .body_identity import available,policy
     if available(target):
-        for row in target.execute('SELECT * FROM body_members WHERE policy=?',(policy(config),)):
+        for row in target.execute('SELECT * FROM body_members WHERE policy=? AND observation'+listed,(policy(config),ids)):
             if row['observation'] not in labels:continue
             proof=json.loads(row['proof']);reasons[proof.get('reason','unknown')]+=1
             decisions[row['observation']]=dict(status=row['status'],identity=row['person'],evidence=proof,

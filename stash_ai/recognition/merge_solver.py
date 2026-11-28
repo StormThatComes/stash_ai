@@ -486,7 +486,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             scoped_options = dict(sorted(scoped_options.items(), key=lambda kv: (-active.get(kv[0],0),kv[0])))
             candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
                           if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
-            candidates = local_screen.order(candidates,config,db,goals,scans,hybrid.get('nearest_competitors',()))
+            candidates = local_screen.order(candidates,config,db,goals,scans,hybrid.get('nearest_competitors',()),family=family)
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())

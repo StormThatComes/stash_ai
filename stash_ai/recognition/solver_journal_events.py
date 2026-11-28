@@ -17,6 +17,8 @@ def apply(document, event):
             apply(document, item)
     elif kind == 'schedule':
         document.setdefault('schedule', []).append(event['entry'])
+    elif kind == 'local_family_screen':
+        document.setdefault('local_screens',{})[event['family']] = event['entry']
     elif kind == 'local_screen':
         document['local_screen'] = event['entry']
     elif kind == 'budget':
