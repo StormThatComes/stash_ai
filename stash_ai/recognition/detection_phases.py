@@ -52,6 +52,8 @@ class History:
         self.image = image
         self.backend = backend
         self.phases = []
+        self.samples = []
+        self.samples_omitted = 0
         self.people = ()
         self.bytes = self.omitted = 0
         self.clock = Clock()

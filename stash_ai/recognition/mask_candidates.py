@@ -27,7 +27,7 @@ def decoded_masks(limit=8*1024**2):
 
 @pipeline_stage('mask_validation')
 def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=None, own=(), limbs=(),
-               edits=None, replay=None, cuts=None, replay_cuts=None):
+               edits=None, replay=None, cuts=None, replay_cuts=None, details=None):
     """Return an admitted mask/box or an explicit, auditable rejection reason."""
     width, height = size
     if mask.dtype != np.bool_ or mask.shape != (height, width):
@@ -41,7 +41,7 @@ def check_mask(mask, score, prompts, foreign, box, settings, size, *, observe=No
     if not mask.any():
         return None, None, 'empty_mask'
     mask = clean_mask(mask, box, settings, prompts=prompts, own=own, foreign=foreign, limbs=limbs,
-                      edits=edits, replay=replay, cuts=cuts, replay_cuts=replay_cuts)
+                      edits=edits, replay=replay, cuts=cuts, replay_cuts=replay_cuts, details=details)
     if observe is not None:
         observe('cleaned', mask)
     if not mask.any():
@@ -383,6 +383,11 @@ def select_masks(owner, image, bounds, points, cores, jobs, records, initial_mas
                 order = sorted(range(len(variants)), key=lambda v: assessed[v][0], reverse=True)
                 best = order[0]
                 raw, score = variants[best]
+                history = phases.active(image)
+                if history is not None:
+                    from .tune_mask_candidate import record as record_sample
+                    record_sample(history, raw, score, f'P{i} · attempt {attempt} · candidate {best}',
+                                  bounds[i], positive, evidence[i], foreign, limbs)
                 observer = mask_observer(image, record)
                 rank, mask, box, reason, edits = assessed[best]
                 if observer is not None:

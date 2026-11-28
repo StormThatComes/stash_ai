@@ -407,3 +407,52 @@ def test_parameter_sidebar_auto_reset_and_diff(root):
     assert settings.value(path) == .71
     editor.reset()
     assert settings.value(path) is None
+
+
+def test_live_masks_edit_only_b_and_discard_late_preview(root):
+    from types import SimpleNamespace
+    import numpy as np
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.tune_editor import Settings
+    from stash_ai.recognition.tune_mask_candidate import MaskSample
+    from stash_ai.recognition.tune_mask_view import LiveMasks
+
+    panel = LiveMasks(root, pytest.fail)
+    panel.pack(fill='both', expand=True)
+    config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
+    a, b = Settings(config), Settings(config)
+    raw = np.zeros((40, 80), bool)
+    raw[8:26, 12:31] = True
+    raw[31:34, 35:39] = True
+    own = np.array([[20., 15.]])
+    sample = MaskSample('P0', raw.shape, np.packbits(raw).tobytes(), .98, (0, 0, 80, 40),
+                        own, own, np.empty((0, 2)), np.empty((0, 2, 2)))
+    history = SimpleNamespace(samples=(sample,))
+    def finish():
+        deadline = time.monotonic() + 5
+        while any(w.future is not None for w in panel.workers.values()):
+            assert time.monotonic() < deadline
+            panel.poll()
+            root.update()
+            time.sleep(.002)
+    try:
+        with Image.new('RGB', (80, 40)) as image:
+            panel.configure_panel('B', True)
+            panel.activate(True)
+            for name, cfg in (('A', a), ('B', b)):
+                cfg.edit('pose.mask.max_island_gap_fraction', '0')
+                panel.set_samples(name, history, cfg, image)
+            finish()
+            for size in (14, 8, 13):
+                b.edit('pose.mask.min_island_pixels', str(size))
+                panel.request('B')
+            finish()
+            assert panel.details['A'][1][32, 36]
+            assert not panel.details['B'][1][32, 36]
+            panel.request('B')
+            panel.clear('B')
+            finish()
+            assert 'B' not in panel.details
+    finally:
+        panel.close()

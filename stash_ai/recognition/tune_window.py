@@ -13,6 +13,8 @@ from .config import load
 from .detection_session import CueDetector
 from .tune_compare import detect_variants
 from .tune_images import ImagePair
+from .tune_mask_view import LiveMasks
+from .tune_mask_candidate import LOCAL_PATHS
 from .tune_phases import PhaseNavigation
 from .tune_editor import ParameterEditor, Settings, display_value
 from .tune_worker import SceneBrowser, Worker
@@ -69,11 +71,17 @@ class Tuner:
         self.slider.bind('<Right>', lambda _: self.step(1))
         work = ttk.Panedwindow(body, orient='horizontal')
         work.grid(row=3, column=0, sticky='nsew')
-        self.images = ImagePair(work)
+        self.tabs = ttk.Notebook(work)
+        self.images = ImagePair(self.tabs)
+        self.live = LiveMasks(self.tabs, self.run_detection)
+        self.tabs.add(self.images, text='Detection phases')
+        self.tabs.add(self.live, text='Live mask')
+        self.tabs.bind('<<NotebookTabChanged>>', lambda _: self.live.activate(
+            self.tabs.select() == str(self.live)))
         self.images.enable_hover()
         self.phases = PhaseNavigation(body, self.images)
         self.phases.grid(row=2, column=0, sticky='ew', pady=(0, 8))
-        work.add(self.images, weight=3)
+        work.add(self.tabs, weight=3)
         tools = ttk.Frame(body)
         tools.grid(row=4, column=0, sticky='ew', pady=8)
         ttk.Label(tools, text='Configuration / phases').pack(side='left')
@@ -116,6 +124,7 @@ class Tuner:
             self.show_raw('B')
 
     def choose_editor(self):
+        self.live.configure_panel(self.active.get(), self.compare.get())
         self.phases.select_panel(self.active.get())
         settings = self.settings[self.active.get()]
         self.editor.bind_settings(settings)
@@ -143,6 +152,9 @@ class Tuner:
         self.active.set('B')
         self.choose_editor()
         self.edited()
+        if 'A' in self.cache:
+            self.live.set_samples('B', getattr(self.cache['A'][1], 'phases', None),
+                                  self.settings['B'], self.frame.image)
 
     def differences(self):
         rows = []
@@ -170,6 +182,8 @@ class Tuner:
     def set_zoom(self):
         self.images.zoom = float(self.zoom.get().rstrip('%')) / 100
         self.images.layout()
+        self.live.images.zoom = self.images.zoom
+        self.live.images.layout()
 
     def show_raw(self, name, caption='Original VTT cue'):
         self.phases.clear(name)
@@ -207,6 +221,9 @@ class Tuner:
         self.frame = None
         self.stop.set()
         self.cache.clear()
+        self.live.source = None
+        for name in self.settings:
+            self.live.clear(name)
         self.inference.invalidate()
         self.run_button.state(['disabled'])
         for name in self.settings:
@@ -233,7 +250,13 @@ class Tuner:
         self.show_raw(name)
         if self.frame is not None:
             self.run_button.state(['!disabled'])
-        self.status.set('Settings changed. Run detection to see the result.')
+        if path in LOCAL_PATHS and self.live.samples.get(name):
+            self.tabs.select(self.live)
+            self.live.request(name)
+            self.status.set('Candidate preview. Check full detection for retries, competing masks and final pose.')
+        else:
+            self.live.clear(name)
+            self.status.set('Settings changed. Run detection to see the result.')
 
     def run_detection(self):
         if self.frame is None:
@@ -267,6 +290,7 @@ class Tuner:
                 continue
             self.cache[name] = (plans[name], result)
             self.phases.set_result(name, result, self.frame.image)
+            self.live.set_samples(name, getattr(result, 'phases', None), self.settings[name], self.frame.image)
         self.run_button.state(['!disabled'])
         self.status.set('Detection complete' if all(n in self.cache for n in self.images.names)
                         else 'One or more panels have no current result.')
@@ -279,7 +303,8 @@ class Tuner:
     def poll(self):
         self.media.poll()
         self.inference.poll()
-        self.poll_id = self.root.after(35, self.poll)
+        self.live.poll()
+        self.poll_id = self.root.after(12 if self.live.visible else 35, self.poll)
 
     def close(self):
         self.root.after_cancel(self.poll_id)
@@ -290,6 +315,7 @@ class Tuner:
             finally:
                 self.inference.close(self.detector.close)
         finally:
+            self.live.close()
             self.body.destroy()
 
 
