@@ -41,21 +41,10 @@ def resolve(database,replay,selected,config,history,bindings,confirmed):
         replay.execute('INSERT INTO historical_pool_claims VALUES (?,?,?,?,?,?,?,?,?)',
             (row['id'],target,proof['mode'],encoded(proof['medoids']),row['scan'],row['cue'],row['seconds'],
              row['current'] if 'current' in row.keys() else 0,encoded(proof)))
-    def claims():
-        for claim in replay.execute('SELECT * FROM historical_pool_claims ORDER BY owner,scan,cue,observation'):
-            row=dict(database.connection.execute('SELECT id,scan,cue,geometry,dimensions,embedding FROM observations WHERE id=?',
-                (claim['observation'],)).fetchone());row['person']=claim['owner'];yield row
-    stronger=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
-    for row in conflicting_claims(claims(),stronger,deduplicate=config.data['clustering'].get('deduplicate_detections',False)):
-        replay.execute('DELETE FROM historical_pool_claims WHERE observation=?',(row['id'],))
-    from .query_support import cohorts
+    from .pool_evidence import claim_cohorts, compact
     from .config import digest
-    claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM historical_pool_claims')}
-    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
-        'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
-    eligible=cohorts(raw,config,key=lambda r:(claims_by_id[r['id']]['owner'],claims_by_id[r['id']]['mode']),
-        prototype=lambda r:claims_by_id[r['id']]['medoids'],
-        minimum=lambda family:config.data['clustering']['view_attach_min_support'] if family[1]=='view' else 1)
+    stronger=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
+    eligible=claim_cohorts(database.connection,replay,'historical_pool_claims',True,config,stronger)
     import json
     for cohort in eligible:
         target,mode=cohort.family;support=cohort.independent_support
@@ -72,13 +61,14 @@ def resolve(database,replay,selected,config,history,bindings,confirmed):
             query_support_ids=cohort.witnesses)
         replay.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',history.people[target])
         bindings[target]=target
+        decision_proof = encoded(compact(replay, proof))
         for row in replay.execute('SELECT * FROM historical_pool_claims WHERE observation IN '
                 '(SELECT value FROM json_each(?))',(encoded(cohort.observations),)):
             if row['current']:
                 reason='pooled_view_identity' if mode=='view' else 'late_strict_identity'
                 replay.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,'$.reason',?,"
                     "'$.provisional_pool',json(?),'$.historical_reference',json(?)) WHERE policy=? AND "+observation_sql('candidates')+'=?',
-                    (target,reason,encoded(proof),row['proof'],policy,row['observation']))
+                    (target,reason,decision_proof,row['proof'],policy,row['observation']))
                 replay.execute('INSERT OR IGNORE INTO members VALUES (?,?)',(row['observation'],target))
             else:
                 replay.execute('INSERT OR IGNORE INTO pool_claims VALUES (?,?,?,?,?)',

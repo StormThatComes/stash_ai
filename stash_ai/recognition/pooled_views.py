@@ -71,21 +71,10 @@ def resolve(database,replay,selected,config,history,bindings,confirmed,early,usa
             (row['id'],view.group.identifier,target,view.medoid,row['scan'],row['cue'],row['seconds'],is_current))
     # One physical cue cannot claim two non-reflection faces of the same owner,
     # including when their matching prototypes differ.
-    def claims():
-        for claim in replay.execute('SELECT * FROM pool_view_claims ORDER BY canonical,scan,cue,observation'):
-            row=dict(database.connection.execute('SELECT id,scan,cue,geometry,dimensions,embedding '
-                'FROM observations WHERE id=?',(claim['observation'],)).fetchone())
-            row['person']=claim['canonical'];yield row
-    stronger=max(settings['match_threshold'],settings['cooccurrence_merge_threshold'])
-    for row in conflicting_claims(claims(),stronger):
-        replay.execute('DELETE FROM pool_view_claims WHERE observation=?',(row['id'],))
-    from .query_support import cohorts
+    from .pool_evidence import claim_cohorts, compact
     from .config import digest
-    claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM pool_view_claims')}
-    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
-        'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
-    eligible=cohorts(raw,config,key=lambda r:claims_by_id[r['id']]['owner'],
-        prototype=lambda r:claims_by_id[r['id']]['medoid'])
+    stronger=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
+    eligible=claim_cohorts(database.connection,replay,'pool_view_claims',False,config,stronger)
     known={(v.group.identifier,v.medoid):v for v in views}
     for cohort in eligible:
         owner=cohort.family
@@ -101,12 +90,13 @@ def resolve(database,replay,selected,config,history,bindings,confirmed,early,usa
             views=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,support_ids=v.support) for v in selected_views],
             claim_id=source,query_ids=cohort.observations,query_support_ids=cohort.witnesses,
             threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold'])
+        decision_proof = encoded(compact(replay, proof))
         for row in replay.execute('SELECT * FROM pool_view_claims WHERE observation IN '
                 '(SELECT value FROM json_each(?))',(encoded(cohort.observations),)):
             if row['current']:
                 replay.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                     "'$.reason','pooled_view_identity','$.provisional_pool',json(?)) WHERE policy=? AND "+
-                    observation_sql('candidates')+'=?',(owner,encoded(proof),matching_policy(config),row['observation']))
+                    observation_sql('candidates')+'=?',(owner,decision_proof,matching_policy(config),row['observation']))
                 replay.execute('INSERT OR IGNORE INTO members VALUES (?,?)',(row['observation'],owner))
             else:
                 replay.execute('INSERT OR IGNORE INTO pool_claims VALUES (?,?,?,?,?)',
