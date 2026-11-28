@@ -33,14 +33,21 @@ def paths(rows, settings, scores, occupied=(), *, extended=False, gap_boxes=None
                 geometry[r['id']][0].get('expected_people',0))==len(members) for r in members)
     links, incoming = {},set()
     ordered = sorted(cues)
+    times = {cue: cues[cue][0].get('seconds') for cue in ordered}
+    steps = [(times[b]-times[a])/(b-a) for a,b in zip(ordered,ordered[1:])
+             if times[a] is not None and times[b] is not None and times[b]>times[a]]
+    cadence = float(np.median(steps)) if len(steps)>=3 else None
     from bisect import bisect_right
     occupied = sorted(occupied)
     for cue,target in zip(ordered,ordered[1:]):
         gap = target-cue
+        if cadence and times[target] is not None and times[cue] is not None:
+            if times[target]-times[cue] > cadence*(5 if extended else 3):
+                continue
         skipped = gap>1
         middle = occupied[bisect_right(occupied,cue):bisect_right(occupied,target-1)]
         verified = len(motion)>target and '0' not in motion[cue+1:target+1]
-        if gap>(5 if extended else 2) or middle and (gap_boxes is None or not verified):
+        if gap>(5 if extended else 3) or middle and (gap_boxes is None or not verified):
             continue
         left,right = cues[cue],cues[target]
         if not right:

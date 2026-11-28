@@ -6,7 +6,7 @@ from .body_observations import enabled as body_enabled
 from .person_association import association_rejection
 
 
-CONTRACT = 'retina-contact-heads-v1'
+CONTRACT = 'retina-contact-heads-v2'
 MIXED = 'face_landmarks_mixed_people'
 BETWEEN = 'face_between_confirmed_heads'
 # Pose nose / anatomical left and right eyes -> RetinaFace landmark indices.
@@ -102,7 +102,7 @@ def guard_body_inputs(faces, people, matches, size):
         heads = nearby_heads(face, measured)
         if len(heads) >= 2:
             owner, sources = ownership(face, measured, heads)
-            if sources or (owner is None and intermediate_pair(face, heads)):
+            if (owner is not None and owner != match) or sources or (owner is None and intermediate_pair(face, heads)):
                 matches[i] = None
 
 

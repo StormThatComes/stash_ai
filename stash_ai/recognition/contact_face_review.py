@@ -157,16 +157,31 @@ def review(db, scan, source, config, acquire, visibility, release):
     # RetinaFace for ordinary pairs whose detections already agree with pose.
     crowded = db.execute('SELECT b.cue FROM body_observations b WHERE b.scan=? AND b.contract=? '
                          'AND EXISTS (SELECT 1 FROM observations o WHERE o.scan=b.scan AND o.cue=b.cue) '
-                         """GROUP BY b.cue HAVING COUNT(*) >= 2 AND (COUNT(b.face) < COUNT(*)
-                         OR EXISTS (SELECT 1 FROM observations o WHERE o.scan=b.scan AND o.cue=b.cue
-                             AND (o.rejected='face_landmarks_invalid' OR NOT EXISTS (
-                                 SELECT 1 FROM body_observations linked WHERE linked.face=o.id
-                                 AND linked.contract=b.contract)))) ORDER BY b.cue""", (scan, expected))
+                         'GROUP BY b.cue HAVING COUNT(*) >= 2 ORDER BY b.cue', (scan, expected))
     def inputs(i):
         return _inputs(db, scan, i, expected, source.cues[i].rect[2:], strict)
     planned = []
     for (i,) in crowded:
-        if inputs(i).needed():
+        inspected = inputs(i)
+        by_face = {body['face']: index for index,body in enumerate(inspected.bodies) if body['face']}
+        revoked = False
+        for row, face in zip(inspected.rows, inspected.faces):
+            assigned = by_face.get(row['id'])
+            if assigned is None:
+                continue
+            heads = contact_faces.nearby_heads(face, inspected.measured)
+            if len(heads) < 2:
+                continue
+            owner, _ = contact_faces.ownership(face, inspected.measured, heads)
+            if owner is not None and owner != assigned:
+                db.execute('DELETE FROM person_evidence WHERE observation=?',(row['id'],))
+                db.execute("UPDATE body_observations SET face=NULL,rejected=coalesce(rejected,'contact_head_owner_conflict'),"
+                           "quality=json_set(quality,'$.face_status','absent') WHERE id=?",
+                           (inspected.bodies[assigned]['id'],))
+                revoked = True
+        if revoked:
+            repair_projections(db, config, scan, cue=i)
+        if inspected.needed():
             planned.append(i)
     if planned:
         with ExitStack() as stack:

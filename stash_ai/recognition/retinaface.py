@@ -116,14 +116,29 @@ class RetinaFaceDetector:
                 for i in np.asarray(selected).reshape(-1)[:maximum]]
 
     def _raw(self, image):
-        tensor, sx, sy = self._blob(image)
+        return self._infer(self._blob(image))
+
+    def _infer(self, prepared):
+        tensor, sx, sy = prepared
         outputs = self.session.run(self.output_names, {self.input_name: tensor})
         return self.decode(outputs, scale_x=sx, scale_y=sy, config=self.config)
 
     def _raw_many(self, images):
         # Use one input per run to bound activation memory. Preserve caller
         # order without retaining multiple 640px activations.
-        return [self._raw(image) for image in images]
+        if getattr(self,'device',None) != 'cuda' or len(images) < 2:
+            return [self._raw(image) for image in images]
+        from concurrent.futures import ThreadPoolExecutor
+        outputs = []
+        source = iter(images)
+        with ThreadPoolExecutor(max_workers=1) as prep:
+            pending = prep.submit(self._blob,next(source))
+            for image in source:
+                ready = pending.result()
+                pending = prep.submit(self._blob,image)
+                outputs.append(self._infer(ready))
+            outputs.append(self._infer(pending.result()))
+        return outputs
 
     def detect_many(self, images):
         from .face_landmark_repair import repair

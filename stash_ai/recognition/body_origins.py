@@ -35,9 +35,11 @@ def origins_for_scene(db, scan, current=()):
             geometry = json.loads(new['geometry'])
             points = torso_points(geometry)
             common = points.keys() & old_points.keys()
+            extent = max(1., min(bounds[2]-bounds[0],bounds[3]-bounds[1]))
+            scale = max(1., min(4., extent/100.))
             if (len(common)<3 or not geometry.get('bounds') or
-                    max(abs(a-b) for a,b in zip(bounds,geometry['bounds']))>2 or
-                    any(np.linalg.norm(points[i]-old_points[i])>2.5 for i in common)):
+                    max(abs(a-b) for a,b in zip(bounds,geometry['bounds']))>2*scale or
+                    any(np.linalg.norm(points[i]-old_points[i])>2.5*scale for i in common)):
                 continue
             raw = db.execute('SELECT embedding FROM body_observations WHERE id=?',(row['id'],)).fetchone()
             if raw[0] and float(vector(raw) @ vector(new))>=.95:
