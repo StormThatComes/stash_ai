@@ -85,21 +85,34 @@ class PartitionImpact:
         self.joined = sum(map(pairs, self.right.values())) - shared
         self.split = sum(map(pairs, self.left.values())) - shared
 
+    def changed_rows(self, delta):
+        from .solver_slot_index import Slots
+        if isinstance(self.before, Slots) and isinstance(self.baseline, Slots) and self.before.db is self.baseline.db:
+            from itertools import islice
+            import json
+            rows = iter(delta.items())
+            while block := dict(islice(rows, 512)):
+                query = f'SELECT id,{self.before.column},{self.baseline.column} FROM slots WHERE id IN (SELECT value FROM json_each(?))'
+                for key, old, previous in self.before.db.execute(query, (json.dumps(list(block)),)):
+                    yield key, old, previous, block[key], True
+            return
+        for key, new in delta.items():
+            if key not in self.excluded:
+                yield key, self.before.get(key), self.baseline[key], new, key in self.before
+
     def measure(self, delta):
         cells, left, right, population = (Counter() for _ in range(4))
         assigned, gained, lost = self.assigned, self.gained, self.lost
-        for key, new in delta.items():
+        for key, old, previous, new, present in self.changed_rows(delta):
             if key in self.excluded:
                 continue
-            previous = self.baseline[key]
             if new == previous:
                 continue
             for person, sign in ((previous, -1), (new, 1)):
                 if person is not None:
                     population[person] += sign
                     assigned += sign
-                if key in self.before:
-                    old = self.before[key]
+                if present:
                     gained += sign * (old is None and person is not None)
                     lost += sign * (old is not None and person is None)
                     if old is not None and person is not None:

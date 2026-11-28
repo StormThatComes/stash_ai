@@ -82,18 +82,36 @@ def cached_review(rows, grouping):
     return proof
 
 
-def apply(db, selected, config):
+def apply(db, selected, config, *, immutable_input=None):
     grouping=config.data['clustering']
     if not grouping.get('revalidate_face_anchors') and not grouping.get('near_duplicate_pixel_rms'):
         return
+    from .run_cache import current, MISSING
+    from .config import digest, plain
+    from .memory_size import size
+    cache = current()
+    reusable = immutable_input is not None and cache is not None and not grouping.get('near_duplicate_pixel_rms')
+    policy = digest(plain(grouping)) if reusable else None
     for item in selected:
+        key = ('immutable-face-review', immutable_input, item['scan'], policy)
+        found = cache.get(key) if reusable else MISSING
+        if found is not MISSING:
+            write_review(db, found)
+            continue
         rows=[dict(r) for r in db.execute('SELECT id,scan,cue,seconds,geometry,quality,dimensions,embedding '
             'FROM observations WHERE scan=? AND rejected IS NULL AND embedding IS NOT NULL ORDER BY cue,id',(item['scan'],))]
         if grouping.get('near_duplicate_pixel_rms'):
             collapse(db,rows,grouping)
         if grouping.get('revalidate_face_anchors'):
-            for oid,proof in cached_review(rows,grouping).items():
-                db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
+            proof = review(rows, grouping) if reusable else cached_review(rows,grouping)
+            if reusable:
+                cache.put(key, proof, size(proof) + 256)
+            write_review(db, proof)
+
+
+def write_review(db, decisions):
+    for oid, proof in decisions.items():
+        db.execute("UPDATE main.observations SET quality=json_set(quality,'$.query_only',json('true'),"
                     "'$.anchor_review',json(?)) WHERE id=?",(encoded(proof),oid))
 
 

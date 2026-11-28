@@ -603,7 +603,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             if inputs.reused == 0 or inputs.replace_invalid:
                 inputs.save(replay)
         from .face_evidence_review import apply as review_face_evidence
-        review_face_evidence(replay,selected,config)
+        review_face_evidence(replay,selected,config, immutable_input=(str(images.seed),raw_image) if raw_image else None)
         _copy_bindings(database,replay,selected,scope,namespace)
         from .prior_membership import PriorMembership
         previous = PriorMembership(replay, 'prior_attachment_queries', previous_queries(db,selected,config,scope,namespace))

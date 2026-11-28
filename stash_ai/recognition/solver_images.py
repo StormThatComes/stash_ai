@@ -10,6 +10,28 @@ import tempfile
 _active = ContextVar('solver_images', default=None)
 
 
+def backup(source, dest):
+    """Reserve SQLite pages before the backup API bypasses normal write admission."""
+    page = source.execute('PRAGMA main.page_size').fetchone()[0]
+    pages = source.execute('PRAGMA main.page_count').fetchone()[0]
+    size = pages * page
+    budget = getattr(dest, 'budget', None)
+    if budget is not None:
+        if hasattr(dest, 'account_pages'):
+            budget.reserve(dest.owner, size)
+        else:
+            from .resource_errors import ResourceLimit
+            limit = getattr(dest, 'page_limit', None)
+            if limit is not None and size > limit:
+                raise ResourceLimit('Solver image exceeds the configured replay snapshot budget.')
+            budget.set(dest, 2 * size)
+            dest.capacity = dest.estimate = size
+            dest.execute(f'PRAGMA main.max_page_count={max(1, pages)}')
+    source.backup(dest)
+    if budget is not None and hasattr(dest, 'account_pages'):
+        dest.account_pages()
+
+
 @dataclass(frozen=True)
 class Images:
     directory: Path
@@ -26,16 +48,8 @@ class Images:
         size = path.stat().st_size
         if size > self.limit or size > (getattr(dest, 'page_limit', None) or self.limit):
             return False
-        if getattr(dest, 'budget', None) is not None:
-            if hasattr(dest, 'account_pages'):
-                dest.budget.reserve(dest.owner, size)
-            else:
-                dest.budget.set(dest, 2 * size)
-                dest.capacity = dest.estimate = size
         with closing(sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True)) as source:
-            source.backup(dest)
-        if hasattr(dest, 'account_pages'):
-            dest.account_pages()
+            backup(source, dest)
         return True
 
     def publish(self, name, connection):

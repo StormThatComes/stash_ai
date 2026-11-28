@@ -110,6 +110,9 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
         import sqlite3
         if isinstance(exc, sqlite3.OperationalError) and getattr(exc, 'sqlite_errorcode', None) == sqlite3.SQLITE_FULL:
             from .resource_errors import ResourceLimit
+            if settings.data['execution'].get('rebuild_storage') == 'disk':
+                exc.add_note('Check the active SQLite page limit, scratch allowance and free disk space.')
+                raise
             limit = ResourceLimit('Trial replay exceeds execution.rebuild_memory_bytes.',
                                   budget='execution.rebuild_memory_bytes',limit=settings.data['execution']['rebuild_memory_bytes'])
             limit.replay_stage = active_stage
