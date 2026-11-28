@@ -50,27 +50,29 @@ def score(labels, predicted):
     groups = {}
     rivals = set()
     fragments = Counter()
-    seen = set()
-    for oid,group in labels.items():
+    physical = {}
+    for oid, label in labels.items():
         owner = predicted.get(oid)
-        if owner is None:
+        if owner is not None:
+            slot = label if isinstance(label, tuple) else (label,None,None,oid)
+            physical.setdefault(slot,set()).add(owner)
+    conflicts = 0
+    for (group,fragment,scan,cue), owners in physical.items():
+        if len(owners) != 1:
+            conflicts += 1
             continue
-        if isinstance(group, tuple):
-            group, fragment, scan, cue = group
-            slot = group, fragment, scan, cue, owner
-            if slot in seen:
-                continue
-            seen.add(slot)
-            fragments[group,fragment,owner] += 1
-        if group<0:
+        owner, = owners
+        if group < 0:
             rivals.add(owner)
         else:
             groups.setdefault(group,Counter())[owner] += 1
+            if fragment is not None:
+                fragments[group,fragment,owner] += 1
     contaminated = sum(n for counts in groups.values() for owner,n in counts.items()
                        if owner in rivals or any(owner in other for other in groups.values() if other is not counts))
     joined = sum(n*(n-1)//2 for counts in groups.values() for n in counts.values())
     joined -= sum(n*(n-1)//2 for n in fragments.values())
-    return -contaminated,joined,sum(sum(v.values()) for v in groups.values())
+    return -(contaminated+conflicts),joined,sum(sum(v.values()) for v in groups.values())
 
 
 class LocalScreen:
@@ -136,7 +138,7 @@ class LocalScreen:
                 ranked.sort(key=lambda item:item[0],reverse=True)
                 batch = [patch for _,patch in ranked]
         if self.journal:
-            entry = dict(input=original,order=batch,info=self.info)
+            entry = dict(input=original,order=batch,info=dict(self.info))
             self.journal.document.setdefault('local_screens',{})[family] = entry
             self.journal.events.append(dict(kind='local_family_screen',family=family,entry=entry))
         yield from batch

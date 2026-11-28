@@ -464,9 +464,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 source = feedback[parent]
                 peers = [c['changes'] for n, c in search._restart_parents().items() if n != parent]
                 recipes = (dict(changes, **p['patch']) for p in source.get('mechanisms', {}).get('plans', ()))
-                for candidate in _interleave((restart_probes(config, changes, options),
+                candidates = _interleave((restart_probes(config, changes, options),
                         joint_probes(config, changes, dict(options, **source['options'])),
-                        crossovers(changes, peers), recipes)):
+                        crossovers(changes, peers), recipes))
+                for candidate in local_screen.order(candidates,config,db,goals,scans,
+                        hybrid.get('nearest_competitors',()),family='restart'):
                     family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in candidate) else 'face'
                     yield family,'restart_probe',candidate
                 return
