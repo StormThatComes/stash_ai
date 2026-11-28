@@ -69,18 +69,40 @@ def test_legacy_and_mb_keys_cannot_silently_override_each_other(reverse):
         effective_data(supplied)
 
 
-def test_migration_of_legacy_v2_preserves_nonintegral_mb_and_exact_bytes(tmp_path):
+FACE_REFERENCE_BYTE_KEYS = (
+    'matching.face.samples.references.max_reference_bytes',
+    'execution.rebuild.face.reference_bytes',
+)
+
+
+def test_duplicate_legacy_face_reference_limits_are_rejected():
+    supplied = {'version': 2}
+    for key in FACE_REFERENCE_BYTE_KEYS:
+        put(supplied, key, BYTES_PER_MB + 1)
+    with pytest.raises(ValueError, match='do not combine'):
+        effective_data(supplied)
+
+
+@pytest.mark.parametrize('reference_key', FACE_REFERENCE_BYTE_KEYS)
+def test_migration_of_legacy_v2_preserves_nonintegral_mb_and_exact_bytes(tmp_path, reference_key):
     from stash_ai.recognition.config_export import migrate
 
     source = tmp_path / 'old.yml'
     supplied = {'version': 2}
+    expected = {}
     for old, internal in LEGACY_BYTE_PATHS.items():
-        put(supplied, old, max(BYTE_LIMITS[internal][0], BYTES_PER_MB) + 1)
+        if internal == 'clustering.max_reference_bytes' and old != reference_key:
+            continue
+        expected[internal] = max(BYTE_LIMITS[internal][0], BYTES_PER_MB) + 1
+        put(supplied, old, expected[internal])
     source.write_text(yaml.safe_dump(supplied))
     config = load(source)
     destination = tmp_path / 'new.yml'
     migrate(config, destination)
-    assert plain(load(destination).data) == plain(config.data)
+    restored = load(destination)
+    assert plain(restored.data) == plain(config.data)
+    for internal, value in expected.items():
+        assert get(restored.data, internal) == value
     assert '_bytes:' not in destination.read_text()
     assert 'memory_mb: 1.0000009536743164' in destination.read_text()
 
