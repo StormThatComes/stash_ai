@@ -7,7 +7,8 @@ LOCAL = tuple('sapiensid.identities.'+key for key in (
 GLOBAL = tuple('sapiensid.global_matching.'+key for key in (
     'match_threshold','cohesion_threshold','ambiguity_margin','min_support'))
 QUALITY=tuple('sapiensid.identities.'+key for key in ('anchor_min_keypoints','anchor_min_sharpness'))
-PARAMETERS = frozenset(LOCAL+GLOBAL)
+SPLIT = tuple('sapiensid.identities.anchor_min_'+k+'_sharpness' for k in ('focus','motion'))
+PARAMETERS = frozenset(LOCAL+GLOBAL+SPLIT)
 
 
 def active(config):
@@ -16,5 +17,6 @@ def active(config):
     # Null is an explicit opt-out, like the optional face admission gates.
     pixel=(PIXEL_PARAMETER,) if settings['enabled'] and settings['identities']['anchor_min_person_pixels'] is not None else ()
     if not settings['enabled']:return ()
-    if not enabled(config):return QUALITY+pixel
-    return tuple(k for k in LOCAL if k!=PIXEL_PARAMETER)+pixel+(GLOBAL if settings['global_matching']['enabled'] else ())
+    split = SPLIT if settings['identities'].get('anchor_sharpness_mode')=='split' else ()
+    if not enabled(config):return QUALITY+pixel+split
+    return tuple(k for k in LOCAL if k!=PIXEL_PARAMETER)+pixel+split+(GLOBAL if settings['global_matching']['enabled'] else ())

@@ -308,9 +308,14 @@ def quality_feedback(db, config, goals, *, priorities=None):
             continue
         patch, missing = {}, []
         for role in ('anchor', 'auxiliary'):
-            for suffix, field in (('face_pixels','pixels'), ('sharpness','sharpness'),
-                                  ('visible_face_fraction','visible_face_fraction')):
-                key = 'clustering.min_'+role+'_'+suffix
+            from .sharpness_gates import estimated
+            fields = [('clustering.min_'+role+'_face_pixels','pixels'),
+                      ('clustering.min_'+role+'_visible_face_fraction','visible_face_fraction')]
+            if config.data['clustering'].get(role+'_sharpness_mode') == 'split' and estimated(quality):
+                fields.extend(('clustering.'+role+'_min_'+field,field) for field in ('focus_sharpness','motion_sharpness'))
+            else:
+                fields.append(('clustering.min_'+role+'_sharpness','sharpness'))
+            for key,field in fields:
                 current = parameter(config.data, key)
                 if not current:
                     continue

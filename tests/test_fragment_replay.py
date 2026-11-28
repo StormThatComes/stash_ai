@@ -55,7 +55,10 @@ def test_export_mixed_holdout_counts(tmp_path):
                        'returns': dict(baseline=1,winner=0,baseline_total=1,winner_total=1,status='regressed')})))
     dest = tmp_path/'proposal.yml'
     export(config,results,tmp_path/'result.json',dest,yaml_mode='diff')
-    assert '0 -> 1 (regressed)' in dest.read_text() and '1/1 -> 0/1' in dest.read_text()
+    import json
+    report = json.loads((tmp_path/'result.json').read_text())
+    assert not dest.exists() and report['yaml_withheld_reason']=='holdout_regressed'
+    assert report['holdout_validation']['verdict']['measures']==results['holdout_validation']['verdict']['measures']
 
 
 def test_fragment_replay_matches_full_scan_on_added_changed_and_removed_rival(tmp_path):

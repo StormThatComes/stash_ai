@@ -214,6 +214,10 @@ def test_diagnostics_stream_only_incident_pairs_and_enforce_proof_budgets(tmp_pa
         config.data['sapiensid']['execution']['max_candidate_pairs'] = 1
         with pytest.raises(ValueError, match='max_candidate_pairs'):
             analyse(db, config, goals)
+        partial = analyse(db,config,goals,allow_partial=True)
+        assert partial['partial_coverage']['complete'] is False
+        assert partial['partial_coverage']['measured_pairs']==len(partial['pairs'])
+        assert partial['comparisons']>0 and not partial['nearest_competitors']
         config.data['sapiensid']['execution']['max_candidate_pairs'] = 100000
         config.data['sapiensid']['execution']['plan_bytes'] = 1
         with pytest.raises(ValueError, match='plan_bytes'):

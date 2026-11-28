@@ -33,7 +33,7 @@ def mode_boundary(left, right):
     return min(rows + columns)
 
 
-def analyse(db, config, goals):
+def analyse(db, config, goals, *, allow_partial=False):
     """Inspect target pairs and every incident competitor, never outsider pairs.
 
     Goal sets only direct the search. They neither enter production matching nor
@@ -74,64 +74,72 @@ def analyse(db, config, goals):
     lookup = Lookup(bank, limits['reference_bytes'])
     nearest, positive = {}, []
     proof_bytes = 0
-    with tracking(lookup.pairs(incident=wanted), 'Measure solver hybrid evidence', unit='pair') as pairs:
-        for a, b, face_mean, body_mean in pairs:
-            result['comparisons'] += 1
-            left, right = by_id[a], by_id[b]
-            target_pair = a in wanted and b in wanted
-            same_set = target_pair and owners[a] == owners[b] and len(owners[a]) == 1
-            nominated = ((face_mean is not None and face_mean + 1e-6 >= settings['face_floor']) or
-                (body_mean is not None and body_mean + 1e-6 >= settings['person_threshold'] - settings['ambiguity_margin']))
-            if target_pair or nominated:
-                result['candidate_pairs'] += 1
-                if result['candidate_pairs'] > limits['max_candidate_pairs']:
-                    raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded by solver evidence.')
-            present = _cooccurs(db, a, b, config) if target_pair else False
-            proof = (pair(left, right, settings, copresent=present,
-                          reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
-                     if target_pair or nominated else None)
-            if target_pair:
-                boundary = mode_boundary(left.body_modes, right.body_modes)
-                alternate = None
-                if boundaries(boundary):
-                    alternate = pair(left, right, dict(settings, person_threshold=_floor(boundary)),
-                        copresent=present, reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
-                entry = dict(proof, relation='within_set' if same_set else 'between_sets',
-                    sets=[sorted(owners[a]), sorted(owners[b])], mode_boundary=boundary,
-                    mode_boundary_evidence=alternate)
-                proof_bytes += len(encoded(entry).encode()) * 2 + 1024
-                if proof_bytes > limits['plan_bytes']:
-                    raise ResourceLimit('SapiensID plan_bytes budget exceeded by solver evidence.')
-                result['pairs'].append(entry)
-                for measured in (proof, alternate):
-                    if measured is None:
-                        continue
-                    for field, signal in (('face_floor', 'face'), ('person_threshold', 'person')):
-                        if measured[signal] is not None:
-                            options[PREFIX + field].update(boundaries(measured[signal]['minimum']))
-                    support = min(measured['support'])
-                    if support:
-                        options[PREFIX + 'min_support'].update((support, support + 1))
-                if same_set:
-                    positive.append(entry)
-            # Match production competitor semantics: missing body evidence can
-            # still compete through a strong face; known face contradictions do not.
-            from .competitor_eligibility import hybrid as eligible_rival
-            if same_set or not eligible_rival(proof, face_mean, settings['face_floor']):
-                continue
-            score = competitor_score(left, right, body_mean)
-            if score is None and face_mean is not None and face_mean >= config.data['recognition']['match_threshold']:
-                score = 1.
-            if score is None:
-                continue
-            for person, rival in ((a, b), (b, a)):
-                if person not in wanted:
+    try:
+        with tracking(lookup.pairs(incident=wanted), 'Measure solver hybrid evidence', unit='pair') as pairs:
+            for a, b, face_mean, body_mean in pairs:
+                result['comparisons'] += 1
+                left, right = by_id[a], by_id[b]
+                target_pair = a in wanted and b in wanted
+                same_set = target_pair and owners[a] == owners[b] and len(owners[a]) == 1
+                nominated = ((face_mean is not None and face_mean + 1e-6 >= settings['face_floor']) or
+                    (body_mean is not None and body_mean + 1e-6 >= settings['person_threshold'] - settings['ambiguity_margin']))
+                if target_pair or nominated:
+                    result['candidate_pairs'] += 1
+                    if result['candidate_pairs'] > limits['max_candidate_pairs']:
+                        raise ResourceLimit('SapiensID max_candidate_pairs budget exceeded by solver evidence.')
+                present = _cooccurs(db, a, b, config) if target_pair else False
+                proof = (pair(left, right, settings, copresent=present,
+                              reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
+                         if target_pair or nominated else None)
+                if target_pair:
+                    boundary = mode_boundary(left.body_modes, right.body_modes)
+                    alternate = None
+                    if boundaries(boundary):
+                        alternate = pair(left, right, dict(settings, person_threshold=_floor(boundary)),
+                            copresent=present, reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
+                    entry = dict(proof, relation='within_set' if same_set else 'between_sets',
+                        sets=[sorted(owners[a]), sorted(owners[b])], mode_boundary=boundary,
+                        mode_boundary_evidence=alternate)
+                    proof_bytes += len(encoded(entry).encode()) * 2 + 1024
+                    if proof_bytes > limits['plan_bytes']:
+                        raise ResourceLimit('SapiensID plan_bytes budget exceeded by solver evidence.')
+                    result['pairs'].append(entry)
+                    for measured in (proof, alternate):
+                        if measured is None:
+                            continue
+                        for field, signal in (('face_floor', 'face'), ('person_threshold', 'person')):
+                            if measured[signal] is not None:
+                                options[PREFIX + field].update(boundaries(measured[signal]['minimum']))
+                        support = min(measured['support'])
+                        if support:
+                            options[PREFIX + 'min_support'].update((support, support + 1))
+                    if same_set:
+                        positive.append(entry)
+                # Match production competitor semantics: missing body evidence can
+                # still compete through a strong face; known face contradictions do not.
+                from .competitor_eligibility import hybrid as eligible_rival
+                if same_set or not eligible_rival(proof, face_mean, settings['face_floor']):
                     continue
-                previous = nearest.get(person)
-                if previous is None or (-score, rival) < (-previous['score'], previous['rival']):
-                    nearest[person] = dict(identity=person, rival=rival, score=score,
-                        relation='other_set' if rival in wanted else 'outside_goals')
-            reserve(proof_bytes + size(nearest) + size(options) + size(result['identities']))
+                score = competitor_score(left, right, body_mean)
+                if score is None and face_mean is not None and face_mean >= config.data['recognition']['match_threshold']:
+                    score = 1.
+                if score is None:
+                    continue
+                for person, rival in ((a, b), (b, a)):
+                    if person not in wanted:
+                        continue
+                    previous = nearest.get(person)
+                    if previous is None or (-score, rival) < (-previous['score'], previous['rival']):
+                        nearest[person] = dict(identity=person, rival=rival, score=score,
+                            relation='other_set' if rival in wanted else 'outside_goals')
+                reserve(proof_bytes + size(nearest) + size(options) + size(result['identities']))
+
+    except ResourceLimit as error:
+        if not allow_partial:
+            raise
+        result['partial_coverage'] = dict(complete=False,reason='diagnostic_resource_limit',
+                                          detail=str(error),measured_pairs=len(result['pairs']))
+        nearest.clear()
 
     def changes(proof):
         support = min(proof['support'])

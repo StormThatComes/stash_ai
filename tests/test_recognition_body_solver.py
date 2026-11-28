@@ -4,7 +4,7 @@ import uuid
 import numpy as np
 import pytest
 
-from stash_ai.recognition.body_parameters import LOCAL,GLOBAL,PARAMETERS,QUALITY
+from stash_ai.recognition.body_parameters import LOCAL,GLOBAL,PARAMETERS,QUALITY,SPLIT
 from stash_ai.recognition.person_anchor import PIXEL_PARAMETER
 from stash_ai.recognition.body_solver import analyse
 from stash_ai.recognition.database import FaceDatabase,encoded
@@ -17,26 +17,30 @@ from stash_ai.recognition.models import namespace
 from tests.test_recognition_body_integration import seeded
 
 
-def test_all_retained_body_parameters_reach_search_and_tpe_dimensions(tmp_path):
+@pytest.mark.parametrize('mode', ['legacy', 'split'])
+def test_all_retained_body_parameters_reach_search_and_tpe_dimensions(tmp_path, mode):
     c,_,_,_=seeded(tmp_path)
+    c.data['sapiensid']['identities'].update(anchor_sharpness_mode=mode,
+        anchor_min_focus_sharpness=23.,anchor_min_motion_sharpness=31.)
+    expected = PARAMETERS if mode == 'split' else PARAMETERS.difference(SPLIT)
     c.data['sapiensid']['identities']['min_appearance_distance']=4
     c.data['sapiensid']['identities']['anchor_min_person_pixels']=96
     with _open_readonly(c.database) as db:
         goals=resolve(db,c,[['900','901'],['902']])
         hints=analyse(db,c,goals)
-    assert hints['options'].keys()==PARAMETERS
+    assert hints['options'].keys()==expected
     proposals=list(hybrid_neighbours(c,{},hints['options'],hints['proposals']))
-    assert PARAMETERS <= {k for p in proposals for k,v in p.items() if v!=parameter(c.data,k)}
+    assert expected <= {k for p in proposals for k,v in p.items() if v!=parameter(c.data,k)}
     domains=registry(c)
     for p in proposals:
         for k,v in normalize(c,p).items():
             assert domains[k].low<=v<=domains[k].high
             assert type(v) is domains[k].kind
     selected=set().union(*(dimensions(c,hints['options'],{},i) for i in range(0,40,5)))
-    assert selected==PARAMETERS
+    assert selected==expected
     from stash_ai.recognition.merge_solver_bidirectional import relaxed_seeds
     seeds=list(relaxed_seeds(c,dict(options=hints['options'])))
-    relaxable = {key for key in PARAMETERS if parameter(c.data, key) > domains[key].low}
+    relaxable = {key for key in expected if parameter(c.data, key) > domains[key].low}
     assert relaxable <= set().union(*(p.keys() for p in seeds))
     for key in ('min_appearance_distance','anchor_min_keypoints'):
         key='sapiensid.identities.'+key

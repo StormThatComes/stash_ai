@@ -181,7 +181,7 @@ def execute(args, config):
                                      strict=getattr(args, 'strict', None),
                                     stop_on_stagnation=getattr(args, 'stop_on_stagnation', None),
                                     progress=progress if args.progress_style != 'off' else None,
-                                    checkpoint=checkpoint,resume=resume,winner_writer=writer,
+                                    checkpoint=checkpoint,resume=resume,winner_writer=None if validation_path else writer,
                                     sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
                                      compare_anchor_rules=getattr(args, 'compare_anchor_rules', False),
                                      compact_report=compact_report,
@@ -193,6 +193,8 @@ def execute(args, config):
                                             ('split_pairs', 'max_outside_split_pairs'),
                                             ('newly_joined_pairs', 'max_outside_joined_pairs'),
                                             ('new_outsider_observations', 'max_new_outsider_observations'))}))
+            if validation_path:
+                result['holdout_required'] = True
             if validation_path and result.get('best_result') and not result.get('interrupted'):
                 from .solver_validation import validate_winner
                 with report_phase('Validate finalist on held-out scenes'):

@@ -46,6 +46,10 @@ def registry(config, changes=None):
     pose = detection['max_pose_deviation']
     result['clustering.max_anchor_pose_deviation'] = Domain(high=1. if pose is None else pose, relax=1)
     for role in ('anchor', 'auxiliary'):
+        if config.data['clustering'].get(role+'_sharpness_mode') == 'split':
+            for kind in ('focus','motion'):
+                key = 'clustering.'+role+'_min_'+kind+'_sharpness'
+                result[key] = Domain(high=100.)
         for suffix, source, high in (('face_pixels', 'min_face_pixels', 4096),
                                      ('sharpness', 'min_sharpness', 100000),
                                      ('visible_face_fraction', 'min_visible_face_fraction', 1.)):
@@ -69,7 +73,8 @@ def registry(config, changes=None):
         'sapiensid.global_matching.min_support': Domain(
             int, MIN_SUPPORT, min(MAX_SUPPORT, config.data['sapiensid']['global_matching']['max_references'])),
     }
-    result.update((key,special.get(key,Domain())) for key in active(config))
+    for key in active(config):
+        result[key] = Domain(high=100.) if key.endswith(('focus_sharpness','motion_sharpness')) else special.get(key,Domain())
     if (changes or {}).get('sapiensid.global_matching.enabled') and config.data['sapiensid']['enabled']:
         from .body_parameters import GLOBAL
         result.update((key,special.get(key,Domain())) for key in GLOBAL)

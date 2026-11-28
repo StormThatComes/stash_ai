@@ -46,6 +46,13 @@ def options_and_quality(db,config,goals,*,frozen_goals=None):
         values=[(measured.get(field),key) for field,key in
                 (('keypoints','sapiensid.identities.anchor_min_keypoints'),
                  ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER))]
+        import json
+        from .sharpness_gates import estimated
+        raw = json.loads(row['quality']) if isinstance(row['quality'],str) else row['quality']
+        quality = (raw or {}).get('quality') or {}
+        if config.data['sapiensid']['identities'].get('anchor_sharpness_mode')=='split' and estimated(quality):
+            values = [(v,k) for v,k in values if not k.endswith('anchor_min_sharpness')]
+            values.extend((quality[field],'sapiensid.identities.anchor_min_'+field) for field in ('focus_sharpness','motion_sharpness'))
         regional=measured['keypoint_rules']
         for value,key in values:
             if key not in options:continue
@@ -95,7 +102,7 @@ def analyse(db,config,goals,*,frozen_goals=None):
         rivals=[p['score'] for p in evidence['pairs'] if eligible_rival(p) and set(p['people']) & {a,b} and
                 any(x not in owners or owners.get(x)!=owners[a] for x in p['people'])]
         rivals.extend(p['score'] for p in evidence.get('nearest_competitors',()) if p['identity'] in (a,b))
-        if rivals and pair['score']>=max(rivals):
+        if not evidence.get('partial_coverage') and rivals and pair['score']>=max(rivals):
             patch[prefix+'ambiguity_margin']=min(settings['ambiguity_margin'],_floor(pair['score']-max(rivals)))
         proposals.append(patch)
     if proposals:
@@ -123,12 +130,16 @@ def focused_evidence(db, config, goals, focus):
     with Search(db,config,bank) as search:
         measured = {}
         used = 0
-        for pair in exact_pairs(search.dense_nominations(labels,incident_only=True), bank, config, search.evidence):
-            used += size(pair) + 512
-            if used > limit:
-                raise ResourceLimit('Focused body evidence exceeds sapiensid.execution.plan_bytes.')
-            measured[tuple(pair['people'])] = pair
-            result['pairs'].append(pair)
-        rivals, = search.nearest([labels],measured)
-        result.update(nearest_competitors=list(rivals.values()), search=dict(search.stats))
+        try:
+            for pair in exact_pairs(search.dense_nominations(labels,incident_only=True), bank, config, search.evidence):
+                used += size(pair) + 512
+                if used > limit:
+                    raise ResourceLimit('Focused body evidence exceeds sapiensid.execution.plan_bytes.')
+                measured[tuple(pair['people'])] = pair
+                result['pairs'].append(pair)
+            rivals, = search.nearest([labels],measured)
+            result.update(nearest_competitors=list(rivals.values()), search=dict(search.stats))
+        except ResourceLimit as error:
+            result['partial_coverage'] = dict(complete=False,reason='diagnostic_resource_limit',detail=str(error),
+                                              measured_pairs=len(result['pairs']))
     return result

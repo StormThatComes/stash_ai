@@ -81,7 +81,7 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None, frozen_goal
     from .solver_measurement_budget import settings as diagnostic_settings, measure
     diagnostic = diagnostic_settings(config)
     diagnostic_coverage = {'hybrid': {}, 'body': {}}
-    analysis = measure(lambda: analyse(db, diagnostic, goals),
+    analysis = measure(lambda: analyse(db, diagnostic, goals, allow_partial=True),
         dict(enabled=False, options={}, proposals=[], pairs=[]), diagnostic_coverage['hybrid'])
     analysis['face_measurement_coverage'] = coverage
     from .body_solver import analyse as body_analyse
@@ -448,6 +448,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     pending_search = {}
     scene_trials = {}
     finalists = []
+    from .solver_local_screen import LocalScreen
+    local_screen = LocalScreen(journal)
     def stream():
         nonlocal search, bidirectional, stop_reason, retire, search_limit, rule_profiles
         trials, attempts, probes_attempted = 1, 0, 0
@@ -484,6 +486,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             scoped_options = dict(sorted(scoped_options.items(), key=lambda kv: (-active.get(kv[0],0),kv[0])))
             candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
                           if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
+            candidates = local_screen.order(candidates,config,db,goals,scans,hybrid.get('nearest_competitors',()))
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
@@ -990,7 +993,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             robustness=dict(selected=best,checks=robustness.get(best,[]),
                 validated=bool(confidence(robustness.get(best,[]))),
                 candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
-            search=dict(scene_finalists={k:{c['parameter']:c['proposed'] for c in input_patch(
+            search=dict(local_screen=local_screen.info,scene_finalists={k:{c['parameter']:c['proposed'] for c in input_patch(
                             max((n for n in scene_trials[k] if n in ranks),key=ranking))['changes']}
                                          for k in finalists},scene_families_tested=len(scene_trials),
                         max_trials=maximum,budget_history=list(budget_history),sampler=sampler_metadata, executed=len(result['trials']) + int('input_control' in result),restored_trials=restored_count + int(control_restored),
