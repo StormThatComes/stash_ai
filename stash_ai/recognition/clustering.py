@@ -20,7 +20,22 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 68
+MATCHING_FORMAT = 69
+
+
+def core_floor(samples, threshold):
+    """For a tight core, require at least sixty percent of its observed internal similarity."""
+    # A zero floor explicitly disables the similarity gate for diagnostic replays.
+    if threshold <= 0 or threshold >= 0.60 or len(samples) < 2:
+        return threshold
+    import numpy as np
+    # Repeated copies of one embedding cannot establish within-person variation.
+    if all(np.array_equal(samples[0], sample) for sample in samples[1:]):
+        return threshold
+    total = np.sum(samples, axis=0, dtype=np.float64)
+    n = len(samples)
+    internal = (float(total @ total) - n) / (n * (n - 1))
+    return max(threshold, 0.60 * internal)
 
 
 def vector(row):
@@ -350,6 +365,10 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 for group, score, cohesion in contributions(
                         groups, query, frozen, fixed_count, settings['match_threshold'] - settings['ambiguity_margin'],
                         exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None):
+                    if independent and not group.known:
+                        floor = core_floor(group.samples, settings['match_threshold'])
+                        if floor > settings['match_threshold'] and score < floor:
+                            continue
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold']):

@@ -197,6 +197,11 @@ def cohort_evidence(db, left, right, config, *, cooccurs=None):
     minimum=1 if strict else settings['min_merge_support']
     copresent=(cooccurs or (lambda a,b:_cooccurs(db,a,b,config)))(left.group.identifier,right.group.identifier)
     blockers=[]
+    if min(len(left.examples), len(right.examples)) >= 2 and grouping.get('anchor_view_matching'):
+        from .clustering import core_floor
+        floor = min(core_floor(left.examples, threshold), core_floor(right.examples, threshold))
+        if mean < floor:
+            blockers.append('cross_core_below_internal_support')
     if score<threshold:
         blockers.append('view_medoid_below_match_threshold')
     if min(left.support_count,right.support_count)<minimum:

@@ -220,3 +220,22 @@ def test_frozen_local_views_reuse_the_same_medoids_and_independent_support(tmp_p
             assert expected
             monkeypatch.setattr(anchor_views,'_build_strict',lambda *_:pytest.fail('rebuilt unchanged view'))
             assert confirmed()==expected
+
+
+def test_similar_people_with_tight_views_keep_independent_cores(tmp_path):
+    from types import SimpleNamespace
+    from stash_ai.recognition.global_views import cohort_evidence
+    from tests.test_recognition_rebuild import changed
+
+    cfg = changed(config_for(tmp_path), recognition={'match_threshold': .25},
+                  clustering={'view_match_threshold': .25})
+    def view(name, angle):
+        angles = np.radians([angle, angle + 1])
+        examples = tuple(np.array([np.cos(a), np.sin(a)]) for a in angles)
+        return SimpleNamespace(group=Group(name, examples, True), examples=examples,
+                               authority='strict_view', medoid=name, support=(name,), support_count=3)
+
+    compare = lambda a,b: cohort_evidence(None,a,b,cfg,cooccurs=lambda *_: False)
+    first = view('a', 0)
+    assert 'cross_core_below_internal_support' in compare(first,view('b',60))['blockers']
+    assert 'cross_core_below_internal_support' not in compare(first,view('a-profile',20))['blockers']

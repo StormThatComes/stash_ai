@@ -26,8 +26,8 @@ def finalize(database, config, mapping, history):
     # a replay including their source scenes, rather than a partial strict bank.
     protected = {g.identifier for g in groups if mapping.get(g.identifier) in history.people}
     from .reference_roles import strict_sql
-    protected.update(r[0] for r in db.execute('SELECT DISTINCT m.person FROM members m '
-        'JOIN observations o ON o.id=m.observation WHERE NOT (' + strict_sql() + ')'))
+    auxiliary = {r[0] for r in db.execute('SELECT DISTINCT m.person FROM members m '
+        'JOIN observations o ON o.id=m.observation WHERE NOT (' + strict_sql() + ')')}
     external = tuple(g for g in history.groups if g.identifier not in local)
     summaries = summary_views(tuple(groups)+external, usage)
     views = catalogue(db, config, *first, usage=usage, complete=True)
@@ -44,6 +44,11 @@ def finalize(database, config, mapping, history):
             people = set(decision['people'])
             if (decision['outcome'] == 'merge' and decision['partition_strategy'] in ('reciprocal_supported_pair','supported_complete_subgroup')
                     and people <= local and not people.intersection(protected)):
+                if auxiliary.intersection(people):
+                    from itertools import combinations
+                    from .global_views import _cooccurs
+                    if any(_cooccurs(db, a, b, config) for a, b in combinations(sorted(people), 2)):
+                        continue
                 proposals.append((bank, policy, decision))
     # Different frozen routes must not claim overlapping incompatible repairs.
     conflicted = set()
