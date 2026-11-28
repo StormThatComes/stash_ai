@@ -27,7 +27,7 @@ def _representative(labels, stats, label):
     return left + int(column), top
 
 
-def _owned_islands(mask, labels, keep, prompts, own, foreign, limbs, max_gap, settings):
+def _owned_islands(mask, labels, keep, prompts, own, foreign, limbs, max_gap, settings, details):
     import cv2
     support = np.vstack((np.asarray(prompts).reshape(-1, 2), np.asarray(own).reshape(-1, 2)))
     ours = _labels_at(labels, support)
@@ -40,10 +40,15 @@ def _owned_islands(mask, labels, keep, prompts, own, foreign, limbs, max_gap, se
         if (len(island) and island[0] not in theirs
                 and inside(mask, segment[:-1]).mean() >= path_floor
                 and (not len(foreign) or np.linalg.norm(foreign - tip, axis=1).min() > foreign_gap)):
+            if details is not None and not keep[island[0]]:
+                details['rescued'].add(int(island[0]))
             keep[island[0]] = True
     if len(own) and len(ours) and len(theirs):
         foreign_only, counts = np.unique(theirs[~np.isin(theirs, ours)], return_counts=True)
-        keep[foreign_only[counts >= settings['min_foreign_island_points']]] = False
+        discard = foreign_only[counts >= settings['min_foreign_island_points']]
+        keep[discard] = False
+        if details is not None:
+            details['foreign_only'] = set(discard)
 
     supported = np.zeros_like(keep)
     supported[ours] = True
@@ -51,6 +56,8 @@ def _owned_islands(mask, labels, keep, prompts, own, foreign, limbs, max_gap, se
     if max_gap > 0 and supported.any() and np.any(keep & ~supported):
         # Edge-to-edge distance from all surviving, pose-supported components.
         distances = cv2.distanceTransform((~supported[labels]).astype(np.uint8), cv2.DIST_L2, 5)
+        if details is not None:
+            details.update(distances=distances, gap_limit=max_gap)
         nearby = np.zeros_like(keep)
         nearby[labels[distances <= max_gap]] = True
         keep &= nearby
@@ -122,7 +129,7 @@ def _prune_bridges(mask, labels, stats, keep, support, radius, fraction, cuts, r
                     cuts.append((int(x) + px, int(y) + py))
 
 
-def clean_mask(mask, box, settings, *, prompts, own, foreign, limbs, edits, replay, cuts, replay_cuts):
+def clean_mask(mask, box, settings, *, prompts, own, foreign, limbs, edits, replay, cuts, replay_cuts, details=None):
     import cv2
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
     areas = stats[:, cv2.CC_STAT_AREA]
@@ -130,6 +137,8 @@ def clean_mask(mask, box, settings, *, prompts, own, foreign, limbs, edits, repl
     keep = areas >= minimum
     keep[0] = False
     baseline = keep.copy() if edits is not None else None
+    if details is not None:
+        details.update(rescued=set(), foreign_only=set(), gap_limit=0.)
     if replay is not None:
         for x, y, decision in replay:
             if 0 <= x < mask.shape[1] and 0 <= y < mask.shape[0] and labels[y, x]:
@@ -137,11 +146,15 @@ def clean_mask(mask, box, settings, *, prompts, own, foreign, limbs, edits, repl
     elif count > 2:
         diagonal = math.hypot(box[2] - box[0], box[3] - box[1])
         _owned_islands(mask, labels, keep, prompts, own, foreign, limbs,
-                       settings['max_island_gap_fraction'] * diagonal, settings)
+                       settings['max_island_gap_fraction'] * diagonal, settings, details)
     if edits is not None:
         for label in np.flatnonzero(keep != baseline):
             edits.append((*_representative(labels, stats, label), bool(keep[label])))
 
+    if details is not None:
+        details.update(labels=labels, areas=areas, minimum=minimum, keep=keep,
+                       own=np.bincount(_labels_at(labels, own), minlength=count),
+                       foreign=np.bincount(_labels_at(labels, foreign), minlength=count))
     cleaned = keep[labels]
     radius = settings['bridge_radius_pixels']
     fraction = settings['max_bridge_lobe_fraction']

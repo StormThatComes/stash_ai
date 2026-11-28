@@ -172,3 +172,21 @@ def test_desktop_result_keeps_json_metadata_serializable():
         rendered, record = result
         assert rendered is image and result[1] is record
         assert json.loads(json.dumps(record)) == record and result.phases is history
+
+
+def test_live_candidate_replays_production_bitmap_without_model_calls():
+    from stash_ai.recognition.tune_mask_candidate import preview, inspect
+    settings = defaults()
+    segmenter = Segmenter()
+    model = RefinedPMPose(Pose(), segmenter, settings)
+    with Image.new('RGB', (160, 100)) as image, phases.capture(image) as history:
+        model.predict(image, [BOX])
+        sample = history.samples[0]
+        expected = next(p.people[0].mask for p in history.phases if 'after cleanup' in p.title)
+        _, _, details, cleaned = preview(image, sample, settings, 'Removed pixels')
+        assert np.packbits(cleaned, axis=None).tobytes() == expected[1]
+        y, x = np.argwhere(cleaned)[0]
+        assert 'kept' in inspect(details, cleaned, x, y)
+        _, message, details, cleaned = preview(image, sample, dict(settings, min_mask_score=1.), 'Raw')
+        assert cleaned is None and 'low_mask_score' in message
+        assert 'did not run' in inspect(details, cleaned, x, y)

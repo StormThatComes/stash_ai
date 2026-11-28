@@ -86,6 +86,14 @@ a conservative 64 MiB history budget per distinct result. If the limit is reache
 the phase caption reports omitted stages; detection and the final result remain available.
 Ordinary recognition and CLI audit exports do not retain this timeline.
 
+Open **Live mask** after detection and select a person, attempt and candidate. Select
+**Raw**, **Cleaned** or **Removed pixels** (red). Cleanup and local admission changes
+replay the recorded candidate on CPU using its original box, prompts, own and foreign
+points and limb segments. Click an island to inspect its size, effective area floor
+and available ownership/distance evidence. Enable A/B and edit B to pin the baseline
+in A. **Check full detection** recomputes candidate selection, retries and final pose
+after changes. Missing candidates and history limits are reported per cue.
+
 Enable **Compare A/B** to show two copies of the same cue. Select **B** under
 **Configuration / phases**, use **Copy A to B** or enter a second file path and choose
 **Load YAML**. You can also start with both files:
