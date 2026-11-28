@@ -11,6 +11,20 @@ def crowded_link(q):
     return q.get('detected_people',1)>1 and max(q.get('overlap',0), q.get('box_overlap',0))>=.25
 
 
+def clean_witness(row, quality):
+    if not crowded_link(quality):
+        return True
+    from .contact_face_evidence import retained
+    proof = retained(row, quality)
+    if quality.get('overlap', 1.) != 0 or not proof['confirmed']:
+        return False
+    upper = proof.get('upper_body', {})
+    if upper.get('confirmed') and upper.get('mask_available'):
+        return True
+    peers = proof.get('peers', ())
+    return bool(peers) and all(peer['reason'] == 'separated_masks_and_anatomy' for peer in peers)
+
+
 def questionable_links(rows,settings,scores,graph=(), *, evidence=None):
     from .contact_face_evidence import retained
     evidence = {} if evidence is None else evidence
@@ -22,7 +36,7 @@ def questionable_links(rows,settings,scores,graph=(), *, evidence=None):
         quality = json.loads(row['quality']).get('quality',{})
         if crowded_link(quality):
             crowded.append((row,quality))
-        elif row.get('face_anchor'):
+        if row.get('face_anchor') and clean_witness(row,quality):
             clean[row['cue']].append((row,quality))
     questionable = set()
     contradicted = set()
@@ -97,7 +111,7 @@ def questionable_links(rows,settings,scores,graph=(), *, evidence=None):
     for chain,_ in graph or ():
         previous = None
         for i,r in enumerate(chain):
-            if not r.get('face_anchor') or crowded_link(json.loads(r['quality'])['quality']):
+            if not r.get('face_anchor') or not clean_witness(r,json.loads(r['quality'])['quality']):
                 continue
             if previous is not None and r['cue']-chain[previous]['cue']<=settings.get('contact_max_cues',12):
                 first = chain[previous]

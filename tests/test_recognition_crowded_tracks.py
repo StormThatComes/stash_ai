@@ -129,3 +129,12 @@ def test_future_context_needs_two_original_torsos_and_same_shot(tmp_path):
         assert planned()==[0]
         db.execute("UPDATE body_observations SET geometry=json_set(geometry,'$.crowded_box_retry',1) WHERE id=?",(ids[-1],))
         assert planned()==[]
+
+
+def test_five_way_joint_assignment_abstains_on_ambiguous_pair():
+    from stash_ai.recognition.track_assignment import joint_links
+    geometry = {f'{side}{i}': pose(40*i) for side in 'ab' for i in range(5)}
+    scores = {(f'a{i}',f'b{j}'): .99 if i == j or {i,j} == {0,1} else .60
+              for i in range(5) for j in range(5)}
+    links = {(a,b) for a,b,_ in joint_links(scores,geometry,.8,.05)}
+    assert links == {(f'a{i}', f'b{i}') for i in range(2,5)}

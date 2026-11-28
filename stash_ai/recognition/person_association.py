@@ -1,10 +1,23 @@
 """Geometry-only face/pose association, shared by inference and audit reasons."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 import math
+
+_version = ContextVar("face_pose_association_version",default="contact-head-ownership-v9")
+
+
+@contextmanager
+def previous_version():
+    token = _version.set("contact-head-ownership-v8")
+    try:
+        yield
+    finally:
+        _version.reset(token)
 
 
 def policy():
     """Version the gates in retained evidence as well as model provenance."""
-    return dict(version='contact-head-ownership-v8', containment_tolerance=.05,
+    return dict(version=_version.get(), containment_tolerance=.05,
                 min_partial_face_coverage=.5, min_head_landmarks=2, max_head_distance=.15)
 
 
@@ -93,7 +106,18 @@ def confirmed_in_contact(face, person, people):
 def resolve(faces, people, choices):
     """Resolve competing head claims using a global assignment with abstention."""
     from collections import Counter
-    choices = [[p for p in candidates if confirmed_in_contact(face,people[p],people)]
+    from .contact_face_evidence import measure
+    from .mask_usage import uses
+    masks = {}
+    def supported(face, index):
+        person = people[index]
+        if confirmed_in_contact(face, person, people):
+            return True
+        if not person.get('pose_refinement', {}).get('overlap_mask') or not uses(person,'contact_confirmation'):
+            return False
+        proof = measure(face, person, people, face_id=None, faces=faces, mask_cache=masks)
+        return proof['confirmed'] and proof.get('upper_body', {}).get('confirmed', False)
+    choices = [[p for p in candidates if supported(face,p)]
                for face,candidates in zip(faces,choices)]
     usage = Counter(p for candidates in choices for p in candidates)
     matches = [c[0] if len(c) == 1 and usage[c[0]] == 1 else None for c in choices]

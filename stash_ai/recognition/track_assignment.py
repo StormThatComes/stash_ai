@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 from .crowd_context import pair
-from itertools import product
+
 
 
 def components(edges):
@@ -39,22 +39,26 @@ def joint_links(edges, physical, threshold, margin):
     for members in components(edges):
         left = sorted(members & by_left.keys())
         right = members.difference(left)
-        if max(len(left), len(right)) > 4:
-            continue
         if not separated(left, physical) or not separated(right, physical):
             continue
-        domains = [[(None, threshold-margin), *sorted(by_left[a].items())] for a in left]
-        # At most 5^4 assignments. For each best edge, certify the best
-        # complete assignment without it, including the option to abstain.
-        solutions = []
-        for choices in product(*domains):
-            targets = [target for target,_ in choices if target is not None]
-            if len(targets)==len(set(targets)):
-                solutions.append((sum(score for _,score in choices),choices))
-        best, choices = max(solutions,key=lambda entry:entry[0])
-        for index,(target,score) in enumerate(choices):
-            if target is None or score<threshold:
+        import numpy as np
+        from scipy.optimize import linear_sum_assignment
+        targets = sorted(right)
+        columns = {target:i for i,target in enumerate(targets)}
+        weights = np.full((len(left), len(targets)+len(left)), -np.inf)
+        weights[:,len(targets):] = threshold-margin
+        for i,source in enumerate(left):
+            for target,score in by_left[source].items():
+                weights[i,columns[target]] = score
+        rows, assigned = linear_sum_assignment(weights, maximize=True)
+        best = weights[rows,assigned].sum()
+        for i,j in zip(rows,assigned):
+            if j>=len(targets) or weights[i,j]<threshold:
                 continue
-            alternative = max(total for total,others in solutions if others[index][0]!=target)
+            score = weights[i,j]
+            weights[i,j] = -np.inf
+            a,b = linear_sum_assignment(weights, maximize=True)
+            alternative = weights[a,b].sum()
+            weights[i,j] = score
             if best-alternative+1e-12>=margin and best>alternative:
-                yield left[index],target,score
+                yield left[i],targets[j],float(score)

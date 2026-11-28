@@ -61,7 +61,11 @@ def contract(config):
 
 
 def compatible_contracts(config):
-    return list(dict.fromkeys([contract(config), *_previous_contracts(config)]))
+    from .person_association import previous_version
+    current = [contract(config), *_previous_contracts(config)]
+    with previous_version():
+        prior = [contract(config), *_previous_contracts(config)]
+    return list(dict.fromkeys([*current,*prior]))
 
 
 def _previous_contracts(config):
