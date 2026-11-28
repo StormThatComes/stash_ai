@@ -82,9 +82,13 @@ def _evaluate(name, settings, *, seed, source, scope, namespace, installation, s
                                              prediction_delta=observations.prediction_delta(target, settings))
                 else:
                     predictions = dict.fromkeys(observations)
-                    predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
-                                       if r[0] in observations)
-                    predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
+                    from itertools import islice
+                    from .database import encoded
+                    identifiers = iter(observations)
+                    while page := list(islice(identifiers, 1024)):
+                        predictions.update(target.execute('SELECT observation,person FROM members '
+                            'WHERE observation IN (SELECT value FROM json_each(?))',(encoded(page),)))
+                        predictions.update(body_members(target,settings,ids=page))
                     prediction_fields = dict(predictions=predictions)
                 scan_ids = [s['id'] for s in scans]
                 body_counts, hybrid = observations.input_counts(settings) if isinstance(observations, Slots) else (None,None)
