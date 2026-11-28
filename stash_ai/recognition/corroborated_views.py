@@ -40,14 +40,14 @@ def previous_queries(db,selected,config,scope,namespace):
     rows=db.execute('SELECT o.id '+_source(config,fallback_sql(db,config,namespace),attachment=True)+
         ' AND s.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
         parameters([],config,scope,namespace)+(encoded([s['scan'] for s in selected]),))
-    return tuple(r['id'] for r in rows)
+    return (r['id'] for r in rows)
 
 
 def previous_strict(db,selected,config,scope,namespace):
     if not enabled(config):return ()
     from .historical_references import _source,parameters
     from .reference_compatibility import fallback_sql
-    return tuple(r['id'] for r in db.execute('SELECT o.id '+_source(config,fallback_sql(db,config,namespace))+
+    return (r['id'] for r in db.execute('SELECT o.id '+_source(config,fallback_sql(db,config,namespace))+
         ' AND s.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
         parameters([],config,scope,namespace)+(encoded([s['scan'] for s in selected]),)))
 
@@ -93,7 +93,7 @@ def defer_new_groups(db,config,hints,established):
     frozen=[(r['id'],vector(r),pose_view(r['geometry'])) for r in hints]
     used=set()
     for group in _groups(db,scope,namespace,grouping):
-        if set(group.sample_ids).intersection(established):continue
+        if any(key in established for key in group.sample_ids):continue
         rows=db.execute('SELECT o.id,o.geometry,o.dimensions,o.embedding FROM members m JOIN observations o ON o.id=m.observation WHERE m.person=?',
                         (group.identifier,))
         common=None

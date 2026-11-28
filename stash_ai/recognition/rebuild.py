@@ -307,7 +307,12 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
                 anchor_sql('o', config.data['clustering']) + ' AND ' + strict_sql() +
                 ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
                 (cluster,)), config.data['clustering']['max_samples_per_person'])] if old_groups else [])
-            parallel = historical_scores.score(tuple(samples), float('-inf'),
+            # Retained face vectors are unit length within .001. Even at the
+            # maximum supported dimension, their float32 dot is below 1.003.
+            settings = config.data['recognition']
+            competitive = settings['match_threshold'] - settings['ambiguity_margin']
+            lower = len(samples)*competitive - max(0,len(samples)-1)*1.003 - 1e-9
+            parallel = historical_scores.score(tuple(samples), lower,
                                                 config.data['clustering']['cohesion_threshold'])
             contributions = None
             if parallel is not None:
@@ -323,9 +328,15 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
                 for position, old in enumerate(tracked):
                     means, minimum = [], 1.
                     if contributions is None:
+                        running = 0.
                         for query in samples:
                             mean, low = _similarities(old, query)
                             means.append(mean)
+                            running += mean
+                            remaining = len(samples) - len(means)
+                            if low < config.data['clustering']['cohesion_threshold'] or running+remaining*1.003 < len(samples)*competitive-1e-9:
+                                means.clear()
+                                break
                             minimum = min(minimum, low)
                     else:
                         values = contributions.get(position, [])
@@ -554,8 +565,6 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 usage.begin('cached')
                 return _results(db,selected,config) if getattr(database, 'collect_publication_results', True) else {}
     from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
-    previous=previous_queries(db,selected,config,scope,namespace)
-    prior_strict=set(previous_strict(db,selected,config,scope,namespace))
     hints=previous_hints(db,config,scope,namespace)
     database._rebuild_corroboration_pending=False
     database._rebuild_corroborated_plan={row['id'] for row in hints}
@@ -596,17 +605,17 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         from .face_evidence_review import apply as review_face_evidence
         review_face_evidence(replay,selected,config)
         _copy_bindings(database,replay,selected,scope,namespace)
-        if previous:
-            replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
-            replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
-            replay.commit()
+        from .prior_membership import PriorMembership
+        previous = PriorMembership(replay, 'prior_attachment_queries', previous_queries(db,selected,config,scope,namespace))
+        prior_strict = PriorMembership(replay, 'prior_strict_ids', previous_strict(db,selected,config,scope,namespace))
+        replay.commit()
         from .checkpoint_delta import DeltaCheckpoints
         checkpoint_type=DeltaCheckpoints if config.data['execution']['rebuild_checkpoint_mode']=='incremental' else Checkpoints
         checkpoints = checkpoint_type(database, selected, config, scope, namespace)
         late_context = None
         if config.data['execution']['rebuild_checkpoint_scenes']:
-            late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
-                sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
+            late_context = digest([external_context, sorted(excluded_views), prior_strict.digest,
+                previous.digest, [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
         late = Checkpoints(database, selected, config, scope, namespace,
                            phase='selected', context=late_context)
         with read_only_dependencies():
