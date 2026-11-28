@@ -263,13 +263,8 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
         replay.execute('SELECT * FROM votes ORDER BY rowid'),
         'Bind historical identity votes', unit='vote', position=0, total=vote_count,
     ) as tracked:
-        for row in tracked:
-            if (not row['retired'] and row['cluster'] not in mapping and row['person'] not in used
-                    and (not row['performer'] or row['performer'] not in performers)):
-                mapping[row['cluster']] = row['person']
-                used.add(row['person'])
-                if row['performer']:
-                    performers.add(row['performer'])
+        from .historical_face_labels import bind_votes
+        bind_votes(tracked, mapping, used, performers)
     unmatched = [r['id'] for r in replay.execute('SELECT id FROM people WHERE NOT EXISTS '
                  '(SELECT 1 FROM identity_merges WHERE source=people.id) AND EXISTS '
                  '(SELECT 1 FROM members WHERE person=people.id) ORDER BY created,id') if r['id'] not in mapping]
@@ -469,6 +464,14 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
+    from .rebuild_transaction import SourceChanged
+    try:
+        return _rebuild_generation(database, selected, config, progress=progress)
+    except SourceChanged:
+        return _rebuild_generation(database, selected, config, progress=progress)
+
+
+def _rebuild_generation(database, selected, config, *, progress=None):
     database.face_rebuild_mode='cold'
     database.body_rebuild_mode='disabled'
     first=(database.connection.execute('SELECT scope,namespace FROM scans WHERE id=?',

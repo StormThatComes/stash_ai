@@ -50,7 +50,8 @@ class Store:
 
     def get_bytes(self,kind,version):
         key=self.prefix+kind+":"+version
-        row=self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
+        pending = getattr(self.db, 'derived_records', {}).get(key)
+        row = (pending[1],) if pending else self.db.execute('SELECT value FROM metadata WHERE key=?',(key,)).fetchone()
         if row is None:count(kind+'_cache_misses');return None
         value=row[0].encode() if isinstance(row[0],str) else row[0]
         checksum,_,payload=value.partition(b' ')
@@ -78,6 +79,8 @@ class Store:
         length=lambda value:len(value.encode()) if isinstance(value,str) else len(value)
         size=length(record)+len(key)+128
         if size>min(self.budget//2,4*1024**2):return
+        stage = getattr(self.db, 'stage_derived', None)
+        if stage and stage(self,key,record,size):return
         if self.used+size<=self.budget:
             inserted=self.db.execute('INSERT OR IGNORE INTO metadata VALUES (?,?)',(key,record))
             if inserted.rowcount:self.used+=size;return

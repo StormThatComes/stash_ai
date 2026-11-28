@@ -136,13 +136,73 @@ def _review(db):
         raise ValueError('Damaged checkpoint database.')
 
 
+def _json_parts(value):
+    encoder = json.JSONEncoder(sort_keys=True, separators=(',', ':'), allow_nan=False)
+    for part in encoder.iterencode(value):
+        yield part.encode('ascii')
+
+
+def _write_header(db, value):
+    """Store long phase catalogues in ordered, bounded SQLite records."""
+    block_size = min(256 * 1024, _MAX_META)
+    pending = bytearray()
+    chunks = 0
+    hasher = hashlib.sha256()
+    for part in _json_parts(value):
+        offset = 0
+        while offset < len(part):
+            take = min(block_size - len(pending), len(part) - offset)
+            pending.extend(part[offset:offset + take])
+            offset += take
+            if len(pending) == block_size:
+                hasher.update(pending)
+                db.execute('INSERT INTO metadata VALUES (?,?)', (f'part-{chunks:012d}', bytes(pending)))
+                chunks += 1
+                pending.clear()
+    if chunks:
+        if pending:
+            hasher.update(pending)
+            db.execute('INSERT INTO metadata VALUES (?,?)', (f'part-{chunks:012d}', bytes(pending)))
+            chunks += 1
+        state = encoded(dict(chunks=chunks, sha256=hasher.hexdigest()))
+    else:
+        state = pending.decode('ascii')
+    db.execute('INSERT INTO metadata VALUES (?,?)', ('state', state))
+
+
 def _header(db):
-    rows = db.execute('SELECT key,value FROM metadata').fetchall()
-    if len(rows) != 1 or rows[0][0] != 'state' or len(rows[0][1]) > _MAX_META:
+    row = db.execute("SELECT value FROM metadata WHERE key='state' AND length(value)<=?", (_MAX_META,)).fetchone()
+    if not row:
         raise ValueError('Malformed checkpoint header.')
-    value = json.loads(rows[0][1])
+    value = json.loads(row[0])
     if not isinstance(value, dict):
         raise ValueError('Malformed checkpoint header.')
+    count = db.execute('SELECT count(*) FROM metadata').fetchone()[0]
+    if 'chunks' not in value:
+        if count != 1:
+            raise ValueError('Unexpected checkpoint metadata.')
+        return value
+    if (set(value) != {'chunks','sha256'} or type(value['chunks']) is not int
+            or count != value['chunks'] + 1 or count < 2):
+        raise ValueError('Invalid checkpoint catalogue length.')
+    import io
+    data = io.BytesIO()
+    hasher = hashlib.sha256()
+    parts = db.execute("SELECT key,value FROM metadata WHERE key<>'state' AND typeof(value)='blob' "
+                       "AND length(value) BETWEEN 1 AND ? ORDER BY key", (_MAX_META,))
+    seen = 0
+    for key, chunk in parts:
+        if key != f'part-{seen:012d}':
+            raise ValueError('Invalid checkpoint catalogue order.')
+        hasher.update(chunk)
+        data.write(chunk)
+        seen += 1
+    if seen != value['chunks'] or hasher.hexdigest() != value['sha256']:
+        raise ValueError('Invalid checkpoint catalogue digest.')
+    data.seek(0)
+    value = json.load(data)
+    if not isinstance(value, dict):
+        raise ValueError('Invalid checkpoint catalogue.')
     return value
 
 
@@ -165,7 +225,9 @@ def _rows(db, table, order):
 
 
 def _checksum(db, header):
-    hasher = hashlib.sha256(encoded(header).encode())
+    hasher = hashlib.sha256()
+    for part in _json_parts(header):
+        hasher.update(part)
     for table, order in zip(SNAPSHOT_TABLES, ORDER):
         hasher.update(table.encode())
         for batch in _rows(db, table, order):
@@ -482,8 +544,6 @@ class Checkpoints:
             inputs=self.input_hash,limits=rebuild_cache.resource_limits(self.config),cursor=cursor,next_clock=next_clock)
         if self.phase:
             header.update(phase=self.phase,phase_context=self.phase_context,phase_payload=self.phase_payload)
-        if len(encoded(header).encode()) > _MAX_META:
-            raise ValueError('Oversized checkpoint input catalogue.')
         path = self.directory/f'replay-{generation}.sqlite3'
         stage = self.directory/f'.manifest-{generation}.json'
         published = stage_created = False
@@ -498,7 +558,7 @@ class Checkpoints:
                 target.executescript(SCHEMA)
                 target.execute(f'PRAGMA application_id={APPLICATION_ID}')
                 target.execute(f'PRAGMA user_version={FORMAT}')
-                target.execute('INSERT INTO metadata VALUES (?,?)', ('state',encoded(header)))
+                _write_header(target, header)
                 target.commit()  # Establish ownership for crash orphan cleanup.
                 for table, order in zip(SNAPSHOT_TABLES, ORDER):
                     if table in EXTRA_SCHEMA and not replay.execute(

@@ -171,7 +171,6 @@ class DeltaCheckpoints(base.Checkpoints):
         header=dict(format=base.FORMAT,engine=base.ENGINE,owner=self.owner,generation=generation,
             scope=self.scope,namespace=self.namespace,selected=self.selected,policy=base.matching_policy(self.config),
             inputs=self.input_hash,limits=base.rebuild_cache.resource_limits(self.config),cursor=cursor,next_clock=next_clock,parent=parent)
-        if len(encoded(header).encode())>base._MAX_META:raise ValueError('Oversized checkpoint header.')
         path=self.directory/f'replay-{generation}.sqlite3';stage=self.directory/f'.manifest-{generation}.json'
         previous_bytes=sum(lease[2] for _,_,lease in self.chain) if parent else 0
         from .disk_budget import reserve_file,check
@@ -185,7 +184,7 @@ class DeltaCheckpoints(base.Checkpoints):
                 target.execute(f'PRAGMA max_page_count={grant//page}')
                 target.executescript(SCHEMA)
                 target.execute(f'PRAGMA application_id={base.APPLICATION_ID}');target.execute('PRAGMA user_version=2')
-                target.execute('INSERT INTO metadata VALUES (?,?)',('state',encoded(header)))
+                base._write_header(target, header)
                 written=0
                 for table,order in zip(base.SNAPSHOT_TABLES,base.ORDER):
                     if not exists(replay,table):continue

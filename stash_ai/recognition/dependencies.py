@@ -53,6 +53,10 @@ def cached(db, kind, key, policy, compute, *, dependency='global', dependency_ke
         validate_triggers(db,required=True)
     with nullcontext() if checked else snapshot(db):
         generation=version(db,dependency,dependency_key)
+        pending = getattr(db, 'fingerprints', {}).get((kind,key,policy))
+        if pending and pending[0] == generation:
+            count('dependency_digest_hits')
+            return pending[1]
         row=db.execute('SELECT version,digest FROM evidence_fingerprints WHERE kind=? AND key=? AND policy=?',
                        (kind,key,policy)).fetchone()
         if row and row[0]==generation and isinstance(row[1],str) and re.fullmatch('[0-9a-f]{64}',row[1]):
@@ -66,6 +70,9 @@ def cached(db, kind, key, policy, compute, *, dependency='global', dependency_ke
 
 def store(db, kind, key, policy, generation, value):
     if not cache_writable(db):
+        return
+    stage = getattr(db, 'stage_fingerprint', None)
+    if stage and stage(kind, key, policy, generation, value):
         return
     try:
         db.execute('INSERT OR REPLACE INTO evidence_fingerprints VALUES (?,?,?,?,?)',
